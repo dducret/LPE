@@ -1226,9 +1226,14 @@ pub(in crate::mapi) fn rop_query_rows_response(
     }
 
     let response_columns = query_rows_response_columns(object.as_deref(), snapshot);
+    let total_row_count = object
+        .as_deref()
+        .map(|object| {
+            table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid).1
+        })
+        .unwrap_or(0);
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.push(0x02);
     let mut start_position = 0usize;
     let mut position_base = 0usize;
     let rows = match object {
@@ -1647,6 +1652,18 @@ pub(in crate::mapi) fn rop_query_rows_response(
             *position = next_position;
         }
     }
+    let response_origin = if forward_read {
+        if next_position >= total_row_count {
+            0x02
+        } else {
+            0x01
+        }
+    } else if next_position == 0 {
+        0x00
+    } else {
+        0x01
+    };
+    response.push(response_origin);
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
         write_query_rows_property_row(&mut response, &response_columns, &row);
@@ -4866,6 +4883,7 @@ mod tests {
             unread_emails: 0,
             is_subscribed: true,
         };
+        let mailboxes = [inbox];
         let mut table = MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
             columns: vec![PID_TAG_DISPLAY_NAME_W, PID_TAG_FOLDER_ID],
@@ -4888,7 +4906,7 @@ mod tests {
         let response = rop_query_rows_response(
             &request,
             Some(&mut table),
-            &[inbox],
+            &mailboxes,
             &[],
             &snapshot,
             Uuid::nil(),
@@ -4900,6 +4918,71 @@ mod tests {
         assert_response_contains_utf16(&response, "Conflicts");
         assert_response_contains_utf16(&response, "Local Failures");
         assert_response_contains_utf16(&response, "Server Failures");
+        assert_eq!(table_position(&table), Some(3));
+    }
+
+    #[test]
+    fn query_rows_origin_tracks_cursor_boundary() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 18,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let mailboxes = [inbox];
+        let mut table = MapiObject::HierarchyTable {
+            folder_id: SYNC_ISSUES_FOLDER_ID,
+            columns: vec![PID_TAG_DISPLAY_NAME_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 1, 0],
+        };
+
+        let response = rop_query_rows_response(
+            &request,
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(response[6], 0x01);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        assert_eq!(table_position(&table), Some(1));
+
+        let response = rop_query_rows_response(
+            &RopRequest {
+                payload: vec![0, 1, 10, 0],
+                ..request
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[6], 0x02);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
         assert_eq!(table_position(&table), Some(3));
     }
 

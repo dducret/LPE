@@ -5625,6 +5625,57 @@ fn log_outlook_contents_table_query_rows(
     );
 }
 
+fn log_outlook_contents_table_query_rows_response(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    response: &[u8],
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        position,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let response_origin = response.get(6).copied().unwrap_or(0xff);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        requested_forward_read = request.query_forward_read(),
+        requested_row_count = request.query_row_count().unwrap_or(0),
+        current_position_after = *position,
+        response_origin = %format!("0x{response_origin:02x}"),
+        response_origin_name = match response_origin {
+            0x00 => "BOOKMARK_BEGINNING",
+            0x01 => "BOOKMARK_CURRENT",
+            0x02 => "BOOKMARK_END",
+            _ => "unknown",
+        },
+        response_row_count = response
+            .get(7..9)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0),
+        "rca debug outlook contents table query rows response"
+    );
+}
+
 fn log_outlook_contents_table_seek_row(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -10196,14 +10247,21 @@ where
                         message = "rca debug mapi inbox hierarchy query rows"
                     );
                 }
-                responses.extend_from_slice(&rop_query_rows_response(
+                let response = rop_query_rows_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
                     mailboxes,
                     emails,
                     snapshot,
                     principal.account_id,
-                ));
+                );
+                log_outlook_contents_table_query_rows_response(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    &response,
+                );
+                responses.extend_from_slice(&response);
                 if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
                     log_outlook_bootstrap_phase(
                         principal,
