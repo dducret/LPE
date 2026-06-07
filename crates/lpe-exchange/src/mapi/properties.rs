@@ -2910,7 +2910,13 @@ fn property_stream_data(
         } => snapshot
             .associated_config_message_for_id(*config_id)
             .filter(|message| message.folder_id == *folder_id)
-            .and_then(|message| associated_config_property_value(&message, property_tag)),
+            .and_then(|message| {
+                associated_config_property_value_with_mailbox_guid(
+                    &message,
+                    mailbox_guid,
+                    property_tag,
+                )
+            }),
         _ => return None,
     };
     let stream = match value {

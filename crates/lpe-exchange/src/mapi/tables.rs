@@ -1342,7 +1342,13 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
                     sort_associated_config_messages(&mut rows, sort_orders);
                     rows.iter()
-                        .map(|message| serialize_associated_config_row(message, &columns))
+                        .map(|message| {
+                            serialize_associated_config_row_with_mailbox_guid(
+                                message,
+                                mailbox_guid,
+                                &columns,
+                            )
+                        })
                         .collect::<Vec<_>>()
                 } else if *folder_id == CALENDAR_FOLDER_ID
                     || snapshot
@@ -3502,7 +3508,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_associated_config_row(message, &columns),
+                        &serialize_associated_config_row_with_mailbox_guid(
+                            message,
+                            mailbox_guid,
+                            &columns,
+                        ),
                     );
                 } else {
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
@@ -6670,9 +6680,17 @@ pub(in crate::mapi) fn serialize_associated_config_row(
     message: &MapiAssociatedConfigMessage,
     columns: &[u32],
 ) -> Vec<u8> {
+    serialize_associated_config_row_with_mailbox_guid(message, Uuid::nil(), columns)
+}
+
+pub(in crate::mapi) fn serialize_associated_config_row_with_mailbox_guid(
+    message: &MapiAssociatedConfigMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match associated_config_property_value(message, *column) {
+        match associated_config_property_value_with_mailbox_guid(message, mailbox_guid, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
@@ -6684,6 +6702,14 @@ pub(in crate::mapi) fn associated_config_property_value(
     message: &MapiAssociatedConfigMessage,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    associated_config_property_value_with_mailbox_guid(message, Uuid::nil(), property_tag)
+}
+
+pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
+    message: &MapiAssociatedConfigMessage,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
     let lookup_tag = canonical_property_storage_tag(property_tag);
     let properties = mapi_properties_from_json(&message.properties_json);
     properties.get(&lookup_tag).cloned().or_else(|| {
@@ -6693,7 +6719,7 @@ pub(in crate::mapi) fn associated_config_property_value(
             PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
             PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
             PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
-                Uuid::nil(),
+                mailbox_guid,
                 message.folder_id,
                 message.id,
             )

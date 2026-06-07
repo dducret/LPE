@@ -1099,7 +1099,11 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
-            serialize_associated_config_row(&message, &columns)
+            serialize_associated_config_row_with_mailbox_guid(
+                &message,
+                principal.account_id,
+                &columns,
+            )
         }
         Some(MapiObject::ConversationAction {
             conversation_action_id,
@@ -2749,7 +2753,13 @@ pub(in crate::mapi) fn serialize_object_property(
             }),
         Some(MapiObject::AssociatedConfig { config_id, .. }) => snapshot
             .associated_config_message_for_id(*config_id)
-            .map(|message| serialize_associated_config_row(&message, &[tag]))
+            .map(|message| {
+                serialize_associated_config_row_with_mailbox_guid(
+                    &message,
+                    principal.account_id,
+                    &[tag],
+                )
+            })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

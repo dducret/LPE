@@ -2332,6 +2332,7 @@ fn format_inbox_associated_query_context(
             snapshot
         ),
         format_inbox_associated_wire_row_summary(
+            Uuid::nil(),
             *folder_id,
             *associated,
             *position,
@@ -2388,6 +2389,7 @@ fn format_inbox_associated_find_context(
             snapshot
         ),
         format_inbox_associated_wire_row_summary(
+            Uuid::nil(),
             *folder_id,
             *associated,
             *position,
@@ -5571,6 +5573,7 @@ fn log_outlook_contents_table_query_rows(
         snapshot,
     );
     let inbox_associated_wire_row_summary = format_inbox_associated_wire_row_summary(
+        principal.account_id,
         *folder_id,
         *associated,
         *position,
@@ -5785,6 +5788,7 @@ fn log_outlook_contents_table_find_row(
     };
     let found_wire_row_summary = if response.get(7).copied().unwrap_or(0) == 1 {
         format_inbox_associated_wire_row_summary(
+            principal.account_id,
             *folder_id,
             *associated,
             *position,
@@ -6188,9 +6192,11 @@ fn format_outlook_query_row_values(
             let values = columns
                 .iter()
                 .map(|tag| {
-                    let value = associated_config_property_value(message, *tag)
-                        .map(|value| format_debug_mapi_value(&value))
-                        .unwrap_or_else(|| "default".to_string());
+                    let value = associated_config_property_value_with_mailbox_guid(
+                        message, account_id, *tag,
+                    )
+                    .map(|value| format_debug_mapi_value(&value))
+                    .unwrap_or_else(|| "default".to_string());
                     format!("0x{tag:08x}={value}")
                 })
                 .collect::<Vec<_>>()
@@ -6202,6 +6208,7 @@ fn format_outlook_query_row_values(
 }
 
 fn format_inbox_associated_wire_row_summary(
+    mailbox_guid: Uuid,
     folder_id: u64,
     associated: bool,
     position: usize,
@@ -6226,7 +6233,8 @@ fn format_inbox_associated_wire_row_summary(
         .iter()
         .map(|index| {
             let message = &rows[*index];
-            let values = serialize_associated_config_row(message, columns);
+            let values =
+                serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns);
             let standard_row = standard_property_row_bytes(&values);
             let query_rows_row = query_rows_property_row_bytes(columns, &values);
             format!(
