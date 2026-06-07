@@ -62,6 +62,23 @@ fn create_folder_existing_mailbox_satisfies_deleted_advertised_request(
         .unwrap_or(false)
 }
 
+fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        INBOX_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | SENT_FOLDER_ID
+            | TRASH_FOLDER_ID
+            | OUTBOX_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | JOURNAL_FOLDER_ID
+            | FREEBUSY_DATA_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+            | QUICK_STEP_SETTINGS_FOLDER_ID
+    )
+}
+
 fn private_logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -8598,19 +8615,7 @@ where
                     && folder_row_for_id(folder_id, mailboxes).is_none()
                     && snapshot.public_folder_for_id(folder_id).is_none()
                     && folder_id != CALENDAR_FOLDER_ID
-                    && !matches!(
-                        folder_id,
-                        INBOX_FOLDER_ID
-                            | DRAFTS_FOLDER_ID
-                            | SENT_FOLDER_ID
-                            | TRASH_FOLDER_ID
-                            | OUTBOX_FOLDER_ID
-                            | NOTES_FOLDER_ID
-                            | JOURNAL_FOLDER_ID
-                            | FREEBUSY_DATA_FOLDER_ID
-                            | COMMON_VIEWS_FOLDER_ID
-                            | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
-                    )
+                    && !synthetic_folder_allows_create_message(folder_id)
                 {
                     responses.extend_from_slice(&rop_error_response(
                         0x06,
@@ -10935,6 +10940,23 @@ where
                                 continue;
                             }
                         };
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x1c",
+                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                            folder_id = %format!("{folder_id:#018x}"),
+                            jmap_mailbox_id = %mailbox.id,
+                            folder_type = request.create_folder_type(),
+                            open_existing = request.create_folder_open_existing(),
+                            display_name = display_name,
+                            message = "rca debug mapi create folder created real folder",
+                        );
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::Folder {
@@ -11032,6 +11054,23 @@ where
                     )
                     .await
                     .is_err();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x1d",
+                    parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                    folder_id = %format!("{folder_id:#018x}"),
+                    jmap_mailbox_id = %mailbox.id,
+                    display_name = %mailbox.name,
+                    role = %mailbox.role,
+                    partial_completion = partial_completion,
+                    message = "rca debug mapi delete real folder",
+                );
                 if !partial_completion {
                     session.record_notification(MapiNotificationEvent::hierarchy(
                         _parent_folder_id,
@@ -17757,6 +17796,17 @@ mod tests {
             debug_container_class_for_folder_id(RSS_FEEDS_FOLDER_ID),
             "IPF.Note.OutlookHomepage"
         );
+    }
+
+    #[test]
+    fn quick_step_synthetic_folder_allows_associated_message_creation() {
+        assert!(synthetic_folder_allows_create_message(
+            QUICK_STEP_SETTINGS_FOLDER_ID
+        ));
+        assert!(synthetic_folder_allows_create_message(
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+        ));
+        assert!(!synthetic_folder_allows_create_message(0x7777_0001));
     }
 
     #[test]

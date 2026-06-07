@@ -5621,6 +5621,71 @@ mod tests {
     }
 
     #[test]
+    fn real_quick_step_folder_projects_configuration_class() {
+        let quick_step_id = Uuid::parse_str("99999999-9999-4999-9999-999999999998").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            quick_step_id,
+            crate::mapi::identity::mapi_store_id(0x97),
+        );
+        let quick_step = JmapMailbox {
+            id: quick_step_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Quick Step Settings".to_string(),
+            sort_order: 40,
+            modseq: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        assert_eq!(folder_message_class(&quick_step), "IPF.Configuration");
+        assert_eq!(
+            mailbox_property_value_with_context(
+                &quick_step,
+                std::slice::from_ref(&quick_step),
+                PID_TAG_ATTRIBUTE_HIDDEN,
+            ),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            mailbox_property_value_with_context(
+                &quick_step,
+                std::slice::from_ref(&quick_step),
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ),
+            Some(MapiValue::String("IPM.Configuration".to_string()))
+        );
+
+        let row = serialize_folder_row_with_context(
+            &quick_step,
+            std::slice::from_ref(&quick_step),
+            &[
+                PID_TAG_ATTRIBUTE_HIDDEN,
+                PID_TAG_CONTAINER_CLASS_W,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ],
+            Uuid::nil(),
+        );
+        let container_class = "IPF.Configuration"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let default_post_class = "IPM.Configuration"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+
+        assert_eq!(row.first(), Some(&1));
+        assert!(row
+            .windows(container_class.len())
+            .any(|window| window == container_class));
+        assert!(row
+            .windows(default_post_class.len())
+            .any(|window| window == default_post_class));
+    }
+
+    #[test]
     fn deleted_advertised_quick_step_folder_is_excluded_from_hierarchy_sync() {
         let quick_step_id = Uuid::parse_str("88888888-8888-4888-8888-888888888888").unwrap();
         let quick_step_folder_id = crate::mapi::identity::mapi_store_id(0x98);
@@ -7934,6 +7999,9 @@ pub(in crate::mapi) fn unread_from_read_flags(read_flags: Option<u8>) -> Option<
 }
 
 pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static str {
+    if let Some(folder_id) = mailbox_advertised_special_folder_id(mailbox) {
+        return special_folder_metadata(folder_id).2;
+    }
     match mailbox.role.as_str() {
         "__mapi_deferred_action"
         | "__mapi_spooler_queue"
@@ -7954,6 +8022,20 @@ pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static s
         "tasks" => "IPF.Task",
         _ => "IPF.Note",
     }
+}
+
+pub(in crate::mapi) fn mailbox_projects_hidden_attribute(mailbox: &JmapMailbox) -> bool {
+    matches!(
+        mailbox_advertised_special_folder_id(mailbox),
+        Some(CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID)
+    )
+}
+
+fn mailbox_advertised_special_folder_id(mailbox: &JmapMailbox) -> Option<u64> {
+    if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID {
+        return None;
+    }
+    advertised_special_folder_id_for_create(IPM_SUBTREE_FOLDER_ID, mailbox.name.trim())
 }
 
 fn folder_type(mailbox: &JmapMailbox) -> u32 {

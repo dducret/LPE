@@ -1278,6 +1278,9 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_ATTRIBUTE_HIDDEN => {
+            Some(MapiValue::Bool(mailbox_projects_hidden_attribute(mailbox)))
+        }
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(folder_message_class(mailbox))
