@@ -831,7 +831,7 @@ async fn rpc_proxy_emsmdb_logon_uses_authenticated_canonical_principal() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_emsmdb_query_rows_reads_canonical_mailboxes() {
+async fn rpc_proxy_emsmdb_query_rows_reads_root_hierarchy_without_ipm_children() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;
     let archive = FakeStore::mailbox("66666666-6666-6666-6666-666666666666", "custom", "Archive");
@@ -894,8 +894,13 @@ async fn rpc_proxy_emsmdb_query_rows_reads_canonical_mailboxes() {
     .expect("table response");
     let rop_response = rpc_response_rpc_header_ext(&table_response);
 
-    assert!(contains_bytes(&rop_response, &utf16z("Inbox")));
-    assert!(contains_bytes(&rop_response, &utf16z("Archive")));
+    assert!(contains_bytes(
+        &rop_response,
+        &utf16z("Top of Information Store")
+    ));
+    assert!(contains_bytes(&rop_response, &utf16z("Common Views")));
+    assert!(!contains_bytes(&rop_response, &utf16z("Inbox")));
+    assert!(!contains_bytes(&rop_response, &utf16z("Archive")));
 }
 
 #[tokio::test]

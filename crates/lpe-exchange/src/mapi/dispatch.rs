@@ -2287,6 +2287,7 @@ fn format_inbox_hierarchy_query_context(
 fn format_inbox_associated_query_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
+    mailbox_guid: Uuid,
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<String> {
     let Some(MapiObject::ContentsTable {
@@ -2321,7 +2322,7 @@ fn format_inbox_associated_query_context(
             snapshot
         ),
         format_outlook_query_row_values(
-            Uuid::nil(),
+            mailbox_guid,
             *folder_id,
             *associated,
             *position,
@@ -2332,7 +2333,7 @@ fn format_inbox_associated_query_context(
             snapshot
         ),
         format_inbox_associated_wire_row_summary(
-            Uuid::nil(),
+            mailbox_guid,
             *folder_id,
             *associated,
             *position,
@@ -2348,6 +2349,7 @@ fn format_inbox_associated_query_context(
 fn format_inbox_associated_find_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
+    mailbox_guid: Uuid,
     snapshot: &MapiMailStoreSnapshot,
     response: &[u8],
 ) -> Option<String> {
@@ -2378,7 +2380,7 @@ fn format_inbox_associated_find_context(
         format_debug_restriction(request_restriction_bytes(request)),
         format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot),
         format_outlook_query_row_values(
-            Uuid::nil(),
+            mailbox_guid,
             *folder_id,
             *associated,
             *position,
@@ -2389,7 +2391,7 @@ fn format_inbox_associated_find_context(
             snapshot
         ),
         format_inbox_associated_wire_row_summary(
-            Uuid::nil(),
+            mailbox_guid,
             *folder_id,
             *associated,
             *position,
@@ -10220,8 +10222,12 @@ where
                     emails,
                     snapshot,
                 );
-                let inbox_associated_query_context =
-                    format_inbox_associated_query_context(query_object, &request, snapshot);
+                let inbox_associated_query_context = format_inbox_associated_query_context(
+                    query_object,
+                    &request,
+                    principal.account_id,
+                    snapshot,
+                );
                 let common_views_inbox_shortcut_context =
                     format_common_views_inbox_shortcut_context(
                         query_object,
@@ -11150,6 +11156,7 @@ where
                 if let Some(context) = format_inbox_associated_find_context(
                     input_object(session, &handle_slots, &request),
                     &request,
+                    principal.account_id,
                     snapshot,
                     &response,
                 ) {

@@ -7232,7 +7232,7 @@ async fn mapi_over_http_execute_sets_columns_and_queries_empty_rows() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_query_rows_lists_root_and_canonical_mailbox_folders() {
+async fn mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;
     inbox.unread_emails = 2;
@@ -7302,10 +7302,15 @@ async fn mapi_over_http_query_rows_lists_root_and_canonical_mailbox_folders() {
                 .try_into()
                 .unwrap()
         ),
-        15
+        13
     );
-    assert!(contains_bytes(response_rops, &utf16z("Inbox")));
-    assert!(contains_bytes(response_rops, &utf16z("Archive")));
+    assert!(contains_bytes(
+        response_rops,
+        &utf16z("Top of Information Store")
+    ));
+    assert!(contains_bytes(response_rops, &utf16z("Common Views")));
+    assert!(!contains_bytes(response_rops, &utf16z("Inbox")));
+    assert!(!contains_bytes(response_rops, &utf16z("Archive")));
 }
 
 #[tokio::test]
@@ -7568,9 +7573,9 @@ async fn mapi_over_http_query_rows_advances_table_position() {
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rops = &rop_buffer[2..2 + response_rop_size];
     let query_offsets = response_rops
-        .windows(7)
+        .windows(6)
         .enumerate()
-        .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0, 0x02]).then_some(offset))
+        .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0]).then_some(offset))
         .collect::<Vec<_>>();
 
     assert_eq!(query_offsets.len(), 3);
@@ -8099,9 +8104,9 @@ async fn mapi_over_http_query_rows_reads_backward_from_table_position() {
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rops = &rop_buffer[2..2 + response_rop_size];
     let query_offsets = response_rops
-        .windows(7)
+        .windows(6)
         .enumerate()
-        .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0, 0x02]).then_some(offset))
+        .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0]).then_some(offset))
         .collect::<Vec<_>>();
 
     assert_eq!(query_offsets.len(), 2);

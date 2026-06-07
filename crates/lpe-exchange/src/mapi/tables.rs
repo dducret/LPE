@@ -553,6 +553,7 @@ fn hierarchy_rows<'a>(
             .iter()
             .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
             .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
+            .filter(|mailbox| mapi_parent_folder_id(mailbox) == folder_id)
             .filter(|mailbox| {
                 restriction_matches_mailbox_with_context_for_account(
                     restriction,
@@ -4474,31 +4475,12 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
     response.extend_from_slice(values);
 }
 
-fn write_query_rows_property_row(response: &mut Vec<u8>, columns: &[u32], values: &[u8]) {
-    response.extend_from_slice(&query_rows_property_row_bytes(columns, values));
+fn write_query_rows_property_row(response: &mut Vec<u8>, _columns: &[u32], values: &[u8]) {
+    write_standard_property_row(response, values);
 }
 
-pub(in crate::mapi) fn query_rows_property_row_bytes(columns: &[u32], values: &[u8]) -> Vec<u8> {
-    if columns.is_empty() {
-        return standard_property_row_bytes(values);
-    }
-
-    let mut cursor = Cursor::new(values);
-    let mut row = Vec::with_capacity(values.len().saturating_add(columns.len() + 1));
-    row.push(1);
-    for column in columns {
-        let value_start = cursor.position();
-        if parse_mapi_property_value(&mut cursor, *column).is_err() {
-            return standard_property_row_bytes(values);
-        }
-        let value_end = cursor.position();
-        row.push(0);
-        row.extend_from_slice(&values[value_start..value_end]);
-    }
-    if !cursor.remaining_is_zero_padding() {
-        return standard_property_row_bytes(values);
-    }
-    row
+pub(in crate::mapi) fn query_rows_property_row_bytes(_columns: &[u32], values: &[u8]) -> Vec<u8> {
+    standard_property_row_bytes(values)
 }
 
 pub(in crate::mapi) fn standard_property_row_bytes(values: &[u8]) -> Vec<u8> {
@@ -5880,8 +5862,7 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(response[9], 1);
-        assert_eq!(response[10], 0);
+        assert_eq!(response[9], 0);
         let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
         let eas = utf16_position(&response, "IPM.Configuration.EAS").unwrap();
         let elc = utf16_position(&response, "IPM.Configuration.ELC").unwrap();
@@ -5893,7 +5874,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_query_rows_uses_flagged_property_rows() {
+    fn inbox_associated_query_rows_uses_standard_property_rows_for_complete_rows() {
         let snapshot = inbox_associated_sort_snapshot();
         let columns = vec![
             PID_TAG_FOLDER_ID,
@@ -5940,9 +5921,8 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
         let mut cursor = Cursor::new(&response[9..]);
-        assert_eq!(cursor.read_u8().unwrap(), 1);
+        assert_eq!(cursor.read_u8().unwrap(), 0);
         for column in columns {
-            assert_eq!(cursor.read_u8().unwrap(), 0);
             parse_mapi_property_value(&mut cursor, column).unwrap();
         }
         assert!(cursor.remaining_is_zero_padding());
@@ -6040,8 +6020,9 @@ mod tests {
             Some(MapiValue::U32(42))
         );
 
-        let row = serialize_associated_config_row(
+        let row = serialize_associated_config_row_with_mailbox_guid(
             &message,
+            mailbox_guid,
             &[
                 PID_TAG_FOLDER_ID,
                 PID_TAG_MID,
@@ -6738,13 +6719,6 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_row(
         }
     }
     row
-}
-
-pub(in crate::mapi) fn serialize_associated_config_row(
-    message: &MapiAssociatedConfigMessage,
-    columns: &[u32],
-) -> Vec<u8> {
-    serialize_associated_config_row_with_mailbox_guid(message, Uuid::nil(), columns)
 }
 
 pub(in crate::mapi) fn serialize_associated_config_row_with_mailbox_guid(
