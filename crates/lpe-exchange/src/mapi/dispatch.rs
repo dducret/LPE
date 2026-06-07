@@ -10901,6 +10901,30 @@ where
                     ));
                     continue;
                 };
+                if is_advertised_special_folder(folder_id) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = principal.email.as_str(),
+                        request_type = "Execute",
+                        request_rop_id = "0x1d",
+                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                        folder_id = %format!("{folder_id:#018x}"),
+                        partial_completion = false,
+                        message = "rca debug mapi delete advertised special folder acknowledged",
+                    );
+                    session.record_notification(MapiNotificationEvent::hierarchy(
+                        _parent_folder_id,
+                        Some(folder_id),
+                    ));
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        false,
+                    ));
+                    continue;
+                }
                 let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x1D,

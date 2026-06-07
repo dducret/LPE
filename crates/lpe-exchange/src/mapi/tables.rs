@@ -970,7 +970,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(message_class.to_string()))
         }
-        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(message_class)
                 .map(|default_class| MapiValue::String(default_class.to_string()))
         }
@@ -4166,11 +4166,17 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
             }
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
-            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 if message_class == "IPF.Appointment" => {
-                write_ascii_z(&mut row, "IPM.Appointment")
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 => {
+                match default_post_message_class_for_container_class(message_class) {
+                    Some(default_class) => write_ascii_z(&mut row, default_class),
+                    None => write_property_default(&mut row, *column),
+                }
             }
-            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W if message_class == "IPF.Appointment" => {
-                write_utf16z(&mut row, "IPM.Appointment")
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+                match default_post_message_class_for_container_class(message_class) {
+                    Some(default_class) => write_utf16z(&mut row, default_class),
+                    None => write_property_default(&mut row, *column),
+                }
             }
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
@@ -4452,6 +4458,8 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_SUBFOLDERS => row.push(1),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 => write_ascii_z(&mut row, "IPM.Note"),
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPM.Note"),
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
@@ -6327,6 +6335,59 @@ mod tests {
             ),
             Some(MapiValue::U32(0))
         );
+    }
+
+    #[test]
+    fn configuration_special_folder_projects_default_post_message_class() {
+        assert_eq!(
+            special_folder_property_value(
+                QUICK_STEP_SETTINGS_FOLDER_ID,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+                Uuid::nil()
+            ),
+            Some(MapiValue::String("IPM.Configuration".to_string()))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                QUICK_STEP_SETTINGS_FOLDER_ID,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+                Uuid::nil()
+            ),
+            Some(MapiValue::String("IPM.Configuration".to_string()))
+        );
+
+        let row = serialize_special_folder_row(
+            QUICK_STEP_SETTINGS_FOLDER_ID,
+            &[],
+            &[
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ],
+            None,
+        );
+        let ascii = b"IPM.Configuration\0";
+        assert!(row.windows(ascii.len()).any(|window| window == ascii));
+        assert!(row
+            .windows(utf16z_test_bytes("IPM.Configuration").len())
+            .any(|window| window == utf16z_test_bytes("IPM.Configuration")));
+    }
+
+    #[test]
+    fn ipm_subtree_row_projects_default_post_message_class() {
+        let row = serialize_special_folder_row(
+            IPM_SUBTREE_FOLDER_ID,
+            &[],
+            &[
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ],
+            None,
+        );
+        let ascii = b"IPM.Note\0";
+        assert!(row.windows(ascii.len()).any(|window| window == ascii));
+        assert!(row
+            .windows(utf16z_test_bytes("IPM.Note").len())
+            .any(|window| window == utf16z_test_bytes("IPM.Note")));
     }
 
     #[test]

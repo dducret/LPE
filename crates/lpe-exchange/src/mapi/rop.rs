@@ -2407,12 +2407,14 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PARENT_SOURCE_KEY => "PidTagParentSourceKey",
         PID_TAG_PARENT_ENTRY_ID => "PidTagParentEntryId",
         PID_TAG_FOLDER_ID => "PidTagFolderId",
+        PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_INSTANCE_KEY => "PidTagInstanceKey",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_ASSOCIATED_CONTENT_COUNT => "PidTagAssociatedContentCount",
         PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
         PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
+        PID_TAG_SUBFOLDERS => "PidTagSubfolders",
         PID_TAG_IPM_SUBTREE_ENTRY_ID => "PidTagIpmSubtreeEntryId",
         PID_TAG_IPM_OUTBOX_ENTRY_ID => "PidTagIpmOutboxEntryId",
         PID_TAG_IPM_WASTEBASKET_ENTRY_ID => "PidTagIpmWastebasketEntryId",
@@ -2429,6 +2431,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
         PID_TAG_REM_OFFLINE_ENTRY_ID => "PidTagRemOfflineEntryId",
         PID_TAG_IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => "PidTagAdditionalRenEntryIdsEx",
+        PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
@@ -2447,7 +2452,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
-        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            "PidTagDefaultPostMessageClass"
+        }
         PID_TAG_DEFAULT_FORM_NAME_W => "PidTagDefaultFormName",
         PID_TAG_DEFAULT_VIEW_ENTRY_ID => "PidTagDefaultViewEntryId",
         PID_TAG_FOLDER_FORM_FLAGS => "PidTagFolderFormFlags",
@@ -6680,6 +6687,14 @@ mod tests {
             "PidTagContentCount"
         );
         assert_eq!(
+            property_tag_debug_name(PID_TAG_PARENT_FOLDER_ID),
+            "PidTagParentFolderId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SUBFOLDERS),
+            "PidTagSubfolders"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_FOLDER_TYPE),
             "PidTagFolderType"
         );
@@ -6703,6 +6718,22 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             "PidTagDefaultPostMessageClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8),
+            "PidTagDefaultPostMessageClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ADDITIONAL_REN_ENTRY_IDS),
+            "PidTagAdditionalRenEntryIds"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX),
+            "PidTagAdditionalRenEntryIdsEx"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_FREE_BUSY_ENTRY_IDS),
+            "PidTagFreeBusyEntryIds"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_ASSOCIATED_SHARING_PROVIDER),

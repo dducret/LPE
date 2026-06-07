@@ -1279,7 +1279,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
-        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(folder_message_class(mailbox))
                 .map(|message_class| MapiValue::String(message_class.to_string()))
         }
@@ -1347,6 +1347,7 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
         "IPF.Task" => Some("IPM.Task"),
         "IPF.StickyNote" => Some("IPM.StickyNote"),
         "IPF.Journal" => Some("IPM.Activity"),
+        "IPF.Configuration" => Some("IPM.Configuration"),
         _ => None,
     }
 }
@@ -1405,10 +1406,11 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
-        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
-            if collaboration_folder_message_class(folder.kind) == "IPF.Appointment" =>
-        {
-            Some(MapiValue::String("IPM.Appointment".to_string()))
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            default_post_message_class_for_container_class(collaboration_folder_message_class(
+                folder.kind,
+            ))
+            .map(|message_class| MapiValue::String(message_class.to_string()))
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
@@ -1473,6 +1475,10 @@ pub(in crate::mapi) fn public_folder_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(folder.folder.folder_class.clone()))
+        }
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            default_post_message_class_for_container_class(&folder.folder.folder_class)
+                .map(|message_class| MapiValue::String(message_class.to_string()))
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
@@ -6355,8 +6361,12 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mapi_store::{MapiCollaborationFolder, MapiCollaborationFolderKind};
-    use lpe_storage::{CollaborationCollection, CollaborationRights};
+    use crate::mapi_store::{
+        MapiCollaborationFolder, MapiCollaborationFolderKind, MapiPublicFolder,
+    };
+    use lpe_storage::{
+        CollaborationCollection, CollaborationRights, PublicFolder, PublicFolderRights,
+    };
 
     fn mailbox(id: &str, parent_id: Option<Uuid>, role: &str, name: &str) -> JmapMailbox {
         JmapMailbox {
@@ -6569,6 +6579,80 @@ mod tests {
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DELETED_COUNT_TOTAL),
             Some(MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn collaboration_folder_projects_default_post_message_class_for_contacts() {
+        let collection = MapiCollaborationFolder {
+            id: CONTACTS_FOLDER_ID,
+            kind: MapiCollaborationFolderKind::Contacts,
+            collection: CollaborationCollection {
+                id: "contacts-default".to_string(),
+                kind: "contacts".to_string(),
+                owner_account_id: Uuid::nil(),
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Contacts".to_string(),
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+            },
+            item_count: 0,
+        };
+
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(
+                &collection,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8
+            ),
+            Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+    }
+
+    #[test]
+    fn public_folder_projects_default_post_message_class_from_folder_class() {
+        let folder = MapiPublicFolder {
+            id: PUBLIC_FOLDERS_ROOT_FOLDER_ID + 0x10000,
+            folder: PublicFolder {
+                id: Uuid::from_u128(1),
+                tree_id: Uuid::from_u128(2),
+                parent_folder_id: None,
+                canonical_id: Uuid::from_u128(3),
+                display_name: "Public Contacts".to_string(),
+                folder_class: "IPF.Contact".to_string(),
+                path: "/Public Contacts".to_string(),
+                sort_order: 0,
+                lifecycle_state: "active".to_string(),
+                change_counter: 1,
+                rights: PublicFolderRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            item_count: 0,
+            child_count: 0,
+        };
+
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8),
+            Some(MapiValue::String("IPM.Contact".to_string()))
         );
     }
 
