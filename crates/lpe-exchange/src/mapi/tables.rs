@@ -6003,7 +6003,7 @@ mod tests {
             Some(MapiValue::Binary(value))
                 if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
                     && value.windows(b"OLPrefsVersion".len()).any(|window| window == b"OLPrefsVersion")
-                    && value.windows(b"9-0".len()).any(|window| window == b"9-0")
+                    && value.windows(b"9-1".len()).any(|window| window == b"9-1")
         ));
         assert!(matches!(
             associated_config_property_value(&message, 0x685D_0003),
@@ -6822,7 +6822,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
 }
 
 fn minimal_roaming_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {

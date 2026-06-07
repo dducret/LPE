@@ -1613,7 +1613,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
-        PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(0)),
+        PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(wlink_save_stamp(message))),
         PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
         PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
         PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
@@ -1704,6 +1704,20 @@ fn wlink_group_name(message: &MapiNavigationShortcutMessage) -> String {
         "Mail".to_string()
     } else {
         message.group_name.clone()
+    }
+}
+
+fn wlink_save_stamp(message: &MapiNavigationShortcutMessage) -> u32 {
+    let bytes = message
+        .group_header_id
+        .as_ref()
+        .map(Uuid::as_bytes)
+        .unwrap_or_else(|| message.canonical_id.as_bytes());
+    let stamp = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    if stamp == 0 {
+        1
+    } else {
+        stamp
     }
 }
 
@@ -8536,6 +8550,14 @@ mod tests {
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_NAME_W),
             Some(MapiValue::String("Projects".to_string()))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_SAVE_STAMP),
+            Some(MapiValue::U32(0x3333_3333))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_SAVE_STAMP),
+            Some(MapiValue::U32(0x3333_3333))
         );
     }
 
