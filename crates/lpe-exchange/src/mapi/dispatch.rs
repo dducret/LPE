@@ -1550,7 +1550,7 @@ fn log_execute_rop_debug(
             outlook_event_operation = "EcDoRpcExt",
             outlook_event_hresult = "0x800704d3",
             outlook_event_data_code = 78,
-            correlation_basis = "release_only_empty_rop_response_spec_compliant",
+            correlation_basis = "release_only_no_rop_response_with_handle_table",
             release_response_spec_compliant = true,
             request_rop_ids = %request.ids_csv,
             request_rop_names = %request.names_csv,
@@ -5626,6 +5626,11 @@ fn log_outlook_contents_table_query_rows(
         } else {
             String::new()
         },
+        common_views_wlink_contract_summary = %if *folder_id == COMMON_VIEWS_FOLDER_ID && *associated {
+            format_common_views_wlink_contract_summary(&selected_columns, snapshot)
+        } else {
+            String::new()
+        },
         "rca debug outlook contents table query rows"
     );
 }
@@ -6328,6 +6333,86 @@ fn format_common_views_wlink_target_decoding(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn format_common_views_wlink_contract_summary(
+    selected_columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if selected_columns.is_empty() {
+        return String::new();
+    }
+
+    let link_rows = snapshot
+        .common_views_table_messages()
+        .filter(|message| {
+            matches!(
+                message,
+                crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                    if shortcut.shortcut_type != 4
+            )
+        })
+        .count();
+    let header_rows = snapshot
+        .common_views_table_messages()
+        .filter(|message| {
+            matches!(
+                message,
+                crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                    if shortcut.shortcut_type == 4
+            )
+        })
+        .count();
+
+    let required_link_columns = [
+        PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_RECORD_KEY,
+        PID_TAG_WLINK_STORE_ENTRY_ID,
+        PID_TAG_WLINK_FOLDER_TYPE,
+        PID_TAG_WLINK_GROUP_CLSID,
+        PID_TAG_WLINK_GROUP_NAME_W,
+        PID_TAG_WLINK_SECTION,
+        PID_TAG_WLINK_ORDINAL,
+        PID_TAG_WLINK_TYPE,
+        PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_SAVE_STAMP,
+        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+    ];
+    let missing_required_link_columns = required_link_columns
+        .iter()
+        .copied()
+        .filter(|tag| {
+            !selected_columns
+                .iter()
+                .any(|column| property_ids_match(*column, *tag))
+        })
+        .collect::<Vec<_>>();
+    let expected_link_default_columns = selected_columns
+        .iter()
+        .copied()
+        .filter(|tag| common_views_link_row_expected_default(*tag))
+        .collect::<Vec<_>>();
+
+    format!(
+        "link_rows={};header_rows={};missing_required_link_columns={};expected_link_default_columns={};note=header_id_and_calendar_wlink_fields_default_on_non_header_mail_shortcut_rows",
+        link_rows,
+        header_rows,
+        format_debug_property_tags(&missing_required_link_columns),
+        format_debug_property_tags(&expected_link_default_columns)
+    )
+}
+
+fn property_ids_match(left: u32, right: u32) -> bool {
+    left & 0xffff_0000 == right & 0xffff_0000
+}
+
+fn common_views_link_row_expected_default(property_tag: u32) -> bool {
+    let property_id = property_tag & 0xffff_0000;
+    property_id == (PID_TAG_WLINK_GROUP_HEADER_ID & 0xffff_0000)
+        || matches!(
+            property_id,
+            0x6853_0000 | 0x6854_0000 | 0x6890_0000 | 0x6892_0000 | 0x6893_0000
+        )
 }
 
 fn format_inbox_associated_query_row_window(
@@ -7361,6 +7446,7 @@ where
         }
         match RopId::from_u8(typed_request.rop_id()) {
             Some(RopId::Release) => {
+                echo_input_handle_table = true;
                 let released_handle = input_handle(&handle_slots, &request);
                 let released_object = input_object(session, &handle_slots, &request);
                 let released_object_kind = mapi_object_debug_kind(released_object);
@@ -17445,6 +17531,7 @@ mod tests {
                 PID_TAG_INSTANCE_NUM,
                 PID_TAG_SUBJECT_W,
                 PID_TAG_WLINK_ENTRY_ID,
+                PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
                 PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
             ],
             &snapshot,
@@ -17456,6 +17543,7 @@ mod tests {
         assert!(summary.contains("0x674e0003=0"));
         assert!(summary.contains("0x0037001f=Inbox"));
         assert!(summary.contains("0x684c0102=binary:"));
+        assert!(summary.contains("0x68910102=binary:"));
         assert!(summary.contains("0x80100102=binary:"));
     }
 
@@ -17496,6 +17584,43 @@ mod tests {
             "sharing_local_folder_id_decoded=0x{INBOX_FOLDER_ID:016x}"
         )));
         assert!(summary.contains("sharing_local_folder_id_matches_inbox=true"));
+    }
+
+    #[test]
+    fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let columns = [
+            PID_TAG_SUBJECT_W,
+            PID_TAG_WLINK_ENTRY_ID,
+            PID_TAG_WLINK_RECORD_KEY,
+            PID_TAG_WLINK_STORE_ENTRY_ID,
+            0x684f_0102,
+            0x6850_0102,
+            PID_TAG_WLINK_GROUP_NAME_W,
+            PID_TAG_WLINK_SECTION,
+            PID_TAG_WLINK_ORDINAL,
+            PID_TAG_WLINK_TYPE,
+            PID_TAG_WLINK_FLAGS,
+            PID_TAG_WLINK_SAVE_STAMP,
+            0x6842_0102,
+            0x6853_0003,
+            0x6854_0102,
+            0x6890_0102,
+            0x6891_0102,
+            0x6892_0003,
+            0x6893_0102,
+            PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+        ];
+
+        let summary = format_common_views_wlink_contract_summary(&columns, &snapshot);
+
+        assert!(summary.contains("link_rows=1"));
+        assert!(summary.contains("header_rows=1"));
+        assert!(summary.contains("missing_required_link_columns="));
+        assert!(summary.contains("expected_link_default_columns=0x68420102"));
+        assert!(summary.contains("0x68530003"));
+        assert!(!summary.contains("0x68910102"));
+        assert!(summary.contains("0x68930102"));
     }
 
     #[test]

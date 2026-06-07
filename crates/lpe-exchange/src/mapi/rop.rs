@@ -1983,6 +1983,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_SUBFOLDERS
                 | PID_TAG_PARENT_FOLDER_ID
                 | PID_TAG_PARENT_SOURCE_KEY
+                | PID_TAG_FOLDER_TYPE
         ),
         _ => false,
     }
@@ -6665,6 +6666,33 @@ mod tests {
         assert!(modeled_zero_or_default_property(
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
+        ));
+    }
+
+    #[test]
+    fn root_folder_type_zero_is_modeled_not_fallback() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let folder = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        assert!(modeled_zero_or_default_property(
+            Some(&folder),
+            PID_TAG_FOLDER_TYPE
+        ));
+        assert!(!fallback_default_specific_property(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_TAG_FOLDER_TYPE
         ));
     }
 

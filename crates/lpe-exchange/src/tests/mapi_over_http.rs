@@ -4340,8 +4340,9 @@ async fn mapi_over_http_execute_accepts_release_rop() {
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 6);
     assert_eq!(&body[16..18], &[0, 0]);
+    assert_eq!(&body[18..22], &u32::MAX.to_le_bytes());
 }
 
 #[tokio::test]
@@ -4375,6 +4376,41 @@ async fn mapi_over_http_empty_extended_execute_returns_success() {
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
     assert_eq!(rop_buffer_size, 10);
     assert_eq!(&body[16..26], &[0, 0, 4, 0, 2, 0, 2, 0, 2, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_extended_execute_release_keeps_handle_table() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rpc_proxy_wrapped_rop_buffer(&[0x01, 0x00, 0x00], &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Execute");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    assert_eq!(rop_buffer_size, 14);
+    assert_eq!(&body[16..24], &[0, 0, 4, 0, 6, 0, 6, 0]);
+    assert_eq!(&body[24..26], &[2, 0]);
+    assert_eq!(&body[26..30], &u32::MAX.to_le_bytes());
 }
 
 #[tokio::test]
@@ -21140,6 +21176,13 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     bootstrap_cookie = mapi_cookie_header(&trace_store_props_response);
     let trace_store_props_rops =
         response_rops_from_execute_response(trace_store_props_response).await;
+    assert!(contains_bytes(
+        &trace_store_props_rops,
+        &[
+            0xAE, 0xF0, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]
+    ));
     let public_folders_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,

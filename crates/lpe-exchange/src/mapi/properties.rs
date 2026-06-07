@@ -379,6 +379,7 @@ pub(in crate::mapi) const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0048;
 pub(in crate::mapi) const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
 pub(in crate::mapi) const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 pub(in crate::mapi) const PID_TAG_WLINK_SECTION: u32 = 0x6852_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID: u32 = 0x6891_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -416,6 +417,9 @@ pub(in crate::mapi) const PS_PUBLIC_STRINGS_GUID: [u8; 16] = [
 ];
 pub(in crate::mapi) const PSETID_SHARING_GUID: [u8; 16] = [
     0x40, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const OUTLOOK_SHARING_PROVIDER_GUID: [u8; 16] = [
+    0xAE, 0xF0, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
 pub(in crate::mapi) const PSETID_LOG_GUID: [u8; 16] = [
     0x0A, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
@@ -727,7 +731,7 @@ pub(in crate::mapi) fn logon_property_value(
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
-        PID_TAG_ASSOCIATED_SHARING_PROVIDER => Some(MapiValue::Guid([0; 16])),
+        PID_TAG_ASSOCIATED_SHARING_PROVIDER => Some(MapiValue::Guid(OUTLOOK_SHARING_PROVIDER_GUID)),
         PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(special_folder_entry_id_value(
             principal.account_id,
             PUBLIC_FOLDERS_ROOT_FOLDER_ID,
@@ -1664,6 +1668,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
             mapi_mailstore::private_store_entry_id(account_id),
         )),
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => Some(
+            MapiValue::Binary(mapi_mailstore::private_store_entry_id(account_id)),
+        ),
         property_tag
             if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_FOLDER_TYPE) =>
         {
@@ -8681,6 +8688,35 @@ mod tests {
     }
 
     #[test]
+    fn navigation_shortcut_projects_address_book_store_entry_id() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(901),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x2222),
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 0x10,
+            group_header_id: None,
+            group_name: "Mail".to_string(),
+        };
+
+        assert_eq!(
+            navigation_shortcut_property_value(
+                &shortcut,
+                account_id,
+                PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+            ),
+            Some(MapiValue::Binary(mapi_mailstore::private_store_entry_id(
+                account_id
+            )))
+        );
+    }
+
+    #[test]
     fn navigation_shortcut_wlink_guid_fields_follow_requested_property_type() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let group_id = Uuid::from_bytes([0x33; 16]);
@@ -8752,7 +8788,7 @@ mod tests {
         );
         assert_eq!(
             logon_property_value(&principal, PID_TAG_ASSOCIATED_SHARING_PROVIDER),
-            Some(MapiValue::Guid([0; 16]))
+            Some(MapiValue::Guid(OUTLOOK_SHARING_PROVIDER_GUID))
         );
         assert_eq!(
             logon_property_value(&principal, PID_TAG_USER_GUID),
