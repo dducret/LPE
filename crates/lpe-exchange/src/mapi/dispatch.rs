@@ -2640,10 +2640,14 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_RIGHTS,
         PID_TAG_EXTENDED_FOLDER_FLAGS,
         PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        PID_TAG_FOLDER_FORM_FLAGS,
         PID_TAG_FOLDER_WEBVIEWINFO,
         PID_TAG_FOLDER_XVIEWINFO_E,
         PID_TAG_FOLDER_VIEWS_ONLY,
         PID_TAG_DEFAULT_FORM_NAME_W,
+        PID_TAG_FOLDER_FORM_STORAGE,
+        PID_TAG_ACL_MEMBER_NAME_W,
+        PID_TAG_FOLDER_VIEWLIST_FLAGS,
         PID_TAG_ARCHIVE_TAG,
         PID_TAG_POLICY_TAG,
         PID_TAG_RETENTION_PERIOD,
@@ -17488,6 +17492,10 @@ mod tests {
             Some(&MapiValue::Binary(Vec::new()))
         );
         assert_eq!(
+            properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
             properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
             Some(&MapiValue::Binary(Vec::new()))
         );
@@ -17502,6 +17510,18 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
             Some(&MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_FORM_STORAGE),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ACL_MEMBER_NAME_W),
+            Some(&MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_VIEWLIST_FLAGS),
+            Some(&MapiValue::U32(0))
         );
         assert_eq!(
             properties.get(&PID_TAG_ARCHIVE_TAG),

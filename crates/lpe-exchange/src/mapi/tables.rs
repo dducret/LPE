@@ -956,8 +956,12 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_DEFAULT_VIEW_ENTRY_ID | PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
-        PID_TAG_FOLDER_VIEWS_ONLY => Some(MapiValue::U32(0)),
+        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
+        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
             folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
@@ -6280,6 +6284,10 @@ mod tests {
             Some(MapiValue::Binary(Vec::new()))
         );
         assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_WEBVIEWINFO, Uuid::nil()),
             Some(MapiValue::Binary(Vec::new()))
         );
@@ -6298,6 +6306,26 @@ mod tests {
                 Uuid::nil()
             ),
             Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                INBOX_FOLDER_ID,
+                PID_TAG_FOLDER_FORM_STORAGE,
+                Uuid::nil()
+            ),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ACL_MEMBER_NAME_W, Uuid::nil()),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                INBOX_FOLDER_ID,
+                PID_TAG_FOLDER_VIEWLIST_FLAGS,
+                Uuid::nil()
+            ),
+            Some(MapiValue::U32(0))
         );
     }
 

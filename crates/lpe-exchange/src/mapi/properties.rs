@@ -288,15 +288,24 @@ pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8: u32 = 0x36
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 pub(in crate::mapi) const PID_TAG_DEFAULT_FORM_NAME_W: u32 = 0x36E6_001F;
 pub(in crate::mapi) const PID_TAG_EXTENDED_FOLDER_FLAGS: u32 = 0x36DA_0102;
+pub(in crate::mapi) const PID_TAG_FOLDER_FORM_FLAGS: u32 = 0x36DE_0003;
 pub(in crate::mapi) const PID_TAG_FOLDER_WEBVIEWINFO: u32 = 0x36DF_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_XVIEWINFO_E: u32 = 0x36E0_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_VIEWS_ONLY: u32 = 0x36E1_0003;
+pub(in crate::mapi) const PID_TAG_FOLDER_FORM_STORAGE: u32 = 0x36EB_0102;
 pub(in crate::mapi) const PID_TAG_ARCHIVE_TAG: u32 = 0x3018_0102;
 pub(in crate::mapi) const PID_TAG_POLICY_TAG: u32 = 0x3019_0102;
 pub(in crate::mapi) const PID_TAG_RETENTION_PERIOD: u32 = 0x301A_0003;
 pub(in crate::mapi) const PID_TAG_RETENTION_FLAGS: u32 = 0x301D_0003;
 pub(in crate::mapi) const PID_TAG_ARCHIVE_PERIOD: u32 = 0x301E_0003;
 pub(in crate::mapi) const PID_TAG_RIGHTS: u32 = 0x6639_0003;
+pub(in crate::mapi) const PID_TAG_ACL_MEMBER_NAME_W: u32 = 0x6672_001F;
+pub(in crate::mapi) const PID_TAG_FOLDER_VIEWLIST_FLAGS: u32 = 0x672D_0003;
+
+pub(in crate::mapi) fn is_acl_member_name_property_tag(property_tag: u32) -> bool {
+    MapiPropertyTag::new(property_tag).property_id()
+        == MapiPropertyTag::new(PID_TAG_ACL_MEMBER_NAME_W).property_id()
+}
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
@@ -1263,8 +1272,12 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_DEFAULT_VIEW_ENTRY_ID | PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
-        PID_TAG_FOLDER_VIEWS_ONLY => Some(MapiValue::U32(0)),
+        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
+        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(folder_message_class(mailbox))

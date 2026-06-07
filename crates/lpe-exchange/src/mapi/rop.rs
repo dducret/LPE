@@ -1975,26 +1975,32 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
             PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE | PID_TAG_RESOURCE_FLAGS
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
-        Some(MapiObject::Folder { .. }) | None => matches!(
-            storage_tag,
-            PID_TAG_CONTENT_COUNT
-                | PID_TAG_CONTENT_UNREAD_COUNT
-                | PID_TAG_DELETED_COUNT_TOTAL
-                | PID_TAG_SUBFOLDERS
-                | PID_TAG_PARENT_FOLDER_ID
-                | PID_TAG_PARENT_SOURCE_KEY
-                | PID_TAG_FOLDER_TYPE
-                | PID_TAG_ARCHIVE_TAG
-                | PID_TAG_POLICY_TAG
-                | PID_TAG_RETENTION_PERIOD
-                | PID_TAG_RETENTION_FLAGS
-                | PID_TAG_ARCHIVE_PERIOD
-                | PID_TAG_DEFAULT_VIEW_ENTRY_ID
-                | PID_TAG_FOLDER_WEBVIEWINFO
-                | PID_TAG_FOLDER_XVIEWINFO_E
-                | PID_TAG_FOLDER_VIEWS_ONLY
-                | PID_TAG_DEFAULT_FORM_NAME_W
-        ),
+        Some(MapiObject::Folder { .. }) | None => {
+            is_acl_member_name_property_tag(tag)
+                || matches!(
+                    storage_tag,
+                    PID_TAG_CONTENT_COUNT
+                        | PID_TAG_CONTENT_UNREAD_COUNT
+                        | PID_TAG_DELETED_COUNT_TOTAL
+                        | PID_TAG_SUBFOLDERS
+                        | PID_TAG_PARENT_FOLDER_ID
+                        | PID_TAG_PARENT_SOURCE_KEY
+                        | PID_TAG_FOLDER_TYPE
+                        | PID_TAG_ARCHIVE_TAG
+                        | PID_TAG_POLICY_TAG
+                        | PID_TAG_RETENTION_PERIOD
+                        | PID_TAG_RETENTION_FLAGS
+                        | PID_TAG_ARCHIVE_PERIOD
+                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
+                        | PID_TAG_FOLDER_FORM_FLAGS
+                        | PID_TAG_FOLDER_WEBVIEWINFO
+                        | PID_TAG_FOLDER_XVIEWINFO_E
+                        | PID_TAG_FOLDER_VIEWS_ONLY
+                        | PID_TAG_DEFAULT_FORM_NAME_W
+                        | PID_TAG_FOLDER_FORM_STORAGE
+                        | PID_TAG_FOLDER_VIEWLIST_FLAGS
+                )
+        }
         _ => false,
     }
 }
@@ -2442,9 +2448,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
         PID_TAG_DEFAULT_FORM_NAME_W => "PidTagDefaultFormName",
         PID_TAG_DEFAULT_VIEW_ENTRY_ID => "PidTagDefaultViewEntryId",
+        PID_TAG_FOLDER_FORM_FLAGS => "PidTagFolderFormFlags",
         PID_TAG_FOLDER_WEBVIEWINFO => "PidTagFolderWebViewInfo",
         PID_TAG_FOLDER_XVIEWINFO_E => "PidTagFolderXViewInfoE",
         PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
+        PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
         PID_TAG_ARCHIVE_TAG => "PidTagArchiveTag",
         PID_TAG_POLICY_TAG => "PidTagPolicyTag",
@@ -2452,6 +2460,8 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_RETENTION_FLAGS => "PidTagRetentionFlags",
         PID_TAG_ARCHIVE_PERIOD => "PidTagArchivePeriod",
         PID_TAG_RIGHTS => "PidTagRights",
+        PID_TAG_FOLDER_VIEWLIST_FLAGS => "PidTagFolderViewListFlags",
+        tag if is_acl_member_name_property_tag(tag) => "PidTagMemberName",
         PID_LID_LOCATION_W_TAG => "PidLidLocation",
         PID_LID_APPOINTMENT_DURATION_TAG => "PidLidAppointmentDuration",
         PID_LID_APPOINTMENT_START_WHOLE_TAG => "PidLidAppointmentStartWhole",
@@ -6723,10 +6733,15 @@ mod tests {
 
         for property_tag in [
             PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+            PID_TAG_FOLDER_FORM_FLAGS,
             PID_TAG_FOLDER_WEBVIEWINFO,
             PID_TAG_FOLDER_XVIEWINFO_E,
             PID_TAG_FOLDER_VIEWS_ONLY,
             PID_TAG_DEFAULT_FORM_NAME_W,
+            PID_TAG_FOLDER_FORM_STORAGE,
+            PID_TAG_ACL_MEMBER_NAME_W,
+            0x6672_0102,
+            PID_TAG_FOLDER_VIEWLIST_FLAGS,
         ] {
             assert!(modeled_zero_or_default_property(
                 Some(&folder),
