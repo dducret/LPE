@@ -3147,27 +3147,23 @@ fn folder_set_property_problems(
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
-            if storage_tag == PID_TAG_ATTRIBUTE_HIDDEN
-                && mailboxes
-                    .iter()
-                    .find(|mailbox| {
-                        try_mapi_folder_id(mailbox) == Some(*folder_id)
-                            || mailbox.role == role_for_folder_id(*folder_id).unwrap_or_default()
-                    })
-                    .map(mailbox_projects_hidden_attribute)
-                    .unwrap_or_else(|| {
-                        is_advertised_special_folder(*folder_id)
-                            && matches!(
-                                *folder_id,
-                                CONVERSATION_ACTION_SETTINGS_FOLDER_ID
-                                    | QUICK_STEP_SETTINGS_FOLDER_ID
-                            )
-                    })
-            {
+            let hidden_configuration_class =
+                hidden_configuration_folder_message_class(*folder_id, mailboxes);
+            if storage_tag == PID_TAG_ATTRIBUTE_HIDDEN && hidden_configuration_class.is_some() {
                 return match value {
                     MapiValue::Bool(_) => None,
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
+            }
+            if storage_tag == PID_TAG_CONTAINER_CLASS_W {
+                if let Some(expected_class) = hidden_configuration_class {
+                    return match value {
+                        MapiValue::String(value) if value.eq_ignore_ascii_case(expected_class) => {
+                            None
+                        }
+                        _ => Some((index, *tag, 0x8004_0102)),
+                    };
+                }
             }
             if !matches!(*folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
                 return Some((index, *tag, 0x8004_0102));
@@ -3188,6 +3184,29 @@ fn folder_set_property_problems(
             }
         })
         .collect()
+}
+
+fn hidden_configuration_folder_message_class(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> Option<&'static str> {
+    if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
+        try_mapi_folder_id(mailbox) == Some(folder_id)
+            || mailbox.role == role_for_folder_id(folder_id).unwrap_or_default()
+    }) {
+        if mailbox_projects_hidden_attribute(mailbox) {
+            return Some(folder_message_class(mailbox));
+        }
+    }
+    if is_advertised_special_folder(folder_id)
+        && matches!(
+            folder_id,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
+        )
+    {
+        return Some("IPF.Configuration");
+    }
+    None
 }
 
 fn default_folder_identification_safe_property_values(
@@ -18570,6 +18589,15 @@ mod tests {
             &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
         )
         .is_empty());
+        assert!(folder_set_property_problems(
+            Some(&quick_step_folder),
+            std::slice::from_ref(&quick_step),
+            &[(
+                PID_TAG_CONTAINER_CLASS_W,
+                MapiValue::String("IPF.Configuration".to_string())
+            )],
+        )
+        .is_empty());
         assert_eq!(
             folder_set_property_problems(
                 Some(&quick_step_folder),
@@ -18583,11 +18611,33 @@ mod tests {
         );
         assert_eq!(
             folder_set_property_problems(
+                Some(&quick_step_folder),
+                std::slice::from_ref(&quick_step),
+                &[(
+                    PID_TAG_CONTAINER_CLASS_W,
+                    MapiValue::String("IPF.Note".to_string())
+                )],
+            ),
+            vec![(0, PID_TAG_CONTAINER_CLASS_W, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
                 Some(&regular_folder),
                 std::slice::from_ref(&quick_step),
                 &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
             ),
             vec![(0, PID_TAG_ATTRIBUTE_HIDDEN, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&regular_folder),
+                std::slice::from_ref(&quick_step),
+                &[(
+                    PID_TAG_CONTAINER_CLASS_W,
+                    MapiValue::String("IPF.Configuration".to_string())
+                )],
+            ),
+            vec![(0, PID_TAG_CONTAINER_CLASS_W, 0x8004_0102)]
         );
     }
 
