@@ -945,6 +945,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
             Some(MapiValue::U32(0))
         }
+        PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
             folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,

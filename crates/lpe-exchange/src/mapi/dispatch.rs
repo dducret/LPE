@@ -2637,6 +2637,7 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_DELETED_COUNT_TOTAL,
         PID_TAG_SUBFOLDERS,
         PID_TAG_ACCESS,
+        PID_TAG_RIGHTS,
         PID_TAG_CONTAINER_CLASS_W,
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
         PID_TAG_MESSAGE_CLASS_W,
@@ -17460,6 +17461,10 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             Some(&MapiValue::String("IPM.Note".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RIGHTS),
+            Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
         );
         let expected_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
             principal.account_id,
