@@ -2779,6 +2779,9 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
                     ],
                 ));
             }
+            if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX {
+                return Some(additional_ren_entry_ids_ex_for_debug(value));
+            }
             if storage_tag == PID_TAG_FREE_BUSY_ENTRY_IDS {
                 return Some(indexed_special_folder_entry_ids_for_debug(
                     storage_tag,
@@ -2810,6 +2813,130 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn additional_ren_entry_ids_ex_for_debug(value: &MapiValue) -> String {
+    let MapiValue::Binary(bytes) = value else {
+        return format!(
+            "{PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX:#010x}:PidTagAdditionalRenEntryIdsEx:value_type={}",
+            mapi_value_debug_shape(value)
+        );
+    };
+    match decode_additional_ren_entry_ids_ex_for_debug(bytes) {
+        Ok(entries) => format!(
+            "{PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX:#010x}:PidTagAdditionalRenEntryIdsEx:bytes={}:entry_count={}:{}",
+            bytes.len(),
+            entries.len(),
+            entries.join(";")
+        ),
+        Err(error) => format!(
+            "{PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX:#010x}:PidTagAdditionalRenEntryIdsEx:bytes={}:parse_error={error}",
+            bytes.len()
+        ),
+    }
+}
+
+fn decode_additional_ren_entry_ids_ex_for_debug(bytes: &[u8]) -> Result<Vec<String>> {
+    let mut offset = 0usize;
+    let mut entries = Vec::new();
+    while offset + 4 <= bytes.len() {
+        let persist_id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+        let data_size = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        offset += 4;
+        if persist_id == 0 {
+            return Ok(entries);
+        }
+        let block_start = offset;
+        let block_end = block_start
+            .checked_add(data_size)
+            .ok_or_else(|| anyhow::anyhow!("persist block size overflow"))?;
+        if block_end > bytes.len() {
+            return Err(anyhow::anyhow!(
+                "persist_id=0x{persist_id:04x}:truncated_block:size={data_size}:remaining={}",
+                bytes.len().saturating_sub(block_start)
+            ));
+        }
+
+        let mut decoded_folder_id = None;
+        let mut element_summaries = Vec::new();
+        while offset + 4 <= block_end {
+            let element_id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+            let element_size = u16::from_le_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+            offset += 4;
+            if element_id == 0 {
+                break;
+            }
+            let element_end = offset
+                .checked_add(element_size)
+                .ok_or_else(|| anyhow::anyhow!("persist element size overflow"))?;
+            if element_end > block_end {
+                return Err(anyhow::anyhow!(
+                    "persist_id=0x{persist_id:04x}:element_id=0x{element_id:04x}:truncated_element:size={element_size}:remaining={}",
+                    block_end.saturating_sub(offset)
+                ));
+            }
+            if element_id == 0x0001 {
+                decoded_folder_id = crate::mapi::identity::object_id_from_folder_identifier_bytes(
+                    &bytes[offset..element_end],
+                );
+            }
+            element_summaries.push(format!("element=0x{element_id:04x}:bytes={element_size}"));
+            offset = element_end;
+        }
+        offset = block_end;
+
+        let expected_folder_id = additional_ren_entry_ids_ex_expected_folder_id(persist_id);
+        let decoded_name = decoded_folder_id
+            .map(post_hierarchy_probe_folder_name)
+            .unwrap_or("invalid");
+        entries.push(format!(
+            "persist_id=0x{persist_id:04x}:persist_name={}:data_bytes={data_size}:decoded_folder_id={}:decoded_name={decoded_name}:expected_folder_id={}:matches_expected={}:{}",
+            additional_ren_entry_ids_ex_persist_name(persist_id),
+            decoded_folder_id
+                .map(|folder_id| format!("0x{folder_id:016x}"))
+                .unwrap_or_else(|| "invalid".to_string()),
+            format_expected_folder_id_for_debug(expected_folder_id),
+            decoded_folder_id == Some(expected_folder_id),
+            element_summaries.join("+")
+        ));
+    }
+
+    if offset == bytes.len() {
+        Ok(entries)
+    } else {
+        Err(anyhow::anyhow!(
+            "trailing_bytes_without_sentinel={}",
+            bytes.len().saturating_sub(offset)
+        ))
+    }
+}
+
+fn additional_ren_entry_ids_ex_expected_folder_id(persist_id: u16) -> u64 {
+    match persist_id {
+        0x8001 => RSS_FEEDS_FOLDER_ID,
+        0x8002 => TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        0x8004 => TODO_SEARCH_FOLDER_ID,
+        0x8006 => CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        0x8008 => SUGGESTED_CONTACTS_FOLDER_ID,
+        0x8009 => CONTACTS_SEARCH_FOLDER_ID,
+        0x800A => IM_CONTACT_LIST_FOLDER_ID,
+        0x800B => QUICK_CONTACTS_FOLDER_ID,
+        _ => 0,
+    }
+}
+
+fn additional_ren_entry_ids_ex_persist_name(persist_id: u16) -> &'static str {
+    match persist_id {
+        0x8001 => "rss_subscriptions",
+        0x8002 => "send_and_track",
+        0x8004 => "todo_search",
+        0x8006 => "conversation_actions",
+        0x8008 => "suggested_contacts",
+        0x8009 => "contact_search",
+        0x800A => "buddylist_pdls",
+        0x800B => "buddylist_contacts",
+        _ => "unknown",
+    }
 }
 
 fn indexed_special_folder_entry_ids_for_debug(
@@ -2936,6 +3063,15 @@ fn folder_set_property_problems(
                 }
                 return match value {
                     MapiValue::MultiBinary(values) if !values.is_empty() => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
+            if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX {
+                if !matches!(*folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
+                    return Some((index, *tag, 0x8004_0102));
+                }
+                return match value {
+                    MapiValue::Binary(bytes) if !bytes.is_empty() => None,
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
@@ -10559,6 +10695,31 @@ where
                 if let Some(folder_id) =
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
+                    if !request.create_folder_open_existing() {
+                        tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x1c",
+                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                            folder_type = request.create_folder_type(),
+                            open_existing = request.create_folder_open_existing(),
+                            display_name = display_name,
+                            matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
+                            response_error = "0x80040604",
+                            message = "rca debug mapi create folder advertised duplicate name",
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1C,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_0604,
+                        ));
+                        continue;
+                    }
                     let properties = folder_properties_for_open(
                         store, principal, session, folder_id, mailboxes, snapshot,
                     )
@@ -18002,6 +18163,73 @@ mod tests {
             ),
             vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
         );
+    }
+
+    #[test]
+    fn folder_set_property_problems_accepts_additional_ren_entry_ids_ex_on_root_and_inbox() {
+        let root = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let inbox = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let ipm_subtree = MapiObject::Folder {
+            folder_id: IPM_SUBTREE_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let value = MapiValue::Binary(vec![1; 490]);
+
+        assert!(folder_set_property_problems(
+            Some(&root),
+            &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
+        )
+        .is_empty());
+        assert!(folder_set_property_problems(
+            Some(&inbox),
+            &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
+        )
+        .is_empty());
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&ipm_subtree),
+                &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
+            ),
+            vec![(0, PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&root),
+                &[(
+                    PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+                    MapiValue::Binary(Vec::new())
+                )],
+            ),
+            vec![(0, PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, 0x8004_0102)]
+        );
+    }
+
+    #[test]
+    fn default_folder_entry_id_values_debug_decodes_additional_ren_entry_ids_ex() {
+        let Some(MapiValue::Binary(value)) = special_folder_identification_property_value(
+            test_principal().account_id,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        ) else {
+            panic!("expected AdditionalRenEntryIdsEx");
+        };
+
+        let debug = default_folder_entry_id_values_for_debug(&[(
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+            MapiValue::Binary(value),
+        )]);
+
+        assert!(debug.contains("PidTagAdditionalRenEntryIdsEx:bytes="));
+        assert!(debug.contains("entry_count=8"));
+        assert!(debug.contains("persist_id=0x8006"));
+        assert!(debug.contains("persist_name=conversation_actions"));
+        assert!(debug.contains("decoded_name=conversation_action_settings"));
+        assert!(debug.contains("matches_expected=true"));
     }
 
     #[test]

@@ -6522,7 +6522,7 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_create_folder_opens_advertised_special_folder() {
+async fn mapi_over_http_create_folder_advertised_special_folder_requires_open_existing() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -6573,11 +6573,7 @@ async fn mapi_over_http_create_folder_opens_advertised_special_folder() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let mut expected = vec![0x1C, 0x02, 0, 0, 0, 0];
-    expected.extend_from_slice(&mapi_wire_id_bytes(
-        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
-    ));
-    expected.extend_from_slice(&[1, 0]);
+    let expected = vec![0x1C, 0x02, 0x04, 0x06, 0x04, 0x80];
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
@@ -6620,7 +6616,7 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
         0x1C, 0x00, 0x01, 0x02, // RopCreateFolder
         0x01, // generic folder
         0x01, // Unicode names
-        0x00, // do not open existing
+        0x01, // open existing
         0x00, // reserved
     ]);
     rops.extend_from_slice(&utf16z("Quick Step Settings"));
@@ -28609,6 +28605,68 @@ async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids()
         &mut property_values,
         0x36D8_1102,
         &[&conflicts, &local_failures, &server_failures, &junk],
+    );
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on opened folder
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids_ex() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let folder_id = test_mapi_folder_id(5);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let client_additional_ren_ex = vec![0x7a; 490];
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        &client_additional_ren_ex,
     );
 
     let mut rops = vec![
