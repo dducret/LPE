@@ -1244,6 +1244,11 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
             FOLDER_GENERIC
         })),
         PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
+        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
+            Some(MapiValue::U32(0))
+        }
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(folder_message_class(mailbox))
@@ -1315,6 +1320,10 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
         "IPF.Journal" => Some("IPM.Activity"),
         _ => None,
     }
+}
+
+pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
+    vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {

@@ -1984,6 +1984,11 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_PARENT_FOLDER_ID
                 | PID_TAG_PARENT_SOURCE_KEY
                 | PID_TAG_FOLDER_TYPE
+                | PID_TAG_ARCHIVE_TAG
+                | PID_TAG_POLICY_TAG
+                | PID_TAG_RETENTION_PERIOD
+                | PID_TAG_RETENTION_FLAGS
+                | PID_TAG_ARCHIVE_PERIOD
         ),
         _ => false,
     }
@@ -6674,6 +6679,27 @@ mod tests {
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
         ));
+    }
+
+    #[test]
+    fn folder_archive_policy_empty_defaults_are_modeled_not_fallback() {
+        let folder = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        for property_tag in [
+            PID_TAG_ARCHIVE_TAG,
+            PID_TAG_POLICY_TAG,
+            PID_TAG_RETENTION_PERIOD,
+            PID_TAG_RETENTION_FLAGS,
+            PID_TAG_ARCHIVE_PERIOD,
+        ] {
+            assert!(modeled_zero_or_default_property(
+                Some(&folder),
+                property_tag
+            ));
+        }
     }
 
     #[test]

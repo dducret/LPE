@@ -946,6 +946,11 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
+        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
+            Some(MapiValue::U32(0))
+        }
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
             folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
@@ -6224,6 +6229,30 @@ mod tests {
             Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 INBOX_FOLDER_ID
             )))
+        );
+    }
+
+    #[test]
+    fn special_folder_property_projects_empty_archive_policy_defaults() {
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ARCHIVE_TAG, Uuid::nil()),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_POLICY_TAG, Uuid::nil()),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_RETENTION_PERIOD, Uuid::nil()),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_RETENTION_FLAGS, Uuid::nil()),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ARCHIVE_PERIOD, Uuid::nil()),
+            Some(MapiValue::U32(0))
         );
     }
 

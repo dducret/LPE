@@ -2638,6 +2638,12 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_SUBFOLDERS,
         PID_TAG_ACCESS,
         PID_TAG_RIGHTS,
+        PID_TAG_EXTENDED_FOLDER_FLAGS,
+        PID_TAG_ARCHIVE_TAG,
+        PID_TAG_POLICY_TAG,
+        PID_TAG_RETENTION_PERIOD,
+        PID_TAG_RETENTION_FLAGS,
+        PID_TAG_ARCHIVE_PERIOD,
         PID_TAG_CONTAINER_CLASS_W,
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
         PID_TAG_MESSAGE_CLASS_W,
@@ -17465,6 +17471,30 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_RIGHTS),
             Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ARCHIVE_TAG),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_POLICY_TAG),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RETENTION_PERIOD),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RETENTION_FLAGS),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ARCHIVE_PERIOD),
+            Some(&MapiValue::U32(0))
         );
         let expected_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
             principal.account_id,
