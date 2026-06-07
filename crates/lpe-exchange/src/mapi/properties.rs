@@ -1739,7 +1739,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         {
             Some(wlink_guid_property_value(
                 requested_property_tag,
-                wlink_folder_type_guid(),
+                wlink_folder_type_guid(message),
             ))
         }
         _ => None,
@@ -1791,7 +1791,28 @@ fn wlink_save_stamp(message: &MapiNavigationShortcutMessage) -> u32 {
     }
 }
 
-pub(in crate::mapi) fn wlink_folder_type_guid() -> [u8; 16] {
+fn wlink_mail_folder_type_guid() -> [u8; 16] {
+    [
+        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+pub(in crate::mapi) fn wlink_folder_type_guid(message: &MapiNavigationShortcutMessage) -> [u8; 16] {
+    if message.target_folder_id.is_some_and(|folder_id| {
+        matches!(
+            folder_id,
+            INBOX_FOLDER_ID
+                | OUTBOX_FOLDER_ID
+                | SENT_FOLDER_ID
+                | DRAFTS_FOLDER_ID
+                | TRASH_FOLDER_ID
+                | JUNK_FOLDER_ID
+                | ARCHIVE_FOLDER_ID
+        )
+    }) {
+        return wlink_mail_folder_type_guid();
+    }
     [
         0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
@@ -6131,7 +6152,7 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
             MapiValue::Guid(guid) => row.extend_from_slice(guid),
             _ => row.extend_from_slice(Uuid::nil().as_bytes()),
         },
-        Some(MapiPropertyType::Binary) => match value {
+        Some(MapiPropertyType::ServerId | MapiPropertyType::Binary) => match value {
             MapiValue::Binary(bytes) => write_rop_binary(row, bytes),
             _ => write_rop_binary(row, &[]),
         },
@@ -6188,7 +6209,7 @@ pub(in crate::mapi) fn parse_mapi_property_value(
                 .map_err(|_| anyhow!("invalid MAPI GUID property value"))?;
             Ok(MapiValue::Guid(guid))
         }
-        Some(MapiPropertyType::Binary) => {
+        Some(MapiPropertyType::ServerId | MapiPropertyType::Binary) => {
             let len = cursor.read_u16()? as usize;
             Ok(MapiValue::Binary(cursor.read_bytes(len)?.to_vec()))
         }
@@ -8897,6 +8918,19 @@ mod tests {
             group_header_id: Some(group_id),
             group_name: "Projects".to_string(),
         };
+        let calendar_link = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(902),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x3333),
+            subject: "Project Calendar".to_string(),
+            target_folder_id: Some(CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 0x82,
+            group_header_id: Some(group_id),
+            group_name: "Projects".to_string(),
+        };
 
         assert_eq!(
             navigation_shortcut_property_value(&header, account_id, 0x6842_0102),
@@ -8908,11 +8942,31 @@ mod tests {
         );
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, 0x684F_0102),
-            Some(MapiValue::Binary(wlink_folder_type_guid().to_vec()))
+            Some(MapiValue::Binary(wlink_folder_type_guid(&link).to_vec()))
         );
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_FOLDER_TYPE),
-            Some(MapiValue::Guid(wlink_folder_type_guid()))
+            Some(MapiValue::Guid(wlink_folder_type_guid(&link)))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, 0x684F_0102),
+            Some(MapiValue::Binary(
+                [
+                    0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x46,
+                ]
+                .to_vec()
+            ))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&calendar_link, account_id, 0x684F_0102),
+            Some(MapiValue::Binary(
+                [
+                    0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x46,
+                ]
+                .to_vec()
+            ))
         );
     }
 

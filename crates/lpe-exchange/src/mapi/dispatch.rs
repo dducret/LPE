@@ -79,6 +79,43 @@ fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
     )
 }
 
+fn canonical_message_folder_id(email: &JmapEmail, mailboxes: &[JmapMailbox]) -> u64 {
+    email
+        .mailbox_states
+        .iter()
+        .find_map(|state| {
+            mailboxes
+                .iter()
+                .find(|mailbox| mailbox.id == state.mailbox_id)
+                .map(mapi_folder_id)
+        })
+        .or_else(|| {
+            mailboxes
+                .iter()
+                .find(|mailbox| mailbox.id == email.mailbox_id)
+                .map(mapi_folder_id)
+        })
+        .unwrap_or_else(|| {
+            mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == email.mailbox_role)
+                .map(mapi_folder_id)
+                .unwrap_or(INBOX_FOLDER_ID)
+        })
+}
+
+fn unique_message_for_id<'a>(message_id: u64, emails: &'a [JmapEmail]) -> Option<&'a JmapEmail> {
+    let mut matches = emails
+        .iter()
+        .filter(|email| mapi_item_id_matches(&email.id, message_id));
+    let email = matches.next()?;
+    matches.next().is_none().then_some(email)
+}
+
+fn persisted_message_delete_is_best_effort(object: Option<&MapiObject>) -> bool {
+    matches!(object, Some(MapiObject::Message { .. }))
+}
+
 fn private_logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -4231,6 +4268,47 @@ where
         .await
 }
 
+async fn delete_associated_config_properties<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    config_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<usize>
+where
+    S: ExchangeStore,
+{
+    if property_tags.is_empty() {
+        return Ok(0);
+    }
+    let Some(existing) = snapshot.associated_config_message_for_id(config_id) else {
+        return Err(anyhow!("MAPI associated config message was not found"));
+    };
+    let mut properties = mapi_properties_from_json(&existing.properties_json);
+    let mut deleted = 0usize;
+    for tag in property_tags
+        .iter()
+        .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
+    {
+        if properties.remove(&tag).is_some() {
+            deleted += 1;
+        }
+    }
+    let (message_class, subject) = associated_config_class_and_subject(&properties);
+    store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(existing.canonical_id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(&properties),
+        })
+        .await?;
+    Ok(deleted)
+}
+
 fn custom_property_object_identity(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -7678,8 +7756,20 @@ where
         let mut completed_hierarchy_sync = None;
         let mut content_sync_configure_observed = false;
         if matches!(request.rop_id, 0x07 | 0x0B | 0x7A)
-            && !property_tags_are_supported(&request.property_tags())
+            && !property_tags_have_known_wire_types(&request.property_tags())
         {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                request_rop_id = %format!("{:#04x}", request.rop_id),
+                input_handle_index = request.input_handle_index().unwrap_or(0),
+                property_tags = %format_debug_property_tags(&request.property_tags()),
+                failure_reason = "unknown_property_wire_type",
+                "rca debug mapi property rop rejected"
+            );
             responses.extend_from_slice(&rop_error_response(
                 request.rop_id,
                 request.response_handle_index(),
@@ -8164,6 +8254,36 @@ where
                         message_recipients(&message.email).len(),
                     ));
                     output_handles.push(handle);
+                } else if let Some(email) = unique_message_for_id(message_id, emails) {
+                    let canonical_folder_id = canonical_message_folder_id(email, mailboxes);
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x03",
+                        requested_folder_id = %format!("0x{folder_id:016x}"),
+                        canonical_folder_id = %format!("0x{canonical_folder_id:016x}"),
+                        message_id = %format!("0x{message_id:016x}"),
+                        message_subject = %email.subject,
+                        fallback_reason = "unique_message_id_folder_mismatch",
+                        "rca debug mapi open message folder fallback"
+                    );
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Message {
+                            folder_id: canonical_folder_id,
+                            message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &email.subject,
+                        message_recipients(email).len(),
+                    ));
+                    output_handles.push(handle);
                 } else if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
@@ -8405,6 +8525,24 @@ where
                         ));
                     }
                 } else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x03",
+                        requested_folder_id = %format!("0x{folder_id:016x}"),
+                        requested_folder_role = debug_role_for_folder_id(folder_id),
+                        message_id = %format!("0x{message_id:016x}"),
+                        loaded_email_count = emails.len(),
+                        same_id_email_count = emails
+                            .iter()
+                            .filter(|email| mapi_item_id_matches(&email.id, message_id))
+                            .count(),
+                        failure_reason = "open_message_not_found",
+                        "rca debug mapi open message failure"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
                         request.output_handle_index.unwrap_or(0),
@@ -9008,6 +9146,35 @@ where
                         emails,
                     )
                     .await
+                } else if let Some(MapiObject::AssociatedConfig {
+                    folder_id,
+                    config_id,
+                }) = object
+                {
+                    let result = delete_associated_config_properties(
+                        store,
+                        principal,
+                        folder_id,
+                        config_id,
+                        snapshot,
+                        &property_tags,
+                    )
+                    .await;
+                    if let Ok(deleted_property_count) = result {
+                        tracing::info!(
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = format_args!("0x{:02x}", request.rop_id),
+                            folder_id = format_args!("0x{folder_id:016x}"),
+                            config_id = format_args!("0x{config_id:016x}"),
+                            property_tags = %format_debug_property_tags(&property_tags),
+                            deleted_property_count,
+                            "rca debug mapi delete associated config properties"
+                        );
+                    }
+                    result.map(|_| ())
                 } else {
                     delete_custom_property_values(
                         store,
@@ -9026,6 +9193,22 @@ where
                         )
                         .or_else(|error| {
                             if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
+                                Ok(())
+                            } else if persisted_message_delete_is_best_effort(object.as_ref()) {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = %format!("{:#04x}", request.rop_id),
+                                    object_kind = mapi_object_debug_kind(object.as_ref()),
+                                    folder_id = %mapi_object_debug_folder_id(object.as_ref()),
+                                    property_tags = %format_debug_property_tags(&property_tags),
+                                    delete_error = %error,
+                                    fallback_reason = "persisted_message_best_effort_delete",
+                                    "rca debug mapi delete properties fallback"
+                                );
                                 Ok(())
                             } else {
                                 Err(error)
@@ -12506,6 +12689,25 @@ where
                                 message_id,
                             },
                         );
+                        match store
+                            .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
+                            .await
+                        {
+                            Ok(mut emails) => created_emails.append(&mut emails),
+                            Err(error) => tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = %format!("{:#04x}", request.rop_id),
+                                input_handle = handle,
+                                submitted_message_id = %submitted.message_id,
+                                load_error = %error,
+                                failure_reason = "submitted_message_same_execute_load_failed",
+                                "rca debug mapi submit message"
+                            ),
+                        }
                         if request.rop_id == 0x4A {
                             responses
                                 .extend_from_slice(&rop_transport_send_success_response(&request));
@@ -12627,6 +12829,18 @@ where
                 let source_folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ => {
+                        tracing::info!(
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x33",
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
+                            want_copy = request.move_copy_want_copy(),
+                            failure = "source_handle_not_folder",
+                            "rca debug mapi move copy messages failure"
+                        );
                         responses.extend_from_slice(&rop_error_response(
                             0x33,
                             request.response_handle_index(),
@@ -12645,6 +12859,18 @@ where
                     }) {
                     Some(folder_id) => folder_id,
                     None => {
+                        tracing::info!(
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x33",
+                            source_folder_id = format_args!("0x{source_folder_id:016x}"),
+                            message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
+                            want_copy = request.move_copy_want_copy(),
+                            failure = "target_handle_not_folder",
+                            "rca debug mapi move copy messages failure"
+                        );
                         responses.extend_from_slice(&rop_error_response(
                             0x33,
                             request.response_handle_index(),
@@ -12654,6 +12880,19 @@ where
                     }
                 };
                 if source_folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
+                    tracing::info!(
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x33",
+                        source_folder_id = format_args!("0x{source_folder_id:016x}"),
+                        target_folder_id = format_args!("0x{target_folder_id:016x}"),
+                        message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
+                        want_copy = request.move_copy_want_copy(),
+                        failure = "recoverable_items_root_source",
+                        "rca debug mapi move copy messages failure"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x33,
                         request.response_handle_index(),

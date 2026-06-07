@@ -941,6 +941,26 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                         .map(|message| &message.email)
                 })
             else {
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x07",
+                    object_kind = "message",
+                    folder_id = %format!("{folder_id:#018x}"),
+                    message_id = %format!("{message_id:#018x}"),
+                    requested_property_tag_count = columns.len(),
+                    requested_property_tags = %columns
+                        .iter()
+                        .map(|tag| format!("{tag:#010x}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    base_email_count = emails.len(),
+                    failure_reason = "message_identity_not_visible_for_getprops",
+                    "rca debug mapi get properties specific"
+                );
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
