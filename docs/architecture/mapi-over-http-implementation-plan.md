@@ -260,6 +260,12 @@ non-canonical LPE state.
   later associated-contents table and FAI content-sync replay. These rows are
   not canonical mailbox messages and must not be exposed through normal message
   lists, JMAP mail, IMAP, search, AI pipelines, or mailbox export as user mail.
+  `PidTagRoamingDictionary` values, including the `[MS-OXOCFG]` reserved
+  `OLPrefsVersion` entry, are preserved as Outlook writes them. For
+  LPE-synthesized minimal Inbox `IPM.Configuration.*` compatibility rows, LPE
+  emits only the dictionary default `OLPrefsVersion = 0`, encoded as `9-0`, so
+  Outlook can choose its local/default settings and rewrite the row without LPE
+  fabricating unsupported Exchange preference data.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`

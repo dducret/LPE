@@ -27028,6 +27028,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         PID_TAG_SUBJECT_W,
         "Outlook Inbox view state",
     );
+    let outlook_prefs_dictionary = br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="Outlook.16"/><Data><e k="OLPrefsVersion" v="9-7"/></Data></UserConfiguration>"#;
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_CHANGE_KEY,
@@ -27038,7 +27039,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         &strict_test_replid_globset(&[crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 42]),
     );
-    append_mapi_binary_property(&mut property_values, 0x7C07_0102, b"view-def");
+    append_mapi_binary_property(&mut property_values, 0x7C07_0102, outlook_prefs_dictionary);
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
@@ -27097,7 +27098,12 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         );
         assert_eq!(
             config.properties_json["0x7c070102"]["value"],
-            serde_json::Value::String("766965772d646566".to_string())
+            serde_json::Value::String(
+                outlook_prefs_dictionary
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            )
         );
         assert_eq!(
             config.properties_json["0x7c080102"]["value"],
@@ -27118,11 +27124,10 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         0x01, 0x00, 0x10, 0x00, // content sync, FAI only
         0x00, 0x00, // RestrictionDataSize
         0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
-        0x03, 0x00, // PropertyTagCount
+        0x02, 0x00, // PropertyTagCount
     ]);
     sync_rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
     sync_rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
-    sync_rops.extend_from_slice(&0x7C07_0102u32.to_le_bytes());
     sync_rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
     sync_rops.extend_from_slice(&4096u16.to_le_bytes());
 
@@ -27149,6 +27154,8 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     assert_eq!(message.subject, "Outlook Inbox view state");
     assert!(message.mid.is_some());
     assert!(message.body_tags.contains(&0x7C08_0102));
+    assert!(contains_bytes(&sync_response_rops, b"OLPrefsVersion"));
+    assert!(contains_bytes(&sync_response_rops, b"9-7"));
     assert!(contains_bytes(&sync_response_rops, b"view-extra"));
 
     let mut table_rops = Vec::new();

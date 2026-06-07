@@ -1846,7 +1846,13 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         None,
                         None,
                         None,
-                        |tag| associated_config_property_value(message, tag),
+                        |tag| {
+                            associated_config_property_value_with_mailbox_guid(
+                                message,
+                                mailbox_guid,
+                                tag,
+                            )
+                        },
                     )
                 })
                 .collect()
@@ -4598,6 +4604,37 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_invariant_uses_mailbox_guid_entry_id() {
+        let mailbox_guid = Uuid::parse_str("bc737006-4413-49b9-aefc-3cb6e0088492").unwrap();
+        let object = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: Vec::new(),
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: std::collections::HashSet::new(),
+            restriction: None,
+            bookmarks: std::collections::HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let summaries = outlook_bootstrap_row_invariant_summaries(
+            Some(&object),
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            mailbox_guid,
+            true,
+            1,
+        );
+
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].contains("kind=inbox_associated"));
+        assert!(summaries[0].contains("entry_id=present:70:00000000067073bc1344b949"));
+    }
+
+    #[test]
     fn outlook_bootstrap_expected_container_class_matches_special_rows() {
         for (folder_id, expected) in [
             (TASKS_FOLDER_ID, "IPF.Task"),
@@ -5947,6 +5984,21 @@ mod tests {
             associated_config_property_value(&message, PID_TAG_ENTRY_ID),
             Some(MapiValue::Binary(entry_id))
         );
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let mailbox_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            INBOX_FOLDER_ID,
+            message.id,
+        )
+        .unwrap();
+        assert_eq!(
+            associated_config_property_value_with_mailbox_guid(
+                &message,
+                mailbox_guid,
+                PID_TAG_ENTRY_ID
+            ),
+            Some(MapiValue::Binary(mailbox_entry_id.clone()))
+        );
         let source_key = mapi_mailstore::source_key_for_store_id(message.id);
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_SOURCE_KEY),
@@ -5968,7 +6020,10 @@ mod tests {
         );
         assert!(matches!(
             associated_config_property_value(&message, PID_TAG_ROAMING_DICTIONARY),
-            Some(MapiValue::Binary(value)) if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+            Some(MapiValue::Binary(value))
+                if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+                    && value.windows(b"OLPrefsVersion".len()).any(|window| window == b"OLPrefsVersion")
+                    && value.windows(b"9-0".len()).any(|window| window == b"9-0")
         ));
         assert!(matches!(
             associated_config_property_value(&message, 0x685D_0003),
@@ -5999,6 +6054,15 @@ mod tests {
         );
 
         assert_eq!(row.len(), 44);
+
+        let entry_id_row = serialize_associated_config_row_with_mailbox_guid(
+            &message,
+            mailbox_guid,
+            &[PID_TAG_ENTRY_ID],
+        );
+        assert!(entry_id_row
+            .windows(mailbox_entry_id.len())
+            .any(|window| window == mailbox_entry_id));
     }
 
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
@@ -6784,7 +6848,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
 }
 
 fn minimal_roaming_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data/></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {
