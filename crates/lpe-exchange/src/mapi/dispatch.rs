@@ -48,6 +48,10 @@ const PID_TAG_RULE_NAME_W: u32 = 0x6682_001F;
 const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
 const ST_ENABLED: u32 = 0x0000_0001;
 
+fn private_create_folder_is_existing_response_flag() -> bool {
+    false
+}
+
 fn private_logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -10716,6 +10720,8 @@ where
                 if let Some(folder_id) =
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
+                    let requested_open_existing = request.create_folder_open_existing();
+                    let response_existing = private_create_folder_is_existing_response_flag();
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -10727,10 +10733,10 @@ where
                         request_rop_id = "0x1c",
                         parent_folder_id = %format!("{parent_folder_id:#018x}"),
                         folder_type = request.create_folder_type(),
-                        open_existing = request.create_folder_open_existing(),
+                        open_existing = requested_open_existing,
                         display_name = display_name,
                         matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
-                        response_existing_folder = true,
+                        response_existing_folder = response_existing,
                         message = "rca debug mapi create folder opened advertised special folder",
                     );
                     let properties = folder_properties_for_open(
@@ -10745,8 +10751,17 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses
-                        .extend_from_slice(&rop_create_folder_response(&request, folder_id, true));
+                    responses.extend_from_slice(&rop_create_folder_response(
+                        &request,
+                        folder_id,
+                        response_existing,
+                    ));
+                    if !requested_open_existing {
+                        session.record_notification(MapiNotificationEvent::hierarchy(
+                            parent_folder_id,
+                            Some(folder_id),
+                        ));
+                    }
                     output_handles.push(handle);
                     continue;
                 }
@@ -10770,7 +10785,9 @@ where
                         );
                         set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                         responses.extend_from_slice(&rop_create_folder_response(
-                            &request, folder_id, true,
+                            &request,
+                            folder_id,
+                            private_create_folder_is_existing_response_flag(),
                         ));
                         output_handles.push(handle);
                         continue;
@@ -17623,6 +17640,11 @@ mod tests {
             debug_container_class_for_folder_id(RSS_FEEDS_FOLDER_ID),
             "IPF.Note.OutlookHomepage"
         );
+    }
+
+    #[test]
+    fn private_create_folder_response_never_sets_existing_folder_flag() {
+        assert!(!private_create_folder_is_existing_response_flag());
     }
 
     #[test]

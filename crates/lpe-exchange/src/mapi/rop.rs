@@ -309,7 +309,9 @@ pub(in crate::mapi) fn rop_create_folder_response(
     write_u32(&mut response, 0);
     write_object_id(&mut response, folder_id);
     response.push(existing as u8);
-    response.push(0);
+    if existing {
+        response.push(0);
+    }
     response
 }
 
@@ -6630,6 +6632,24 @@ mod tests {
         let bytes = logon_time_bytes(SystemTime::UNIX_EPOCH + Duration::from_secs(1_778_046_495));
 
         assert_eq!(bytes, [15, 48, 5, 3, 6, 5, 0xEA, 0x07]);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn create_folder_private_response_stops_after_non_existing_flag() {
+        let request = RopRequest {
+            rop_id: RopId::CreateFolder.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+
+        let created = rop_create_folder_response(&request, QUICK_STEP_SETTINGS_FOLDER_ID, false);
+        assert_eq!(created.len(), 15);
+        assert_eq!(created[14], 0);
+
+        let existing = rop_create_folder_response(&request, QUICK_STEP_SETTINGS_FOLDER_ID, true);
+        assert_eq!(existing.len(), 16);
+        assert_eq!(existing[14], 1);
     }
 
     #[test]
