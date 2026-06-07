@@ -52,6 +52,16 @@ fn private_create_folder_is_existing_response_flag() -> bool {
     false
 }
 
+fn create_folder_existing_mailbox_satisfies_deleted_advertised_request(
+    session: &MapiSession,
+    parent_folder_id: u64,
+    display_name: &str,
+) -> bool {
+    advertised_special_folder_id_for_create(parent_folder_id, display_name)
+        .map(|folder_id| session.advertised_special_folder_was_deleted(folder_id))
+        .unwrap_or(false)
+}
+
 fn private_logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -10806,12 +10816,38 @@ where
                     }
                 }
 
-                if request.create_folder_open_existing() {
-                    if let Some(existing) = mailboxes.iter().find(|mailbox| {
-                        mailbox.parent_id == create_parent_id
-                            && mailbox.name.eq_ignore_ascii_case(display_name)
-                    }) {
+                let existing_mailbox = mailboxes.iter().find(|mailbox| {
+                    mailbox.parent_id == create_parent_id
+                        && mailbox.name.eq_ignore_ascii_case(display_name)
+                });
+                let deleted_advertised_existing =
+                    create_folder_existing_mailbox_satisfies_deleted_advertised_request(
+                        session,
+                        parent_folder_id,
+                        display_name,
+                    );
+                if request.create_folder_open_existing() || deleted_advertised_existing {
+                    if let Some(existing) = existing_mailbox {
                         let folder_id = mapi_folder_id(existing);
+                        if deleted_advertised_existing && !request.create_folder_open_existing() {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                tenant_id = %principal.tenant_id,
+                                account_id = %principal.account_id,
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x1c",
+                                parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                                folder_id = %format!("{folder_id:#018x}"),
+                                folder_type = request.create_folder_type(),
+                                open_existing = request.create_folder_open_existing(),
+                                display_name = display_name,
+                                response_existing_folder = false,
+                                message = "rca debug mapi create folder opened real folder replacing deleted advertised folder",
+                            );
+                        }
                         let properties = folder_properties_for_open(
                             store, principal, session, folder_id, mailboxes, snapshot,
                         )
@@ -10827,15 +10863,16 @@ where
                         responses.extend_from_slice(&rop_create_folder_response(
                             &request,
                             folder_id,
-                            private_create_folder_is_existing_response_flag(),
+                            if deleted_advertised_existing {
+                                false
+                            } else {
+                                private_create_folder_is_existing_response_flag()
+                            },
                         ));
                         output_handles.push(handle);
                         continue;
                     }
-                } else if mailboxes.iter().any(|mailbox| {
-                    mailbox.parent_id == create_parent_id
-                        && mailbox.name.eq_ignore_ascii_case(display_name)
-                }) {
+                } else if existing_mailbox.is_some() {
                     tracing::warn!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -17725,6 +17762,36 @@ mod tests {
     #[test]
     fn private_create_folder_response_never_sets_existing_folder_flag() {
         assert!(!private_create_folder_is_existing_response_flag());
+    }
+
+    #[test]
+    fn deleted_advertised_quick_step_create_can_reuse_existing_real_folder() {
+        let mut session = test_mapi_session();
+
+        assert!(
+            !create_folder_existing_mailbox_satisfies_deleted_advertised_request(
+                &session,
+                IPM_SUBTREE_FOLDER_ID,
+                "Quick Step Settings",
+            )
+        );
+
+        session.record_deleted_advertised_special_folder(QUICK_STEP_SETTINGS_FOLDER_ID);
+
+        assert!(
+            create_folder_existing_mailbox_satisfies_deleted_advertised_request(
+                &session,
+                IPM_SUBTREE_FOLDER_ID,
+                "Quick Step Settings",
+            )
+        );
+        assert!(
+            !create_folder_existing_mailbox_satisfies_deleted_advertised_request(
+                &session,
+                IPM_SUBTREE_FOLDER_ID,
+                "Ordinary Folder",
+            )
+        );
     }
 
     #[test]
