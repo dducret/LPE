@@ -1008,7 +1008,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
             Some(MapiValue::U32(0))
         }
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID | PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+        PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
@@ -6218,57 +6218,6 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_matches_folder_design_named_view() {
-        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-        let snapshot = MapiMailStoreSnapshot::empty();
-        let mut table = MapiObject::ContentsTable {
-            folder_id: INBOX_FOLDER_ID,
-            associated: true,
-            columns: vec![
-                PID_TAG_MID,
-                PID_TAG_INST_ID,
-                PID_TAG_INSTANCE_NUM,
-                PID_TAG_MESSAGE_CLASS_W,
-                PID_TAG_SUBJECT_W,
-                PID_TAG_VIEW_DESCRIPTOR_FLAGS,
-                PID_TAG_VIEW_DESCRIPTOR_VERSION,
-                PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
-            ],
-            sort_orders: Vec::new(),
-            category_count: 0,
-            expanded_count: 0,
-            collapsed_categories: HashSet::new(),
-            restriction: None,
-            bookmarks: HashMap::new(),
-            next_bookmark: 1,
-            position: 0,
-        };
-        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
-        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-        write_utf16z(&mut restriction, "IPM.Microsoft.FolderDesign.NamedView");
-        let mut payload = vec![0];
-        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
-        payload.extend_from_slice(&restriction);
-        payload.push(0);
-        payload.extend_from_slice(&0u16.to_le_bytes());
-        let request = RopRequest {
-            rop_id: RopId::FindRow.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload,
-        };
-
-        let response =
-            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
-
-        assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[7], 1);
-        assert_response_contains_utf16(&response, "Compact");
-    }
-
-    #[test]
     fn common_views_query_rows_uses_account_bound_wlink_entry_ids() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = common_views_sort_snapshot(account_id);
@@ -6896,14 +6845,14 @@ mod tests {
     }
 
     #[test]
-    fn special_folder_property_projects_empty_view_defaults() {
+    fn special_folder_property_projects_view_defaults_without_invalid_default_view_entry_id() {
         assert_eq!(
             special_folder_property_value(
                 INBOX_FOLDER_ID,
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 Uuid::nil()
             ),
-            Some(MapiValue::Binary(Vec::new()))
+            None
         );
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
@@ -7620,43 +7569,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
                 mapi_mailstore::filetime_from_change_number(change_number) as i64,
             )),
-            PID_TAG_VIEW_DESCRIPTOR_FLAGS
-                if message.message_class == "IPM.Microsoft.FolderDesign.NamedView" =>
-            {
-                Some(MapiValue::U32(match message.subject.as_str() {
-                    "Sent To" => 15_269_893,
-                    _ => 14_745_605,
-                }))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_VERSION
-                if message.message_class == "IPM.Microsoft.FolderDesign.NamedView" =>
-            {
-                Some(MapiValue::U32(8))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
-                if message.message_class == "IPM.Microsoft.FolderDesign.NamedView" =>
-            {
-                Some(MapiValue::U32(0))
-            }
-            tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID)
-                && message.message_class == "IPM.Microsoft.FolderDesign.NamedView" =>
-            {
-                Some(guid_property_value(
-                    property_tag,
-                    *message.canonical_id.as_bytes(),
-                ))
-            }
-            tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE)
-                && message.message_class == "IPM.Microsoft.FolderDesign.NamedView" =>
-            {
-                Some(guid_property_value(
-                    property_tag,
-                    [
-                        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x46,
-                    ],
-                ))
-            }
             PID_TAG_ROAMING_DATATYPES
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
@@ -7674,17 +7586,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             _ => None,
         }
     })
-}
-
-fn property_tag_id(property_tag: u32) -> u32 {
-    property_tag & 0xFFFF_0000
-}
-
-fn guid_property_value(property_tag: u32, guid: [u8; 16]) -> MapiValue {
-    match MapiPropertyTag::new(property_tag).property_type() {
-        Some(MapiPropertyType::Binary) => MapiValue::Binary(guid.to_vec()),
-        _ => MapiValue::Guid(guid),
-    }
 }
 
 fn configuration_roaming_datatypes(properties: &HashMap<u32, MapiValue>) -> u32 {

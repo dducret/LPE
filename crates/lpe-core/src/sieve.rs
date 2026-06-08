@@ -294,7 +294,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>> {
     while let Some(char) = chars.next() {
         match char {
             '#' => {
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     if next == '\n' {
                         break;
                     }
@@ -313,7 +313,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>> {
             '"' => {
                 let mut value = String::new();
                 let mut escaped = false;
-                while let Some(next) = chars.next() {
+                for next in chars.by_ref() {
                     if escaped {
                         value.push(next);
                         escaped = false;

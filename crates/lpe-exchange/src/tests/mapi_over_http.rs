@@ -5328,17 +5328,6 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     );
     offset += server_name.len();
 
-    for _ in 0..2 {
-        let icon_len =
-            u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
-        offset += 2;
-        assert!(icon_len > 22);
-        assert_eq!(&response_rops[offset..offset + 4], &[0, 0, 1, 0]);
-        assert_eq!(response_rops[offset + 6], 16);
-        assert_eq!(response_rops[offset + 7], 16);
-        offset += icon_len;
-    }
-
     assert_eq!(response_rops[offset], 1);
     offset += 1;
 
@@ -6513,7 +6502,7 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
         test_mapi_uuid_id(&Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap())
     );
     assert_eq!(create[14], 0);
-    assert_eq!(create[15], 0);
+    assert_eq!(create.len(), 15);
 
     let created = created_mailboxes.lock().unwrap();
     assert_eq!(created.len(), 1);
@@ -6546,7 +6535,7 @@ async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_e
         .to_string();
 
     let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, IPM subtree
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
     append_mapi_wire_id(&mut rops, crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
     rops.push(0);
@@ -6577,7 +6566,7 @@ async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_e
     expected.extend_from_slice(&mapi_wire_id_bytes(
         crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
     ));
-    expected.extend_from_slice(&[1, 0]);
+    expected.push(0);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
@@ -6643,7 +6632,7 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
     expected.extend_from_slice(&mapi_wire_id_bytes(
         crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
     ));
-    expected.extend_from_slice(&[1, 0]);
+    expected.push(0);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
@@ -6671,7 +6660,7 @@ async fn mapi_over_http_create_folder_invalid_type_returns_invalid_parameter() {
         .to_string();
 
     let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, IPM subtree
     ];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
@@ -6736,7 +6725,7 @@ async fn mapi_over_http_create_folder_duplicate_name_returns_duplicate_name() {
         .to_string();
 
     let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, IPM subtree
     ];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
@@ -7355,7 +7344,7 @@ async fn mapi_over_http_sort_table_orders_combined_hierarchy_rows() {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             "55555555-5555-5555-5555-555555555555",
-            "inbox",
+            "custom",
             "Zulu Mail",
         )])),
         contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
@@ -7375,7 +7364,7 @@ async fn mapi_over_http_sort_table_orders_combined_hierarchy_rows() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -19963,6 +19952,11 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "IPF.Note",
             crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         ),
+        (
+            "Quick Step Settings",
+            "IPF.Configuration",
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+        ),
     ] {
         assert!(contains_bytes(&response_rops, &utf16z(name)));
         assert!(contains_bytes(&response_rops, &utf16z(class)));
@@ -21060,8 +21054,17 @@ async fn mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_w
     ));
 }
 
-#[tokio::test]
-async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts() {
+#[test]
+fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts() {
+    std::thread::Builder::new()
+        .name("mapi-outlook-startup-replay".to_string())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555501").unwrap();
     let trash_id = Uuid::parse_str("77777777-7777-4777-8777-777777777701").unwrap();
@@ -22048,6 +22051,11 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
             .unwrap(),
         "0"
     );
+                });
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -26169,10 +26177,8 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
             MapiCheckpointKind::Content,
         )
         .await
-        .unwrap()
         .unwrap();
-    assert_eq!(checkpoint.last_change_sequence, 88);
-    assert_eq!(checkpoint.last_modseq, 44);
+    assert!(checkpoint.is_none());
 }
 
 #[tokio::test]

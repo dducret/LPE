@@ -544,8 +544,9 @@ mod tests {
     fn dynamic_counters_start_after_reserved_special_folders() {
         assert_eq!(
             FIRST_DYNAMIC_GLOBAL_COUNTER,
-            RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER + 1
+            QUICK_STEP_SETTINGS_FOLDER_COUNTER + 1
         );
+        assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > QUICK_STEP_SETTINGS_FOLDER_COUNTER);
         assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER);
     }
 

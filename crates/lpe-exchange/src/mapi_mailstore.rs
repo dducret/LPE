@@ -331,9 +331,18 @@ pub(crate) fn sync_state_token_with_special_objects(
         scoped_emails,
         attachment_facts,
     );
+    let default_include_associated =
+        default_content_sync_includes_associated(scoped_emails, special_objects);
     let scoped_special_objects = special_objects
         .iter()
-        .filter(|object| content_sync_includes_associated(sync_type, sync_flags, object.associated))
+        .filter(|object| {
+            content_sync_includes_associated(
+                sync_type,
+                sync_flags,
+                object.associated,
+                default_include_associated,
+            )
+        })
         .collect::<Vec<_>>();
     let mut object_ids = normal_object_ids;
     object_ids.extend(scoped_special_objects.iter().map(|object| object.item_id));
@@ -764,9 +773,18 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         }
     }
 
+    let default_include_associated =
+        default_content_sync_includes_associated(emails, special_objects);
     let mut special_objects = special_objects
         .iter()
-        .filter(|object| content_sync_includes_associated(sync_type, sync_flags, object.associated))
+        .filter(|object| {
+            content_sync_includes_associated(
+                sync_type,
+                sync_flags,
+                object.associated,
+                default_include_associated,
+            )
+        })
         .collect::<Vec<_>>();
     special_objects.sort_by(|left, right| {
         left.folder_id
@@ -3159,12 +3177,26 @@ fn content_sync_includes_normal(sync_type: u8, sync_flags: u16) -> bool {
         || sync_flags & SYNC_FLAG_NORMAL != 0
 }
 
-fn content_sync_includes_associated(sync_type: u8, sync_flags: u16, associated: bool) -> bool {
+fn default_content_sync_includes_associated(
+    emails: &[JmapEmail],
+    special_objects: &[SpecialMessageSyncFact],
+) -> bool {
+    emails.is_empty()
+        && special_objects.iter().all(|object| object.associated)
+        && special_objects.iter().any(|object| object.associated)
+}
+
+fn content_sync_includes_associated(
+    sync_type: u8,
+    sync_flags: u16,
+    associated: bool,
+    default_include_associated: bool,
+) -> bool {
     if sync_type != SYNC_TYPE_CONTENTS {
         return true;
     }
     if sync_flags & (SYNC_FLAG_NORMAL | SYNC_FLAG_FAI) == 0 {
-        return true;
+        return associated == default_include_associated;
     }
     if associated {
         sync_flags & SYNC_FLAG_FAI != 0
@@ -5138,6 +5170,67 @@ mod tests {
             named_properties: Vec::new(),
         };
         let email = test_email();
+        crate::mapi::identity::remember_mapi_identity(
+            email.id,
+            crate::mapi::identity::mapi_store_id(95),
+        );
+        let default_mixed_buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            0,
+            SYNC_EXTRA_FLAG_EID,
+            &[],
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            &[normal_object.clone(), associated_object.clone()],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            &[normal_object.clone(), associated_object.clone()],
+            &[],
+            &[],
+            1,
+        );
+        assert!(contains_bytes(&default_mixed_buffer, &utf16z("Hello")));
+        assert!(contains_bytes(
+            &default_mixed_buffer,
+            &utf16z("Normal appointment")
+        ));
+        assert!(!contains_bytes(
+            &default_mixed_buffer,
+            &utf16z("Associated view")
+        ));
+
+        let default_fai_only_buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            0,
+            SYNC_EXTRA_FLAG_EID,
+            &[],
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&associated_object),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&associated_object),
+            &[],
+            &[],
+            1,
+        );
+        assert!(contains_bytes(
+            &default_fai_only_buffer,
+            &utf16z("Associated view")
+        ));
+
         let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
             Uuid::nil(),
             SYNC_TYPE_CONTENTS,

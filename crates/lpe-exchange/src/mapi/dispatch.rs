@@ -5216,11 +5216,11 @@ fn response_rop_frame_end(
     let fixed_end =
         response_rop_fixed_frame_end(responses, start, rop_id, error_code).or_else(|| {
             match (rop_id, error_code) {
-                (0x4F, Some(0)) => match responses.get(start + 6).copied() {
-                    Some(0) => Some(start.saturating_add(7)),
+                (0x4F, Some(0)) => match responses.get(start + 7).copied() {
+                    Some(0) => Some(start.saturating_add(8)),
                     Some(_) => next_response_rop_start_validated(
                         responses,
-                        start.saturating_add(7),
+                        start.saturating_add(8),
                         next_expected_rop_id,
                         following_expected_rop_id,
                     ),
@@ -11771,7 +11771,17 @@ where
                     ));
                     continue;
                 };
-                if is_advertised_special_folder(folder_id) {
+                let mailbox = folder_row_for_id(folder_id, mailboxes);
+                if let Some(mailbox) = mailbox {
+                    if mailbox.role != "custom" {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1D,
+                            request.response_handle_index(),
+                            0x8007_0005,
+                        ));
+                        continue;
+                    }
+                } else if is_advertised_special_folder(folder_id) {
                     session.record_deleted_advertised_special_folder(folder_id);
                     tracing::info!(
                         rca_debug = true,
@@ -11796,7 +11806,7 @@ where
                     ));
                     continue;
                 }
-                let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
+                let Some(mailbox) = mailbox else {
                     responses.extend_from_slice(&rop_error_response(
                         0x1D,
                         request.response_handle_index(),
@@ -11804,14 +11814,6 @@ where
                     ));
                     continue;
                 };
-                if mailbox.role != "custom" {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
 
                 let partial_completion = store
                     .destroy_jmap_mailbox(
@@ -14400,10 +14402,19 @@ where
                     .map(|buffer| buffer.len())
                     .unwrap_or_default();
                 let scope_flags_present = sync_type != 0x01 || sync_flags & 0x0030 != 0;
-                let normal_scope_requested =
-                    sync_type != 0x01 || !scope_flags_present || sync_flags & 0x0020 != 0;
-                let fai_scope_requested =
-                    sync_type != 0x01 || !scope_flags_present || sync_flags & 0x0010 != 0;
+                let default_fai_scope_requested = all_sync_emails.is_empty()
+                    && all_special_sync_objects
+                        .iter()
+                        .all(|object| object.associated)
+                    && all_special_sync_objects
+                        .iter()
+                        .any(|object| object.associated);
+                let normal_scope_requested = sync_type != 0x01
+                    || (scope_flags_present && sync_flags & 0x0020 != 0)
+                    || (!scope_flags_present && !default_fai_scope_requested);
+                let fai_scope_requested = sync_type != 0x01
+                    || (scope_flags_present && sync_flags & 0x0010 != 0)
+                    || (!scope_flags_present && default_fai_scope_requested);
                 let wire_sync_email_count = if normal_scope_requested {
                     all_sync_emails.len()
                 } else {
@@ -18543,10 +18554,7 @@ mod tests {
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
         );
-        assert_eq!(
-            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            Some(&MapiValue::Binary(Vec::new()))
-        );
+        assert!(!properties.contains_key(&PID_TAG_DEFAULT_VIEW_ENTRY_ID));
         assert_eq!(
             properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
             Some(&MapiValue::U32(0))
@@ -19502,6 +19510,7 @@ mod tests {
 
         let mut responses = vec![0x4F, 0x01];
         responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
         responses.push(1);
         responses.extend_from_slice(&[
             0x00, 0x01, 0x00, 0x01, 0x05, 0x01, 0x00, 0x7f, 0xff, 0x00, 0x44, 0x55,

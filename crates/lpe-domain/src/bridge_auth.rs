@@ -185,11 +185,11 @@ fn sign_components(
     mac.update(nonce.trim().as_bytes());
     mac.update(b"\n");
     mac.update(body_hash.as_bytes());
-    hex_bytes(&mac.finalize().into_bytes())
+    hex_bytes(mac.finalize().into_bytes())
 }
 
 fn hex_sha256(payload: &[u8]) -> String {
-    hex_bytes(&Sha256::digest(payload))
+    hex_bytes(Sha256::digest(payload))
 }
 
 fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {

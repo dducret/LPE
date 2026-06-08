@@ -1361,6 +1361,7 @@ fn fallback_default_specific_property(
         object,
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
             | Some(MapiObject::Folder { .. })
+            | Some(MapiObject::AssociatedConfig { .. } | MapiObject::CommonViewNamedView { .. })
             | None
     ) {
         return false;
@@ -1485,7 +1486,14 @@ fn log_get_properties_specific_debug(
         unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
         default_ipm_folder_mapping_count = default_folder_mappings.len(),
         default_ipm_folder_mappings = %default_folder_mappings.join(","),
-        response_property_row_kind = %property_row_kind_for_debug(object, principal, columns),
+        response_property_row_kind = %property_row_kind_for_debug(
+            object,
+            principal,
+            mailboxes,
+            emails,
+            snapshot,
+            columns,
+        ),
         unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
         ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
@@ -2191,7 +2199,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
-                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
@@ -2208,11 +2215,13 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
 fn property_row_kind_for_debug(
     object: Option<&MapiObject>,
     principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
 ) -> &'static str {
-    if columns
-        .iter()
-        .any(|tag| property_is_unsupported_for_object(object, principal, *tag))
+    if !unsupported_specific_property_tags(object, principal, mailboxes, emails, snapshot, columns)
+        .is_empty()
     {
         "flagged"
     } else {
@@ -7519,6 +7528,70 @@ mod tests {
     }
 
     #[test]
+    fn property_row_kind_reports_fallback_defaults_as_flagged() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let config_id = crate::mapi::identity::mapi_store_id(0x4322);
+        let object = MapiObject::AssociatedConfig {
+            folder_id: INBOX_FOLDER_ID,
+            config_id,
+            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+                id: config_id,
+                folder_id: INBOX_FOLDER_ID,
+                canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555556").unwrap(),
+                message_class: "IPM.Configuration.MessageListSettings".to_string(),
+                subject: "Message list settings".to_string(),
+                properties_json: serde_json::json!({}),
+            }),
+        };
+
+        assert_eq!(
+            property_row_kind_for_debug(
+                Some(&object),
+                &principal,
+                &[],
+                &[],
+                &MapiMailStoreSnapshot::empty(),
+                &[OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B],
+            ),
+            "flagged"
+        );
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
+        assert_eq!(response[7], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response[8..12].try_into().unwrap()),
+            0x8004_0102
+        );
+    }
+
+    #[test]
     pub(in crate::mapi) fn folder_deleted_count_total_zero_is_modeled_not_fallback() {
         let folder = MapiObject::Folder {
             folder_id: COMMON_VIEWS_FOLDER_ID,
@@ -7561,14 +7634,17 @@ mod tests {
     }
 
     #[test]
-    fn folder_view_empty_defaults_are_modeled_not_fallback() {
+    fn folder_view_empty_defaults_are_modeled_not_fallback_except_default_view_entry_id() {
         let folder = MapiObject::Folder {
             folder_id: INBOX_FOLDER_ID,
             properties: HashMap::new(),
         };
 
+        assert!(!modeled_zero_or_default_property(
+            Some(&folder),
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID
+        ));
         for property_tag in [
-            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
             PID_TAG_FOLDER_FORM_FLAGS,
             PID_TAG_FOLDER_WEBVIEWINFO,
             PID_TAG_FOLDER_XVIEWINFO_E,
