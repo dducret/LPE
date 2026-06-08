@@ -431,9 +431,11 @@ pub(in crate::mapi) const PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID: u32 = 0x6891_010
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
+pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835: u32 = 0x6835_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_BINARY: u32 = 0x7001_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
@@ -1892,8 +1894,12 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
             )))
         }
         PID_TAG_VIEW_DESCRIPTOR_FLAGS => Some(MapiValue::U32(message.view_flags)),
+        PID_TAG_VIEW_DESCRIPTOR_BINARY | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => {
+            Some(MapiValue::Binary(minimal_view_descriptor_binary()))
+        }
         PID_TAG_VIEW_DESCRIPTOR_VERSION => Some(MapiValue::U32(message.view_type)),
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => Some(
             wlink_guid_property_value(requested_property_tag, *message.canonical_id.as_bytes()),
         ),
@@ -1908,6 +1914,28 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         ),
         _ => None,
     }
+}
+
+fn minimal_view_descriptor_binary() -> Vec<u8> {
+    let mut value = Vec::with_capacity(96);
+    value.extend_from_slice(&[0; 8]);
+    value.extend_from_slice(&8u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&1u32.to_le_bytes());
+    value.extend_from_slice(&u32::MAX.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&[0; 24]);
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&4u16.to_le_bytes());
+    value.extend_from_slice(&7u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0x28u32.to_le_bytes());
+    value.extend_from_slice(&[0; 12]);
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&4u32.to_le_bytes());
+    value
 }
 
 fn property_tag_id(property_tag: u32) -> u32 {
@@ -9460,6 +9488,53 @@ mod tests {
             Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 shortcut.id
             )))
+        );
+    }
+
+    #[test]
+    fn common_view_named_view_projects_descriptor_properties_for_outlook() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let view = MapiCommonViewNamedViewMessage {
+            id: crate::mapi::identity::mapi_store_id(0x7fff_ffff_fff7),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x11111111111111111111111111111111),
+            name: "Messages".to_string(),
+            view_flags: 0,
+            view_type: 8,
+        };
+
+        let Some(MapiValue::Binary(descriptor)) = common_view_named_view_property_value(
+            &view,
+            account_id,
+            PID_TAG_VIEW_DESCRIPTOR_BINARY,
+        ) else {
+            panic!("expected PidTagViewDescriptorBinary");
+        };
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+            ),
+            Some(MapiValue::Binary(descriptor.clone()))
+        );
+        assert_eq!(descriptor.len(), 96);
+        assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &1u32.to_le_bytes());
+        assert_eq!(&descriptor[24..28], &u32::MAX.to_le_bytes());
+        assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
+        assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
+        assert_eq!(&descriptor[64..68], &7u32.to_le_bytes());
+        assert_eq!(&descriptor[72..76], &0x28u32.to_le_bytes());
+        assert_eq!(&descriptor[88..92], &0u32.to_le_bytes());
+        assert_eq!(&descriptor[92..96], &4u32.to_le_bytes());
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            ),
+            Some(MapiValue::Binary(Vec::new()))
         );
     }
 

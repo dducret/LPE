@@ -2183,6 +2183,15 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_PST_PATH_W
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
+        Some(MapiObject::AssociatedConfig { .. }) => {
+            storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        }
+        Some(MapiObject::CommonViewNamedView { .. }) => matches!(
+            storage_tag,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+                | PID_TAG_VIEW_DESCRIPTOR_BINARY
+        ),
         Some(MapiObject::Folder { .. }) | None => {
             is_acl_member_name_property_tag(tag)
                 || matches!(
@@ -2647,6 +2656,8 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => "OutlookCommonViewDescriptorBinary6835",
+        PID_TAG_VIEW_DESCRIPTOR_BINARY => "PidTagViewDescriptorBinary",
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => "OutlookAssociatedConfigBinary0E0B",
         PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
@@ -7079,6 +7090,14 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_MESSAGE_LOCALE_ID),
             "PidTagMessageLocaleId"
+        );
+        assert_eq!(
+            property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
+            "OutlookCommonViewDescriptorBinary6835"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_BINARY),
+            "PidTagViewDescriptorBinary"
         );
         assert_eq!(
             property_tag_debug_name(OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),

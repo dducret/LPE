@@ -976,9 +976,11 @@ fn common_view_named_view_sync_object(
     for property_tag in [
         PID_TAG_VIEW_DESCRIPTOR_CLSID,
         PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
         PID_TAG_VIEW_DESCRIPTOR_VERSION,
         PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+        PID_TAG_VIEW_DESCRIPTOR_BINARY,
         PID_TAG_WLINK_GROUP_HEADER_ID,
     ] {
         if let Some(value) =
