@@ -128,6 +128,17 @@ fn persisted_message_delete_is_best_effort(object: Option<&MapiObject>) -> bool 
     matches!(object, Some(MapiObject::Message { .. }))
 }
 
+fn append_save_changes_message_response(
+    responses: &mut Vec<u8>,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    handle: u32,
+    message_id: u64,
+) {
+    set_handle_slot(handle_slots, Some(request.response_handle_index()), handle);
+    responses.extend_from_slice(&rop_save_changes_message_response(request, message_id));
+}
+
 fn private_logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -5145,6 +5156,17 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     }
     if request_rop_ids
         .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x06 | 0x07 | 0x0A | 0x0C | 0x29 | 0x79))
+        && request_rop_ids.contains(&0x06)
+        && request_rop_ids.contains(&0x0C)
+        && request_rop_ids
+            .iter()
+            .any(|rop_id| matches!(*rop_id, 0x0A | 0x79))
+    {
+        return Some("create_message_setprops_save");
+    }
+    if request_rop_ids
+        .iter()
         .all(|rop_id| matches!(*rop_id, 0x01 | 0x05 | 0x12 | 0x13 | 0x18 | 0x4F | 0x56))
         && request_rop_ids.contains(&0x05)
         && request_rop_ids.contains(&0x4F)
@@ -5243,9 +5265,20 @@ fn response_rop_fixed_frame_end(
 ) -> Option<usize> {
     match (rop_id, error_code) {
         (0x02, Some(0)) => Some(start.saturating_add(8)),
+        (0x06, Some(0)) => Some(start.saturating_add(7)),
         (0x04 | 0x05 | 0x21, Some(0)) => Some(start.saturating_add(10)),
+        (0x0A | 0x79, Some(0)) => responses.get(start + 6..start + 8).and_then(|bytes| {
+            let problem_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
+            Some(
+                start
+                    .saturating_add(8)
+                    .saturating_add(problem_count.saturating_mul(10)),
+            )
+        }),
+        (0x0C, Some(0)) => Some(start.saturating_add(15)),
         (0x12 | 0x13, Some(0)) => Some(start.saturating_add(7)),
         (0x18, Some(0)) => Some(start.saturating_add(11)),
+        (0x29, Some(0)) => Some(start.saturating_add(6)),
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(10).saturating_add(byte_count))
@@ -9758,9 +9791,13 @@ where
                                     folder_id,
                                     Some(contact_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
-                                    &request, contact_id,
-                                ));
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
+                                    &request,
+                                    handle,
+                                    contact_id,
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -9861,9 +9898,13 @@ where
                                     folder_id,
                                     Some(event_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
-                                    &request, event_id,
-                                ));
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
+                                    &request,
+                                    handle,
+                                    event_id,
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -9941,9 +9982,13 @@ where
                                     folder_id,
                                     Some(task_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
-                                    &request, task_id,
-                                ));
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
+                                    &request,
+                                    handle,
+                                    task_id,
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -10017,9 +10062,13 @@ where
                                     folder_id,
                                     Some(note_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
-                                    &request, note_id,
-                                ));
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
+                                    &request,
+                                    handle,
+                                    note_id,
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -10097,10 +10146,13 @@ where
                                     folder_id,
                                     Some(journal_entry_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
                                     &request,
+                                    handle,
                                     journal_entry_id,
-                                ));
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -10184,10 +10236,13 @@ where
                                     folder_id,
                                     Some(conversation_action_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
                                     &request,
+                                    handle,
                                     conversation_action_id,
-                                ));
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -10251,10 +10306,13 @@ where
                                     folder_id,
                                     Some(shortcut_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
                                     &request,
+                                    handle,
                                     shortcut_id,
-                                ));
+                                );
                             }
                             Err(_) => responses.extend_from_slice(&rop_error_response(
                                 0x0C,
@@ -10297,9 +10355,13 @@ where
                         message_id: contact_id,
                         ..
                     }) => {
-                        responses.extend_from_slice(&rop_save_changes_message_response(
-                            &request, contact_id,
-                        ));
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            contact_id,
+                        );
                         continue;
                     }
                     Some(MapiObject::PendingAssociatedMessage {
@@ -10349,9 +10411,13 @@ where
                                     folder_id,
                                     Some(message_id),
                                 ));
-                                responses.extend_from_slice(&rop_save_changes_message_response(
-                                    &request, message_id,
-                                ));
+                                append_save_changes_message_response(
+                                    &mut responses,
+                                    &mut handle_slots,
+                                    &request,
+                                    handle,
+                                    message_id,
+                                );
                                 tracing::info!(
                                     rca_debug = true,
                                     adapter = "mapi",
@@ -10409,9 +10475,13 @@ where
                             false,
                             true,
                         );
-                        responses.extend_from_slice(&rop_save_changes_message_response(
-                            &request, item_id,
-                        ));
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            item_id,
+                        );
                         continue;
                     }
                     _ => {}
@@ -10508,9 +10578,13 @@ where
                                 false,
                                 true,
                             );
-                            responses.extend_from_slice(&rop_save_changes_message_response(
-                                &request, item_id,
-                            ));
+                            append_save_changes_message_response(
+                                &mut responses,
+                                &mut handle_slots,
+                                &request,
+                                handle,
+                                item_id,
+                            );
                         }
                         Err(_) => responses.extend_from_slice(&rop_error_response(
                             0x0C,
@@ -10530,14 +10604,13 @@ where
                 };
                 if pending_message_is_trash_sync_artifact(folder_id, &properties, &recipients) {
                     let message_id = transient_associated_message_id(folder_id, &properties);
-                    set_handle_slot(
+                    append_save_changes_message_response(
+                        &mut responses,
                         &mut handle_slots,
-                        Some(request.response_handle_index()),
+                        &request,
                         handle,
+                        message_id,
                     );
-                    responses.extend_from_slice(&rop_save_changes_message_response(
-                        &request, message_id,
-                    ));
                     continue;
                 }
                 if pending_message_is_sync_metadata_only(&properties, &recipients) {
@@ -10551,9 +10624,13 @@ where
                                 saved_email: None,
                             },
                         );
-                        responses.extend_from_slice(&rop_save_changes_message_response(
-                            &request, message_id,
-                        ));
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            message_id,
+                        );
                         continue;
                     }
                     tracing::info!(
@@ -10722,9 +10799,13 @@ where
                             identity_fallback_reason = %identity_fallback_reason,
                             "rca debug mapi save changes message"
                         );
-                        responses.extend_from_slice(&rop_save_changes_message_response(
-                            &request, message_id,
-                        ));
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            message_id,
+                        );
                     }
                     Err(error) => {
                         tracing::info!(
@@ -19494,6 +19575,88 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_response_summary_keeps_create_setprops_save_frame_boundary() {
+        let mut responses = vec![0x06, 0x02];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.extend_from_slice(&[0x29, 0x03]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&[0x0a, 0x04]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&0u16.to_le_bytes());
+        responses.extend_from_slice(&[0x07, 0x04]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&1u32.to_le_bytes());
+        responses.push(0);
+        responses.extend_from_slice(&[0x0a, 0x04]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.extend_from_slice(&PID_TAG_NORMALIZED_SUBJECT_W.to_le_bytes());
+        responses.extend_from_slice(&0x8004_0102u32.to_le_bytes());
+        responses.extend_from_slice(&[0x0c, 0x05]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(4);
+        responses.extend_from_slice(&0x0000_0000_0000_1234u64.to_le_bytes());
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[1, 4, 5, 6]));
+        let response_summary = summarize_response_rop_buffer(
+            &response_buffer,
+            &[0x01, 0x06, 0x29, 0x0a, 0x07, 0x0a, 0x0c],
+        );
+
+        assert_eq!(response_summary.ids_csv, "0x06,0x29,0x0a,0x07,0x0a,0x0c");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x06:0x00000000,0x29:0x00000000,0x0a:0x00000000,0x07:0x00000000,0x0a:0x00000000,0x0c:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x06@0..7:len=7:out=2:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x29@7..13:len=6:out=3:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x0a@13..21:len=8:out=4:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x07@21..32:len=11:out=4:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x0a@32..50:len=18:out=4:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x0c@50..65:len=15:out=5:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn save_changes_success_response_updates_response_handle_slot() {
+        let request = RopRequest {
+            rop_id: 0x0c,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0],
+        };
+        let mut responses = Vec::new();
+        let mut handle_slots = vec![77, u32::MAX];
+
+        append_save_changes_message_response(
+            &mut responses,
+            &mut handle_slots,
+            &request,
+            77,
+            0x0000_0000_0000_1234,
+        );
+
+        assert_eq!(handle_slots, vec![77, 77]);
+        assert_eq!(responses[0], 0x0c);
+        assert_eq!(responses[1], 1);
+    }
+
+    #[test]
     fn execute_rop_response_summary_does_not_treat_find_row_payload_as_next_rop() {
         let table_request = RopRequest {
             rop_id: 0x05,
@@ -19624,6 +19787,10 @@ mod tests {
         );
         assert_eq!(execute_response_framing_context(&[0x0A]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x79]), Some("setprops"));
+        assert_eq!(
+            execute_response_framing_context(&[0x01, 0x06, 0x29, 0x0a, 0x07, 0x0a, 0x0c]),
+            Some("create_message_setprops_save")
+        );
         assert_eq!(
             execute_response_framing_context(&[0x02, 0x07]),
             Some("openfolder_getprops_probe")

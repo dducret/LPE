@@ -7,6 +7,7 @@ use lpe_storage::{
     SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::mapi::permissions::{
@@ -222,6 +223,13 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
             | OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID
+    )
+}
+
+pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
+    matches!(
+        item_id,
+        OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID | OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID
     )
 }
 
@@ -1225,7 +1233,7 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
-        self.navigation_shortcuts.clone()
+        deduplicate_navigation_shortcuts(self.navigation_shortcuts.clone())
     }
 
     pub(crate) fn common_views_table_messages(
@@ -2106,6 +2114,25 @@ fn reserved_folder_id_for_role(role: &str) -> Option<u64> {
     reserved_folder_counter_for_role(role).map(crate::mapi::identity::mapi_store_id)
 }
 
+fn deduplicate_navigation_shortcuts(
+    shortcuts: Vec<MapiNavigationShortcutMessage>,
+) -> Vec<MapiNavigationShortcutMessage> {
+    let mut seen = HashSet::new();
+    shortcuts
+        .into_iter()
+        .filter(|shortcut| {
+            seen.insert((
+                shortcut.subject.clone(),
+                shortcut.target_folder_id,
+                shortcut.shortcut_type,
+                shortcut.section,
+                shortcut.group_header_id,
+                shortcut.group_name.clone(),
+            ))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2345,6 +2372,81 @@ mod tests {
         assert!(snapshot
             .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
             .is_none());
+    }
+
+    #[test]
+    fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let inbox_first_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000010);
+        let inbox_duplicate_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000011);
+        let sent_id = Uuid::from_u128(0x6d617069_776c_5365_8000_000000000010);
+        for (offset, id) in [inbox_first_id, inbox_duplicate_id, sent_id]
+            .into_iter()
+            .enumerate()
+        {
+            crate::mapi::identity::remember_mapi_identity(
+                id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 80 + offset as u64,
+                ),
+            );
+        }
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            MapiNavigationShortcutRecord {
+                id: inbox_first_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID),
+                group_name: "Mail".to_string(),
+            },
+            MapiNavigationShortcutRecord {
+                id: inbox_duplicate_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID),
+                group_name: "Mail".to_string(),
+            },
+            MapiNavigationShortcutRecord {
+                id: sent_id,
+                account_id,
+                subject: "Sent".to_string(),
+                target_folder_id: Some(crate::mapi::identity::SENT_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 191,
+                group_header_id: Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        let shortcuts = snapshot.navigation_shortcut_messages();
+        assert_eq!(shortcuts.len(), 2);
+        assert_eq!(shortcuts[0].canonical_id, inbox_first_id);
+        let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+        assert_eq!(
+            table_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.subject == "Inbox"
+                            && shortcut.target_folder_id
+                                == Some(crate::mapi::identity::INBOX_FOLDER_ID)
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
