@@ -446,6 +446,7 @@ pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835: u32 = 0x6835_0102;
+pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C: u32 = 0x683C_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
@@ -1929,7 +1930,9 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
             )))
         }
         PID_TAG_VIEW_DESCRIPTOR_FLAGS => Some(MapiValue::U32(message.view_flags)),
-        PID_TAG_VIEW_DESCRIPTOR_BINARY | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => {
+        PID_TAG_VIEW_DESCRIPTOR_BINARY
+        | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+        | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => {
             Some(MapiValue::Binary(minimal_view_descriptor_binary()))
         }
         PID_TAG_VIEW_DESCRIPTOR_VERSION => Some(MapiValue::U32(message.view_type)),
@@ -9577,6 +9580,14 @@ mod tests {
                 &view,
                 account_id,
                 OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+            ),
+            Some(MapiValue::Binary(descriptor.clone()))
+        );
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C,
             ),
             Some(MapiValue::Binary(descriptor.clone()))
         );

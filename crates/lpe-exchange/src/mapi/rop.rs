@@ -2660,6 +2660,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => "OutlookCommonViewDescriptorBinary6835",
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => "OutlookCommonViewDescriptorBinary683C",
         PID_TAG_VIEW_DESCRIPTOR_BINARY => "PidTagViewDescriptorBinary",
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => "OutlookAssociatedConfigBinary0E0B",
         PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
@@ -7106,6 +7107,10 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
             "OutlookCommonViewDescriptorBinary6835"
+        );
+        assert_eq!(
+            property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C),
+            "OutlookCommonViewDescriptorBinary683C"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_BINARY),
