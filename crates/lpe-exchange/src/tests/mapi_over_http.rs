@@ -31203,6 +31203,64 @@ async fn mapi_over_http_set_get_search_criteria_updates_canonical_search_folder(
 }
 
 #[tokio::test]
+async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_folder_id() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: Uuid::parse_str("34343434-3434-4434-8434-343434343450").unwrap(),
+            account_id: account.account_id,
+            role: "contacts_search".to_string(),
+            display_name: "Contacts Search".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "contact".to_string(),
+            scope_json: serde_json::json!({"scope": "contacts_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_contacts_search"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+    );
+    append_rop_get_search_criteria(&mut rops, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::wire_id_bytes_from_object_id(
+            crate::mapi::identity::CONTACTS_FOLDER_ID
+        )
+        .unwrap()
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_get_search_criteria_round_trips_received_date_bounds() {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555502").unwrap();

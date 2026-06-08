@@ -608,6 +608,25 @@ fn bounded_search_criteria_to_rop(
     Ok((restriction, folder_ids, flags))
 }
 
+fn builtin_search_criteria_to_rop(
+    definition: &lpe_storage::SearchFolderDefinition,
+) -> Option<(Vec<u8>, Vec<u64>, u32)> {
+    if !definition.is_builtin {
+        return None;
+    }
+    let folder_ids = match definition.role.as_str() {
+        "contacts_search" => vec![CONTACTS_FOLDER_ID],
+        "todo_search" => vec![TASKS_FOLDER_ID],
+        "reminders" => vec![CALENDAR_FOLDER_ID, TASKS_FOLDER_ID],
+        _ => return None,
+    };
+    Some((
+        Vec::new(),
+        folder_ids,
+        SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG,
+    ))
+}
+
 fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
     let field = clause
         .get("field")
@@ -1657,6 +1676,51 @@ fn log_execute_rop_debug(
                 post_hierarchy.content_sync_configure_observed,
             post_hierarchy_execute_count = post_hierarchy.execute_count,
             post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
+            message = "rca debug mapi outlook event 19 candidate"
+        );
+    }
+
+    if endpoint == "emsmdb" && execute_batch_has_same_save_getprops_not_found(request, &response) {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            outlook_event_provider = "Outlook",
+            outlook_event_id = 19,
+            outlook_event_hresult_candidate = "0x800704d3",
+            outlook_event_data_code_observed = 1343,
+            correlation_basis =
+                "same_execute_batch_savechanges_success_then_getprops_object_not_found",
+            request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
+            request_rop_payload_bytes = request.request_payload_bytes,
+            request_handle_table_bytes = request.handle_table_bytes,
+            request_handle_count = request.handle_count,
+            input_handle_table_summary = %request.handle_table_summary,
+            request_rop_raw_frame_count = request.raw_frame_count,
+            request_rop_raw_frames = %request.raw_frames,
+            response_rop_ids = %response.ids_csv,
+            response_rop_names = %response.names_csv,
+            response_rop_results_best_effort = %response.results_csv,
+            response_rop_buffer_layout = %response.buffer_layout,
+            response_rop_buffer_size_word = %response.buffer_size_word,
+            response_rop_payload_bytes = response.response_payload_bytes,
+            response_handle_table_bytes = response.handle_table_bytes,
+            response_handle_count = response.handle_count,
+            output_handle_table_summary = %response.handle_table_summary,
+            response_rop_frame_count = response.count,
+            response_rop_frames = %response.frames,
+            response_rop_parse_error = %response.parse_error,
+            live_handle_count = session.handles.len(),
             message = "rca debug mapi outlook event 19 candidate"
         );
     }
@@ -3677,6 +3741,7 @@ where
             MapiObject::Message {
                 folder_id,
                 message_id,
+                ..
             } => {
                 apply_canonical_message_property_values(
                     store,
@@ -3834,6 +3899,7 @@ where
             MapiObject::AssociatedConfig {
                 folder_id,
                 config_id,
+                ..
             } => {
                 let Some(existing) = snapshot.associated_config_message_for_id(*config_id) else {
                     return Err(anyhow!("MAPI associated config message was not found"));
@@ -4378,7 +4444,9 @@ fn custom_property_object_identity(
         MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         } => message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .or(saved_email.as_ref().map(|saved| &saved.email))
             .map(|email| (MapiCustomPropertyObjectKind::Message, email.id)),
         MapiObject::Contact {
             folder_id,
@@ -5025,6 +5093,17 @@ fn summarize_response_rop_buffer(
 
 fn rop_has_no_response(rop_id: u8) -> bool {
     matches!(rop_id, 0x01)
+}
+
+fn execute_batch_has_same_save_getprops_not_found(
+    request: &RopRequestDebugSummary,
+    response: &RopResponseDebugSummary,
+) -> bool {
+    request.ids.contains(&0x06)
+        && request.ids.contains(&0x0c)
+        && request.ids.last().copied() == Some(0x07)
+        && response.results_csv.contains("0x0c:0x00000000")
+        && response.results_csv.ends_with("0x07:0x8004010f")
 }
 
 fn rop_names_csv(rop_ids: &[u8]) -> String {
@@ -6431,9 +6510,14 @@ fn format_ipm_configuration_row_contract(
     let has_xml_stream =
         associated_config_property_value(message, PID_TAG_ROAMING_XML_STREAM).is_some();
     let has_binary_stream = associated_config_property_value(message, 0x7C09_0102).is_some();
+    let associated_config_0e0b =
+        associated_config_property_value(message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+            .as_ref()
+            .map(format_debug_mapi_value)
+            .unwrap_or_else(|| "missing".to_string());
     let issues = ipm_configuration_row_issues(message);
     format!(
-        "id=0x{:016x};class={};datatypes={};has_dict={};has_xml={};has_binary={};issues={}",
+        "id=0x{:016x};class={};datatypes={};has_dict={};has_xml={};has_binary={};associated_config_0e0b={};issues={}",
         message.id,
         message.message_class,
         datatypes
@@ -6442,6 +6526,7 @@ fn format_ipm_configuration_row_contract(
         has_dictionary_stream,
         has_xml_stream,
         has_binary_stream,
+        associated_config_0e0b,
         issues
     )
 }
@@ -8539,6 +8624,7 @@ where
                         MapiObject::Message {
                             folder_id,
                             message_id,
+                            saved_email: None,
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -8556,6 +8642,7 @@ where
                         MapiObject::Message {
                             folder_id,
                             message_id,
+                            saved_email: None,
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -8589,6 +8676,7 @@ where
                         MapiObject::Message {
                             folder_id: handle_folder_id,
                             message_id,
+                            saved_email: None,
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -8727,6 +8815,7 @@ where
                         MapiObject::AssociatedConfig {
                             folder_id,
                             config_id: message.id,
+                            saved_message: None,
                         },
                     );
                     if folder_id == INBOX_FOLDER_ID
@@ -9480,6 +9569,7 @@ where
                 } else if let Some(MapiObject::AssociatedConfig {
                     folder_id,
                     config_id,
+                    ..
                 }) = object
                 {
                     let result = delete_associated_config_properties(
@@ -10235,6 +10325,16 @@ where
                                     MapiObject::AssociatedConfig {
                                         folder_id,
                                         config_id: message_id,
+                                        saved_message: Some(
+                                            crate::mapi_store::MapiAssociatedConfigMessage {
+                                                id: message_id,
+                                                folder_id,
+                                                canonical_id: saved.id,
+                                                message_class: saved.message_class.clone(),
+                                                subject: saved.subject.clone(),
+                                                properties_json: saved.properties_json.clone(),
+                                            },
+                                        ),
                                     },
                                 );
                                 record_sync_upload_content_change(
@@ -10448,6 +10548,7 @@ where
                             MapiObject::Message {
                                 folder_id,
                                 message_id,
+                                saved_email: None,
                             },
                         );
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -10575,6 +10676,9 @@ where
                             MapiObject::Message {
                                 folder_id,
                                 message_id,
+                                saved_email: Some(MapiSavedEmail {
+                                    email: email.clone(),
+                                }),
                             },
                         );
                         let associated = matches!(
@@ -10798,6 +10902,7 @@ where
                 let MapiObject::Message {
                     folder_id,
                     message_id,
+                    saved_email,
                 } = object
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -10807,7 +10912,9 @@ where
                     ));
                     continue;
                 };
-                let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+                let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
+                    .or(saved_email.as_ref().map(|saved| &saved.email))
+                else {
                     responses.extend_from_slice(&rop_error_response(
                         0x11,
                         request.response_handle_index(),
@@ -10913,6 +11020,21 @@ where
                     ..
                 }) => {
                     if !property_tags_have_known_wire_types(&request.property_tags()) {
+                        tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x12",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            associated = *associated,
+                            requested_columns = %format_debug_property_tags(&request.property_tags()),
+                            unknown_wire_type_columns =
+                                %format_unknown_wire_type_property_tags(&request.property_tags()),
+                            response_error = "0x80040102",
+                            message = "rca debug mapi contents table set columns rejected",
+                        );
                         responses.extend_from_slice(&rop_error_response(
                             0x12,
                             request.response_handle_index(),
@@ -11264,6 +11386,7 @@ where
                 let parent_mailbox = folder_row_for_id(parent_folder_id, mailboxes);
                 if !is_root_hierarchy_folder(parent_folder_id)
                     && parent_mailbox.is_none()
+                    && parent_folder_id != SEARCH_FOLDER_ID
                     && role_for_folder_id(parent_folder_id).is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -11383,6 +11506,90 @@ where
                         output_handles.push(handle);
                         continue;
                     }
+                }
+
+                if parent_folder_id == SEARCH_FOLDER_ID {
+                    let input = UpsertSearchFolderInput {
+                        id: None,
+                        account_id: principal.account_id,
+                        display_name: display_name.to_string(),
+                        result_object_kind: "message".to_string(),
+                        scope_json: json!({
+                            "kind": "mapi_bounded",
+                            "scope": "folders",
+                            "recursive": true,
+                            "folderIds": [],
+                            "folderRoles": ["inbox"]
+                        }),
+                        restriction_json: json!({
+                            "kind": "mapi_bounded",
+                            "all": []
+                        }),
+                        excluded_folder_roles: Vec::new(),
+                    };
+                    match store.upsert_search_folder(input).await {
+                        Ok(definition) => {
+                            let folder_id = match remember_created_mapi_identity(
+                                store,
+                                principal,
+                                MapiIdentityObjectKind::SearchFolderDefinition,
+                                definition.id,
+                                None,
+                                None,
+                            )
+                            .await
+                            {
+                                Ok(folder_id) => folder_id,
+                                Err(_) => {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x1C,
+                                        request.output_handle_index.unwrap_or(0),
+                                        0x8004_0102,
+                                    ));
+                                    continue;
+                                }
+                            };
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                tenant_id = %principal.tenant_id,
+                                account_id = %principal.account_id,
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x1c",
+                                parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                                folder_id = %format!("{folder_id:#018x}"),
+                                search_folder_id = %definition.id,
+                                folder_type = request.create_folder_type(),
+                                open_existing = request.create_folder_open_existing(),
+                                display_name = display_name,
+                                message = "rca debug mapi create folder created search folder",
+                            );
+                            let handle = session.allocate_output_handle(
+                                request.output_handle_index,
+                                MapiObject::Folder {
+                                    folder_id,
+                                    properties: HashMap::new(),
+                                },
+                            );
+                            set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                            responses.extend_from_slice(&rop_create_folder_response(
+                                &request, folder_id, false,
+                            ));
+                            session.record_notification(MapiNotificationEvent::hierarchy(
+                                parent_folder_id,
+                                Some(folder_id),
+                            ));
+                            output_handles.push(handle);
+                        }
+                        Err(_) => responses.extend_from_slice(&rop_error_response(
+                            0x1C,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_0102,
+                        )),
+                    }
+                    continue;
                 }
 
                 let existing_mailbox = mailboxes.iter().find(|mailbox| {
@@ -12158,6 +12365,7 @@ where
                     Some(MapiObject::Message {
                         folder_id,
                         message_id,
+                        ..
                     })
                     | Some(MapiObject::Event {
                         folder_id,
@@ -12199,6 +12407,7 @@ where
                     Some(MapiObject::Message {
                         folder_id,
                         message_id,
+                        ..
                     })
                     | Some(MapiObject::Event {
                         folder_id,
@@ -12243,6 +12452,7 @@ where
                         Some(MapiObject::Message {
                             folder_id,
                             message_id,
+                            ..
                         }) => (*folder_id, *message_id, false),
                         Some(MapiObject::Event {
                             folder_id,
@@ -12310,6 +12520,7 @@ where
                         Some(MapiObject::Message {
                             folder_id,
                             message_id,
+                            ..
                         }) => (*folder_id, *message_id, false),
                         Some(MapiObject::Event {
                             folder_id,
@@ -12875,8 +13086,10 @@ where
                     MapiObject::Message {
                         folder_id,
                         message_id,
+                        saved_email,
                     } => {
                         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
+                            .or(saved_email.as_ref().map(|saved| &saved.email))
                         else {
                             tracing::info!(
                                 rca_debug = true,
@@ -13046,6 +13259,7 @@ where
                             MapiObject::Message {
                                 folder_id: submitted_mapi_folder_id(&submitted, mailboxes),
                                 message_id,
+                                saved_email: None,
                             },
                         );
                         match store
@@ -13630,7 +13844,9 @@ where
                     ));
                     continue;
                 };
-                let Some(definition) = snapshot.search_folder_definition_for_folder_id(*folder_id)
+                let Some(definition) = snapshot
+                    .search_folder_definition_for_folder_id(*folder_id)
+                    .or_else(|| session.search_folder_definition(*folder_id))
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x30,
@@ -13668,7 +13884,10 @@ where
                     excluded_folder_roles: definition.excluded_folder_roles.clone(),
                 };
                 match store.upsert_search_folder(input).await {
-                    Ok(_) => responses.extend_from_slice(&rop_simple_success_response(&request)),
+                    Ok(definition) => {
+                        session.remember_search_folder_definition(*folder_id, definition);
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
                         0x30,
                         request.response_handle_index(),
@@ -13687,7 +13906,9 @@ where
                     ));
                     continue;
                 };
-                let Some(definition) = snapshot.search_folder_definition_for_folder_id(*folder_id)
+                let Some(definition) = snapshot
+                    .search_folder_definition_for_folder_id(*folder_id)
+                    .or_else(|| session.search_folder_definition(*folder_id))
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x31,
@@ -13696,7 +13917,9 @@ where
                     ));
                     continue;
                 };
-                match bounded_search_criteria_to_rop(definition, mailboxes) {
+                match bounded_search_criteria_to_rop(definition, mailboxes)
+                    .or_else(|error| builtin_search_criteria_to_rop(definition).ok_or(error))
+                {
                     Ok((restriction, folder_ids, flags)) => {
                         responses.extend_from_slice(&rop_get_search_criteria_response(
                             &request,
@@ -15469,6 +15692,7 @@ where
                         MapiObject::Message {
                             folder_id,
                             message_id,
+                            saved_email: None,
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -17366,6 +17590,21 @@ fn property_tags_have_known_wire_types(property_tags: &[u32]) -> bool {
     })
 }
 
+fn format_unknown_wire_type_property_tags(property_tags: &[u32]) -> String {
+    property_tags
+        .iter()
+        .copied()
+        .filter(|tag| {
+            let property_type = (*tag & 0xFFFF) as u16;
+            property_type != 0
+                && MapiPropertyType::from_code(property_type).is_none()
+                && MapiPropertyType::known_unsupported_name(property_type).is_none()
+        })
+        .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
     let size = u16::from_le_bytes(request.payload.get(..2)?.try_into().ok()?) as usize;
     let bytes = request.payload.get(2..2 + size)?;
@@ -18830,6 +19069,7 @@ mod tests {
         assert!(summary.contains("row_issue_count=0"));
         assert!(summary.contains("datatypes=0x00000004"));
         assert!(summary.contains("has_dict=true"));
+        assert!(summary.contains("associated_config_0e0b=missing"));
     }
 
     #[test]
@@ -19379,6 +19619,36 @@ mod tests {
             execute_response_framing_context(&[0x02, 0x07]),
             Some("openfolder_getprops_probe")
         );
+    }
+
+    #[test]
+    fn event_19_candidate_detects_same_batch_save_getprops_not_found() {
+        let request = RopRequestDebugSummary {
+            ids: vec![
+                0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x06, 0x0a, 0x0a, 0x0a, 0x0a, 0x0c,
+                0x07,
+            ],
+            ..RopRequestDebugSummary::default()
+        };
+        let response = RopResponseDebugSummary {
+            results_csv: "0x06:0x00000000,0x0a:0x00000000,0x0c:0x00000000,0x07:0x8004010f"
+                .to_string(),
+            ..RopResponseDebugSummary::default()
+        };
+
+        assert!(execute_batch_has_same_save_getprops_not_found(
+            &request, &response
+        ));
+
+        let response = RopResponseDebugSummary {
+            results_csv: "0x06:0x00000000,0x0a:0x00000000,0x0c:0x00000000,0x07:0x00000000"
+                .to_string(),
+            ..RopResponseDebugSummary::default()
+        };
+
+        assert!(!execute_batch_has_same_save_getprops_not_found(
+            &request, &response
+        ));
     }
 
     #[test]
@@ -20079,6 +20349,7 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
             named_properties: HashMap::new(),

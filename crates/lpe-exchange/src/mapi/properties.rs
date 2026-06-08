@@ -326,6 +326,7 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE_EXTENDED: u32 = 0x0E08_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_ENTRY_ID: u32 = 0x0E09_0102;
+pub(in crate::mapi) const OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B: u32 = 0x0E0B_0102;
 pub(in crate::mapi) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
@@ -1025,12 +1026,14 @@ pub(in crate::mapi) fn rop_read_recipients_response(
         Some(MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         }) => {
-            let Some(email) =
-                message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
+            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
+                .or_else(|| {
                     search_folder_message_for_id(snapshot, *folder_id, *message_id)
                         .map(|message| &message.email)
                 })
+                .or(saved_email.as_ref().map(|saved| &saved.email))
             else {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             };
@@ -3306,8 +3309,10 @@ fn property_stream_data(
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,
+            saved_message,
         } => snapshot
             .associated_config_message_for_id(*config_id)
+            .or_else(|| saved_message.clone())
             .filter(|message| message.folder_id == *folder_id)
             .and_then(|message| {
                 associated_config_property_value_with_mailbox_guid(
@@ -3362,8 +3367,10 @@ pub(in crate::mapi) fn message_body_stream_data(
         MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         } if open_mode == 0 => {
-            let email = message_for_id(*folder_id, *message_id, mailboxes, emails)?;
+            let email = message_for_id(*folder_id, *message_id, mailboxes, emails)
+                .or(saved_email.as_ref().map(|saved| &saved.email))?;
             (email.body_text.clone(), email.body_html_sanitized.clone())
         }
         MapiObject::PendingMessage { properties, .. }
@@ -3397,9 +3404,11 @@ pub(in crate::mapi) fn message_body_stream_data(
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,
+            saved_message,
         } if open_mode == 0 => {
             let message = snapshot
                 .associated_config_message_for_id(*config_id)
+                .or_else(|| saved_message.clone())
                 .filter(|message| message.folder_id == *folder_id)?;
             let body_text = match associated_config_property_value(&message, PID_TAG_BODY_W) {
                 Some(MapiValue::String(value)) => value,

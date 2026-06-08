@@ -2349,6 +2349,7 @@ mod tests {
             next_handle: 1,
             handles,
             message_statuses: HashMap::new(),
+            saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
             named_properties: HashMap::new(),

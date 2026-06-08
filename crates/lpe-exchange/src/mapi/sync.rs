@@ -1313,8 +1313,11 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
         MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         } => {
-            let message = message_for_id(*folder_id, *message_id, mailboxes, emails)?.clone();
+            let message = message_for_id(*folder_id, *message_id, mailboxes, emails)
+                .or(saved_email.as_ref().map(|saved| &saved.email))?
+                .clone();
             let folder = folder_row_for_id(*folder_id, mailboxes)
                 .cloned()
                 .into_iter()
@@ -1334,8 +1337,11 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,
+            saved_message,
         } => {
-            let message = snapshot.associated_config_message_for_id(*config_id)?;
+            let message = snapshot
+                .associated_config_message_for_id(*config_id)
+                .or_else(|| saved_message.clone())?;
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(

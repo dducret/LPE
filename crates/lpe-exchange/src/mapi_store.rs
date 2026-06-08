@@ -182,7 +182,7 @@ pub(crate) struct MapiCommonViewNamedViewMessage {
     pub(crate) view_type: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) struct MapiAssociatedConfigMessage {
     pub(crate) id: u64,
@@ -1209,9 +1209,15 @@ impl MapiMailStoreSnapshot {
         &self,
         folder_id: u64,
     ) -> Option<&SearchFolderDefinition> {
-        self.search_folder_definitions.iter().find(|definition| {
-            crate::mapi::identity::mapped_mapi_object_id(&definition.id) == Some(folder_id)
-        })
+        self.search_folder_definitions
+            .iter()
+            .find(|definition| {
+                crate::mapi::identity::mapped_mapi_object_id(&definition.id) == Some(folder_id)
+            })
+            .or_else(|| {
+                fixed_search_folder_role(folder_id)
+                    .and_then(|role| self.search_folder_definition_for_role(role))
+            })
     }
 
     pub(crate) fn rules(&self) -> &[MapiRule] {
@@ -1441,6 +1447,15 @@ impl MapiMailStoreSnapshot {
     #[cfg(test)]
     pub(crate) fn messages(&self) -> &[MapiMessage] {
         &self.messages
+    }
+}
+
+fn fixed_search_folder_role(folder_id: u64) -> Option<&'static str> {
+    match folder_id {
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID => Some("contacts_search"),
+        crate::mapi::identity::TODO_SEARCH_FOLDER_ID => Some("todo_search"),
+        crate::mapi::identity::REMINDERS_FOLDER_ID => Some("reminders"),
+        _ => None,
     }
 }
 

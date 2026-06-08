@@ -201,10 +201,14 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
         Some(MapiObject::Message {
             folder_id,
             message_id,
-        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
-            search_folder_message_for_id(snapshot, *folder_id, *message_id)
-                .map(|message| &message.email)
-        }) {
+            saved_email,
+        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .or_else(|| {
+                search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                    .map(|message| &message.email)
+            })
+            .or(saved_email.as_ref().map(|saved| &saved.email))
+        {
             Some(email) => (email.subject.clone(), message_recipients(email).len()),
             None => {
                 return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
@@ -934,12 +938,14 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         }) => {
-            let Some(_email) =
-                message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
+            let Some(_email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
+                .or_else(|| {
                     search_folder_message_for_id(snapshot, *folder_id, *message_id)
                         .map(|message| &message.email)
                 })
+                .or(saved_email.as_ref().map(|saved| &saved.email))
             else {
                 tracing::info!(
                     rca_debug = true,
@@ -1127,8 +1133,15 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 &columns,
             )
         }
-        Some(MapiObject::AssociatedConfig { config_id, .. }) => {
-            let Some(message) = snapshot.associated_config_message_for_id(*config_id) else {
+        Some(MapiObject::AssociatedConfig {
+            config_id,
+            saved_message,
+            ..
+        }) => {
+            let Some(message) = snapshot
+                .associated_config_message_for_id(*config_id)
+                .or_else(|| saved_message.clone())
+            else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
@@ -1511,6 +1524,7 @@ fn format_message_body_getprops_contract(
     let Some(MapiObject::Message {
         folder_id,
         message_id,
+        saved_email,
     }) = object
     else {
         return String::new();
@@ -1526,6 +1540,14 @@ fn format_message_body_getprops_contract(
                     .map(|message| &message.email),
             )
         };
+    let saved_email = saved_email.as_ref().map(|saved| &saved.email);
+    let (source, email) = match email.or(saved_email) {
+        Some(email) if saved_email.is_some_and(|saved| saved.id == email.id) => {
+            ("saved_handle", Some(email))
+        }
+        Some(email) => (source, Some(email)),
+        None => (source, None),
+    };
     let Some(email) = email else {
         return format!(
             "message_found=false;folder_id={folder_id:#018x};message_id={message_id:#018x};requested_body_tags={}",
@@ -1742,12 +1764,14 @@ fn format_ipm_configuration_getprops_contract(
     let Some(MapiObject::AssociatedConfig {
         folder_id,
         config_id,
+        saved_message,
     }) = object
     else {
         return String::new();
     };
     let Some(message) = snapshot
         .associated_config_message_for_id(*config_id)
+        .or_else(|| saved_message.clone())
         .filter(|message| message.folder_id == *folder_id)
     else {
         return format!("found=false;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x}");
@@ -1772,8 +1796,9 @@ fn format_ipm_configuration_getprops_contract(
         .copied()
         .filter(|tag| associated_config_property_value(&message, *tag).is_none())
         .collect::<Vec<_>>();
+    let undocumented_0e0b = format_associated_config_0e0b_debug(columns, &message, fallback_tags);
     format!(
-        "found=true;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x};class={};datatypes={};has_dictionary={};has_xml={};requested_streams={};missing_requested_streams={};fallback_tags={}",
+        "found=true;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x};class={};datatypes={};has_dictionary={};has_xml={};requested_streams={};missing_requested_streams={};fallback_tags={};undocumented_0e0b={}",
         message.message_class,
         datatypes
             .map(|value| format!("0x{value:08x}"))
@@ -1782,7 +1807,38 @@ fn format_ipm_configuration_getprops_contract(
         associated_config_property_value(&message, PID_TAG_ROAMING_XML_STREAM).is_some(),
         format_property_tags_for_debug(&requested_stream_tags),
         format_property_tags_for_debug(&missing_requested_streams),
-        format_property_tags_for_debug(fallback_tags)
+        format_property_tags_for_debug(fallback_tags),
+        undocumented_0e0b
+    )
+}
+
+fn format_associated_config_0e0b_debug(
+    columns: &[u32],
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+    fallback_tags: &[u32],
+) -> String {
+    if !columns.contains(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B) {
+        return "requested=false".to_string();
+    }
+    let properties = mapi_properties_from_json(&message.properties_json);
+    let mut property_json_tags = properties.keys().copied().collect::<Vec<_>>();
+    property_json_tags.sort_unstable();
+    let stored_value = properties.get(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B);
+    let semantic_value =
+        associated_config_property_value(message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B);
+    let semantic_shape = semantic_value
+        .as_ref()
+        .map(mapi_value_shape_for_debug)
+        .unwrap_or_else(|| "missing".to_string());
+    format!(
+        "requested=true;public_ms_oxprops_name=unmapped;stored={};stored_shape={};semantic_shape={};fallback_default={};property_json_tags={}",
+        stored_value.is_some(),
+        stored_value
+            .map(mapi_value_shape_for_debug)
+            .unwrap_or_else(|| "missing".to_string()),
+        semantic_shape,
+        fallback_tags.contains(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+        format_property_tags_for_debug(&property_json_tags)
     )
 }
 
@@ -2200,9 +2256,10 @@ fn format_property_value_shapes_for_debug(
             } else {
                 ""
             };
-            let semantic_shape = semantic_property_shape_for_debug(object, principal, *tag)
-                .map(|shape| format!(":{shape}"))
-                .unwrap_or_default();
+            let semantic_shape =
+                semantic_property_shape_for_debug(object, principal, snapshot, *tag)
+                    .map(|shape| format!(":{shape}"))
+                    .unwrap_or_default();
             format!(
                 "{tag:#010x}:{name}:row_bytes={}{}:row_hex={}{}",
                 encoded.len(),
@@ -2218,6 +2275,7 @@ fn format_property_value_shapes_for_debug(
 fn semantic_property_shape_for_debug(
     object: Option<&MapiObject>,
     principal: &AccountPrincipal,
+    snapshot: &MapiMailStoreSnapshot,
     tag: u32,
 ) -> Option<String> {
     match object {
@@ -2232,6 +2290,23 @@ fn semantic_property_shape_for_debug(
                 .as_ref()
                 .map(mapi_value_shape_for_debug)
         }
+        Some(MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+            saved_message,
+        }) => snapshot
+            .associated_config_message_for_id(*config_id)
+            .or_else(|| saved_message.clone())
+            .filter(|message| message.folder_id == *folder_id)
+            .and_then(|message| {
+                associated_config_property_value_with_mailbox_guid(
+                    &message,
+                    principal.account_id,
+                    tag,
+                )
+            })
+            .as_ref()
+            .map(mapi_value_shape_for_debug),
         _ => None,
     }
 }
@@ -2303,6 +2378,7 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         Some(MapiObject::Message {
             folder_id,
             message_id,
+            ..
         }) => (
             "message",
             format!("{folder_id:#018x}"),
@@ -2366,6 +2442,7 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         Some(MapiObject::AssociatedConfig {
             folder_id,
             config_id,
+            ..
         }) => (
             "associated_config",
             format!("{folder_id:#018x}"),
@@ -2561,6 +2638,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => "OutlookAssociatedConfigBinary0E0B",
         PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_ASSOCIATED_CONTENT_COUNT => "PidTagAssociatedContentCount",
@@ -2793,6 +2871,7 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
         Some(MapiObject::Message {
             folder_id,
             message_id,
+            ..
         })
         | Some(MapiObject::Event {
             folder_id,
@@ -2874,11 +2953,13 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::Message {
             folder_id,
             message_id,
+            saved_email,
         }) => message_for_id(*folder_id, *message_id, mailboxes, emails)
             .or_else(|| {
                 search_folder_message_for_id(snapshot, *folder_id, *message_id)
                     .map(|message| &message.email)
             })
+            .or(saved_email.as_ref().map(|saved| &saved.email))
             .map(|email| serialize_message_row(email, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
@@ -2995,8 +3076,13 @@ pub(in crate::mapi) fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::AssociatedConfig { config_id, .. }) => snapshot
+        Some(MapiObject::AssociatedConfig {
+            config_id,
+            saved_message,
+            ..
+        }) => snapshot
             .associated_config_message_for_id(*config_id)
+            .or_else(|| saved_message.clone())
             .map(|message| {
                 serialize_associated_config_row_with_mailbox_guid(
                     &message,
@@ -6812,6 +6898,7 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
             named_properties: HashMap::new(),
@@ -6985,6 +7072,10 @@ mod tests {
             "PidTagMessageLocaleId"
         );
         assert_eq!(
+            property_tag_debug_name(OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+            "OutlookAssociatedConfigBinary0E0B"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_ROAMING_DATATYPES),
             "PidTagRoamingDatatypes"
         );
@@ -7021,6 +7112,34 @@ mod tests {
             "PidTagAssociatedSharingProvider"
         );
         assert_eq!(property_tag_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
+    }
+
+    #[test]
+    fn associated_config_0e0b_debug_reports_stored_value_and_fallback() {
+        let message = crate::mapi_store::MapiAssociatedConfigMessage {
+            id: 0x7fff_ffff_fffb_0001,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "Account preferences".to_string(),
+            properties_json: serde_json::json!({
+                "0x0e0b0102": {"type": "binary", "value": "01020304"}
+            }),
+        };
+
+        let summary = format_associated_config_0e0b_debug(
+            &[OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B],
+            &message,
+            &[OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B],
+        );
+
+        assert!(summary.contains("requested=true"));
+        assert!(summary.contains("public_ms_oxprops_name=unmapped"));
+        assert!(summary.contains("stored=true"));
+        assert!(summary.contains("stored_shape=binary:bytes=4:preview=01020304"));
+        assert!(summary.contains("semantic_shape=binary:bytes=4:preview=01020304"));
+        assert!(summary.contains("fallback_default=true"));
+        assert!(summary.contains("property_json_tags=0x0e0b0102"));
     }
 
     #[test]
@@ -7094,6 +7213,7 @@ mod tests {
         let object = MapiObject::Message {
             folder_id: INBOX_FOLDER_ID,
             message_id: crate::mapi::identity::mapi_store_id(0x99),
+            saved_email: None,
         };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
@@ -7131,6 +7251,99 @@ mod tests {
         assert!(
             contract.contains("requested_body_tags=0x1000001f,0x10090102,0x10130102,0x10160003")
         );
+    }
+
+    #[test]
+    fn saved_message_handle_getprops_uses_same_batch_email() {
+        let account_id = Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap();
+        let email_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
+        let message_id = crate::mapi::identity::mapi_store_id(0x99);
+        let email = JmapEmail {
+            id: email_id,
+            thread_id: email_id,
+            mailbox_ids: vec![account_id],
+            mailbox_states: Vec::new(),
+            mailbox_id: account_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            received_at: "2026-06-07T19:56:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "author".to_string(),
+            submitted_by_account_id: account_id,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Saved batch".to_string(),
+            preview: "Saved body".to_string(),
+            body_text: "Saved body".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: Some("<saved-batch@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        };
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id,
+            saved_email: Some(MapiSavedEmail { email }),
+        };
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "test@example.test".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&2u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_BODY_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+        assert!(response
+            .windows(utf16z_bytes("Saved batch").len())
+            .any(|window| window == utf16z_bytes("Saved batch").as_slice()));
+        assert!(response
+            .windows(utf16z_bytes("Saved body").len())
+            .any(|window| window == utf16z_bytes("Saved body").as_slice()));
     }
 
     #[test]
@@ -7207,6 +7420,7 @@ mod tests {
         let object = MapiObject::Message {
             folder_id: INBOX_FOLDER_ID,
             message_id,
+            saved_email: None,
         };
         let mut payload = Vec::new();
         payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -7246,6 +7460,62 @@ mod tests {
         assert!(response
             .windows(4)
             .any(|window| window == 3u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn saved_associated_config_getprops_uses_same_batch_saved_message() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let config_id = crate::mapi::identity::mapi_store_id(0x4321);
+        let object = MapiObject::AssociatedConfig {
+            folder_id: CALENDAR_FOLDER_ID,
+            config_id,
+            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+                id: config_id,
+                folder_id: CALENDAR_FOLDER_ID,
+                canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+                message_class: "IPM.Configuration.Calendar".to_string(),
+                subject: "Calendar config".to_string(),
+                properties_json: serde_json::json!({}),
+            }),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&2u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_CHANGE_KEY.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
+        assert!(response
+            .windows(utf16z_bytes("IPM.Configuration.Calendar").len())
+            .any(|window| window == utf16z_bytes("IPM.Configuration.Calendar").as_slice()));
+        let expected_change_key = mapi_mailstore::change_key_for_change_number(
+            mapi_mailstore::change_number_for_store_id(config_id),
+        );
+        assert!(response
+            .windows(expected_change_key.len())
+            .any(|window| window == expected_change_key.as_slice()));
     }
 
     #[test]

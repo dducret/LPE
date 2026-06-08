@@ -1425,6 +1425,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::Message {
             folder_id,
             message_id,
+            ..
         }
         | MapiObject::AttachmentTable {
             folder_id,
@@ -1499,6 +1500,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,
+            ..
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *config_id);
@@ -1595,6 +1597,7 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
             named_properties: HashMap::new(),

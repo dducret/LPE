@@ -6,6 +6,8 @@ use super::store_adapter::*;
 use super::sync::*;
 use super::transport::*;
 use super::*;
+use crate::mapi_store::MapiAssociatedConfigMessage;
+use lpe_storage::{JmapEmail, SearchFolderDefinition};
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 
@@ -26,6 +28,8 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_handle: u32,
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
+    pub(in crate::mapi) saved_search_folder_definitions:
+        HashMap<u64, MapiSavedSearchFolderDefinition>,
     pub(in crate::mapi) special_folder_aliases: HashMap<u64, u64>,
     pub(in crate::mapi) deleted_advertised_special_folders: HashSet<u64>,
     pub(in crate::mapi) named_properties: HashMap<MapiNamedProperty, u16>,
@@ -137,6 +141,32 @@ pub(in crate::mapi) struct TableBookmark {
     pub(in crate::mapi) row_key: Option<u64>,
 }
 
+#[derive(Clone, Debug)]
+pub(in crate::mapi) struct MapiSavedEmail {
+    pub(in crate::mapi) email: JmapEmail,
+}
+
+impl PartialEq for MapiSavedEmail {
+    fn eq(&self, other: &Self) -> bool {
+        self.email.id == other.email.id
+    }
+}
+
+impl Eq for MapiSavedEmail {}
+
+#[derive(Clone, Debug)]
+pub(in crate::mapi) struct MapiSavedSearchFolderDefinition {
+    pub(in crate::mapi) definition: SearchFolderDefinition,
+}
+
+impl PartialEq for MapiSavedSearchFolderDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.definition.id == other.definition.id
+    }
+}
+
+impl Eq for MapiSavedSearchFolderDefinition {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiObject {
     Logon,
@@ -148,6 +178,7 @@ pub(in crate::mapi) enum MapiObject {
     Message {
         folder_id: u64,
         message_id: u64,
+        saved_email: Option<MapiSavedEmail>,
     },
     Contact {
         folder_id: u64,
@@ -184,6 +215,7 @@ pub(in crate::mapi) enum MapiObject {
     AssociatedConfig {
         folder_id: u64,
         config_id: u64,
+        saved_message: Option<MapiAssociatedConfigMessage>,
     },
     DelegateFreeBusyMessage {
         folder_id: u64,
@@ -458,6 +490,7 @@ pub(in crate::mapi) fn create_session(
         next_handle: 1,
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
+        saved_search_folder_definitions: HashMap::new(),
         special_folder_aliases: HashMap::new(),
         deleted_advertised_special_folders: HashSet::new(),
         named_properties: HashMap::new(),
@@ -905,6 +938,24 @@ impl MapiSession {
             return;
         }
         self.special_folder_aliases.insert(alias_id, folder_id);
+    }
+
+    pub(in crate::mapi) fn remember_search_folder_definition(
+        &mut self,
+        folder_id: u64,
+        definition: SearchFolderDefinition,
+    ) {
+        self.saved_search_folder_definitions
+            .insert(folder_id, MapiSavedSearchFolderDefinition { definition });
+    }
+
+    pub(in crate::mapi) fn search_folder_definition(
+        &self,
+        folder_id: u64,
+    ) -> Option<&SearchFolderDefinition> {
+        self.saved_search_folder_definitions
+            .get(&folder_id)
+            .map(|saved| &saved.definition)
     }
 
     pub(in crate::mapi) fn resolve_special_folder_alias(&self, folder_id: u64) -> u64 {
@@ -1494,6 +1545,35 @@ mod tests {
         session.record_deleted_advertised_special_folder(QUICK_STEP_SETTINGS_FOLDER_ID);
 
         assert!(session.advertised_special_folder_was_deleted(QUICK_STEP_SETTINGS_FOLDER_ID));
+    }
+
+    #[test]
+    fn session_remembers_saved_search_folder_definition() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let folder_id = 0x0000_0000_0157_0001;
+        let definition = SearchFolderDefinition {
+            id: Uuid::from_u128(0x157),
+            account_id: principal.account_id,
+            role: "custom".to_string(),
+            display_name: "Unread Mail".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "email".to_string(),
+            scope_json: serde_json::json!({"kind": "mapi_bounded"}),
+            restriction_json: serde_json::json!({"kind": "mapi_bounded", "all": []}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        };
+
+        session.remember_search_folder_definition(folder_id, definition);
+
+        assert_eq!(
+            session
+                .search_folder_definition(folder_id)
+                .map(|definition| definition.display_name.as_str()),
+            Some("Unread Mail")
+        );
     }
 
     #[test]
