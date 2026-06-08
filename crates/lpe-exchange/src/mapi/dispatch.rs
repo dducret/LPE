@@ -104,6 +104,18 @@ fn canonical_message_folder_id(email: &JmapEmail, mailboxes: &[JmapMailbox]) -> 
         })
 }
 
+fn fallback_open_message_folder_id(
+    requested_folder_id: u64,
+    email: &JmapEmail,
+    mailboxes: &[JmapMailbox],
+) -> u64 {
+    if email_matches_folder(email, requested_folder_id, mailboxes) {
+        requested_folder_id
+    } else {
+        canonical_message_folder_id(email, mailboxes)
+    }
+}
+
 fn unique_message_for_id<'a>(message_id: u64, emails: &'a [JmapEmail]) -> Option<&'a JmapEmail> {
     let mut matches = emails
         .iter()
@@ -1872,6 +1884,7 @@ struct SetPropertiesProbeRequest {
     input_handle_index: u8,
     property_tags: Vec<u32>,
     property_value_shapes: String,
+    associated_config_stream_summary: String,
     default_folder_entry_id_values: String,
     parse_error: String,
 }
@@ -2119,6 +2132,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::JournalEntry { .. }) => "journal_entry",
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
+        Some(MapiObject::CommonViewNamedView { .. }) => "common_view_named_view",
         Some(MapiObject::AssociatedConfig { .. }) => "associated_config",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
         Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
@@ -2793,6 +2807,7 @@ fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeReque
                 .map(|(tag, value)| format!("{tag:#010x}:{}", mapi_value_debug_shape(value)))
                 .collect::<Vec<_>>()
                 .join(","),
+            associated_config_stream_summary: associated_config_stream_write_summary(&values),
             default_folder_entry_id_values: default_folder_entry_id_values_for_debug(&values),
             parse_error: String::new(),
         },
@@ -2800,6 +2815,7 @@ fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeReque
             input_handle_index: request.input_handle_index().unwrap_or(0),
             property_tags: Vec::new(),
             property_value_shapes: String::new(),
+            associated_config_stream_summary: String::new(),
             default_folder_entry_id_values: String::new(),
             parse_error: error.to_string(),
         },
@@ -2842,13 +2858,55 @@ fn log_set_properties_specific_debug(
         folder_id = %mapi_object_debug_folder_id(object),
         property_tag_count = probe.property_tags.len(),
         property_tags = %format_debug_property_tags(&probe.property_tags),
+        property_names = %format_set_property_names_for_debug(&probe.property_tags),
         property_value_shapes = %probe.property_value_shapes,
+        associated_config_stream_summary = %probe.associated_config_stream_summary,
         default_folder_entry_id_values = %probe.default_folder_entry_id_values,
         default_folder_identification_values_stripped = default_folder_identification_values_stripped,
         default_folder_entry_id_storage_mode = default_folder_entry_id_storage_mode,
         parse_error = %probe.parse_error,
         "rca debug mapi set properties specific"
     );
+}
+
+fn associated_config_stream_write_summary(values: &[(u32, MapiValue)]) -> String {
+    let mut parts = Vec::new();
+    for (tag, value) in values {
+        match canonical_property_storage_tag(*tag) {
+            PID_TAG_ROAMING_DATATYPES
+            | PID_TAG_ROAMING_DICTIONARY
+            | PID_TAG_ROAMING_XML_STREAM
+            | 0x7C09_0102
+            | 0x685D_0003 => parts.push(format!(
+                "{}={}",
+                set_property_debug_name(*tag),
+                mapi_value_debug_shape(value)
+            )),
+            _ => {}
+        }
+    }
+    parts.join(",")
+}
+
+fn format_set_property_names_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| set_property_debug_name(*tag))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn set_property_debug_name(tag: u32) -> &'static str {
+    match canonical_property_storage_tag(tag) {
+        PID_TAG_MESSAGE_CLASS_W => "PidTagMessageClass",
+        PID_TAG_SUBJECT_W => "PidTagSubject",
+        PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
+        PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
+        PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
+        PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
+        0x7C09_0102 => "PidTagRoamingBinary",
+        0x685D_0003 => "OutlookConfigurationStamp",
+        _ => "unknown",
+    }
 }
 
 fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> String {
@@ -3550,6 +3608,7 @@ fn mapi_value_debug_shape(value: &MapiValue) -> String {
         MapiValue::I16(_) => "i16".to_string(),
         MapiValue::I32(_) => "i32".to_string(),
         MapiValue::I64(_) => "i64".to_string(),
+        MapiValue::F64(_) => "f64".to_string(),
         MapiValue::U32(_) => "u32".to_string(),
         MapiValue::U64(_) => "u64".to_string(),
         MapiValue::String(value) => format!("string:chars={}", value.chars().count()),
@@ -4942,7 +5001,14 @@ fn summarize_response_rop_buffer(
             results.push(format!("{}:truncated", rop_id_hex(rop_id)));
         }
         let next_expected_rop_id = expected_ids.get(expected_index + 1).copied();
-        let frame_end = response_rop_frame_end(responses, offset, error_code, next_expected_rop_id);
+        let following_expected_rop_id = expected_ids.get(expected_index + 2).copied();
+        let frame_end = response_rop_frame_end(
+            responses,
+            offset,
+            error_code,
+            next_expected_rop_id,
+            following_expected_rop_id,
+        );
         frames.push(summarize_response_rop_frame(
             responses, offset, frame_end, error_code,
         ));
@@ -5065,9 +5131,38 @@ fn response_rop_frame_end(
     start: usize,
     error_code: Option<u32>,
     next_expected_rop_id: Option<u8>,
+    following_expected_rop_id: Option<u8>,
 ) -> usize {
     let rop_id = responses.get(start).copied().unwrap_or_default();
-    let fixed_end = match (rop_id, error_code) {
+    let fixed_end =
+        response_rop_fixed_frame_end(responses, start, rop_id, error_code).or_else(|| {
+            match (rop_id, error_code) {
+                (0x4F, Some(0)) => match responses.get(start + 6).copied() {
+                    Some(0) => Some(start.saturating_add(7)),
+                    Some(_) => next_response_rop_start_validated(
+                        responses,
+                        start.saturating_add(7),
+                        next_expected_rop_id,
+                        following_expected_rop_id,
+                    ),
+                    None => None,
+                },
+                _ => None,
+            }
+        });
+    fixed_end
+        .filter(|end| *end <= responses.len())
+        .or_else(|| next_response_rop_start(responses, start, next_expected_rop_id))
+        .unwrap_or(responses.len())
+}
+
+fn response_rop_fixed_frame_end(
+    responses: &[u8],
+    start: usize,
+    rop_id: u8,
+    error_code: Option<u32>,
+) -> Option<usize> {
+    match (rop_id, error_code) {
         (0x02, Some(0)) => Some(start.saturating_add(8)),
         (0x04 | 0x05 | 0x21, Some(0)) => Some(start.saturating_add(10)),
         (0x12 | 0x13, Some(0)) => Some(start.saturating_add(7)),
@@ -5087,11 +5182,42 @@ fn response_rop_frame_end(
         (_, Some(code)) if code != 0 => Some(start.saturating_add(6)),
         (_, Some(_)) => None,
         (_, None) => None,
-    };
-    fixed_end
+    }
+}
+
+fn next_response_rop_start_validated(
+    responses: &[u8],
+    search_start: usize,
+    next_expected_rop_id: Option<u8>,
+    following_expected_rop_id: Option<u8>,
+) -> Option<usize> {
+    let next_expected_rop_id = next_expected_rop_id?;
+    let mut cursor = search_start;
+    while cursor < responses.len() {
+        let found = responses
+            .get(cursor..)?
+            .iter()
+            .position(|candidate| *candidate == next_expected_rop_id)?;
+        let candidate_start = cursor + found;
+        let error_code = read_response_error_code(responses, candidate_start);
+        if let Some(end) = response_rop_fixed_frame_end(
+            responses,
+            candidate_start,
+            next_expected_rop_id,
+            error_code,
+        )
         .filter(|end| *end <= responses.len())
-        .or_else(|| next_response_rop_start(responses, start, next_expected_rop_id))
-        .unwrap_or(responses.len())
+        {
+            if following_expected_rop_id
+                .and_then(|rop_id| responses.get(end).map(|candidate| *candidate == rop_id))
+                .unwrap_or(true)
+            {
+                return Some(candidate_start);
+            }
+        }
+        cursor = candidate_start.saturating_add(1);
+    }
+    None
 }
 
 fn next_response_rop_start(
@@ -5906,6 +6032,17 @@ fn log_outlook_contents_table_query_rows(
         &selected_columns,
         snapshot,
     );
+    let normal_message_query_row_summary = format_normal_message_query_row_summary(
+        *folder_id,
+        *associated,
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+        sort_orders,
+        &selected_columns,
+        mailboxes,
+        emails,
+    );
     let inbox_associated_wire_row_summary = format_inbox_associated_wire_row_summary(
         principal.account_id,
         *folder_id,
@@ -5952,6 +6089,7 @@ fn log_outlook_contents_table_query_rows(
         ),
         query_row_window_summary = %query_row_window_summary,
         query_row_value_summary = %query_row_value_summary,
+        normal_message_query_row_summary = %normal_message_query_row_summary,
         inbox_associated_wire_row_summary = %inbox_associated_wire_row_summary,
         common_views_wlink_target_decoding = %if *folder_id == COMMON_VIEWS_FOLDER_ID && *associated {
             format_common_views_wlink_target_decoding(principal.account_id, snapshot)
@@ -6422,6 +6560,7 @@ fn format_debug_mapi_value(value: &MapiValue) -> String {
         MapiValue::I16(value) => value.to_string(),
         MapiValue::I32(value) => value.to_string(),
         MapiValue::I64(value) => value.to_string(),
+        MapiValue::F64(value) => f64::from_bits(*value).to_string(),
         MapiValue::U32(value) => value.to_string(),
         MapiValue::U64(value) => value.to_string(),
         MapiValue::Guid(value) => format!("guid:{}", hex_preview(value, 16)),
@@ -6516,6 +6655,20 @@ fn format_outlook_query_row_values(
                             .join(",");
                         format!("index={};id=0x{:016x};{}", index, shortcut.id, values)
                     }
+                    crate::mapi_store::MapiCommonViewsMessage::NamedView(view) => {
+                        let values = columns
+                            .iter()
+                            .map(|tag| {
+                                let value =
+                                    common_view_named_view_property_value(view, account_id, *tag)
+                                        .map(|value| format_debug_mapi_value(&value))
+                                        .unwrap_or_else(|| "default".to_string());
+                                format!("0x{tag:08x}={value}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("index={};id=0x{:016x};{}", index, view.id, values)
+                    }
                 }
             })
             .collect::<Vec<_>>()
@@ -6546,6 +6699,146 @@ fn format_outlook_query_row_values(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn format_normal_message_query_row_summary(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> String {
+    if associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+        return String::new();
+    }
+
+    let mut rows = emails_for_folder(folder_id, mailboxes, emails);
+    sort_emails(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let row_summaries = selected
+        .iter()
+        .take(5)
+        .map(|index| {
+            let email = rows[*index];
+            let serialized = serialize_message_row(email, columns);
+            let standard_row = standard_property_row_bytes(&serialized);
+            let values = columns
+                .iter()
+                .map(|tag| {
+                    let value = normal_message_debug_property_value(email, *tag)
+                        .map(|value| format_normal_message_debug_value(*tag, &value))
+                        .unwrap_or_else(|| "default".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "index={};mid=0x{:016x};subject={};class={};unread={};body_text_len={};body_html_len={};row_len={};standard_len={};values={}",
+                index,
+                mapi_message_id(email),
+                email.subject,
+                message_class_for_email(email),
+                email.unread,
+                email.body_text.len(),
+                email.body_html_sanitized.as_ref().map(|body| body.len()).unwrap_or(0),
+                serialized.len(),
+                standard_row.len(),
+                values
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    format!(
+        "total={};position={};forward={};requested={};returned={};summarized={};{}",
+        rows.len(),
+        position,
+        forward_read,
+        row_count,
+        selected.len(),
+        selected.len().min(5),
+        row_summaries
+    )
+}
+
+fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {
+    if property_tag == PID_TAG_HTML_BINARY {
+        return email
+            .body_html_sanitized
+            .as_ref()
+            .map(|value| MapiValue::Binary(value.clone().into_bytes()));
+    }
+
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(mapi_message_id(email))),
+        PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE => Some(MapiValue::U32(0)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(email.subject.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
+            message_class_for_email(email).to_string(),
+        )),
+        PID_TAG_MESSAGE_DELIVERY_TIME
+        | PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
+        )),
+        PID_TAG_CLIENT_SUBMIT_TIME => Some(MapiValue::U64(
+            email
+                .sent_at
+                .as_deref()
+                .map(mapi_mailstore::filetime_from_rfc3339_utc)
+                .unwrap_or_default(),
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
+        PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::U32(
+            email.size_octets.clamp(0, u32::MAX as i64) as u32
+        )),
+        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
+            email
+                .from_display
+                .clone()
+                .unwrap_or_else(|| email.from_address.clone()),
+        )),
+        PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
+        PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(email.from_address.clone()))
+        }
+        PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
+        PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
+        PID_TAG_DISPLAY_BCC_W => Some(MapiValue::String(display_bcc(email))),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
+        PID_TAG_RTF_IN_SYNC => Some(MapiValue::Bool(false)),
+        PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
+        PID_TAG_RTF_COMPRESSED => Some(MapiValue::Binary(uncompressed_rtf_body(&email.body_text))),
+        PID_TAG_BODY_HTML_W => email.body_html_sanitized.clone().map(MapiValue::String),
+        PID_TAG_NATIVE_BODY => Some(MapiValue::U32(native_body_format(email))),
+        PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
+        PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(mapi_message_id(email)),
+        )),
+        PID_TAG_INTERNET_MESSAGE_ID_W => Some(MapiValue::String(
+            email.internet_message_id.clone().unwrap_or_default(),
+        )),
+        tag => email_property_value(email, tag),
+    }
+}
+
+fn format_normal_message_debug_value(property_tag: u32, value: &MapiValue) -> String {
+    match (canonical_property_storage_tag(property_tag), value) {
+        (PID_TAG_RTF_COMPRESSED | PID_TAG_HTML_BINARY, MapiValue::Binary(value)) => {
+            format!("binary:bytes={}", value.len())
+        }
+        _ => format_debug_mapi_value(value),
+    }
 }
 
 fn format_inbox_associated_wire_row_summary(
@@ -6664,6 +6957,7 @@ fn format_common_views_wlink_target_decoding(
                     sharing_local_folder_id_decoded == Some(INBOX_FOLDER_ID)
                 ))
             }
+            crate::mapi_store::MapiCommonViewsMessage::NamedView(_) => None,
         })
         .collect::<Vec<_>>()
         .join("|")
@@ -6808,6 +7102,10 @@ fn format_common_views_query_row_window(
                     message.ordinal
                 ))
             }
+            crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => Some(format!(
+                "index={};id=0x{:016x};subject={};class=IPM.Microsoft.FolderDesign.NamedView;view_flags={};view_type={}",
+                index, message.id, message.name, message.view_flags, message.view_type
+            )),
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -8269,6 +8567,8 @@ where
                     output_handles.push(handle);
                 } else if let Some(email) = unique_message_for_id(message_id, emails) {
                     let canonical_folder_id = canonical_message_folder_id(email, mailboxes);
+                    let handle_folder_id =
+                        fallback_open_message_folder_id(folder_id, email, mailboxes);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -8278,6 +8578,7 @@ where
                         request_rop_id = "0x03",
                         requested_folder_id = %format!("0x{folder_id:016x}"),
                         canonical_folder_id = %format!("0x{canonical_folder_id:016x}"),
+                        handle_folder_id = %format!("0x{handle_folder_id:016x}"),
                         message_id = %format!("0x{message_id:016x}"),
                         message_subject = %email.subject,
                         fallback_reason = "unique_message_id_folder_mismatch",
@@ -8286,7 +8587,7 @@ where
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::Message {
-                            folder_id: canonical_folder_id,
+                            folder_id: handle_folder_id,
                             message_id,
                         },
                     );
@@ -8385,6 +8686,23 @@ where
                         responses.extend_from_slice(&rop_open_message_response(
                             &request,
                             &message.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else if let Some(message) =
+                        snapshot.common_view_named_view_message_for_id(message_id)
+                    {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::CommonViewNamedView {
+                                folder_id,
+                                view_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &message.name,
                             0,
                         ));
                         output_handles.push(handle);
@@ -9911,6 +10229,13 @@ where
                                     &mut handle_slots,
                                     Some(request.response_handle_index()),
                                     handle,
+                                );
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::AssociatedConfig {
+                                        folder_id,
+                                        config_id: message_id,
+                                    },
                                 );
                                 record_sync_upload_content_change(
                                     session,
@@ -12574,7 +12899,22 @@ where
                             ));
                             continue;
                         };
-                        if email.mailbox_role != "drafts" {
+                        if !matches!(email.mailbox_role.as_str(), "drafts" | "outbox") {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = %format!("{:#04x}", request.rop_id),
+                                input_handle = handle,
+                                object_kind = "message",
+                                folder_id = %format!("{folder_id:#018x}"),
+                                message_id = %format!("{message_id:#018x}"),
+                                mailbox_role = %email.mailbox_role,
+                                failure_reason = "message_not_in_outgoing_folder",
+                                "rca debug mapi submit message"
+                            );
                             responses.extend_from_slice(&rop_error_response(
                                 request.rop_id,
                                 request.response_handle_index(),
@@ -17126,6 +17466,9 @@ fn read_fast_transfer_property_value(
     match MapiPropertyType::from_code((property_tag & 0xFFFF) as u16) {
         Some(MapiPropertyType::Integer16) => Ok(MapiValue::I16(cursor.read_u16()? as i16)),
         Some(MapiPropertyType::Integer32) => Ok(MapiValue::I32(cursor.read_i32()?)),
+        Some(MapiPropertyType::Floating32 | MapiPropertyType::Floating64) => Err(anyhow::anyhow!(
+            "unsupported FastTransfer floating-point property type"
+        )),
         Some(MapiPropertyType::Boolean) => Ok(MapiValue::Bool(cursor.read_u16()? != 0)),
         Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
             Ok(MapiValue::I64(cursor.read_i64()?))
@@ -18034,6 +18377,221 @@ mod tests {
         );
     }
 
+    fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
+        lpe_storage::JmapEmailMailboxState {
+            mailbox_id,
+            role: role.to_string(),
+            name: role.to_string(),
+            modseq: 1,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            draft: false,
+        }
+    }
+
+    #[test]
+    fn open_message_fallback_preserves_valid_requested_folder() {
+        let inbox_id = Uuid::from_u128(0x1111);
+        let sent_id = Uuid::from_u128(0x2222);
+        crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+        crate::mapi::identity::remember_mapi_identity(sent_id, SENT_FOLDER_ID);
+
+        let mailboxes = vec![
+            JmapMailbox {
+                id: inbox_id,
+                parent_id: None,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 1,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: sent_id,
+                parent_id: None,
+                role: "sent".to_string(),
+                name: "Sent".to_string(),
+                sort_order: 1,
+                modseq: 1,
+                total_emails: 1,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+        ];
+        let email = JmapEmail {
+            id: Uuid::from_u128(0x3333),
+            thread_id: Uuid::from_u128(0x4444),
+            mailbox_ids: vec![sent_id, inbox_id],
+            mailbox_states: vec![
+                test_mailbox_state(sent_id, "sent"),
+                test_mailbox_state(inbox_id, "inbox"),
+            ],
+            mailbox_id: sent_id,
+            mailbox_role: "sent".to_string(),
+            mailbox_name: "Sent".to_string(),
+            modseq: 1,
+            received_at: "2026-06-07T19:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Test".to_string(),
+            preview: String::new(),
+            body_text: String::new(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 0,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        assert_eq!(
+            fallback_open_message_folder_id(INBOX_FOLDER_ID, &email, &mailboxes),
+            INBOX_FOLDER_ID
+        );
+        assert_eq!(
+            fallback_open_message_folder_id(TRASH_FOLDER_ID, &email, &mailboxes),
+            SENT_FOLDER_ID
+        );
+    }
+
+    #[test]
+    fn normal_inbox_query_row_summary_reports_message_shapes() {
+        let inbox_id = Uuid::from_u128(0x5555);
+        crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+        let mailbox = JmapMailbox {
+            id: inbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let email = JmapEmail {
+            id: Uuid::from_u128(0x6666),
+            thread_id: Uuid::from_u128(0x7777),
+            mailbox_ids: vec![inbox_id],
+            mailbox_states: vec![test_mailbox_state(inbox_id, "inbox")],
+            mailbox_id: inbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 1,
+            received_at: "2026-06-07T19:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Preview target".to_string(),
+            preview: "Body text".to_string(),
+            body_text: "Body text".to_string(),
+            body_html_sanitized: Some("<p>Body text</p>".to_string()),
+            unread: true,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: Some("<message@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        crate::mapi::identity::remember_mapi_identity(
+            email.id,
+            crate::mapi::identity::mapi_store_id(0x6666),
+        );
+
+        let summary = format_normal_message_query_row_summary(
+            INBOX_FOLDER_ID,
+            false,
+            0,
+            true,
+            50,
+            &[],
+            &[
+                PID_TAG_MID,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_MESSAGE_FLAGS,
+                PID_TAG_BODY_W,
+                PID_TAG_RTF_COMPRESSED,
+                PID_TAG_HTML_BINARY,
+                PID_TAG_NATIVE_BODY,
+                PID_TAG_INTERNET_MESSAGE_ID_W,
+            ],
+            &[mailbox],
+            &[email],
+        );
+
+        assert!(summary.contains("total=1"));
+        assert!(summary.contains("returned=1"));
+        assert!(summary.contains("class=IPM.Note"));
+        assert!(summary.contains("body_text_len=9"));
+        assert!(summary.contains("body_html_len=16"));
+        assert!(summary.contains("0x001a001f=IPM.Note"));
+        assert!(summary.contains("0x0e070003="));
+        assert!(summary.contains("0x1000001f=Body text"));
+        assert!(summary.contains("0x10090102=binary:"));
+        assert!(summary.contains("0x10130102=binary:bytes=16"), "{summary}");
+        assert!(summary.contains("0x10160003=3"));
+        assert!(summary.contains("0x1035001f=<message@example.test>"));
+    }
+
     #[test]
     fn folder_properties_for_open_reports_inbox_associated_content_count() {
         let principal = test_principal();
@@ -18167,6 +18725,24 @@ mod tests {
         }
 
         assert!(!uploaded_state_has_delta_anchor(marker_mask));
+    }
+
+    #[test]
+    fn associated_config_stream_write_summary_names_roaming_xml() {
+        let values = vec![
+            (PID_TAG_ROAMING_DATATYPES, MapiValue::I32(2)),
+            (
+                PID_TAG_ROAMING_XML_STREAM,
+                MapiValue::Binary(b"<xml/>".to_vec()),
+            ),
+            (0x685D_0003, MapiValue::I32(42)),
+        ];
+
+        let summary = associated_config_stream_write_summary(&values);
+
+        assert!(summary.contains("PidTagRoamingDatatypes=i32"));
+        assert!(summary.contains("PidTagRoamingXmlStream=binary:bytes=6"));
+        assert!(summary.contains("OutlookConfigurationStamp=i32"));
     }
 
     #[test]
@@ -18666,6 +19242,47 @@ mod tests {
         assert!(response_summary
             .frames
             .contains("0x05@35..45:len=10:out=1:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_response_summary_does_not_treat_find_row_payload_as_next_rop() {
+        let table_request = RopRequest {
+            rop_id: 0x05,
+            input_handle_index: Some(0),
+            output_handle_index: Some(2),
+            payload: vec![0x02],
+        };
+        let set_columns_request = RopRequest {
+            rop_id: 0x12,
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let mut responses = vec![0x4F, 0x01];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(1);
+        responses.extend_from_slice(&[
+            0x00, 0x01, 0x00, 0x01, 0x05, 0x01, 0x00, 0x7f, 0xff, 0x00, 0x44, 0x55,
+        ]);
+        let find_row_end = responses.len();
+        responses.extend_from_slice(&rop_get_contents_table_response(&table_request, 3));
+        responses.extend_from_slice(&rop_set_columns_response(&set_columns_request));
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[42, 43]));
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x4F, 0x05, 0x12]);
+
+        assert_eq!(response_summary.ids_csv, "0x4f,0x05,0x12");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x4f:0x00000000,0x05:0x00000000,0x12:0x00000000"
+        );
+        assert!(response_summary.frames.contains(&format!(
+            "0x4f@0..{find_row_end}:len={find_row_end}:out=1:rv=0x00000000"
+        )));
+        assert!(!response_summary.results_csv.contains("0xffff7f00"));
         assert!(response_summary.parse_error.is_empty());
     }
 
@@ -19212,6 +19829,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let request = RopRequest {
             rop_id: 0xFE,
@@ -19437,6 +20056,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         }
     }
 

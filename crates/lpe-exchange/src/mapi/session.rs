@@ -177,6 +177,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         shortcut_id: u64,
     },
+    CommonViewNamedView {
+        folder_id: u64,
+        view_id: u64,
+    },
     AssociatedConfig {
         folder_id: u64,
         config_id: u64,
@@ -1165,6 +1169,7 @@ impl MapiObject {
             | MapiObject::JournalEntry { folder_id, .. }
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
+            | MapiObject::CommonViewNamedView { folder_id, .. }
             | MapiObject::AssociatedConfig { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
             | MapiObject::RecoverableItem { folder_id, .. }
@@ -1389,6 +1394,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "user@example.test".to_string(),
             display_name: "User".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         }
     }
 

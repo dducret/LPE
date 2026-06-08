@@ -120,6 +120,8 @@ pub struct AccountLogin {
     pub password_hash: String,
     pub status: String,
     pub display_name: String,
+    pub quota_mb: u32,
+    pub quota_used_octets: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -995,7 +997,21 @@ impl Storage {
                 ac.account_email AS email,
                 ac.password_hash,
                 ac.status,
-                a.display_name
+                a.display_name,
+                a.quota_mb,
+                COALESCE((
+                    SELECT SUM(logical_messages.size_octets)::BIGINT
+                    FROM (
+                        SELECT DISTINCT m.id, m.size_octets
+                        FROM mailbox_messages mm
+                        JOIN messages m
+                          ON m.tenant_id = mm.tenant_id
+                         AND m.id = mm.message_id
+                        WHERE mm.tenant_id = a.tenant_id
+                          AND mm.account_id = a.id
+                          AND mm.visibility <> 'expunged'
+                    ) logical_messages
+                ), 0)::BIGINT AS quota_used_octets
             FROM account_credentials ac
             JOIN accounts a
               ON a.tenant_id = ac.tenant_id
@@ -1016,6 +1032,8 @@ impl Storage {
             password_hash: row.password_hash,
             status: row.status,
             display_name: row.display_name,
+            quota_mb: row.quota_mb.max(0) as u32,
+            quota_used_octets: row.quota_used_octets.max(0) as u64,
         }))
     }
 

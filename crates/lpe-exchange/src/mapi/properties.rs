@@ -5,8 +5,8 @@ use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
-    MapiAssociatedConfigMessage, MapiConversationActionMessage, MapiMessage,
-    MapiNavigationShortcutMessage, MapiPublicFolder,
+    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
+    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
 use anyhow::bail;
 use lpe_storage::{
@@ -70,6 +70,7 @@ pub(in crate::mapi) enum MapiValue {
     I64(i64),
     U32(u32),
     U64(u64),
+    F64(u64),
     String(String),
     Binary(Vec<u8>),
     Guid([u8; 16]),
@@ -117,6 +118,9 @@ fn mapi_value_to_json(value: &MapiValue) -> serde_json::Value {
         MapiValue::I64(value) => serde_json::json!({"type": "i64", "value": value}),
         MapiValue::U32(value) => serde_json::json!({"type": "u32", "value": value}),
         MapiValue::U64(value) => serde_json::json!({"type": "u64", "value": value}),
+        MapiValue::F64(value) => {
+            serde_json::json!({"type": "f64", "value": f64::from_bits(*value)})
+        }
         MapiValue::String(value) => serde_json::json!({"type": "string", "value": value}),
         MapiValue::Binary(value) => {
             serde_json::json!({"type": "binary", "value": bytes_to_hex(value)})
@@ -150,6 +154,7 @@ fn mapi_value_from_json(value: &serde_json::Value) -> Option<MapiValue> {
         "i64" => Some(MapiValue::I64(value.as_i64()?)),
         "u32" => Some(MapiValue::U32(value.as_u64()?.try_into().ok()?)),
         "u64" => Some(MapiValue::U64(value.as_u64()?)),
+        "f64" => Some(MapiValue::F64(value.as_f64()?.to_bits())),
         "string" => Some(MapiValue::String(value.as_str()?.to_string())),
         "binary" => Some(MapiValue::Binary(hex_to_bytes(value.as_str()?)?)),
         "guid" => Some(MapiValue::Guid(
@@ -319,6 +324,7 @@ pub(in crate::mapi) const PID_TAG_DISPLAY_TO_W: u32 = 0x0E04_001F;
 pub(in crate::mapi) const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE_EXTENDED: u32 = 0x0E08_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_ENTRY_ID: u32 = 0x0E09_0102;
 pub(in crate::mapi) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
@@ -338,6 +344,7 @@ pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 pub(in crate::mapi) const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
 pub(in crate::mapi) const PID_TAG_BODY_STRING8: u32 = 0x1000_001E;
 pub(in crate::mapi) const PID_TAG_BODY_W: u32 = 0x1000_001F;
+pub(in crate::mapi) const PID_TAG_RTF_COMPRESSED: u32 = 0x1009_0102;
 pub(in crate::mapi) const PID_TAG_BODY_HTML_W: u32 = 0x1013_001F;
 pub(in crate::mapi) const PID_TAG_NATIVE_BODY: u32 = 0x1016_0003;
 pub(in crate::mapi) const PID_TAG_ATTRIBUTE_HIDDEN: u32 = 0x10F4_000B;
@@ -395,8 +402,13 @@ pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
 pub(in crate::mapi) const PID_TAG_OUTLOOK_STORE_STATE: u32 = 0x346F_0003;
 pub(in crate::mapi) const PID_TAG_PRIVATE: u32 = 0x0E5C_000B;
 pub(in crate::mapi) const PID_TAG_USER_GUID: u32 = 0x6707_0102;
+pub(in crate::mapi) const PID_TAG_PROHIBIT_RECEIVE_QUOTA: u32 = 0x666A_0003;
 pub(in crate::mapi) const PID_TAG_MAX_SUBMIT_MESSAGE_SIZE: u32 = 0x666D_0003;
+pub(in crate::mapi) const PID_TAG_PROHIBIT_SEND_QUOTA: u32 = 0x666E_0003;
+pub(in crate::mapi) const PID_TAG_STORAGE_QUOTA_LIMIT: u32 = 0x3FF5_0003;
+pub(in crate::mapi) const PID_TAG_PST_PATH_W: u32 = 0x6700_001F;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
+pub(in crate::mapi) const PID_TAG_SENT_MAIL_SVR_EID: u32 = 0x6740_00FB;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_INST_ID: u32 = 0x674D_0014;
 pub(in crate::mapi) const PID_TAG_INSTANCE_NUM: u32 = 0x674E_0003;
@@ -416,6 +428,11 @@ pub(in crate::mapi) const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 pub(in crate::mapi) const PID_TAG_WLINK_SECTION: u32 = 0x6852_0003;
 pub(in crate::mapi) const PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID: u32 = 0x6891_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
@@ -491,6 +508,7 @@ pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND: u32 = 0x0000_851E;
 pub(in crate::mapi) const PID_LID_REMINDER_FILE_PARAMETER: u32 = 0x0000_851F;
 pub(in crate::mapi) const PID_LID_FLAG_REQUEST: u32 = 0x0000_8530;
 pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME: u32 = 0x0000_8560;
+pub(in crate::mapi) const PID_LID_PERCENT_COMPLETE: u32 = 0x0000_8102;
 pub(in crate::mapi) const PID_LID_TASK_START_DATE: u32 = 0x0000_8104;
 pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE: u32 = 0x0000_820D;
@@ -565,6 +583,7 @@ pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND_TAG: u32 = 0x851E_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_FILE_PARAMETER_W_TAG: u32 = 0x851F_001F;
 pub(in crate::mapi) const PID_LID_FLAG_REQUEST_W_TAG: u32 = 0x8530_001F;
 pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME_TAG: u32 = 0x8560_0040;
+pub(in crate::mapi) const PID_LID_PERCENT_COMPLETE_TAG: u32 = 0x8102_0005;
 pub(in crate::mapi) const PID_LID_TASK_START_DATE_TAG: u32 = 0x8104_0040;
 pub(in crate::mapi) const PID_LID_TASK_DUE_DATE_TAG: u32 = 0x8105_0040;
 pub(in crate::mapi) const PID_LID_COMPANIES_TAG: u32 = 0x8539_101F;
@@ -643,6 +662,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_REMINDER_FILE_PARAMETER, PSETID_COMMON_GUID),
             (PID_LID_FLAG_REQUEST, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
+            (PID_LID_PERCENT_COMPLETE, PSETID_TASK_GUID),
             (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
             (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
             (PID_LID_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
@@ -775,7 +795,16 @@ pub(in crate::mapi) fn logon_property_value(
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => principal
+            .quota_used_octets
+            .map(|value| MapiValue::I64(value.min(i64::MAX as u64) as i64)),
+        PID_TAG_PROHIBIT_RECEIVE_QUOTA
+        | PID_TAG_PROHIBIT_SEND_QUOTA
+        | PID_TAG_STORAGE_QUOTA_LIMIT => principal
+            .quota_mb
+            .map(|value| MapiValue::U32(value.saturating_mul(1024))),
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => Some(MapiValue::U32(35 * 1024)),
+        PID_TAG_PST_PATH_W => Some(MapiValue::String(String::new())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
 }
@@ -1185,6 +1214,16 @@ pub(in crate::mapi) fn restriction_matches_navigation_shortcut(
     })
 }
 
+pub(in crate::mapi) fn restriction_matches_common_view_named_view(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiCommonViewNamedViewMessage,
+    account_id: Uuid,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        common_view_named_view_property_value(message, account_id, property_tag)
+    })
+}
+
 pub(in crate::mapi) fn restriction_matches_associated_config(
     restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
@@ -1358,6 +1397,7 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
 ) -> Option<&'static str> {
     match container_class {
         "IPF.Note" => Some("IPM.Note"),
+        class if class.starts_with("IPF.Note.") => Some("IPM.Note"),
         "IPF.Appointment" => Some("IPM.Appointment"),
         "IPF.Contact" | "IPF.Contact.MOC.QuickContacts" => Some("IPM.Contact"),
         "IPF.Task" => Some("IPM.Task"),
@@ -1567,6 +1607,9 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
+        PID_LID_PERCENT_COMPLETE_TAG => {
+            Some(MapiValue::F64(email_percent_complete(email).to_bits()))
+        }
         PID_TAG_FLAG_COMPLETE_TIME => email
             .followup_completed_at
             .as_deref()
@@ -1611,11 +1654,17 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
         PID_TAG_RTF_IN_SYNC => Some(MapiValue::Bool(false)),
         PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
-        PID_TAG_BODY_HTML_W => email.body_html_sanitized.clone().map(MapiValue::String),
+        PID_TAG_RTF_COMPRESSED => Some(MapiValue::Binary(uncompressed_rtf_body(&email.body_text))),
+        PID_TAG_BODY_HTML_W => email
+            .body_html_sanitized
+            .clone()
+            .or_else(|| html_body_from_plain_text(&email.body_text))
+            .map(MapiValue::String),
         PID_TAG_HTML_BINARY => email
             .body_html_sanitized
-            .as_ref()
-            .map(|value| MapiValue::Binary(value.clone().into_bytes())),
+            .clone()
+            .or_else(|| html_body_from_plain_text(&email.body_text))
+            .map(|value| MapiValue::Binary(value.into_bytes())),
         PID_TAG_NATIVE_BODY => Some(MapiValue::U32(native_body_format(email))),
         PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
         PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
@@ -1769,6 +1818,80 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
                 wlink_folder_type_guid(message),
             ))
         }
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn common_view_named_view_property_value(
+    message: &MapiCommonViewNamedViewMessage,
+    account_id: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let requested_property_tag = property_tag;
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            message.folder_id,
+            message.id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(message.name.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY | PID_TAG_RECORD_KEY | PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.id),
+        )),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            ),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            )))
+        }
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(mapi_mailstore::change_number_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            )))
+        }
+        PID_TAG_VIEW_DESCRIPTOR_FLAGS => Some(MapiValue::U32(message.view_flags)),
+        PID_TAG_VIEW_DESCRIPTOR_VERSION => Some(MapiValue::U32(message.view_type)),
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
+        tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => Some(
+            wlink_guid_property_value(requested_property_tag, *message.canonical_id.as_bytes()),
+        ),
+        tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) => {
+            Some(wlink_guid_property_value(
+                requested_property_tag,
+                wlink_mail_folder_type_guid(),
+            ))
+        }
+        tag if property_tag_id(tag) == property_tag_id(PID_TAG_WLINK_GROUP_HEADER_ID) => Some(
+            wlink_guid_property_value(requested_property_tag, default_wlink_group_guid()),
+        ),
         _ => None,
     }
 }
@@ -1959,6 +2082,69 @@ pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {
     } else {
         1
     }
+}
+
+fn html_body_from_plain_text(body_text: &str) -> Option<String> {
+    if body_text.trim().is_empty() {
+        return None;
+    }
+    let mut html = String::from("<html><body>");
+    for ch in body_text.chars() {
+        match ch {
+            '&' => html.push_str("&amp;"),
+            '<' => html.push_str("&lt;"),
+            '>' => html.push_str("&gt;"),
+            '"' => html.push_str("&quot;"),
+            '\'' => html.push_str("&#39;"),
+            '\r' => {}
+            '\n' => html.push_str("<br>"),
+            _ => html.push(ch),
+        }
+    }
+    html.push_str("</body></html>");
+    Some(html)
+}
+
+pub(in crate::mapi) fn uncompressed_rtf_body(body_text: &str) -> Vec<u8> {
+    let mut rtf = String::from("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil Segoe UI;}}\\f0\\fs20 ");
+    append_rtf_escaped_text(&mut rtf, body_text);
+    rtf.push('}');
+    rtf_uncompressed_container(rtf.as_bytes())
+}
+
+fn append_rtf_escaped_text(output: &mut String, value: &str) {
+    for ch in value.chars() {
+        match ch {
+            '\\' => output.push_str("\\\\"),
+            '{' => output.push_str("\\{"),
+            '}' => output.push_str("\\}"),
+            '\r' => {}
+            '\n' => output.push_str("\\par "),
+            '\t' => output.push_str("\\tab "),
+            ' '..='~' => output.push(ch),
+            _ => {
+                let mut units = [0; 2];
+                for unit in ch.encode_utf16(&mut units) {
+                    let signed = *unit as i16;
+                    output.push_str(&format!("\\u{signed}?"));
+                }
+            }
+        }
+    }
+}
+
+fn rtf_uncompressed_container(raw: &[u8]) -> Vec<u8> {
+    let raw_size = u32::try_from(raw.len()).expect("RTF body too large for MAPI");
+    let compressed_size = raw_size
+        .checked_add(12)
+        .expect("RTF body too large for MAPI");
+    let mut value = Vec::with_capacity(raw.len() + 16);
+    value.extend_from_slice(&compressed_size.to_le_bytes());
+    value.extend_from_slice(&raw_size.to_le_bytes());
+    value.extend_from_slice(&0x414C_454D_u32.to_le_bytes());
+    value.extend_from_slice(&0_u32.to_le_bytes());
+    value.extend_from_slice(raw);
+    value
 }
 
 fn transport_headers(email: &JmapEmail) -> String {
@@ -2492,6 +2678,7 @@ pub(in crate::mapi) fn task_property_value_with_reminder(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(task_flag_status(task))),
+        PID_LID_PERCENT_COMPLETE_TAG => Some(MapiValue::F64(task_percent_complete(task).to_bits())),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(task_size(task))),
         PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
@@ -2792,6 +2979,22 @@ fn task_flag_status(task: &ClientTask) -> u32 {
     }
 }
 
+fn task_percent_complete(task: &ClientTask) -> f64 {
+    if task.status == "completed" {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+fn email_percent_complete(email: &JmapEmail) -> f64 {
+    if email.followup_flag_status == "complete" {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 pub(in crate::mapi) fn attachment_property_value(
     attachment: &MapiAttachment,
     property_tag: u32,
@@ -2851,7 +3054,8 @@ impl MapiValue {
             MapiValue::I64(value) => Some(*value),
             MapiValue::U32(value) => Some(i64::from(*value)),
             MapiValue::U64(value) => i64::try_from(*value).ok(),
-            MapiValue::String(_)
+            MapiValue::F64(_)
+            | MapiValue::String(_)
             | MapiValue::Binary(_)
             | MapiValue::Guid(_)
             | MapiValue::Error(_)
@@ -2872,6 +3076,7 @@ impl MapiValue {
             MapiValue::I64(value) => Some(*value != 0),
             MapiValue::U32(value) => Some(*value != 0),
             MapiValue::U64(value) => Some(*value != 0),
+            MapiValue::F64(value) => Some(f64::from_bits(*value) != 0.0),
             MapiValue::String(_)
             | MapiValue::Binary(_)
             | MapiValue::Guid(_)
@@ -2900,6 +3105,7 @@ impl MapiValue {
             MapiValue::I64(value) => Some(value.to_string()),
             MapiValue::U32(value) => Some(value.to_string()),
             MapiValue::U64(value) => Some(value.to_string()),
+            MapiValue::F64(value) => Some(f64::from_bits(value).to_string()),
             MapiValue::String(value) => Some(value),
             MapiValue::Binary(_)
             | MapiValue::Guid(_)
@@ -2922,6 +3128,14 @@ impl MapiValue {
             MapiValue::U32(value) => Some(value),
             MapiValue::U64(value) => u32::try_from(value).ok(),
             MapiValue::Error(value) => Some(value),
+            MapiValue::F64(value) => {
+                let value = f64::from_bits(value);
+                if value.is_finite() && value >= 0.0 && value <= f64::from(u32::MAX) {
+                    Some(value as u32)
+                } else {
+                    None
+                }
+            }
             MapiValue::String(_)
             | MapiValue::Binary(_)
             | MapiValue::Guid(_)
@@ -2939,7 +3153,7 @@ impl MapiValue {
             MapiValue::Bool(_) => 1,
             MapiValue::I16(_) => 2,
             MapiValue::I32(_) | MapiValue::U32(_) => 4,
-            MapiValue::I64(_) | MapiValue::U64(_) => 8,
+            MapiValue::I64(_) | MapiValue::U64(_) | MapiValue::F64(_) => 8,
             MapiValue::String(value) => value.encode_utf16().count() * 2,
             MapiValue::Binary(value) => value.len(),
             MapiValue::Guid(_) => 16,
@@ -3032,17 +3246,19 @@ pub(in crate::mapi) async fn open_stream_data<S: ExchangeStore>(
             attachment_stream_data(store, principal, session, input_handle, open_mode, snapshot)
                 .await
         }
-        PID_TAG_BODY_STRING8 | PID_TAG_BODY_W | PID_TAG_BODY_HTML_W | PID_TAG_HTML_BINARY => {
-            message_body_stream_data(
-                session,
-                input_handle,
-                property_tag,
-                open_mode,
-                mailboxes,
-                emails,
-                snapshot,
-            )
-        }
+        PID_TAG_BODY_STRING8
+        | PID_TAG_BODY_W
+        | PID_TAG_RTF_COMPRESSED
+        | PID_TAG_BODY_HTML_W
+        | PID_TAG_HTML_BINARY => message_body_stream_data(
+            session,
+            input_handle,
+            property_tag,
+            open_mode,
+            mailboxes,
+            emails,
+            snapshot,
+        ),
         _ => property_stream_data(
             session,
             input_handle,
@@ -3202,10 +3418,12 @@ pub(in crate::mapi) fn message_body_stream_data(
         _ => return None,
     };
 
+    let body_html = body_html.or_else(|| html_body_from_plain_text(&body_text));
     let stream = match (property_tag, open_mode) {
         (_, 2) => Vec::new(),
         (PID_TAG_BODY_STRING8, _) => string8z_bytes(&body_text),
         (PID_TAG_BODY_W, _) => utf16z_bytes(&body_text),
+        (PID_TAG_RTF_COMPRESSED, _) => uncompressed_rtf_body(&body_text),
         (PID_TAG_BODY_HTML_W, _) => utf16z_bytes(body_html.as_deref().unwrap_or("")),
         (PID_TAG_HTML_BINARY, _) => body_html.unwrap_or_default().into_bytes(),
         _ => return None,
@@ -3472,11 +3690,21 @@ pub(in crate::mapi) fn pending_message_size(properties: &HashMap<u32, MapiValue>
         properties,
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
-    let body = pending_text_property(properties, &[PID_TAG_BODY_W]);
+    let body = pending_body_text_property(properties);
     subject
         .len()
         .saturating_add(body.len())
         .min(i64::MAX as usize) as i64
+}
+
+fn pending_body_text_property(properties: &HashMap<u32, MapiValue>) -> String {
+    let body_text = pending_text_property(properties, &[PID_TAG_BODY_W]);
+    if !body_text.trim().is_empty() {
+        return body_text;
+    }
+    pending_html_property(properties)
+        .map(|value| plain_text_from_html_body(&value))
+        .unwrap_or_default()
 }
 
 pub(in crate::mapi) fn pending_text_property(
@@ -3503,6 +3731,57 @@ pub(in crate::mapi) fn optional_pending_text_property(
                 .and_then(|value| value.clone().into_text())
         })
         .filter(|value| !value.trim().is_empty())
+}
+
+fn plain_text_from_html_body(html: &str) -> String {
+    let mut text = String::new();
+    let mut tag = String::new();
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match (in_tag, ch) {
+            (false, '<') => {
+                in_tag = true;
+                tag.clear();
+            }
+            (true, '>') => {
+                in_tag = false;
+                if html_tag_is_line_break(&tag) && !text.ends_with('\n') {
+                    text.push('\n');
+                }
+            }
+            (true, _) => tag.push(ch),
+            (false, _) => text.push(ch),
+        }
+    }
+    decode_basic_html_entities(&text)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn html_tag_is_line_break(tag: &str) -> bool {
+    let tag_name = tag
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+    matches!(tag_name.as_str(), "br" | "p" | "div" | "li")
+}
+
+fn decode_basic_html_entities(value: &str) -> String {
+    value
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 pub(in crate::mapi) fn default_mapping_rights() -> CollaborationRights {
@@ -5319,7 +5598,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         properties,
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
-    let body_text = pending_text_property(properties, &[PID_TAG_BODY_W]);
+    let body_text = pending_body_text_property(properties);
     let from_address =
         optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
             .unwrap_or_else(|| principal.email.clone());
@@ -5395,7 +5674,7 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         properties,
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
-    let body_text = pending_text_property(properties, &[PID_TAG_BODY_W]);
+    let body_text = pending_body_text_property(properties);
     let from_address =
         optional_pending_submit_address(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
             .unwrap_or_else(|| principal.email.clone());
@@ -6207,6 +6486,24 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
         Some(MapiPropertyType::Integer32) => {
             write_u32(row, value.clone().into_u32().unwrap_or_default())
         }
+        Some(MapiPropertyType::Floating32) => {
+            let value = match value {
+                MapiValue::F64(value) if f64::from_bits(*value).is_finite() => {
+                    f64::from_bits(*value) as f32
+                }
+                _ => 0.0,
+            };
+            row.extend_from_slice(&value.to_le_bytes());
+        }
+        Some(MapiPropertyType::Floating64) => {
+            let value = match value {
+                MapiValue::F64(value) if f64::from_bits(*value).is_finite() => {
+                    f64::from_bits(*value)
+                }
+                _ => 0.0,
+            };
+            row.extend_from_slice(&value.to_le_bytes());
+        }
         Some(MapiPropertyType::Error) => {
             write_u32(row, value.clone().into_u32().unwrap_or(0x8004_0102))
         }
@@ -6273,6 +6570,21 @@ pub(in crate::mapi) fn parse_mapi_property_value(
     match MapiPropertyTag::new(property_tag).property_type() {
         Some(MapiPropertyType::Integer16) => Ok(MapiValue::I16(cursor.read_u16()? as i16)),
         Some(MapiPropertyType::Integer32) => Ok(MapiValue::I32(cursor.read_i32()?)),
+        Some(MapiPropertyType::Floating32) => {
+            let bytes = cursor.read_bytes(4)?;
+            Ok(MapiValue::F64(
+                (f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f64).to_bits(),
+            ))
+        }
+        Some(MapiPropertyType::Floating64) => {
+            let bytes = cursor.read_bytes(8)?;
+            Ok(MapiValue::F64(
+                f64::from_le_bytes([
+                    bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                ])
+                .to_bits(),
+            ))
+        }
         Some(MapiPropertyType::Error) => Ok(MapiValue::Error(cursor.read_u32()?)),
         Some(MapiPropertyType::Boolean) => Ok(MapiValue::Bool(cursor.read_u8()? != 0)),
         Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
@@ -6504,6 +6816,56 @@ mod tests {
         value[532..536].copy_from_slice(&1_000_030u32.to_le_bytes());
         value[536..540].copy_from_slice(&1u32.to_le_bytes());
         value
+    }
+
+    #[test]
+    fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mailbox = mailbox(
+            "11111111-1111-4111-8111-111111111111",
+            None,
+            "drafts",
+            "Drafts",
+        );
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("HTML draft".to_string()),
+        );
+        properties.insert(
+            PID_TAG_HTML_BINARY,
+            MapiValue::Binary(b"<html><body>Hello<br>World &amp; team</body></html>".to_vec()),
+        );
+        let recipients = vec![PendingRecipient {
+            row_id: 1,
+            address: "to@example.test".to_string(),
+            display_name: Some("To".to_string()),
+            recipient_type: 0x01,
+        }];
+
+        let imported =
+            jmap_import_from_pending_message(&principal, &mailbox, &properties, &recipients);
+        assert_eq!(imported.body_text, "Hello\nWorld & team");
+        assert_eq!(
+            imported.body_html_sanitized.as_deref(),
+            Some("<html><body>Hello<br>World &amp; team</body></html>")
+        );
+        assert_eq!(imported.size_octets, "HTML draft".len() as i64 + 18);
+
+        let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
+        assert_eq!(submitted.body_text, "Hello\nWorld & team");
+        assert_eq!(
+            submitted.body_html_sanitized.as_deref(),
+            Some("<html><body>Hello<br>World &amp; team</body></html>")
+        );
+        assert_eq!(submitted.size_octets, "HTML draft".len() as i64 + 18);
     }
 
     #[test]
@@ -6755,6 +7117,14 @@ mod tests {
         assert_eq!(
             public_folder_property_value(&folder, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8),
             Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+    }
+
+    #[test]
+    fn note_derived_folder_classes_project_default_post_message_class() {
+        assert_eq!(
+            default_post_message_class_for_container_class("IPF.Note.OutlookHomepage"),
+            Some("IPM.Note")
         );
     }
 
@@ -7040,6 +7410,13 @@ mod tests {
         assert_eq!(
             round_trip(0x6748_0014, &MapiValue::I64(99)),
             MapiValue::I64(99)
+        );
+        assert_eq!(
+            round_trip(
+                PID_LID_PERCENT_COMPLETE_TAG,
+                &MapiValue::F64(1.0f64.to_bits())
+            ),
+            MapiValue::F64(1.0f64.to_bits())
         );
     }
 
@@ -7350,6 +7727,25 @@ mod tests {
             email_property_value(&email, PID_TAG_RTF_IN_SYNC),
             Some(MapiValue::Bool(false))
         );
+        let rtf = match email_property_value(&email, PID_TAG_RTF_COMPRESSED) {
+            Some(MapiValue::Binary(value)) => value,
+            other => panic!("unexpected RTF body value: {other:?}"),
+        };
+        assert!(rtf.len() > 16);
+        assert_eq!(
+            u32::from_le_bytes([rtf[0], rtf[1], rtf[2], rtf[3]]) as usize,
+            rtf.len() - 4
+        );
+        assert_eq!(
+            u32::from_le_bytes([rtf[4], rtf[5], rtf[6], rtf[7]]) as usize,
+            rtf.len() - 16
+        );
+        assert_eq!(
+            u32::from_le_bytes([rtf[8], rtf[9], rtf[10], rtf[11]]),
+            0x414C_454D
+        );
+        assert_eq!(u32::from_le_bytes([rtf[12], rtf[13], rtf[14], rtf[15]]), 0);
+        assert!(String::from_utf8_lossy(&rtf[16..]).contains("RSS item"));
         assert_eq!(
             email_property_value(&email, PID_TAG_NATIVE_BODY),
             Some(MapiValue::U32(3))
@@ -7372,6 +7768,13 @@ mod tests {
                 kind: MapiNamedPropertyKind::Lid(PID_LID_FLAG_REQUEST),
             }),
             Some(PID_LID_FLAG_REQUEST as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_TASK_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_PERCENT_COMPLETE),
+            }),
+            Some(PID_LID_PERCENT_COMPLETE as u16)
         );
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {
@@ -7474,6 +7877,10 @@ mod tests {
             Some(MapiValue::String("Follow up".to_string()))
         );
         assert_eq!(
+            email_property_value(&email, PID_LID_PERCENT_COMPLETE_TAG),
+            Some(MapiValue::F64(1.0f64.to_bits()))
+        );
+        assert_eq!(
             email_property_value(&email, PID_TAG_FLAG_COMPLETE_TIME),
             Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
                 "2026-05-20T10:30:00Z"
@@ -7514,6 +7921,22 @@ mod tests {
         assert_eq!(
             email_property_value(&email, PID_TAG_SWAPPED_TODO_DATA),
             Some(MapiValue::Binary(valid_swapped_todo_data()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_BODY_HTML_W),
+            Some(MapiValue::String(
+                "<html><body>Flagged item</body></html>".to_string()
+            ))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_HTML_BINARY),
+            Some(MapiValue::Binary(
+                b"<html><body>Flagged item</body></html>".to_vec()
+            ))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_NATIVE_BODY),
+            Some(MapiValue::U32(1))
         );
     }
 
@@ -7642,6 +8065,16 @@ mod tests {
             completed_at: None,
             status: "pending".to_string(),
         };
+        assert_eq!(
+            task_property_value_with_reminder(
+                &task,
+                2,
+                REMINDERS_FOLDER_ID,
+                PID_LID_PERCENT_COMPLETE_TAG,
+                Some(&task_reminder)
+            ),
+            Some(MapiValue::F64(0.0f64.to_bits()))
+        );
         assert_eq!(
             task_property_value_with_reminder(
                 &task,
@@ -8817,6 +9250,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         for tag in [PID_TAG_SERVER_CONNECTED_ICON, PID_TAG_SERVER_ACCOUNT_ICON] {
@@ -8831,6 +9266,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         assert_eq!(
@@ -9129,6 +9566,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "Test User".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         assert_eq!(
@@ -9184,11 +9623,33 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: Some(4096),
+            quota_used_octets: Some(12_345),
         };
 
         assert_eq!(
             logon_property_value(&principal, PID_TAG_MAX_SUBMIT_MESSAGE_SIZE),
             Some(MapiValue::U32(35 * 1024))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_MESSAGE_SIZE_EXTENDED),
+            Some(MapiValue::I64(12_345))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_PROHIBIT_RECEIVE_QUOTA),
+            Some(MapiValue::U32(4096 * 1024))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_PROHIBIT_SEND_QUOTA),
+            Some(MapiValue::U32(4096 * 1024))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_STORAGE_QUOTA_LIMIT),
+            Some(MapiValue::U32(4096 * 1024))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_PST_PATH_W),
+            Some(MapiValue::String(String::new()))
         );
     }
 }

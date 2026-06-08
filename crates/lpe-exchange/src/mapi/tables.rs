@@ -11,9 +11,9 @@ use crate::mapi::identity::{
     RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
 use crate::mapi_store::{
-    MapiAssociatedConfigMessage, MapiCommonViewsMessage, MapiConversationActionMessage,
-    MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage, MapiNavigationShortcutMessage,
-    MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
+    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiCommonViewsMessage,
+    MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage,
+    MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
@@ -221,6 +221,7 @@ fn category_value_to_string(value: &MapiValue) -> String {
         MapiValue::I16(value) => value.to_string(),
         MapiValue::I32(value) => value.to_string(),
         MapiValue::I64(value) => value.to_string(),
+        MapiValue::F64(value) => f64::from_bits(*value).to_string(),
         MapiValue::U32(value) => value.to_string(),
         MapiValue::U64(value) => value.to_string(),
         MapiValue::String(value) => value.clone(),
@@ -2658,6 +2659,18 @@ pub(in crate::mapi) fn sort_common_views_messages(
                     MapiCommonViewsMessage::NavigationShortcut(left),
                     MapiCommonViewsMessage::NavigationShortcut(right),
                 ) => compare_navigation_shortcuts(left, right, sort_order.property_tag),
+                (
+                    MapiCommonViewsMessage::NamedView(left),
+                    MapiCommonViewsMessage::NamedView(right),
+                ) => compare_common_view_named_views(left, right, sort_order.property_tag),
+                (
+                    MapiCommonViewsMessage::NavigationShortcut(_),
+                    MapiCommonViewsMessage::NamedView(_),
+                ) => Ordering::Less,
+                (
+                    MapiCommonViewsMessage::NamedView(_),
+                    MapiCommonViewsMessage::NavigationShortcut(_),
+                ) => Ordering::Greater,
             };
             let ordering = apply_sort_direction(ordering, sort_order.order);
             if ordering != Ordering::Equal {
@@ -2687,9 +2700,24 @@ fn compare_navigation_shortcuts(
     }
 }
 
+fn compare_common_view_named_views(
+    left: &MapiCommonViewNamedViewMessage,
+    right: &MapiCommonViewNamedViewMessage,
+    property_tag: u32,
+) -> Ordering {
+    match property_tag & 0xFFFF_0000 {
+        0x0037_0000 | 0x3001_0000 => compare_case_insensitive(&left.name, &right.name),
+        0x6834_0000 => left.view_flags.cmp(&right.view_flags),
+        0x683A_0000 => left.view_type.cmp(&right.view_type),
+        0x674A_0000 => left.id.cmp(&right.id),
+        _ => Ordering::Equal,
+    }
+}
+
 fn common_views_message_id(message: &MapiCommonViewsMessage) -> u64 {
     match message {
         MapiCommonViewsMessage::NavigationShortcut(message) => message.id,
+        MapiCommonViewsMessage::NamedView(message) => message.id,
     }
 }
 
@@ -2701,6 +2729,9 @@ fn common_views_message_property_value(
     match message {
         MapiCommonViewsMessage::NavigationShortcut(message) => {
             navigation_shortcut_property_value(message, mailbox_guid, property_tag)
+        }
+        MapiCommonViewsMessage::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
         }
     }
 }
@@ -3570,6 +3601,13 @@ pub(in crate::mapi) fn rop_find_row_response(
                             restriction_matches_navigation_shortcut(
                                 Some(&restriction),
                                 shortcut,
+                                mailbox_guid,
+                            )
+                        }
+                        MapiCommonViewsMessage::NamedView(view) => {
+                            restriction_matches_common_view_named_view(
+                                Some(&restriction),
+                                view,
                                 mailbox_guid,
                             )
                         }
@@ -4669,6 +4707,24 @@ mod tests {
     }
 
     #[test]
+    fn property_defaults_serialize_floating_types_with_wire_widths() {
+        let mut single = Vec::new();
+        write_property_default(&mut single, 0x80BF_0004);
+        assert_eq!(single, 0.0f32.to_le_bytes());
+
+        let mut double = Vec::new();
+        write_property_default(&mut double, 0x80BF_0005);
+        assert_eq!(double, 0.0f64.to_le_bytes());
+    }
+
+    #[test]
+    fn property_defaults_serialize_server_ids_as_empty_counted_binary() {
+        let mut row = Vec::new();
+        write_property_default(&mut row, PID_TAG_SENT_MAIL_SVR_EID);
+        assert_eq!(row, 0u16.to_le_bytes());
+    }
+
+    #[test]
     fn outlook_bootstrap_row_invariant_classifier_reports_consistency() {
         let folder_id = INBOX_FOLDER_ID;
         let parent_id = IPM_SUBTREE_FOLDER_ID;
@@ -4809,6 +4865,44 @@ mod tests {
         ] {
             assert!(columns.contains(&property_tag));
         }
+    }
+
+    #[test]
+    fn pending_message_projects_non_empty_change_identity() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_MID,
+            MapiValue::U64(crate::mapi::identity::mapi_store_id(42)),
+        );
+
+        assert_eq!(
+            pending_message_property_value(&principal, &properties, PID_TAG_CHANGE_NUMBER),
+            Some(MapiValue::U64(42))
+        );
+        assert_eq!(
+            pending_message_property_value(&principal, &properties, PID_TAG_CHANGE_KEY),
+            Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(42)
+            ))
+        );
+        assert_eq!(
+            pending_message_property_value(
+                &principal,
+                &properties,
+                PID_TAG_PREDECESSOR_CHANGE_LIST
+            ),
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                42
+            )))
+        );
     }
 
     #[test]
@@ -5192,6 +5286,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let row =
             serialize_special_folder_row(IPM_SUBTREE_FOLDER_ID, &[], &[PID_TAG_OST_OSTID], None);
@@ -5215,6 +5311,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         for folder_id in [ROOT_FOLDER_ID, IPM_SUBTREE_FOLDER_ID] {
@@ -5875,7 +5973,7 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            2
+            4
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
@@ -5970,6 +6068,87 @@ mod tests {
             0x8004_010F
         );
         assert_eq!(table_position(&table), Some(0));
+    }
+
+    #[test]
+    fn common_views_find_row_matches_default_named_view() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_SUBJECT_W,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION,
+                PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+            ],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::And as u8];
+        restriction.extend_from_slice(&5u16.to_le_bytes());
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Microsoft.FolderDesign.NamedView");
+        restriction.push(MapiRestrictionType::Bitmask as u8);
+        restriction.push(1);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&1u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
+        restriction.extend_from_slice(&8u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Content as u8);
+        restriction.extend_from_slice(&0u32.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Compact");
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE.to_le_bytes());
+        restriction.extend_from_slice(&16u16.to_le_bytes());
+        restriction.extend_from_slice(&[
+            0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]);
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(0);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        assert!(response
+            .windows("Compact".encode_utf16().count() * 2)
+            .any(|window| window
+                == "Compact"
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>()
+                    .as_slice()));
     }
 
     #[test]
@@ -6424,6 +6603,20 @@ mod tests {
         assert_eq!(
             associated_config_property_value(&explicit_marker, 0x685D_0003),
             Some(MapiValue::U32(42))
+        );
+        let xml_only = MapiAssociatedConfigMessage {
+            properties_json: serde_json::json!({
+                "0x7c080102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+            ..message.clone()
+        };
+        assert_eq!(
+            associated_config_property_value(&xml_only, PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::U32(2))
+        );
+        assert_eq!(
+            associated_config_property_value(&xml_only, PID_TAG_ROAMING_XML_STREAM),
+            Some(MapiValue::Binary(b"<xml/>".to_vec()))
         );
 
         let row = serialize_associated_config_row_with_mailbox_guid(
@@ -7051,6 +7244,9 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_HAS_ATTACHMENTS => row.push(email.has_attachments as u8),
             PID_TAG_RTF_IN_SYNC => row.push(0),
             PID_TAG_BODY_W => write_utf16z(&mut row, &email.body_text),
+            PID_TAG_RTF_COMPRESSED => {
+                write_u16_prefixed_bytes(&mut row, &uncompressed_rtf_body(&email.body_text))
+            }
             PID_TAG_NATIVE_BODY => write_u32(&mut row, native_body_format(email)),
             PID_TAG_INTERNET_CODEPAGE => write_u32(&mut row, 65001),
             PID_TAG_MESSAGE_LOCALE_ID => write_u32(&mut row, 0x0409),
@@ -7224,6 +7420,9 @@ fn serialize_common_views_row_with_mailbox_guid(
         MapiCommonViewsMessage::NavigationShortcut(message) => {
             serialize_navigation_shortcut_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
+        MapiCommonViewsMessage::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
     }
 }
 
@@ -7235,6 +7434,21 @@ fn serialize_navigation_shortcut_row_with_mailbox_guid(
     let mut row = Vec::new();
     for column in columns {
         match navigation_shortcut_property_value(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_common_view_named_view_row_with_mailbox_guid(
+    message: &MapiCommonViewNamedViewMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match common_view_named_view_property_value(message, mailbox_guid, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
@@ -7358,7 +7572,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_ROAMING_DATATYPES
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
-                Some(MapiValue::U32(4))
+                Some(MapiValue::U32(configuration_roaming_datatypes(&properties)))
             }
             PID_TAG_ROAMING_DICTIONARY
                 if message.message_class.starts_with("IPM.Configuration.") =>
@@ -7372,6 +7586,21 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             _ => None,
         }
     })
+}
+
+fn configuration_roaming_datatypes(properties: &HashMap<u32, MapiValue>) -> u32 {
+    let mut datatypes = 0;
+    if properties.contains_key(&PID_TAG_ROAMING_XML_STREAM) {
+        datatypes |= 0x0000_0002;
+    }
+    if properties.contains_key(&PID_TAG_ROAMING_DICTIONARY) {
+        datatypes |= 0x0000_0004;
+    }
+    if datatypes == 0 {
+        0x0000_0004
+    } else {
+        datatypes
+    }
 }
 
 fn minimal_roaming_dictionary_stream() -> Vec<u8> {
@@ -7861,10 +8090,56 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_UNSENT)),
             PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
             PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(pending_message_size(properties))),
+            PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(pending_message_change_number(
+                    properties,
+                )),
+            )),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+                mapi_mailstore::predecessor_change_list(pending_message_change_number(properties)),
+            )),
+            PID_TAG_CHANGE_NUMBER => {
+                Some(MapiValue::U64(pending_message_change_number(properties)))
+            }
             PID_TAG_SENDER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(principal.email.clone())),
             _ => None,
         })
+}
+
+fn pending_message_change_number(properties: &HashMap<u32, MapiValue>) -> u64 {
+    properties
+        .get(&PID_TAG_CHANGE_NUMBER)
+        .and_then(mapi_value_u64)
+        .or_else(|| {
+            properties
+                .get(&PID_TAG_MID)
+                .and_then(mapi_value_u64)
+                .and_then(crate::mapi::identity::global_counter_from_store_id)
+        })
+        .or_else(|| {
+            properties
+                .get(&PID_TAG_SOURCE_KEY)
+                .and_then(|value| match value {
+                    MapiValue::Binary(value) => {
+                        crate::mapi::identity::object_id_from_source_key(value)
+                            .and_then(crate::mapi::identity::global_counter_from_store_id)
+                    }
+                    _ => None,
+                })
+        })
+        .unwrap_or(1)
+}
+
+fn mapi_value_u64(value: &MapiValue) -> Option<u64> {
+    match value {
+        MapiValue::I16(value) => u64::try_from(*value).ok(),
+        MapiValue::I32(value) => u64::try_from(*value).ok(),
+        MapiValue::I64(value) => u64::try_from(*value).ok(),
+        MapiValue::U32(value) => Some(u64::from(*value)),
+        MapiValue::U64(value) => Some(*value),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn serialize_pending_contact_row(
@@ -8259,12 +8534,14 @@ pub(in crate::mapi) fn write_property_default(row: &mut Vec<u8>, property_tag: u
     match MapiPropertyTag::new(property_tag).property_type() {
         Some(MapiPropertyType::Integer16) => write_u16(row, 0),
         Some(MapiPropertyType::Integer32) | Some(MapiPropertyType::Error) => write_u32(row, 0),
+        Some(MapiPropertyType::Floating32) => row.extend_from_slice(&0.0f32.to_le_bytes()),
+        Some(MapiPropertyType::Floating64) => row.extend_from_slice(&0.0f64.to_le_bytes()),
         Some(MapiPropertyType::Boolean) => row.push(0),
         Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => write_u64(row, 0),
         Some(MapiPropertyType::String8) => write_ascii_z(row, ""),
         Some(MapiPropertyType::String) => write_utf16z(row, ""),
         Some(MapiPropertyType::Guid) => row.extend_from_slice(Uuid::nil().as_bytes()),
-        Some(MapiPropertyType::Binary) => write_rop_binary(row, &[]),
+        Some(MapiPropertyType::ServerId | MapiPropertyType::Binary) => write_rop_binary(row, &[]),
         Some(
             MapiPropertyType::MultipleInteger16
             | MapiPropertyType::MultipleInteger32

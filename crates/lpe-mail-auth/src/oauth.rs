@@ -28,6 +28,8 @@ pub struct AccountPrincipal {
     pub account_id: Uuid,
     pub email: String,
     pub display_name: String,
+    pub quota_mb: Option<u32>,
+    pub quota_used_octets: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

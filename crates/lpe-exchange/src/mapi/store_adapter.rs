@@ -1492,6 +1492,10 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *shortcut_id);
         }
+        MapiObject::CommonViewNamedView { folder_id, view_id } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *view_id);
+        }
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,

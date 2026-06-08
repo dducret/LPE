@@ -962,6 +962,46 @@ fn common_views_sync_object(
         crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
             navigation_shortcut_sync_object(&message, account_id)
         }
+        crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => {
+            common_view_named_view_sync_object(&message, account_id)
+        }
+    }
+}
+
+fn common_view_named_view_sync_object(
+    message: &crate::mapi_store::MapiCommonViewNamedViewMessage,
+    account_id: Uuid,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_VIEW_DESCRIPTOR_CLSID,
+        PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+        PID_TAG_VIEW_DESCRIPTOR_VERSION,
+        PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+        PID_TAG_WLINK_GROUP_HEADER_ID,
+    ] {
+        if let Some(value) =
+            common_view_named_view_property_value(message, account_id, property_tag)
+                .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.name.clone(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size: 128,
+        read_state: None,
+        named_properties,
     }
 }
 
@@ -1713,7 +1753,7 @@ mod tests {
         assert_eq!(
             property(PID_TAG_WLINK_FOLDER_TYPE),
             &crate::mapi_mailstore::SpecialMessagePropertyValue::Guid([
-                0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x46,
             ])
         );

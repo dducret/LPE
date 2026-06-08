@@ -105,6 +105,8 @@ async fn basic_auth_preserves_tenant_id() {
             password_hash: password_hash("secret"),
             status: "active".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: 4096,
+            quota_used_octets: 0,
         }))),
         app_passwords: Arc::default(),
     };
@@ -134,6 +136,8 @@ async fn hinted_user_does_not_override_login_tenant() {
             password_hash: password_hash("secret"),
             status: "active".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: 4096,
+            quota_used_octets: 0,
         }))),
         app_passwords: Arc::default(),
     };
@@ -165,6 +169,8 @@ async fn app_password_is_accepted_for_basic_auth() {
             password_hash: password_hash("primary-secret"),
             status: "active".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: 4096,
+            quota_used_octets: 0,
         }))),
         app_passwords: Arc::new(Mutex::new(vec![StoredAccountAppPassword {
             id: Uuid::new_v4(),
@@ -199,12 +205,16 @@ async fn oauth_access_token_is_accepted_for_bearer_auth() {
         password_hash: password_hash("secret"),
         status: "active".to_string(),
         display_name: "Alice".to_string(),
+        quota_mb: 4096,
+        quota_used_octets: 0,
     };
     let principal = AccountPrincipal {
         tenant_id: login.tenant_id,
         account_id: login.account_id,
         email: login.email.clone(),
         display_name: login.display_name.clone(),
+        quota_mb: Some(login.quota_mb),
+        quota_used_octets: Some(login.quota_used_octets),
     };
     let token = issue_oauth_access_token(&principal, "dav activesync", 600).unwrap();
     let store = FakeStore {
@@ -241,12 +251,16 @@ async fn oauth_access_token_rejects_surface_outside_scope() {
         password_hash: password_hash("secret"),
         status: "active".to_string(),
         display_name: "Alice".to_string(),
+        quota_mb: 4096,
+        quota_used_octets: 0,
     };
     let principal = AccountPrincipal {
         tenant_id: login.tenant_id,
         account_id: login.account_id,
         email: login.email.clone(),
         display_name: login.display_name.clone(),
+        quota_mb: Some(login.quota_mb),
+        quota_used_octets: Some(login.quota_used_octets),
     };
     let token = issue_oauth_access_token(&principal, "dav", 600).unwrap();
     let store = FakeStore {

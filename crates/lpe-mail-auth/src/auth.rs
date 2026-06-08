@@ -27,6 +27,8 @@ pub async fn authenticate_account<S: AccountAuthStore>(
                 account_id: account.account_id,
                 email: account.email,
                 display_name: account.display_name,
+                quota_mb: None,
+                quota_used_octets: None,
             });
         }
 
@@ -78,6 +80,8 @@ pub async fn authenticate_bearer_access_token<S: AccountAuthStore>(
         account_id: login.account_id,
         email: login.email,
         display_name: login.display_name,
+        quota_mb: Some(login.quota_mb),
+        quota_used_octets: Some(login.quota_used_octets),
     })
 }
 
@@ -152,6 +156,8 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
         account_id: login.account_id,
         email: login.email,
         display_name: login.display_name,
+        quota_mb: Some(login.quota_mb),
+        quota_used_octets: Some(login.quota_used_octets),
     })
 }
 

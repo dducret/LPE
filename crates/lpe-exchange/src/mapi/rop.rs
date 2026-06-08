@@ -1113,6 +1113,20 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             };
             serialize_navigation_shortcut_row(&message, Some(principal), &columns)
         }
+        Some(MapiObject::CommonViewNamedView { view_id, .. }) => {
+            let Some(message) = snapshot.common_view_named_view_message_for_id(*view_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_common_view_named_view_row_with_mailbox_guid(
+                &message,
+                principal.account_id,
+                &columns,
+            )
+        }
         Some(MapiObject::AssociatedConfig { config_id, .. }) => {
             let Some(message) = snapshot.associated_config_message_for_id(*config_id) else {
                 return rop_error_response(
@@ -1428,6 +1442,8 @@ fn log_get_properties_specific_debug(
     );
     let folder_type_getprops_contract =
         format_folder_type_getprops_contract(object, principal, columns, mailboxes, snapshot);
+    let message_body_getprops_contract =
+        format_message_body_getprops_contract(object, columns, mailboxes, emails, snapshot);
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1461,6 +1477,7 @@ fn log_get_properties_specific_debug(
         returned_property_value_shapes = %returned_property_value_shapes,
         ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
         folder_type_getprops_contract = %folder_type_getprops_contract,
+        message_body_getprops_contract = %message_body_getprops_contract,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
         outlook_bootstrap_estimated_rop_payload_bytes =
             outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
@@ -1479,6 +1496,88 @@ fn log_get_properties_specific_debug(
         snapshot,
         &unsupported_tags,
     );
+}
+
+fn format_message_body_getprops_contract(
+    object: Option<&MapiObject>,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !columns.iter().any(|tag| is_message_body_debug_tag(*tag)) {
+        return String::new();
+    }
+    let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+    }) = object
+    else {
+        return String::new();
+    };
+
+    let (source, email) =
+        if let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) {
+            ("mailbox", Some(email))
+        } else {
+            (
+                "search_folder",
+                search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                    .map(|message| &message.email),
+            )
+        };
+    let Some(email) = email else {
+        return format!(
+            "message_found=false;folder_id={folder_id:#018x};message_id={message_id:#018x};requested_body_tags={}",
+            format_property_tags_for_debug(
+                &columns
+                    .iter()
+                    .copied()
+                    .filter(|tag| is_message_body_debug_tag(*tag))
+                    .collect::<Vec<_>>()
+            )
+        );
+    };
+
+    let body_text_chars = email.body_text.chars().count();
+    let body_html_bytes = email
+        .body_html_sanitized
+        .as_deref()
+        .map(str::len)
+        .unwrap_or_default();
+    format!(
+        "message_found=true;source={source};folder_id={folder_id:#018x};message_id={message_id:#018x};subject_chars={};body_text_chars={body_text_chars};body_text_empty={};body_html_bytes={body_html_bytes};body_html_empty={};native_body={};has_attachments={};size_octets={};requested_body_tags={}",
+        email.subject.chars().count(),
+        email.body_text.trim().is_empty(),
+        email.body_html_sanitized
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty(),
+        native_body_format(email),
+        email.has_attachments,
+        email.size_octets,
+        format_property_tags_for_debug(
+            &columns
+                .iter()
+                .copied()
+                .filter(|tag| is_message_body_debug_tag(*tag))
+                .collect::<Vec<_>>()
+        )
+    )
+}
+
+fn is_message_body_debug_tag(tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(tag),
+        PID_TAG_BODY_STRING8
+            | PID_TAG_BODY_W
+            | PID_TAG_RTF_COMPRESSED
+            | PID_TAG_BODY_HTML_W
+            | PID_TAG_HTML_BINARY
+            | PID_TAG_NATIVE_BODY
+            | PID_TAG_RTF_IN_SYNC
+    )
 }
 
 fn format_folder_type_getprops_contract(
@@ -1900,6 +1999,15 @@ fn format_outlook_logon_bootstrap_property_details(
                 (PID_TAG_MAX_SUBMIT_MESSAGE_SIZE, MapiValue::U32(value)) => {
                     format!("max_submit_message_size_kb={value}")
                 }
+                (PID_TAG_MESSAGE_SIZE_EXTENDED, MapiValue::I64(value)) => {
+                    format!("message_size_extended_octets={value}")
+                }
+                (
+                    PID_TAG_PROHIBIT_RECEIVE_QUOTA
+                    | PID_TAG_PROHIBIT_SEND_QUOTA
+                    | PID_TAG_STORAGE_QUOTA_LIMIT,
+                    MapiValue::U32(value),
+                ) => format!("quota_limit_kb={value}"),
                 (
                     PID_TAG_MAILBOX_OWNER_NAME_W | PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
                     MapiValue::String(value),
@@ -2005,7 +2113,10 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
     match object {
         Some(MapiObject::Logon) => matches!(
             tag,
-            PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE | PID_TAG_RESOURCE_FLAGS
+            PID_TAG_PRIVATE
+                | PID_TAG_OUTLOOK_STORE_STATE
+                | PID_TAG_RESOURCE_FLAGS
+                | PID_TAG_PST_PATH_W
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::Folder { .. }) | None => {
@@ -2131,6 +2242,7 @@ fn mapi_value_shape_for_debug(value: &MapiValue) -> String {
         MapiValue::I16(value) => format!("i16={value}"),
         MapiValue::I32(value) => format!("i32={value}"),
         MapiValue::I64(value) => format!("i64={value}"),
+        MapiValue::F64(value) => format!("f64={}", f64::from_bits(*value)),
         MapiValue::U32(value) => format!("u32={value}"),
         MapiValue::U64(value) => format!("u64={value}"),
         MapiValue::String(value) => format!(
@@ -2245,6 +2357,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             "navigation_shortcut",
             format!("{folder_id:#018x}"),
             format!("{shortcut_id:#018x}"),
+        ),
+        Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => (
+            "common_view_named_view",
+            format!("{folder_id:#018x}"),
+            format!("{view_id:#018x}"),
         ),
         Some(MapiObject::AssociatedConfig {
             folder_id,
@@ -2472,11 +2589,27 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
         PID_TAG_SENDER_ADDRESS_TYPE_W => "PidTagSenderAddressType",
+        PID_TAG_SENDER_NAME_W => "PidTagSenderName",
+        PID_TAG_SENDER_EMAIL_ADDRESS_W => "PidTagSenderEmailAddress",
         PID_TAG_SENDER_SMTP_ADDRESS_W => "PidTagSenderSmtpAddress",
+        PID_TAG_CLIENT_SUBMIT_TIME => "PidTagClientSubmitTime",
+        PID_TAG_MESSAGE_DELIVERY_TIME => "PidTagMessageDeliveryTime",
         PID_TAG_DISPLAY_BCC_W => "PidTagDisplayBcc",
+        PID_TAG_DISPLAY_CC_W => "PidTagDisplayCc",
+        PID_TAG_DISPLAY_TO_W => "PidTagDisplayTo",
+        PID_TAG_SUBJECT_W => "PidTagSubject",
+        PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
         PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => "PidTagTransportMessageHeaders",
+        PID_TAG_BODY_STRING8 | PID_TAG_BODY_W => "PidTagBody",
+        PID_TAG_RTF_COMPRESSED => "PidTagRtfCompressed",
+        PID_TAG_BODY_HTML_W => "PidTagBodyHtml",
+        PID_TAG_HTML_BINARY => "PidTagHtml",
         PID_TAG_RTF_IN_SYNC => "PidTagRtfInSync",
         PID_TAG_NATIVE_BODY => "PidTagNativeBody",
+        PID_TAG_HAS_ATTACHMENTS => "PidTagHasAttachments",
+        PID_TAG_MESSAGE_FLAGS => "PidTagMessageFlags",
+        PID_TAG_MESSAGE_SIZE => "PidTagMessageSize",
+        PID_TAG_READ => "PidTagRead",
         PID_TAG_INTERNET_CODEPAGE => "PidTagInternetCodepage",
         PID_TAG_MESSAGE_LOCALE_ID => "PidTagMessageLocaleId",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
@@ -2492,7 +2625,12 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_OUTLOOK_STORE_STATE => "OutlookStoreState",
         PID_TAG_PRIVATE => "PidTagPrivate",
         PID_TAG_USER_GUID => "PidTagUserGuid",
+        PID_TAG_MESSAGE_SIZE_EXTENDED => "PidTagMessageSizeExtended",
+        PID_TAG_PROHIBIT_RECEIVE_QUOTA => "PidTagProhibitReceiveQuota",
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
+        PID_TAG_PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
+        PID_TAG_STORAGE_QUOTA_LIMIT => "PidTagStorageQuotaLimit",
+        PID_TAG_PST_PATH_W => "PidTagPstPath",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
@@ -2513,7 +2651,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_ARCHIVE_PERIOD => "PidTagArchivePeriod",
         PID_TAG_RIGHTS => "PidTagRights",
         PID_TAG_FOLDER_VIEWLIST_FLAGS => "PidTagFolderViewListFlags",
+        PID_TAG_SENT_MAIL_SVR_EID => "PidTagSentMailSvrEID",
         tag if is_acl_member_name_property_tag(tag) => "PidTagMemberName",
+        PID_LID_PERCENT_COMPLETE_TAG => "PidLidPercentComplete",
         PID_LID_LOCATION_W_TAG => "PidLidLocation",
         PID_LID_APPOINTMENT_DURATION_TAG => "PidLidAppointmentDuration",
         PID_LID_APPOINTMENT_START_WHOLE_TAG => "PidLidAppointmentStartWhole",
@@ -2836,6 +2976,20 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => snapshot
             .navigation_shortcut_message_for_id(*shortcut_id)
             .map(|message| serialize_navigation_shortcut_row(&message, Some(principal), &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::CommonViewNamedView { view_id, .. }) => snapshot
+            .common_view_named_view_message_for_id(*view_id)
+            .map(|message| {
+                serialize_common_view_named_view_row_with_mailbox_guid(
+                    &message,
+                    principal.account_id,
+                    &[tag],
+                )
+            })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);
@@ -6791,6 +6945,26 @@ mod tests {
             "PidTagDisplayBcc"
         );
         assert_eq!(
+            property_tag_debug_name(PID_TAG_DISPLAY_TO_W),
+            "PidTagDisplayTo"
+        );
+        assert_eq!(property_tag_debug_name(PID_TAG_SUBJECT_W), "PidTagSubject");
+        assert_eq!(property_tag_debug_name(PID_TAG_BODY_W), "PidTagBody");
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_RTF_COMPRESSED),
+            "PidTagRtfCompressed"
+        );
+        assert_eq!(property_tag_debug_name(PID_TAG_HTML_BINARY), "PidTagHtml");
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_HAS_ATTACHMENTS),
+            "PidTagHasAttachments"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_MESSAGE_FLAGS),
+            "PidTagMessageFlags"
+        );
+        assert_eq!(property_tag_debug_name(PID_TAG_READ), "PidTagRead");
+        assert_eq!(
             property_tag_debug_name(PID_TAG_TRANSPORT_MESSAGE_HEADERS_W),
             "PidTagTransportMessageHeaders"
         );
@@ -6846,6 +7020,232 @@ mod tests {
             property_tag_debug_name(PID_TAG_ASSOCIATED_SHARING_PROVIDER),
             "PidTagAssociatedSharingProvider"
         );
+        assert_eq!(property_tag_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
+    }
+
+    #[test]
+    fn message_body_getprops_contract_reports_canonical_body_shape() {
+        let mailbox_id = Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap();
+        let email_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, INBOX_FOLDER_ID);
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(0x99),
+        );
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let emails = vec![JmapEmail {
+            id: email_id,
+            thread_id: email_id,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: Vec::new(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            received_at: "2026-06-07T19:56:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "author".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: vec![JmapEmailAddress {
+                address: "test@example.test".to_string(),
+                display_name: Some("Test".to_string()),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Body check".to_string(),
+            preview: "Plain body".to_string(),
+            body_text: "Plain body".to_string(),
+            body_html_sanitized: Some("<p>Plain body</p>".to_string()),
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 512,
+            internet_message_id: Some("<body-check@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        }];
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: crate::mapi::identity::mapi_store_id(0x99),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let contract = format_message_body_getprops_contract(
+            Some(&object),
+            &[
+                PID_TAG_BODY_W,
+                PID_TAG_RTF_COMPRESSED,
+                PID_TAG_HTML_BINARY,
+                PID_TAG_NATIVE_BODY,
+            ],
+            &mailboxes,
+            &emails,
+            &snapshot,
+        );
+
+        assert!(contract.contains("message_found=true"));
+        assert!(contract.contains("source=mailbox"));
+        assert!(contract.contains("subject_chars=10"));
+        assert!(contract.contains("body_text_chars=10"));
+        assert!(contract.contains("body_text_empty=false"));
+        assert!(contract.contains("body_html_bytes=17"));
+        assert!(contract.contains("native_body=3"));
+        assert!(
+            contract.contains("requested_body_tags=0x1000001f,0x10090102,0x10130102,0x10160003")
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn persisted_message_getprops_returns_body_values() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mailbox_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, INBOX_FOLDER_ID);
+        let email_id = Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap();
+        let message_id = crate::mapi::identity::mapi_store_id(0x99);
+        crate::mapi::identity::remember_mapi_identity(email_id, message_id);
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let emails = vec![JmapEmail {
+            id: email_id,
+            thread_id: email_id,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: Vec::new(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            received_at: "2026-06-07T19:56:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "author".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Body check".to_string(),
+            preview: "Plain body".to_string(),
+            body_text: "Plain body".to_string(),
+            body_html_sanitized: Some("<p>Plain body</p>".to_string()),
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 512,
+            internet_message_id: Some("<body-check@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        }];
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&4u16.to_le_bytes());
+        for tag in [
+            PID_TAG_BODY_W,
+            PID_TAG_RTF_COMPRESSED,
+            PID_TAG_HTML_BINARY,
+            PID_TAG_NATIVE_BODY,
+        ] {
+            payload.extend_from_slice(&tag.to_le_bytes());
+        }
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &mailboxes,
+            &emails,
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+        assert!(response
+            .windows(utf16z_bytes("Plain body").len())
+            .any(|window| window == utf16z_bytes("Plain body").as_slice()));
+        assert!(response
+            .windows("<p>Plain body</p>".len())
+            .any(|window| window == b"<p>Plain body</p>"));
+        assert!(response.windows(5).any(|window| window == b"{\\rtf"));
+        assert!(response
+            .windows(4)
+            .any(|window| window == 3u32.to_le_bytes()));
     }
 
     #[test]
@@ -6858,6 +7258,14 @@ mod tests {
         assert!(modeled_zero_or_default_property(
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
+        ));
+    }
+
+    #[test]
+    fn logon_empty_pst_path_is_modeled_not_fallback() {
+        assert!(modeled_zero_or_default_property(
+            Some(&MapiObject::Logon),
+            PID_TAG_PST_PATH_W
         ));
     }
 
@@ -6915,6 +7323,8 @@ mod tests {
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let folder = MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID,
@@ -6943,6 +7353,8 @@ mod tests {
             account_id,
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let inbox_id = Uuid::from_u128(0x1111);
         crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
@@ -6985,6 +7397,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let object = MapiObject::Folder {
             folder_id: INBOX_FOLDER_ID,
@@ -7013,6 +7427,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let object = MapiObject::Folder {
             folder_id: CONTACTS_SEARCH_FOLDER_ID,
@@ -7076,6 +7492,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let columns = [
             PID_TAG_MAILBOX_OWNER_NAME_W,
@@ -7117,6 +7535,8 @@ mod tests {
             account_id,
             email: "test@example.test".to_string(),
             display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let rights = lpe_storage::CollaborationRights {
             may_read: true,
@@ -7212,6 +7632,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let request = RopRequest {
             rop_id: 0xFE,
@@ -7403,6 +7825,8 @@ mod tests {
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let client_ostid = vec![0x42; 40];
         let mut folder = MapiObject::Folder {
@@ -7671,6 +8095,8 @@ mod tests {
             account_id: Uuid::nil(),
             email: "test@example.test".to_string(),
             display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         let note_object = MapiObject::Note {

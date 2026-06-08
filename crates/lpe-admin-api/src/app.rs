@@ -778,6 +778,8 @@ mod tests {
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let request = SmtpSubmissionRequest {
             trace_id: "trace-1".to_string(),
@@ -845,6 +847,8 @@ mod tests {
             account_id: Uuid::new_v4(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let owner = SubmissionAccountIdentity {
             account_id: Uuid::new_v4(),
@@ -906,6 +910,8 @@ mod tests {
             account_id: Uuid::new_v4(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
         let owner = SubmissionAccountIdentity {
             account_id: Uuid::new_v4(),

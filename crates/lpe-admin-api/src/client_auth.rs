@@ -372,6 +372,8 @@ pub(crate) async fn create_client_oauth_access_token(
             account_id: account.account_id,
             email: account.email.clone(),
             display_name: account.display_name.clone(),
+            quota_mb: None,
+            quota_used_octets: None,
         },
         &scope,
         expires_in,

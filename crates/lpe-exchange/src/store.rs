@@ -4280,6 +4280,8 @@ impl ExchangeStore for Storage {
                 account_id,
                 email: row.get("primary_email"),
                 display_name: row.get("display_name"),
+                quota_mb: None,
+                quota_used_octets: None,
             };
             let mut permissions = mailbox_ids
                 .iter()

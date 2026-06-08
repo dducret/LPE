@@ -315,6 +315,8 @@ async fn load_authenticated_submission_principal(
         account_id: identity.account_id,
         email: identity.email,
         display_name: identity.display_name,
+        quota_mb: None,
+        quota_used_octets: None,
     })
 }
 

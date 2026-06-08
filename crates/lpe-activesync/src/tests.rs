@@ -86,6 +86,8 @@ impl FakeStore {
             display_name: Self::account().display_name,
             password_hash: Self::password_hash(),
             status: "active".to_string(),
+            quota_mb: 4096,
+            quota_used_octets: 0,
         }
     }
 

@@ -2505,6 +2505,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "test@l-p-e.ch".to_string(),
             display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         };
 
         assert!(nspi_lookup_matches_principal(

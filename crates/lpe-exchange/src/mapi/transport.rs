@@ -1179,6 +1179,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::JournalEntry { .. } => "journal_entry",
         MapiObject::ConversationAction { .. } => "conversation_action",
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
+        MapiObject::CommonViewNamedView { .. } => "common_view_named_view",
         MapiObject::AssociatedConfig { .. } => "associated_config",
         MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
         MapiObject::RecoverableItem { .. } => "recoverable_item",
@@ -2370,6 +2371,8 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "user@example.test".to_string(),
             display_name: "User".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
         }
     }
 

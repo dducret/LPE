@@ -118,6 +118,8 @@ impl FakeStore {
                 display_name: "Alice".to_string(),
                 password_hash: password_hash(),
                 status: "active".to_string(),
+                quota_mb: 4096,
+                quota_used_octets: 0,
             },
             mailboxes: Arc::new(Mutex::new(vec![
                 mailbox(&inbox_id.to_string(), "inbox", "INBOX", 0),
@@ -3541,6 +3543,8 @@ async fn xoauth2_authenticate_is_accepted() {
             account_id: store.login.account_id,
             email: store.login.email.clone(),
             display_name: store.login.display_name.clone(),
+            quota_mb: None,
+            quota_used_octets: None,
         },
         "imap",
         600,

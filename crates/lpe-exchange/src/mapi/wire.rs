@@ -569,6 +569,8 @@ impl RopId {
 pub(in crate::mapi) enum MapiPropertyType {
     Integer16 = 0x0002,
     Integer32 = 0x0003,
+    Floating32 = 0x0004,
+    Floating64 = 0x0005,
     Error = 0x000A,
     Boolean = 0x000B,
     Integer64 = 0x0014,
@@ -597,6 +599,8 @@ impl MapiPropertyType {
         match value {
             0x0002 => Some(Self::Integer16),
             0x0003 => Some(Self::Integer32),
+            0x0004 => Some(Self::Floating32),
+            0x0005 => Some(Self::Floating64),
             0x000A => Some(Self::Error),
             0x000B => Some(Self::Boolean),
             0x0014 => Some(Self::Integer64),
@@ -633,8 +637,6 @@ impl MapiPropertyType {
         match value {
             0x0000 => Some("PtypUnspecified"),
             0x0001 => Some("PtypNull"),
-            0x0004 => Some("PtypFloating32"),
-            0x0005 => Some("PtypFloating64"),
             0x0006 => Some("PtypCurrency"),
             0x0007 => Some("PtypFloatingTime"),
             0x000D => Some("PtypObject"),
@@ -929,6 +931,8 @@ mod tests {
         let property_types = [
             MapiPropertyType::Integer16,
             MapiPropertyType::Integer32,
+            MapiPropertyType::Floating32,
+            MapiPropertyType::Floating64,
             MapiPropertyType::Error,
             MapiPropertyType::Boolean,
             MapiPropertyType::Integer64,
@@ -936,6 +940,7 @@ mod tests {
             MapiPropertyType::String,
             MapiPropertyType::Time,
             MapiPropertyType::Guid,
+            MapiPropertyType::ServerId,
             MapiPropertyType::Binary,
             MapiPropertyType::MultipleInteger16,
             MapiPropertyType::MultipleInteger32,

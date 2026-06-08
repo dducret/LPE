@@ -3033,6 +3033,8 @@ impl ExchangeStore for FakeStore {
                         account_id,
                         email: principal.email.clone(),
                         display_name: principal.display_name.clone(),
+                        quota_mb: None,
+                        quota_used_octets: None,
                     },
                 )
             }));
@@ -3089,6 +3091,8 @@ impl ExchangeStore for FakeStore {
                         account_id: owner_account_id,
                         email: principal.email,
                         display_name: principal.display_name,
+                        quota_mb: None,
+                        quota_used_octets: None,
                     },
                 ));
             }
@@ -3146,6 +3150,8 @@ impl ExchangeStore for FakeStore {
                         account_id: owner_account_id,
                         email: principal.email,
                         display_name: principal.display_name,
+                        quota_mb: None,
+                        quota_used_octets: None,
                     },
                 ));
             }
@@ -3207,6 +3213,8 @@ impl ExchangeStore for FakeStore {
                         account_id: owner_account_id,
                         email: principal.email,
                         display_name: principal.display_name,
+                        quota_mb: None,
+                        quota_used_octets: None,
                     },
                 ));
             }
@@ -5819,6 +5827,8 @@ fn test_account_principal() -> AccountPrincipal {
         account_id: account.account_id,
         email: account.email,
         display_name: account.display_name,
+        quota_mb: None,
+        quota_used_octets: None,
     }
 }
 

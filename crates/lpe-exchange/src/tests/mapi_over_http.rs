@@ -10409,6 +10409,83 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
 }
 
 #[tokio::test]
+async fn mapi_over_http_transport_send_opened_outbox_message_uses_canonical_submission() {
+    let outbox_message_id = Uuid::parse_str("30303030-3030-3030-3030-303030303030").unwrap();
+    let outbox_mailbox_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    let sent_mailbox_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let mut outbox = FakeStore::email(
+        &outbox_message_id.to_string(),
+        &outbox_mailbox_id.to_string(),
+        "outbox",
+        "Transport outbox send",
+    );
+    outbox.body_text = "Outbox body for transport send".to_string();
+    outbox.bcc.push(JmapEmailAddress {
+        address: "outbox-hidden@example.test".to_string(),
+        display_name: Some("Outbox Hidden".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&outbox_mailbox_id.to_string(), "outbox", "Outbox"),
+            FakeStore::mailbox(&sent_mailbox_id.to_string(), "sent", "Sent"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![outbox])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(7));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(7),
+        test_mapi_message_id(&outbox_message_id.to_string()),
+    );
+    append_rop_transport_send(&mut rops, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
+
+    {
+        let recorded = submitted_messages.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].source, "mapi-submit-message");
+        assert_eq!(recorded[0].draft_message_id, Some(outbox_message_id));
+        assert_eq!(recorded[0].subject, "Transport outbox send");
+        assert_eq!(recorded[0].body_text, "Outbox body for transport send");
+        assert_eq!(recorded[0].bcc[0].address, "outbox-hidden@example.test");
+    }
+
+    let canonical = emails.lock().unwrap();
+    assert!(canonical.iter().all(|email| email.id != outbox_message_id));
+    let sent = canonical
+        .iter()
+        .find(|email| email.mailbox_role == "sent" && email.subject == "Transport outbox send")
+        .expect("submitted outbox message is visible in canonical Sent");
+    assert_eq!(sent.mailbox_id, sent_mailbox_id);
+    assert_eq!(sent.delivery_status, "queued");
+}
+
+#[tokio::test]
 async fn mapi_over_http_replayed_execute_request_id_does_not_resubmit_message() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
@@ -23574,6 +23651,8 @@ async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
                     account_id: FakeStore::account().account_id,
                     email: FakeStore::account().email,
                     display_name: FakeStore::account().display_name,
+                    quota_mb: None,
+                    quota_used_octets: None,
                 },
             ),
             MapiFolderPermission {

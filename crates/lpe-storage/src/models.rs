@@ -320,6 +320,8 @@ pub(crate) struct AccountLoginRow {
     pub(crate) password_hash: String,
     pub(crate) status: String,
     pub(crate) display_name: String,
+    pub(crate) quota_mb: i32,
+    pub(crate) quota_used_octets: i64,
 }
 
 #[derive(Debug, FromRow)]
