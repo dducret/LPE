@@ -6594,6 +6594,10 @@ mod tests {
             associated_config_property_value(&message, 0x685D_0003),
             Some(MapiValue::U32(value)) if value != 0
         ));
+        assert_eq!(
+            associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+            Some(MapiValue::Binary(Vec::new()))
+        );
         let explicit_marker = MapiAssociatedConfigMessage {
             properties_json: serde_json::json!({
                 "0x685d0003": {"type": "u32", "value": 42}
@@ -6629,11 +6633,28 @@ mod tests {
                 PID_TAG_INSTANCE_NUM,
                 PID_TAG_ROAMING_DATATYPES,
                 0x685D_0003,
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
                 PID_TAG_LAST_MODIFICATION_TIME,
             ],
         );
 
-        assert_eq!(row.len(), 44);
+        assert_eq!(row.len(), 46);
+        let mut row_cursor = Cursor::new(&row);
+        for column in [
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_ROAMING_DATATYPES,
+            0x685D_0003,
+        ] {
+            parse_mapi_property_value(&mut row_cursor, column).unwrap();
+        }
+        assert_eq!(
+            parse_mapi_property_value(&mut row_cursor, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+                .unwrap(),
+            MapiValue::Binary(Vec::new())
+        );
 
         let entry_id_row = serialize_associated_config_row_with_mailbox_guid(
             &message,
@@ -7578,6 +7599,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
                 Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
+            }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::Binary(Vec::new()))
             }
             0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
                 Some(MapiValue::U32(outlook_configuration_stamp(message)))

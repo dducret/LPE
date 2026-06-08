@@ -6700,7 +6700,9 @@ fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
 fn format_debug_mapi_value(value: &MapiValue) -> String {
     match value {
         MapiValue::String(value) => format_debug_text_value(value),
-        MapiValue::Binary(value) => format!("binary:{}", hex_preview(value, 96)),
+        MapiValue::Binary(value) => {
+            format!("binary:bytes={}:preview={}", value.len(), hex_preview(value, 96))
+        }
         MapiValue::Bool(value) => value.to_string(),
         MapiValue::I16(value) => value.to_string(),
         MapiValue::I32(value) => value.to_string(),
@@ -19251,7 +19253,7 @@ mod tests {
         assert!(summary.contains("row_issue_count=0"));
         assert!(summary.contains("datatypes=0x00000004"));
         assert!(summary.contains("has_dict=true"));
-        assert!(summary.contains("associated_config_0e0b=missing"));
+        assert!(summary.contains("associated_config_0e0b=binary:bytes=0"));
     }
 
     #[test]
