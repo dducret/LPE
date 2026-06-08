@@ -1582,6 +1582,12 @@ fn search_folder_schema_persists_exchange_builtin_definitions() {
             && SCHEMA.contains("WHERE is_builtin"),
         "built-in search folder definitions must be unique per account and role"
     );
+    assert!(
+        SCHEMA.contains("CREATE UNIQUE INDEX search_folders_user_saved_name_idx")
+            && SCHEMA.contains("lower(btrim(display_name))")
+            && SCHEMA.contains("WHERE NOT is_builtin AND definition_kind = 'user_saved'"),
+        "user-saved search folder definitions must not duplicate Outlook-created names per account and result kind"
+    );
     for role in [
         "reminders",
         "todo_search",

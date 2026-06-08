@@ -576,11 +576,18 @@ impl MapiMailStoreSnapshot {
     ) -> Self {
         self.folders
             .retain(|folder| !folder.mailbox.role.starts_with("__mapi_search_folder_"));
-        self.folders.extend(
-            search_folder_definitions
-                .iter()
-                .filter_map(mapi_search_folder_definition_to_folder),
-        );
+        let mut projected_user_saved_keys = HashSet::new();
+        self.folders
+            .extend(search_folder_definitions.iter().filter_map(|definition| {
+                if definition.is_builtin || definition.definition_kind != "user_saved" {
+                    return mapi_search_folder_definition_to_folder(definition);
+                }
+                let key = user_saved_search_folder_projection_key(definition);
+                if !projected_user_saved_keys.insert(key) {
+                    return None;
+                }
+                mapi_search_folder_definition_to_folder(definition)
+            }));
         self.search_folder_definitions = search_folder_definitions;
         self
     }
@@ -1228,6 +1235,23 @@ impl MapiMailStoreSnapshot {
             })
     }
 
+    pub(crate) fn user_saved_search_folder_definition_by_display_name(
+        &self,
+        display_name: &str,
+        result_object_kind: &str,
+    ) -> Option<&SearchFolderDefinition> {
+        let display_name = display_name.trim();
+        self.search_folder_definitions.iter().find(|definition| {
+            !definition.is_builtin
+                && definition.definition_kind == "user_saved"
+                && definition.result_object_kind == result_object_kind
+                && definition
+                    .display_name
+                    .trim()
+                    .eq_ignore_ascii_case(display_name)
+        })
+    }
+
     pub(crate) fn rules(&self) -> &[MapiRule] {
         &self.rules
     }
@@ -1520,6 +1544,14 @@ fn mapi_search_folder_definition_to_folder(
             is_subscribed: true,
         },
     })
+}
+
+fn user_saved_search_folder_projection_key(definition: &SearchFolderDefinition) -> String {
+    format!(
+        "{}\x1f{}",
+        definition.display_name.trim().to_ascii_lowercase(),
+        definition.result_object_kind
+    )
 }
 
 fn mapi_search_folder_role(result_object_kind: &str) -> &'static str {
@@ -3016,6 +3048,47 @@ mod tests {
         assert_eq!(folder.id, folder_id);
         assert_eq!(folder.mailbox.name, "Unread from Alice");
         assert_eq!(folder.mailbox.role, "__mapi_search_folder_message");
+    }
+
+    #[test]
+    fn snapshot_deduplicates_user_saved_search_folder_projection_by_name() {
+        let first_id = Uuid::parse_str("aaaaaaaa-3333-4111-8111-aaaaaaaaaaaa").unwrap();
+        let second_id = Uuid::parse_str("aaaaaaaa-4444-4111-8111-aaaaaaaaaaaa").unwrap();
+        let first_folder_id = crate::mapi::identity::mapi_store_id(123);
+        let second_folder_id = crate::mapi::identity::mapi_store_id(124);
+        crate::mapi::identity::remember_mapi_identity(first_id, first_folder_id);
+        crate::mapi::identity::remember_mapi_identity(second_id, second_folder_id);
+
+        let account_id = Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
+        let duplicate_name = "Categories Rename Search Folder";
+        let definition = |id| SearchFolderDefinition {
+            id,
+            account_id,
+            role: "custom".to_string(),
+            display_name: duplicate_name.to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "folders"}),
+            restriction_json: serde_json::json!({"kind": "mapi_bounded"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_search_folder_definitions(vec![definition(first_id), definition(second_id)]);
+
+        let projected = snapshot
+            .folders()
+            .into_iter()
+            .filter(|folder| folder.mailbox.name == duplicate_name)
+            .collect::<Vec<_>>();
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].id, first_folder_id);
+        assert_eq!(
+            snapshot
+                .user_saved_search_folder_definition_by_display_name(duplicate_name, "message")
+                .map(|definition| definition.id),
+            Some(first_id)
+        );
     }
 
     #[test]

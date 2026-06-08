@@ -244,6 +244,10 @@ Conversation Action Settings FAI messages are projections of
 `conversation_actions` rows with `object_kind = 'conversation_action'` change
 rows. These rows are canonical LPE state, not Exchange-only FAI message stores
 or protocol-owned rule tables.
+Built-in Search Folders are unique per account and role. User-saved Search
+Folders are unique per account, normalized display name, and result object
+kind so repeated Outlook create probes update the canonical saved search
+instead of creating duplicate hierarchy entries.
 MAPI `RopSetSearchCriteria` writes only existing user-saved `search_folders`
 rows and only when the request maps to the documented `mapi_bounded` JSON
 subset in `scope_json` and `restriction_json`: folder scope, unread, flagged,

@@ -3497,6 +3497,50 @@ async fn exercise_canonical_search_folder_and_rule_replay(
         !custom_search.is_builtin && custom_search.definition_kind == "user_saved",
         "created search folder must be user-saved canonical state"
     );
+    let duplicate_name_update = storage
+        .upsert_search_folder(UpsertSearchFolderInput {
+            id: None,
+            account_id: fixture.account_id,
+            display_name: " Runtime unread from Alice ".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "inbox"}),
+            restriction_json: serde_json::json!({
+                "kind": "mapi_bounded",
+                "all": [
+                    {"field": "sender", "contains": "alice duplicate"}
+                ]
+            }),
+            excluded_folder_roles: vec!["junk".to_string()],
+        })
+        .await
+        .context("upsert duplicate user-saved search folder name")?;
+    anyhow::ensure!(
+        duplicate_name_update.id == custom_search.id
+            && duplicate_name_update.display_name == "Runtime unread from Alice",
+        "duplicate user-saved search folder name must update the existing row"
+    );
+    let duplicate_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM search_folders
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND NOT is_builtin
+          AND definition_kind = 'user_saved'
+          AND lower(btrim(display_name)) = lower(btrim($3))
+          AND result_object_kind = 'message'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind("Runtime unread from Alice")
+    .fetch_one(pool)
+    .await
+    .context("count duplicate user-saved search folder names")?;
+    anyhow::ensure!(
+        duplicate_count == 1,
+        "duplicate user-saved search folder names must be prevented"
+    );
 
     let fetched_custom = storage
         .fetch_search_folders_by_ids(fixture.account_id, &[custom_search.id])
@@ -3512,8 +3556,8 @@ async fn exercise_canonical_search_folder_and_rule_replay(
                     .and_then(serde_json::Value::as_array)
                     .is_some_and(|clauses| clauses.iter().any(|clause| clause
                         == &serde_json::json!({
-                            "field": "hasAttachment",
-                            "equals": true
+                            "field": "sender",
+                            "contains": "alice duplicate"
                         })))),
         "created search folder must be readable by id"
     );
@@ -3573,7 +3617,7 @@ async fn exercise_canonical_search_folder_and_rule_replay(
     .fetch_all(pool)
     .await
     .context("count user-saved search folder change rows")?;
-    for expected_kind in ["created", "updated", "destroyed"] {
+    for (expected_kind, expected_count) in [("created", 1), ("updated", 2), ("destroyed", 1)] {
         let mut count = 0;
         for row in &search_folder_change_counts {
             if row.try_get::<String, _>("change_kind")? == expected_kind {
@@ -3581,8 +3625,8 @@ async fn exercise_canonical_search_folder_and_rule_replay(
             }
         }
         anyhow::ensure!(
-            count == 1,
-            "search folder {expected_kind} must write one canonical change row"
+            count == expected_count,
+            "search folder {expected_kind} must write {expected_count} canonical change row(s)"
         );
     }
 

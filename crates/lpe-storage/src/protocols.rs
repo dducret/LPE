@@ -1194,64 +1194,135 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
-        let id = input.id.unwrap_or_else(Uuid::new_v4);
-        let existed = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM search_folders
-                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        let display_name = input.display_name.trim();
+        let (row, existed) = if let Some(id) = input.id {
+            let existed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM search_folders
+                    WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                )
+                "#,
             )
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let row = sqlx::query_as::<_, SearchFolderRow>(
-            r#"
-            INSERT INTO search_folders (
-                id, tenant_id, account_id, role, display_name, definition_kind,
-                result_object_kind, scope_json, restriction_json, excluded_folder_roles,
-                is_builtin
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let row = sqlx::query_as::<_, SearchFolderRow>(
+                r#"
+                INSERT INTO search_folders (
+                    id, tenant_id, account_id, role, display_name, definition_kind,
+                    result_object_kind, scope_json, restriction_json, excluded_folder_roles,
+                    is_builtin
+                )
+                VALUES ($1, $2, $3, 'custom', $4, 'user_saved', $5, $6, $7, $8, FALSE)
+                ON CONFLICT (id)
+                DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    result_object_kind = EXCLUDED.result_object_kind,
+                    scope_json = EXCLUDED.scope_json,
+                    restriction_json = EXCLUDED.restriction_json,
+                    excluded_folder_roles = EXCLUDED.excluded_folder_roles,
+                    updated_at = NOW()
+                WHERE search_folders.tenant_id = EXCLUDED.tenant_id
+                  AND search_folders.account_id = EXCLUDED.account_id
+                  AND NOT search_folders.is_builtin
+                RETURNING
+                    id,
+                    account_id,
+                    role,
+                    display_name,
+                    definition_kind,
+                    result_object_kind,
+                    scope_json,
+                    restriction_json,
+                    excluded_folder_roles,
+                    is_builtin
+                "#,
             )
-            VALUES ($1, $2, $3, 'custom', $4, 'user_saved', $5, $6, $7, $8, FALSE)
-            ON CONFLICT (id)
-            DO UPDATE SET
-                display_name = EXCLUDED.display_name,
-                result_object_kind = EXCLUDED.result_object_kind,
-                scope_json = EXCLUDED.scope_json,
-                restriction_json = EXCLUDED.restriction_json,
-                excluded_folder_roles = EXCLUDED.excluded_folder_roles,
-                updated_at = NOW()
-            WHERE search_folders.tenant_id = EXCLUDED.tenant_id
-              AND search_folders.account_id = EXCLUDED.account_id
-              AND NOT search_folders.is_builtin
-            RETURNING
-                id,
-                account_id,
-                role,
-                display_name,
-                definition_kind,
-                result_object_kind,
-                scope_json,
-                restriction_json,
-                excluded_folder_roles,
-                is_builtin
-            "#,
-        )
-        .bind(id)
-        .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(input.display_name.trim())
-        .bind(&input.result_object_kind)
-        .bind(&input.scope_json)
-        .bind(&input.restriction_json)
-        .bind(&input.excluded_folder_roles)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| anyhow!("search folder not found or cannot update builtin search folder"))?;
+            .bind(id)
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(display_name)
+            .bind(&input.result_object_kind)
+            .bind(&input.scope_json)
+            .bind(&input.restriction_json)
+            .bind(&input.excluded_folder_roles)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                anyhow!("search folder not found or cannot update builtin search folder")
+            })?;
+            (row, existed)
+        } else {
+            let existed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM search_folders
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND NOT is_builtin
+                      AND definition_kind = 'user_saved'
+                      AND lower(btrim(display_name)) = lower(btrim($3))
+                      AND result_object_kind = $4
+                )
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(display_name)
+            .bind(&input.result_object_kind)
+            .fetch_one(&mut *tx)
+            .await?;
+            let row = sqlx::query_as::<_, SearchFolderRow>(
+                r#"
+                INSERT INTO search_folders (
+                    id, tenant_id, account_id, role, display_name, definition_kind,
+                    result_object_kind, scope_json, restriction_json, excluded_folder_roles,
+                    is_builtin
+                )
+                VALUES ($1, $2, $3, 'custom', $4, 'user_saved', $5, $6, $7, $8, FALSE)
+                ON CONFLICT (
+                    tenant_id,
+                    account_id,
+                    (lower(btrim(display_name))),
+                    result_object_kind
+                )
+                WHERE NOT is_builtin AND definition_kind = 'user_saved'
+                DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    scope_json = EXCLUDED.scope_json,
+                    restriction_json = EXCLUDED.restriction_json,
+                    excluded_folder_roles = EXCLUDED.excluded_folder_roles,
+                    updated_at = NOW()
+                RETURNING
+                    id,
+                    account_id,
+                    role,
+                    display_name,
+                    definition_kind,
+                    result_object_kind,
+                    scope_json,
+                    restriction_json,
+                    excluded_folder_roles,
+                    is_builtin
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(display_name)
+            .bind(&input.result_object_kind)
+            .bind(&input.scope_json)
+            .bind(&input.restriction_json)
+            .bind(&input.excluded_folder_roles)
+            .fetch_one(&mut *tx)
+            .await?;
+            (row, existed)
+        };
 
         let change_kind = if existed { "updated" } else { "created" };
         let modseq = self

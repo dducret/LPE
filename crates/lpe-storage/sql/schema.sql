@@ -572,6 +572,10 @@ CREATE UNIQUE INDEX search_folders_builtin_role_idx
     ON search_folders (tenant_id, account_id, role)
     WHERE is_builtin;
 
+CREATE UNIQUE INDEX search_folders_user_saved_name_idx
+    ON search_folders (tenant_id, account_id, lower(btrim(display_name)), result_object_kind)
+    WHERE NOT is_builtin AND definition_kind = 'user_saved';
+
 CREATE INDEX search_folders_account_idx
     ON search_folders (tenant_id, account_id, display_name);
 

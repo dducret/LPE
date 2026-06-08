@@ -11652,6 +11652,66 @@ where
                 }
 
                 if parent_folder_id == SEARCH_FOLDER_ID {
+                    if let Some(definition) = snapshot
+                        .user_saved_search_folder_definition_by_display_name(
+                            display_name,
+                            "message",
+                        )
+                    {
+                        let folder_id = match remember_created_mapi_identity(
+                            store,
+                            principal,
+                            MapiIdentityObjectKind::SearchFolderDefinition,
+                            definition.id,
+                            None,
+                            None,
+                        )
+                        .await
+                        {
+                            Ok(folder_id) => folder_id,
+                            Err(_) => {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x1C,
+                                    request.output_handle_index.unwrap_or(0),
+                                    0x8004_0102,
+                                ));
+                                continue;
+                            }
+                        };
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x1c",
+                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                            folder_id = %format!("{folder_id:#018x}"),
+                            search_folder_id = %definition.id,
+                            folder_type = request.create_folder_type(),
+                            open_existing = request.create_folder_open_existing(),
+                            display_name = display_name,
+                            reused_existing_search_folder = true,
+                            message = "rca debug mapi create folder reused search folder",
+                        );
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::Folder {
+                                folder_id,
+                                properties: HashMap::new(),
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_create_folder_response(
+                            &request,
+                            folder_id,
+                            private_create_folder_is_existing_response_flag(),
+                        ));
+                        output_handles.push(handle);
+                        continue;
+                    }
                     let input = UpsertSearchFolderInput {
                         id: None,
                         account_id: principal.account_id,
