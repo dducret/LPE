@@ -189,6 +189,24 @@ ALTER TABLE public.mapi_object_identities
     ADD CONSTRAINT mapi_object_identities_object_kind_check
     CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'));
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM public.search_folders
+        WHERE NOT is_builtin
+          AND definition_kind = 'user_saved'
+        GROUP BY tenant_id, account_id, lower(btrim(display_name)), result_object_kind
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'Duplicate user-saved Search Folder names exist; remove duplicates before applying search_folders_user_saved_name_idx';
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS search_folders_user_saved_name_idx
+    ON public.search_folders (tenant_id, account_id, lower(btrim(display_name)), result_object_kind)
+    WHERE NOT is_builtin AND definition_kind = 'user_saved';
+
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN target_folder_id DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS group_header_id UUID,
@@ -1445,6 +1463,11 @@ fi
 mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"
 if [[ "${mapi_associated_config_table}" != "mapi_associated_config_messages" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce public.mapi_associated_config_messages." >&2
+  exit 1
+fi
+search_folder_user_saved_name_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');")"
+if [[ "${search_folder_user_saved_name_idx}" != "search_folders_user_saved_name_idx" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce search_folders_user_saved_name_idx." >&2
   exit 1
 fi
 recoverable_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');")"

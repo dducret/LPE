@@ -133,6 +133,10 @@ mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_S
   || fail "MAPI associated configuration replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "MAPI associated configuration replay shape constraint is current"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');" | grep -qx 'search_folders_user_saved_name_idx' \
+  || fail "User-saved Search Folder uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "User-saved Search Folder uniqueness index is present"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
   || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.recoverable_items"
