@@ -740,6 +740,7 @@ where
         notes.len(),
         journal_entries.len(),
         search_folder_definitions.len(),
+        &search_folder_definitions,
         conversation_actions.len(),
         reminders.len(),
         folder_permissions.len(),
@@ -1041,6 +1042,7 @@ fn log_mapi_store_load_summary(
     note_count: usize,
     journal_entry_count: usize,
     search_folder_count: usize,
+    search_folder_definitions: &[lpe_storage::SearchFolderDefinition],
     conversation_action_count: usize,
     reminder_count: usize,
     folder_permission_count: usize,
@@ -1073,12 +1075,33 @@ fn log_mapi_store_load_summary(
         note_count,
         journal_entry_count,
         search_folder_count,
+        search_folder_roles = %format_search_folder_roles(search_folder_definitions),
         conversation_action_count,
         reminder_count,
         folder_permission_count,
         content_window_count,
         message = "rca debug mapi execute store load summary",
     );
+}
+
+fn format_search_folder_roles(definitions: &[lpe_storage::SearchFolderDefinition]) -> String {
+    definitions
+        .iter()
+        .map(|definition| {
+            format!(
+                "{}:{}:{}:{}",
+                definition.role,
+                definition.definition_kind,
+                definition.result_object_kind,
+                if definition.is_builtin {
+                    "builtin"
+                } else {
+                    "user"
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn rop_requires_full_snapshot(rop_id: u8) -> bool {
@@ -1659,6 +1682,24 @@ mod tests {
 
         assert_eq!(loaded.len(), 2);
         assert!(loaded.iter().any(|mailbox| mailbox.id == custom.id));
+    }
+
+    #[test]
+    fn search_folder_role_summary_includes_builtin_flags() {
+        let roles = format_search_folder_roles(&[lpe_storage::SearchFolderDefinition {
+            id: Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
+            account_id: Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }]);
+
+        assert_eq!(roles, "reminders:exchange_builtin:mixed:builtin");
     }
 
     #[test]

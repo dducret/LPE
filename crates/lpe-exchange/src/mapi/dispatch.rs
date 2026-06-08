@@ -625,17 +625,44 @@ fn builtin_search_criteria_to_rop(
     if !definition.is_builtin {
         return None;
     }
-    let folder_ids = match definition.role.as_str() {
-        "contacts_search" => vec![CONTACTS_FOLDER_ID],
-        "todo_search" => vec![TASKS_FOLDER_ID],
-        "reminders" => vec![CALENDAR_FOLDER_ID, TASKS_FOLDER_ID],
-        _ => return None,
-    };
+    let folder_ids = builtin_search_scope_folder_ids(definition.role.as_str())?;
     Some((
         Vec::new(),
         folder_ids,
         SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG,
     ))
+}
+
+fn builtin_search_scope_folder_ids(role: &str) -> Option<Vec<u64>> {
+    match role {
+        "contacts_search" => Some(vec![CONTACTS_FOLDER_ID]),
+        "todo_search" => Some(vec![TASKS_FOLDER_ID]),
+        "reminders" => Some(vec![CALENDAR_FOLDER_ID, TASKS_FOLDER_ID]),
+        _ => None,
+    }
+}
+
+fn builtin_search_role_for_folder_id(folder_id: u64) -> Option<&'static str> {
+    match folder_id {
+        CONTACTS_SEARCH_FOLDER_ID => Some("contacts_search"),
+        TODO_SEARCH_FOLDER_ID => Some("todo_search"),
+        REMINDERS_FOLDER_ID => Some("reminders"),
+        _ => None,
+    }
+}
+
+fn builtin_search_criteria_to_rop_for_folder_id(
+    folder_id: u64,
+) -> Option<(Vec<u8>, Vec<u64>, u32)> {
+    builtin_search_scope_folder_ids(builtin_search_role_for_folder_id(folder_id)?).map(
+        |folder_ids| {
+            (
+                Vec::new(),
+                folder_ids,
+                SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG,
+            )
+        },
+    )
 }
 
 fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
@@ -8355,8 +8382,12 @@ where
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
                     mailbox = %principal.email,
                     request_type = "Execute",
+                    mapi_request_id = request_id,
                     request_rop_id = "0x02",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     response_handle_index = request.output_handle_index.unwrap_or(0),
@@ -8379,8 +8410,11 @@ where
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
                     mailbox = %principal.email,
                     request_type = "Execute",
+                    mapi_request_id = request_id,
                     request_rop_id = "0x02",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     input_handle_value = %format_optional_debug_handle(input_handle_value),
@@ -8432,8 +8466,12 @@ where
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
                     mailbox = %principal.email,
                     request_type = "Execute",
+                    mapi_request_id = request_id,
                     request_rop_id = "0x02",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     response_handle_index = request.output_handle_index.unwrap_or(0),
@@ -13927,10 +13965,36 @@ where
                     ));
                     continue;
                 };
-                let Some(definition) = snapshot
+                let definition = snapshot
                     .search_folder_definition_for_folder_id(*folder_id)
-                    .or_else(|| session.search_folder_definition(*folder_id))
-                else {
+                    .or_else(|| session.search_folder_definition(*folder_id));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    request_rop_id = "0x30",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                    folder_id = %format!("0x{folder_id:016x}"),
+                    folder_role = debug_role_for_folder_id(*folder_id),
+                    definition_found = definition.is_some(),
+                    fallback_builtin_role = builtin_search_role_for_folder_id(*folder_id).unwrap_or(""),
+                    message = "rca debug mapi set search criteria lookup"
+                );
+                let Some(definition) = definition else {
+                    if builtin_search_role_for_folder_id(*folder_id).is_some() {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x30,
+                            request.response_handle_index(),
+                            EC_SEARCH_ACCESS_DENIED,
+                        ));
+                        continue;
+                    }
                     responses.extend_from_slice(&rop_error_response(
                         0x30,
                         request.response_handle_index(),
@@ -13989,10 +14053,39 @@ where
                     ));
                     continue;
                 };
-                let Some(definition) = snapshot
+                let definition = snapshot
                     .search_folder_definition_for_folder_id(*folder_id)
-                    .or_else(|| session.search_folder_definition(*folder_id))
-                else {
+                    .or_else(|| session.search_folder_definition(*folder_id));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    request_rop_id = "0x31",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                    folder_id = %format!("0x{folder_id:016x}"),
+                    folder_role = debug_role_for_folder_id(*folder_id),
+                    definition_found = definition.is_some(),
+                    fallback_builtin_role = builtin_search_role_for_folder_id(*folder_id).unwrap_or(""),
+                    message = "rca debug mapi get search criteria lookup"
+                );
+                let Some(definition) = definition else {
+                    if let Some((restriction, folder_ids, flags)) =
+                        builtin_search_criteria_to_rop_for_folder_id(*folder_id)
+                    {
+                        responses.extend_from_slice(&rop_get_search_criteria_response(
+                            &request,
+                            &restriction,
+                            &folder_ids,
+                            flags,
+                        ));
+                        continue;
+                    }
                     responses.extend_from_slice(&rop_error_response(
                         0x31,
                         request.response_handle_index(),
@@ -19794,6 +19887,21 @@ mod tests {
         assert_eq!(
             execute_response_framing_context(&[0x02, 0x07]),
             Some("openfolder_getprops_probe")
+        );
+    }
+
+    #[test]
+    fn builtin_search_criteria_fallback_covers_advertised_reminders_folder() {
+        let (restriction, folder_ids, flags) =
+            builtin_search_criteria_to_rop_for_folder_id(REMINDERS_FOLDER_ID)
+                .expect("reminders built-in search criteria");
+
+        assert!(restriction.is_empty());
+        assert_eq!(folder_ids, vec![CALENDAR_FOLDER_ID, TASKS_FOLDER_ID]);
+        assert_eq!(flags, SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG);
+        assert_eq!(
+            builtin_search_role_for_folder_id(REMINDERS_FOLDER_ID),
+            Some("reminders")
         );
     }
 
