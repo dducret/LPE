@@ -3005,6 +3005,11 @@ fn set_property_debug_name(tag: u32) -> &'static str {
         PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
         PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
+        PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => "PidTagAdditionalRenEntryIdsEx",
+        PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
+        PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
         0x7C09_0102 => "PidTagRoamingBinary",
         0x685D_0003 => "OutlookConfigurationStamp",
         _ => "unknown",
@@ -3168,6 +3173,7 @@ fn additional_ren_entry_ids_ex_expected_folder_id(persist_id: u16) -> u64 {
         0x8002 => TRACKED_MAIL_PROCESSING_FOLDER_ID,
         0x8004 => TODO_SEARCH_FOLDER_ID,
         0x8006 => CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        0x8007 => QUICK_STEP_SETTINGS_FOLDER_ID,
         0x8008 => SUGGESTED_CONTACTS_FOLDER_ID,
         0x8009 => CONTACTS_SEARCH_FOLDER_ID,
         0x800A => IM_CONTACT_LIST_FOLDER_ID,
@@ -3183,6 +3189,7 @@ fn additional_ren_entry_ids_ex_persist_name(persist_id: u16) -> &'static str {
         0x8002 => "send_and_track",
         0x8004 => "todo_search",
         0x8006 => "conversation_actions",
+        0x8007 => "quick_step_settings",
         0x8008 => "suggested_contacts",
         0x8009 => "contact_search",
         0x800A => "buddylist_pdls",
@@ -6701,7 +6708,11 @@ fn format_debug_mapi_value(value: &MapiValue) -> String {
     match value {
         MapiValue::String(value) => format_debug_text_value(value),
         MapiValue::Binary(value) => {
-            format!("binary:bytes={}:preview={}", value.len(), hex_preview(value, 96))
+            format!(
+                "binary:bytes={}:preview={}",
+                value.len(),
+                hex_preview(value, 96)
+            )
         }
         MapiValue::Bool(value) => value.to_string(),
         MapiValue::I16(value) => value.to_string(),
@@ -20163,15 +20174,38 @@ mod tests {
         )]);
 
         assert!(debug.contains("PidTagAdditionalRenEntryIdsEx:bytes="));
-        assert!(debug.contains("bytes=490"));
-        assert!(debug.contains("entry_count=9"));
+        assert!(debug.contains("bytes=544"));
+        assert!(debug.contains("entry_count=10"));
         assert!(debug.contains("persist_id=0x8006"));
         assert!(debug.contains("persist_name=conversation_actions"));
         assert!(debug.contains("decoded_name=conversation_action_settings"));
+        assert!(debug.contains("persist_id=0x8007"));
+        assert!(debug.contains("persist_name=quick_step_settings"));
+        assert!(debug.contains("decoded_name=quick_step_settings"));
         assert!(debug.contains("persist_id=0x800f"));
         assert!(debug.contains("persist_name=archive"));
         assert!(debug.contains("decoded_name=archive"));
         assert!(debug.contains("matches_expected=true"));
+    }
+
+    #[test]
+    fn set_property_debug_names_cover_folder_special_properties() {
+        assert_eq!(
+            set_property_debug_name(PID_TAG_CONTAINER_CLASS_W),
+            "PidTagContainerClass"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX),
+            "PidTagAdditionalRenEntryIdsEx"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_EXTENDED_FOLDER_FLAGS),
+            "PidTagExtendedFolderFlags"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_FREE_BUSY_ENTRY_IDS),
+            "PidTagFreeBusyEntryIds"
+        );
     }
 
     #[test]

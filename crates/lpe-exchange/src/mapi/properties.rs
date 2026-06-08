@@ -977,6 +977,7 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
         (0x8002, TRACKED_MAIL_PROCESSING_FOLDER_ID),
         (0x8004, TODO_SEARCH_FOLDER_ID),
         (0x8006, CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
+        (0x8007, QUICK_STEP_SETTINGS_FOLDER_ID),
         (0x8008, SUGGESTED_CONTACTS_FOLDER_ID),
         (0x8009, CONTACTS_SEARCH_FOLDER_ID),
         (0x800A, IM_CONTACT_LIST_FOLDER_ID),
@@ -7500,6 +7501,7 @@ mod tests {
                 (0x8002, Some(TRACKED_MAIL_PROCESSING_FOLDER_ID)),
                 (0x8004, Some(TODO_SEARCH_FOLDER_ID)),
                 (0x8006, Some(CONVERSATION_ACTION_SETTINGS_FOLDER_ID)),
+                (0x8007, Some(QUICK_STEP_SETTINGS_FOLDER_ID)),
                 (0x8008, Some(SUGGESTED_CONTACTS_FOLDER_ID)),
                 (0x8009, Some(CONTACTS_SEARCH_FOLDER_ID)),
                 (0x800A, Some(IM_CONTACT_LIST_FOLDER_ID)),
@@ -7507,7 +7509,7 @@ mod tests {
                 (0x800F, Some(ARCHIVE_FOLDER_ID)),
             ]
         );
-        assert_eq!(value.len(), 490);
+        assert_eq!(value.len(), 544);
     }
 
     #[test]
