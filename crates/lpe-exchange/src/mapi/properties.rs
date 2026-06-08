@@ -1900,7 +1900,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) => {
             Some(wlink_guid_property_value(
                 requested_property_tag,
-                wlink_mail_folder_type_guid(),
+                common_view_named_view_folder_type_guid(),
             ))
         }
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_WLINK_GROUP_HEADER_ID) => Some(
@@ -1958,6 +1958,13 @@ fn wlink_save_stamp(message: &MapiNavigationShortcutMessage) -> u32 {
 fn wlink_mail_folder_type_guid() -> [u8; 16] {
     [
         0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+fn common_view_named_view_folder_type_guid() -> [u8; 16] {
+    [
+        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
     ]
 }
