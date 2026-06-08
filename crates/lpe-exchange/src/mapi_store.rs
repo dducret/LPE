@@ -209,9 +209,9 @@ const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
 const OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
-const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
+pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
-const OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID: u64 =
+pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
 const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID: Uuid =
     Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);

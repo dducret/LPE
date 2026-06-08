@@ -1358,6 +1358,9 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if folder_message_class(mailbox) == "IPF.Note" => {
+            default_mail_folder_view_entry_id(mailbox_guid, mapi_folder_id(mailbox))
+        }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_ATTRIBUTE_HIDDEN => {
@@ -1440,6 +1443,23 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
 
 pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
     vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]
+}
+
+pub(in crate::mapi) fn default_mail_folder_view_entry_id(
+    mailbox_guid: Uuid,
+    folder_id: u64,
+) -> Option<MapiValue> {
+    let view_id = if folder_id == SENT_FOLDER_ID {
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID
+    } else {
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID
+    };
+    crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_guid,
+        COMMON_VIEWS_FOLDER_ID,
+        view_id,
+    )
+    .map(MapiValue::Binary)
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -7170,6 +7190,28 @@ mod tests {
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DELETED_COUNT_TOTAL),
             Some(MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn mailbox_properties_project_default_mail_view_entry_id() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
+        let mailbox = mailbox(
+            "56565656-5656-4656-9656-565656565656",
+            None,
+            "inbox",
+            "Inbox",
+        );
+        crate::mapi::identity::remember_mapi_identity(mailbox.id, INBOX_FOLDER_ID);
+
+        assert_eq!(
+            mailbox_property_value_with_context_for_account(
+                &mailbox,
+                &[],
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                account_id,
+            ),
+            default_mail_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
         );
     }
 

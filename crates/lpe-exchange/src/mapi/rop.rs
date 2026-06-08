@@ -2215,6 +2215,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_XVIEWINFO_E
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
+                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_STORAGE
                         | PID_TAG_FOLDER_VIEWLIST_FLAGS
                 )

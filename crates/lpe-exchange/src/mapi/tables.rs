@@ -1015,6 +1015,9 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if message_class == "IPF.Note" => {
+            default_mail_folder_view_entry_id(mailbox_guid, folder_id)
+        }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
@@ -6873,12 +6876,29 @@ mod tests {
     }
 
     #[test]
-    fn special_folder_property_projects_view_defaults_without_invalid_default_view_entry_id() {
+    fn special_folder_property_projects_view_defaults_for_mail_folders_only() {
+        let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
         assert_eq!(
             special_folder_property_value(
                 INBOX_FOLDER_ID,
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-                Uuid::nil()
+                account_id
+            ),
+            default_mail_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
+        );
+        assert_eq!(
+            special_folder_property_value(
+                SENT_FOLDER_ID,
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                account_id
+            ),
+            default_mail_folder_view_entry_id(account_id, SENT_FOLDER_ID)
+        );
+        assert_eq!(
+            special_folder_property_value(
+                CALENDAR_FOLDER_ID,
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                account_id
             ),
             None
         );
