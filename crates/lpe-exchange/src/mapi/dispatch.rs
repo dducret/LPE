@@ -5190,6 +5190,17 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     }
     if request_rop_ids
         .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x03 | 0x07 | 0x0A | 0x79))
+        && request_rop_ids.contains(&0x03)
+        && request_rop_ids.contains(&0x07)
+        && request_rop_ids
+            .iter()
+            .any(|rop_id| matches!(*rop_id, 0x0A | 0x79))
+    {
+        return Some("open_message_getprops_setprops");
+    }
+    if request_rop_ids
+        .iter()
         .all(|rop_id| matches!(*rop_id, 0x01 | 0x06 | 0x07 | 0x0A | 0x0C | 0x29 | 0x79))
         && request_rop_ids.contains(&0x06)
         && request_rop_ids.contains(&0x0C)
@@ -19904,6 +19915,10 @@ mod tests {
         );
         assert_eq!(execute_response_framing_context(&[0x0A]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x79]), Some("setprops"));
+        assert_eq!(
+            execute_response_framing_context(&[0x03, 0x07, 0x01, 0x0a]),
+            Some("open_message_getprops_setprops")
+        );
         assert_eq!(
             execute_response_framing_context(&[0x01, 0x06, 0x29, 0x0a, 0x07, 0x0a, 0x0c]),
             Some("create_message_setprops_save")
