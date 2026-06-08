@@ -1022,6 +1022,8 @@ pub(in crate::mapi) fn rop_read_recipients_response(
     let mut response = vec![0x0F, input_handle_index];
     write_u32(&mut response, 0);
 
+    let mut row_count = 0usize;
+    let mut rows = Vec::new();
     match object {
         Some(MapiObject::Message {
             folder_id,
@@ -1041,32 +1043,41 @@ pub(in crate::mapi) fn rop_read_recipients_response(
             if start >= recipients.len() {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             }
-            for (offset, recipient) in recipients.into_iter().enumerate().skip(start) {
-                write_u32(&mut response, offset as u32);
-                response.push(recipient.recipient_type);
-                response.extend_from_slice(&0x0FFFu16.to_le_bytes());
-                response.extend_from_slice(&0u16.to_le_bytes());
+            for (offset, recipient) in recipients
+                .into_iter()
+                .enumerate()
+                .skip(start)
+                .take(u8::MAX as usize)
+            {
+                write_u32(&mut rows, offset as u32);
+                rows.push(recipient.recipient_type);
+                rows.extend_from_slice(&0x0FFFu16.to_le_bytes());
+                rows.extend_from_slice(&0u16.to_le_bytes());
                 let row = serialize_recipient_row(recipient.address);
-                response.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                response.extend_from_slice(&row);
+                rows.extend_from_slice(&(row.len() as u16).to_le_bytes());
+                rows.extend_from_slice(&row);
+                row_count += 1;
             }
         }
         Some(MapiObject::PendingMessage { recipients, .. }) => {
             if start >= recipients.len() {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             }
-            for recipient in recipients.iter().skip(start) {
-                write_u32(&mut response, recipient.row_id);
-                response.push(recipient.recipient_type);
-                response.extend_from_slice(&0x0FFFu16.to_le_bytes());
-                response.extend_from_slice(&0u16.to_le_bytes());
+            for recipient in recipients.iter().skip(start).take(u8::MAX as usize) {
+                write_u32(&mut rows, recipient.row_id);
+                rows.push(recipient.recipient_type);
+                rows.extend_from_slice(&0x0FFFu16.to_le_bytes());
+                rows.extend_from_slice(&0u16.to_le_bytes());
                 let row = serialize_pending_recipient_row(recipient);
-                response.extend_from_slice(&(row.len() as u16).to_le_bytes());
-                response.extend_from_slice(&row);
+                rows.extend_from_slice(&(row.len() as u16).to_le_bytes());
+                rows.extend_from_slice(&row);
+                row_count += 1;
             }
         }
         _ => return rop_error_response(0x0F, input_handle_index, 0x0000_04B9),
     }
+    response.push(row_count.min(u8::MAX as usize) as u8);
+    response.extend_from_slice(&rows);
     response
 }
 
@@ -6805,6 +6816,14 @@ mod tests {
         }
     }
 
+    fn utf16z(value: &str) -> Vec<u8> {
+        value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .chain([0, 0])
+            .collect()
+    }
+
     fn valid_swapped_todo_data() -> Vec<u8> {
         let mut value = vec![0; SWAPPED_TODO_DATA_LEN];
         value[0..4].copy_from_slice(&SWAPPED_TODO_DATA_VERSION.to_le_bytes());
@@ -6875,6 +6894,52 @@ mod tests {
             Some("<html><body>Hello<br>World &amp; team</body></html>")
         );
         assert_eq!(submitted.size_octets, "HTML draft".len() as i64 + 18);
+    }
+
+    #[test]
+    fn read_recipients_success_response_includes_row_count() {
+        let request = RopRequest {
+            rop_id: 0x0F,
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: 0u32.to_le_bytes().to_vec(),
+        };
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties: HashMap::new(),
+            recipients: vec![
+                PendingRecipient {
+                    row_id: 0,
+                    address: "bob@example.test".to_string(),
+                    display_name: Some("Bob".to_string()),
+                    recipient_type: 0x01,
+                },
+                PendingRecipient {
+                    row_id: 1,
+                    address: "carol@example.test".to_string(),
+                    display_name: Some("Carol".to_string()),
+                    recipient_type: 0x02,
+                },
+            ],
+        };
+
+        let response = rop_read_recipients_response(
+            &request,
+            Some(&object),
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x0F, 0x02, 0, 0, 0, 0, 2]);
+        assert_eq!(u32::from_le_bytes(response[7..11].try_into().unwrap()), 0);
+        assert_eq!(response[11], 0x01);
+        assert!(response
+            .windows(utf16z("Bob").len())
+            .any(|window| window == utf16z("Bob").as_slice()));
+        assert!(response
+            .windows(utf16z("Carol").len())
+            .any(|window| window == utf16z("Carol").as_slice()));
     }
 
     #[test]
