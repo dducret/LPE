@@ -240,7 +240,21 @@ impl MapiPropertyTag {
     }
 
     pub(in crate::mapi) fn property_type(self) -> Option<MapiPropertyType> {
-        MapiPropertyType::from_code(self.property_type_code())
+        MapiPropertyType::from_code(self.property_type_code()).or_else(|| {
+            let base_type = self.property_type_code() & !0x2000;
+            match MapiPropertyType::from_code(base_type) {
+                Some(
+                    property_type @ (MapiPropertyType::MultipleInteger16
+                    | MapiPropertyType::MultipleInteger32
+                    | MapiPropertyType::MultipleInteger64
+                    | MapiPropertyType::MultipleString8
+                    | MapiPropertyType::MultipleString
+                    | MapiPropertyType::MultipleGuid
+                    | MapiPropertyType::MultipleBinary),
+                ) => Some(property_type),
+                _ => None,
+            }
+        })
     }
 }
 
@@ -7081,6 +7095,10 @@ mod tests {
         assert_eq!(tag.property_type_code(), 0x001F);
         assert_eq!(tag.property_type(), Some(MapiPropertyType::String));
         assert!(MapiPropertyTag::new(0x8001_001F).property_id() >= FIRST_NAMED_PROPERTY_ID);
+        assert_eq!(
+            MapiPropertyTag::new(0x8031_3003).property_type(),
+            Some(MapiPropertyType::MultipleInteger32)
+        );
     }
 
     #[test]

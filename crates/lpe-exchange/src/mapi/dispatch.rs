@@ -17764,7 +17764,7 @@ where
 fn property_tags_are_supported(property_tags: &[u32]) -> bool {
     property_tags.iter().all(|tag| {
         let property_type = (*tag & 0xFFFF) as u16;
-        property_type == 0 || MapiPropertyType::from_code(property_type).is_some()
+        property_type == 0 || MapiPropertyTag::new(*tag).property_type().is_some()
     })
 }
 
@@ -17772,7 +17772,7 @@ fn property_tags_have_known_wire_types(property_tags: &[u32]) -> bool {
     property_tags.iter().all(|tag| {
         let property_type = (*tag & 0xFFFF) as u16;
         property_type == 0
-            || MapiPropertyType::from_code(property_type).is_some()
+            || MapiPropertyTag::new(*tag).property_type().is_some()
             || MapiPropertyType::known_unsupported_name(property_type).is_some()
     })
 }
@@ -17784,12 +17784,23 @@ fn format_unknown_wire_type_property_tags(property_tags: &[u32]) -> String {
         .filter(|tag| {
             let property_type = (*tag & 0xFFFF) as u16;
             property_type != 0
-                && MapiPropertyType::from_code(property_type).is_none()
+                && MapiPropertyTag::new(*tag).property_type().is_none()
                 && MapiPropertyType::known_unsupported_name(property_type).is_none()
         })
         .map(|tag| format!("0x{tag:08x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod property_tag_validation_tests {
+    use super::*;
+
+    #[test]
+    fn set_columns_accepts_multi_value_instance_property_types() {
+        assert!(property_tags_have_known_wire_types(&[0x8031_3003]));
+        assert_eq!(format_unknown_wire_type_property_tags(&[0x8031_3003]), "");
+    }
 }
 
 fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {

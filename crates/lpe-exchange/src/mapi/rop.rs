@@ -1643,7 +1643,9 @@ fn format_folder_type_getprops_contract(
         .get(&PID_TAG_FOLDER_TYPE)
         .cloned()
         .and_then(MapiValue::into_u32);
-    let (property_source, returned_value) = if handle_value.is_some() {
+    let (property_source, returned_value) = if search_folder_found {
+        ("search_folder_definition", Some(FOLDER_SEARCH))
+    } else if handle_value.is_some() {
         ("opened_handle", handle_value)
     } else if let Some(mailbox) = mailbox {
         (
@@ -3232,6 +3234,15 @@ fn serialize_session_folder_row(
     let mut row = Vec::new();
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
+        if storage_tag == PID_TAG_FOLDER_TYPE
+            && snapshot
+                .search_folder_definition_for_folder_id(folder_id)
+                .is_some()
+        {
+            write_mapi_value(&mut row, *column, &MapiValue::U32(FOLDER_SEARCH));
+            continue;
+        }
+
         if let Some(value) = properties
             .get(&storage_tag)
             .or_else(|| properties.get(column))
@@ -7814,6 +7825,122 @@ mod tests {
         assert!(contract.contains("returned_kind=search"));
         assert!(contract.contains("expected_kind=search"));
         assert!(contract.ends_with("issues="));
+    }
+
+    #[test]
+    fn folder_type_getprops_contract_prefers_saved_search_definition() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb);
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder_id = crate::mapi::identity::mapi_store_id(0x165);
+        let mailbox_id = Uuid::from_u128(0x165);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: String::new(),
+            name: "People Search".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            lpe_storage::SearchFolderDefinition {
+                id: mailbox_id,
+                account_id,
+                role: "contacts_search".to_string(),
+                display_name: "People Search".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "contact".to_string(),
+                scope_json: serde_json::json!({"scope": "contacts"}),
+                restriction_json: serde_json::json!({"kind": "contacts_search"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: true,
+            },
+        ]);
+        let object = MapiObject::Folder {
+            folder_id,
+            properties: HashMap::from([(PID_TAG_FOLDER_TYPE, MapiValue::U32(FOLDER_GENERIC))]),
+        };
+
+        let contract = format_folder_type_getprops_contract(
+            Some(&object),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[mailbox],
+            &snapshot,
+        );
+
+        assert!(contract.contains("search_folder_definition_found=true"));
+        assert!(contract.contains("property_source=search_folder_definition"));
+        assert!(contract.contains("returned_value=2"));
+        assert!(contract.contains("returned_kind=search"));
+        assert!(contract.contains("expected_kind=search"));
+        assert!(contract.ends_with("issues="));
+    }
+
+    #[test]
+    fn folder_getprops_returns_search_type_for_saved_search_definition() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb);
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder_id = crate::mapi::identity::mapi_store_id(0x168);
+        let mailbox_id = Uuid::from_u128(0x168);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: String::new(),
+            name: "Category Search".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            lpe_storage::SearchFolderDefinition {
+                id: mailbox_id,
+                account_id,
+                role: "category_search".to_string(),
+                display_name: "Category Search".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "message".to_string(),
+                scope_json: serde_json::json!({"scope": "mail"}),
+                restriction_json: serde_json::json!({"kind": "category_search"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: true,
+            },
+        ]);
+        let object = MapiObject::Folder {
+            folder_id,
+            properties: HashMap::from([(PID_TAG_FOLDER_TYPE, MapiValue::U32(FOLDER_GENERIC))]),
+        };
+
+        let row = serialize_object_property(
+            Some(&object),
+            &principal,
+            &[mailbox],
+            &[],
+            &snapshot,
+            PID_TAG_FOLDER_TYPE,
+        );
+
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), FOLDER_SEARCH);
     }
 
     #[test]

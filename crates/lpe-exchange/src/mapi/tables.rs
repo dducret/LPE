@@ -4725,6 +4725,13 @@ mod tests {
     }
 
     #[test]
+    fn property_defaults_serialize_multi_value_instance_columns() {
+        let mut row = Vec::new();
+        write_property_default(&mut row, 0x8031_3003);
+        assert_eq!(row, 0u32.to_le_bytes());
+    }
+
+    #[test]
     fn outlook_bootstrap_row_invariant_classifier_reports_consistency() {
         let folder_id = INBOX_FOLDER_ID;
         let parent_id = IPM_SUBTREE_FOLDER_ID;
