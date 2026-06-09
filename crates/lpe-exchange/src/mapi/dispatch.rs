@@ -4757,6 +4757,51 @@ fn format_debug_named_property_context(session: &MapiSession, tags: &[u32]) -> S
         .join("|")
 }
 
+fn normalize_table_property_tags_for_session(session: &MapiSession, tags: Vec<u32>) -> Vec<u32> {
+    tags.into_iter()
+        .map(|tag| normalize_table_property_tag_for_session(session, tag))
+        .collect()
+}
+
+fn cache_named_property_mapping_and_return_property_id(
+    session: &mut MapiSession,
+    property_id: u16,
+    property: MapiNamedProperty,
+) -> u16 {
+    let property_for_lookup = property.clone();
+    session.cache_named_property(property_id, property);
+    session
+        .property_id_for_name(property_for_lookup, false)
+        .unwrap_or(property_id)
+}
+
+fn normalize_table_property_tag_for_session(session: &MapiSession, property_tag: u32) -> u32 {
+    let tag = MapiPropertyTag::new(property_tag);
+    if tag.property_id() < FIRST_NAMED_PROPERTY_ID {
+        return property_tag;
+    }
+    let Some(property) = session.named_property_ids.get(&tag.property_id()) else {
+        return property_tag;
+    };
+    if is_sharing_local_folder_named_property(property) {
+        return (PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
+            & 0xffff_0000)
+            | u32::from(tag.property_type_code());
+    }
+    property_tag
+}
+
+fn is_sharing_local_folder_named_property(property: &MapiNamedProperty) -> bool {
+    property.guid == PSETID_SHARING_GUID
+        && matches!(
+            &property.kind,
+            MapiNamedPropertyKind::Name(name)
+                if name.eq_ignore_ascii_case(
+                    "SharingCalendarGroupEntryAssociatedLocalFolderId"
+                )
+        )
+}
+
 fn format_debug_search_criteria_scope(request: &RopRequest) -> String {
     if request.rop_id != RopId::SetSearchCriteria.as_u8() {
         return String::new();
@@ -11389,104 +11434,128 @@ where
                 }
                 responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
             }
-            Some(RopId::SetColumns) => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::HierarchyTable {
-                    folder_id, columns, ..
-                }) => {
-                    if !property_tags_have_known_wire_types(&request.property_tags()) {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x12,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        break;
+            Some(RopId::SetColumns) => {
+                let requested_columns = request.property_tags();
+                let normalized_columns =
+                    normalize_table_property_tags_for_session(session, requested_columns.clone());
+                let normalized_named_property_context = (requested_columns != normalized_columns)
+                    .then(|| format_debug_named_property_context(session, &requested_columns))
+                    .unwrap_or_default();
+                match input_object_mut(session, &handle_slots, &request) {
+                    Some(MapiObject::HierarchyTable {
+                        folder_id, columns, ..
+                    }) => {
+                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x12,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            break;
+                        }
+                        let folder_id_value = *folder_id;
+                        *columns = normalized_columns.clone();
+                        let selected_columns = columns.clone();
+                        if folder_id_value == INBOX_FOLDER_ID {
+                            session.record_last_inbox_hierarchy_table_context(format!(
+                                "set_columns_input_index={};set_columns={}",
+                                request.input_handle_index().unwrap_or(0),
+                                format_debug_property_tags(&selected_columns)
+                            ));
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x12",
+                                folder_id = %format!("0x{folder_id_value:016x}"),
+                                input_handle_index = request.input_handle_index().unwrap_or(0),
+                                requested_columns = %format_debug_property_tags(&selected_columns),
+                                message = "rca debug mapi inbox hierarchy set columns"
+                            );
+                        }
+                        responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
-                    let folder_id_value = *folder_id;
-                    *columns = request.property_tags();
-                    let selected_columns = columns.clone();
-                    if folder_id_value == INBOX_FOLDER_ID {
-                        session.record_last_inbox_hierarchy_table_context(format!(
-                            "set_columns_input_index={};set_columns={}",
-                            request.input_handle_index().unwrap_or(0),
-                            format_debug_property_tags(&selected_columns)
-                        ));
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x12",
-                            folder_id = %format!("0x{folder_id_value:016x}"),
-                            input_handle_index = request.input_handle_index().unwrap_or(0),
-                            requested_columns = %format_debug_property_tags(&selected_columns),
-                            message = "rca debug mapi inbox hierarchy set columns"
-                        );
+                    Some(MapiObject::AttachmentTable { columns, .. }) => {
+                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x12,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            break;
+                        }
+                        *columns = normalized_columns.clone();
+                        responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
-                    responses.extend_from_slice(&rop_set_columns_response(&request));
-                }
-                Some(MapiObject::AttachmentTable { columns, .. }) => {
-                    if !property_tags_have_known_wire_types(&request.property_tags()) {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x12,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        break;
-                    }
-                    *columns = request.property_tags();
-                    responses.extend_from_slice(&rop_set_columns_response(&request));
-                }
-                Some(MapiObject::ContentsTable {
-                    folder_id,
-                    associated,
-                    columns,
-                    ..
-                }) => {
-                    if !property_tags_have_known_wire_types(&request.property_tags()) {
-                        tracing::warn!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x12",
-                            folder_id = %format!("0x{folder_id:016x}"),
-                            associated = *associated,
-                            requested_columns = %format_debug_property_tags(&request.property_tags()),
-                            unknown_wire_type_columns =
-                                %format_unknown_wire_type_property_tags(&request.property_tags()),
-                            response_error = "0x80040102",
-                            message = "rca debug mapi contents table set columns rejected",
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            0x12,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        break;
-                    }
-                    *columns = request.property_tags();
-                    log_outlook_contents_table_set_columns(
-                        principal,
-                        &request,
-                        *folder_id,
-                        *associated,
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
                         columns,
-                    );
-                    responses.extend_from_slice(&rop_set_columns_response(&request));
+                        ..
+                    }) => {
+                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                            tracing::warn!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x12",
+                                folder_id = %format!("0x{folder_id:016x}"),
+                                associated = *associated,
+                                requested_columns = %format_debug_property_tags(&request.property_tags()),
+                                unknown_wire_type_columns =
+                                    %format_unknown_wire_type_property_tags(&request.property_tags()),
+                                response_error = "0x80040102",
+                                message = "rca debug mapi contents table set columns rejected",
+                            );
+                            responses.extend_from_slice(&rop_error_response(
+                                0x12,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            break;
+                        }
+                        *columns = normalized_columns.clone();
+                        if !normalized_named_property_context.is_empty() {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x12",
+                                folder_id = %format!("0x{folder_id:016x}"),
+                                associated = *associated,
+                                requested_columns = %format_debug_property_tags(&requested_columns),
+                                normalized_columns = %format_debug_property_tags(columns),
+                                named_property_context = %normalized_named_property_context,
+                                message = "rca debug mapi contents table set columns normalized named property aliases",
+                            );
+                        }
+                        log_outlook_contents_table_set_columns(
+                            principal,
+                            &request,
+                            *folder_id,
+                            *associated,
+                            columns,
+                        );
+                        responses.extend_from_slice(&rop_set_columns_response(&request));
+                    }
+                    Some(MapiObject::PermissionTable { columns, .. })
+                    | Some(MapiObject::RuleTable { columns, .. }) => {
+                        *columns = normalized_columns.clone();
+                        responses.extend_from_slice(&rop_set_columns_response(&request));
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x12,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
                 }
-                Some(MapiObject::PermissionTable { columns, .. })
-                | Some(MapiObject::RuleTable { columns, .. }) => {
-                    *columns = request.property_tags();
-                    responses.extend_from_slice(&rop_set_columns_response(&request));
-                }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x12,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
+            }
             Some(RopId::SortTable) => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable {
                     sort_orders,
@@ -17462,11 +17531,11 @@ where
                                 let mapping = mappings.get(missing_index).cloned().flatten();
                                 let property_id = mapping
                                     .map(|mapping| {
-                                        session.cache_named_property(
+                                        cache_named_property_mapping_and_return_property_id(
+                                            session,
                                             mapping.property_id,
                                             mapping.property,
-                                        );
-                                        mapping.property_id
+                                        )
                                     })
                                     .or_else(|| {
                                         session.property_id_for_name(
@@ -19050,6 +19119,54 @@ mod tests {
         assert!(context.contains("name=custom field"));
         assert!(context.contains("0x836b001f:id=0x836b:type=0x001f:source=unresolved_fallback"));
         assert!(!context.contains("0x0037001f"));
+    }
+
+    #[test]
+    fn table_columns_normalize_stale_sharing_named_property_alias() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x8fff,
+            MapiNamedProperty {
+                guid: PSETID_SHARING_GUID,
+                kind: MapiNamedPropertyKind::Name(
+                    "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
+                ),
+            },
+        );
+
+        let columns = normalize_table_property_tags_for_session(
+            &session,
+            vec![0x8fff_0102, PID_TAG_SUBJECT_W],
+        );
+
+        assert_eq!(
+            columns,
+            vec![
+                PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+                PID_TAG_SUBJECT_W
+            ]
+        );
+    }
+
+    #[test]
+    fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
+        let mut session = test_mapi_session();
+        let property = MapiNamedProperty {
+            guid: PSETID_SHARING_GUID,
+            kind: MapiNamedPropertyKind::Name(
+                "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
+            ),
+        };
+
+        let property_id = cache_named_property_mapping_and_return_property_id(
+            &mut session,
+            0x8fff,
+            property.clone(),
+        );
+
+        assert_eq!(property_id, 0x8010);
+        assert_eq!(session.property_name_for_id(0x8fff), property);
+        assert_eq!(session.property_id_for_name(property, false), Some(0x8010));
     }
 
     #[test]

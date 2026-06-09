@@ -234,6 +234,10 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
     )
 }
 
+pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -> bool {
+    item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
+}
+
 pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
     matches!(
         item_id,
@@ -2385,6 +2389,9 @@ mod tests {
             Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
         );
         assert!(snapshot.has_associated_config_identity_id(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID));
+        assert!(is_outlook_quick_step_default_associated_config_id(
+            OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
+        ));
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_7173_4361_8000_000000000002);

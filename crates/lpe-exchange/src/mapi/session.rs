@@ -1156,8 +1156,14 @@ impl MapiSession {
         property: MapiNamedProperty,
     ) {
         let property = normalize_named_property(property);
-        self.named_properties.insert(property.clone(), property_id);
-        self.named_property_ids.insert(property_id, property);
+        let canonical_property_id = well_known_named_property_id(&property).unwrap_or(property_id);
+        self.named_properties
+            .insert(property.clone(), canonical_property_id);
+        self.named_property_ids
+            .insert(canonical_property_id, property.clone());
+        if property_id != canonical_property_id {
+            self.named_property_ids.insert(property_id, property);
+        }
         if property_id >= self.next_named_property_id {
             self.next_named_property_id = property_id.saturating_add(1);
         }
@@ -1731,6 +1737,29 @@ mod tests {
         );
         assert_eq!(session.property_name_for_id(0x8001), property);
         assert_eq!(session.next_named_property_id, 0x8002);
+    }
+
+    #[test]
+    fn cached_well_known_named_property_keeps_dynamic_id_as_alias() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let property = MapiNamedProperty {
+            guid: PSETID_SHARING_GUID,
+            kind: MapiNamedPropertyKind::Name(
+                "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
+            ),
+        };
+
+        session.cache_named_property(0x8fff, property.clone());
+
+        assert_eq!(
+            session.property_id_for_name(property.clone(), false),
+            Some(0x8010)
+        );
+        assert_eq!(session.property_name_for_id(0x8010), property);
+        assert_eq!(session.property_name_for_id(0x8fff), property);
+        assert_eq!(session.next_named_property_id, 0x9000);
     }
 
     #[test]

@@ -980,6 +980,9 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_inbox_default_associated_config_id(object_id) {
         return "virtual_inbox_associated_config";
     }
+    if mapi_store::is_outlook_quick_step_default_associated_config_id(object_id) {
+        return "virtual_quick_step_associated_config";
+    }
     if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
         return "virtual_common_view_named_view";
     }
@@ -993,6 +996,7 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
 fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
+        || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
 }
 
@@ -1907,16 +1911,18 @@ mod tests {
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
         );
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
 
         assert_eq!(
             format_unresolved_mapi_object_scopes(&[
                 ROOT_FOLDER_ID,
                 common_view_named_view_id,
+                quick_step_config_id,
                 dynamic_id,
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
     }
@@ -1927,10 +1933,12 @@ mod tests {
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
         );
         let inbox_default_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
+        let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
 
         assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
         assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
+        assert!(is_expected_unbacked_mapi_object(quick_step_config_id));
         assert!(is_expected_unbacked_mapi_object(common_view_named_view_id));
         assert!(!is_expected_unbacked_mapi_object(dynamic_id));
     }
