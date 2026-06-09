@@ -6498,6 +6498,9 @@ mod tests {
         assert!(response
             .windows(encoded_message_class.len())
             .any(|window| window == encoded_message_class.as_slice()));
+        assert!(response
+            .windows(b"<?xml version=\"1.0\" encoding=\"utf-8\"?>".len())
+            .any(|window| window == b"<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
     }
 
     #[test]
@@ -6829,6 +6832,26 @@ mod tests {
             associated_config_property_value(&xml_only, PID_TAG_ROAMING_XML_STREAM),
             Some(MapiValue::Binary(b"<xml/>".to_vec()))
         );
+        let quick_step = MapiAssociatedConfigMessage {
+            id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 92,
+            ),
+            folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+            canonical_id: Uuid::nil(),
+            message_class: crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+            subject: crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        };
+        assert_eq!(
+            associated_config_property_value(&quick_step, PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::U32(2))
+        );
+        assert!(matches!(
+            associated_config_property_value(&quick_step, PID_TAG_ROAMING_XML_STREAM),
+            Some(MapiValue::Binary(value))
+                if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+                    && value.windows(b"customActions".len()).any(|window| window == b"customActions")
+        ));
 
         let row = serialize_associated_config_row_with_mailbox_guid(
             &message,
@@ -7914,6 +7937,18 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             {
                 Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
             }
+            PID_TAG_ROAMING_DATATYPES
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::U32(0x0000_0002))
+            }
+            PID_TAG_ROAMING_XML_STREAM
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
+            }
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
@@ -7998,6 +8033,10 @@ fn configuration_roaming_datatypes(properties: &HashMap<u32, MapiValue>) -> u32 
 
 fn minimal_roaming_dictionary_stream() -> Vec<u8> {
     br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
+}
+
+fn minimal_custom_action_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><customActions xmlns="http://schemas.microsoft.com/office/outlook/quicksteps/2010" version="1"/>"#.to_vec()
 }
 
 fn property_tag_id_matches(left: u32, right: u32) -> bool {
