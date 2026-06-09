@@ -1372,6 +1372,25 @@ fn fallback_default_specific_property(
     encoded == default_value && !modeled_zero_or_default_property(object, tag)
 }
 
+fn flagged_property_error_code(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    tag: u32,
+) -> u32 {
+    if property_is_unsupported_for_object(object, principal, tag) {
+        0x8004_0102
+    } else if fallback_default_specific_property(
+        object, principal, mailboxes, emails, snapshot, tag,
+    ) {
+        ROP_ERROR_NOT_FOUND
+    } else {
+        0x8004_0102
+    }
+}
+
 fn write_flagged_property_row(
     response: &mut Vec<u8>,
     object: Option<&MapiObject>,
@@ -1386,7 +1405,10 @@ fn write_flagged_property_row(
     for tag in columns {
         if unsupported_tags.contains(tag) {
             response.push(0x0A);
-            write_u32(response, 0x8004_0102);
+            write_u32(
+                response,
+                flagged_property_error_code(object, principal, mailboxes, emails, snapshot, *tag),
+            );
         } else {
             response.push(0);
             response.extend_from_slice(&serialize_object_property(
@@ -1408,10 +1430,8 @@ fn log_get_properties_specific_debug(
     let mut defaulted_tags = Vec::new();
     let mut intentional_default_tags = Vec::new();
     let mut fallback_default_tags = Vec::new();
-    let mut unsupported_tags = Vec::new();
     for tag in columns {
         if property_is_unsupported_for_object(object, principal, *tag) {
-            unsupported_tags.push(*tag);
             continue;
         }
         let value = serialize_object_property(object, principal, mailboxes, emails, snapshot, *tag);
@@ -1426,6 +1446,8 @@ fn log_get_properties_specific_debug(
             }
         }
     }
+    let flagged_error_tags =
+        unsupported_specific_property_tags(object, principal, mailboxes, emails, snapshot, columns);
     let (object_kind, folder_id, item_id) = mapi_object_debug_fields(object);
     let default_folder_mappings = default_folder_property_mappings_for_debug(columns);
     let returned_property_value_shapes = format_property_value_shapes_for_debug(
@@ -1435,7 +1457,7 @@ fn log_get_properties_specific_debug(
         mailboxes,
         emails,
         snapshot,
-        &unsupported_tags,
+        &flagged_error_tags,
     );
     let outlook_bootstrap_getprops = is_outlook_logon_bootstrap_getprops(object, columns);
     let outlook_bootstrap_property_details = if outlook_bootstrap_getprops {
@@ -1474,16 +1496,16 @@ fn log_get_properties_specific_debug(
         requested_property_tag_count = columns.len(),
         requested_property_tags = %format_property_tags_for_debug(columns),
         requested_property_names = %format_property_names_for_debug(columns),
-        returned_property_tag_count = columns.len().saturating_sub(unsupported_tags.len()),
-        returned_property_tags = %format_returned_property_tags_for_debug(columns, &unsupported_tags),
+        returned_property_tag_count = columns.len().saturating_sub(flagged_error_tags.len()),
+        returned_property_tags = %format_returned_property_tags_for_debug(columns, &flagged_error_tags),
         zero_or_default_property_tag_count = defaulted_tags.len(),
         zero_or_default_property_tags = %format_property_tags_for_debug(&defaulted_tags),
         intentional_zero_or_default_property_tag_count = intentional_default_tags.len(),
         intentional_zero_or_default_property_tags = %format_property_tags_for_debug(&intentional_default_tags),
         fallback_default_property_tag_count = fallback_default_tags.len(),
         fallback_default_property_tags = %format_property_tags_for_debug(&fallback_default_tags),
-        unsupported_property_tag_count = unsupported_tags.len(),
-        unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
+        unsupported_property_tag_count = flagged_error_tags.len(),
+        unsupported_property_tags = %format_property_tags_for_debug(&flagged_error_tags),
         default_ipm_folder_mapping_count = default_folder_mappings.len(),
         default_ipm_folder_mappings = %default_folder_mappings.join(","),
         response_property_row_kind = %property_row_kind_for_debug(
@@ -1494,7 +1516,14 @@ fn log_get_properties_specific_debug(
             snapshot,
             columns,
         ),
-        unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
+        unsupported_property_errors = %format_property_errors_for_debug(
+            object,
+            principal,
+            mailboxes,
+            emails,
+            snapshot,
+            &flagged_error_tags
+        ),
         returned_property_value_shapes = %returned_property_value_shapes,
         ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
         folder_type_getprops_contract = %folder_type_getprops_contract,
@@ -1515,7 +1544,7 @@ fn log_get_properties_specific_debug(
         mailboxes,
         emails,
         snapshot,
-        &unsupported_tags,
+        &flagged_error_tags,
     );
 }
 
@@ -2291,9 +2320,22 @@ fn property_row_kind_for_debug(
     }
 }
 
-fn format_property_errors_for_debug(tags: &[u32]) -> String {
+fn format_property_errors_for_debug(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    tags: &[u32],
+) -> String {
     tags.iter()
-        .map(|tag| format!("{tag:#010x}:{}:0x80040102", property_tag_debug_name(*tag)))
+        .map(|tag| {
+            format!(
+                "{tag:#010x}:{}:{:#010x}",
+                property_tag_debug_name(*tag),
+                flagged_property_error_code(object, principal, mailboxes, emails, snapshot, *tag)
+            )
+        })
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -2707,6 +2749,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_INSTANCE_KEY => "PidTagInstanceKey",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => "OutlookUndocumentedFolderBinary120C",
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
         PID_TAG_VIEW_DESCRIPTOR_CLSID => "PidTagViewDescriptorCLSID",
@@ -2730,7 +2773,12 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_WLINK_GROUP_NAME_W => "PidTagWlinkGroupName",
         PID_TAG_WLINK_SECTION => "PidTagWlinkSection",
         PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID => "PidTagWlinkAddressBookStoreEid",
+        OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG => {
+            "OutlookStaleSharingCalendarGroupEntryAssociatedLocalFolderId"
+        }
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => "OutlookAssociatedConfigBinary0E0B",
+        PID_NAME_CONTENT_CLASS_W_TAG => "PidNameContentClass",
+        PID_NAME_CONTENT_TYPE_W_TAG => "PidNameContentType",
         PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_ASSOCIATED_CONTENT_COUNT => "PidTagAssociatedContentCount",
@@ -2768,6 +2816,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_DISPLAY_CC_W => "PidTagDisplayCc",
         PID_TAG_DISPLAY_TO_W => "PidTagDisplayTo",
         PID_TAG_SUBJECT_W => "PidTagSubject",
+        PID_TAG_SUBJECT_PREFIX_W => "PidTagSubjectPrefix",
         PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
         PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => "PidTagTransportMessageHeaders",
         PID_TAG_BODY_STRING8 | PID_TAG_BODY_W => "PidTagBody",
@@ -2783,6 +2832,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_INTERNET_CODEPAGE => "PidTagInternetCodepage",
         PID_TAG_MESSAGE_LOCALE_ID => "PidTagMessageLocaleId",
         PID_TAG_INTERNET_MESSAGE_ID_W => "PidTagInternetMessageId",
+        PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS => "PidTagExtendedRuleMessageActions",
         PID_TAG_FLAG_STATUS => "PidTagFlagStatus",
         PID_TAG_SWAPPED_TODO_STORE => "PidTagSwappedToDoStore",
         PID_TAG_LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
@@ -7179,6 +7229,10 @@ mod tests {
             "PidTagDisplayTo"
         );
         assert_eq!(property_tag_debug_name(PID_TAG_SUBJECT_W), "PidTagSubject");
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SUBJECT_PREFIX_W),
+            "PidTagSubjectPrefix"
+        );
         assert_eq!(property_tag_debug_name(PID_TAG_BODY_W), "PidTagBody");
         assert_eq!(
             property_tag_debug_name(PID_TAG_RTF_COMPRESSED),
@@ -7213,6 +7267,10 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_MESSAGE_LOCALE_ID),
             "PidTagMessageLocaleId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS),
+            "PidTagExtendedRuleMessageActions"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_INTERNET_MESSAGE_ID_W),
@@ -7315,8 +7373,20 @@ mod tests {
             "PidTagWlinkAddressBookStoreEid"
         );
         assert_eq!(
+            property_tag_debug_name(OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG),
+            "OutlookStaleSharingCalendarGroupEntryAssociatedLocalFolderId"
+        );
+        assert_eq!(
             property_tag_debug_name(OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
             "OutlookAssociatedConfigBinary0E0B"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_NAME_CONTENT_CLASS_W_TAG),
+            "PidNameContentClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_NAME_CONTENT_TYPE_W_TAG),
+            "PidNameContentType"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_ROAMING_DATATYPES),
@@ -7821,6 +7891,7 @@ mod tests {
 
     #[test]
     fn property_row_kind_reports_fallback_defaults_as_flagged() {
+        const UNKNOWN_ASSOCIATED_CONFIG_INTEGER: u32 = 0x801D_0003;
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -7850,7 +7921,7 @@ mod tests {
                 &[],
                 &[],
                 &MapiMailStoreSnapshot::empty(),
-                &[OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B],
+                &[UNKNOWN_ASSOCIATED_CONFIG_INTEGER],
             ),
             "flagged"
         );
@@ -7858,7 +7929,7 @@ mod tests {
         let mut payload = Vec::new();
         payload.extend_from_slice(&4096u16.to_le_bytes());
         payload.extend_from_slice(&1u16.to_le_bytes());
-        payload.extend_from_slice(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes());
+        payload.extend_from_slice(&UNKNOWN_ASSOCIATED_CONFIG_INTEGER.to_le_bytes());
         let request = RopRequest {
             rop_id: RopId::GetPropertiesSpecific as u8,
             input_handle_index: Some(3),
@@ -7879,8 +7950,113 @@ mod tests {
         assert_eq!(response[7], 0x0A);
         assert_eq!(
             u32::from_le_bytes(response[8..12].try_into().unwrap()),
-            0x8004_0102
+            0x8004_010F
         );
+    }
+
+    #[test]
+    fn undocumented_folder_binary_120c_returns_not_found() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload,
+        };
+
+        assert_eq!(
+            property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
+            "OutlookUndocumentedFolderBinary120C"
+        );
+        assert!(fallback_default_specific_property(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
+        ));
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+        assert_eq!(response[7], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response[8..12].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn fallback_property_errors_for_debug_match_wire_error_codes() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let folder_errors = format_property_errors_for_debug(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            &[OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C],
+        );
+        assert!(folder_errors.contains("0x120c0102:OutlookUndocumentedFolderBinary120C:0x8004010f"));
+
+        let config = MapiObject::AssociatedConfig {
+            folder_id: INBOX_FOLDER_ID,
+            config_id: crate::mapi::identity::mapi_store_id(0x4322),
+            saved_message: None,
+        };
+        let missing_known_errors = format_property_errors_for_debug(
+            Some(&config),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            &[0x801D_0003],
+        );
+        assert!(missing_known_errors.contains("0x801d0003:unknown:0x8004010f"));
+
+        let unsupported_errors = format_property_errors_for_debug(
+            Some(&config),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            &[0x801D_0000],
+        );
+        assert!(unsupported_errors.contains("0x801d0000:unknown:0x80040102"));
     }
 
     #[test]
@@ -7926,13 +8102,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_view_empty_defaults_are_modeled_not_fallback_except_default_view_entry_id() {
+    fn folder_view_empty_defaults_are_modeled_not_fallback() {
         let folder = MapiObject::Folder {
             folder_id: INBOX_FOLDER_ID,
             properties: HashMap::new(),
         };
 
-        assert!(!modeled_zero_or_default_property(
+        assert!(modeled_zero_or_default_property(
             Some(&folder),
             PID_TAG_DEFAULT_VIEW_ENTRY_ID
         ));

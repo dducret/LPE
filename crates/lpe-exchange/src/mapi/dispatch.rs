@@ -3010,15 +3010,31 @@ fn set_property_debug_name(tag: u32) -> &'static str {
     match canonical_property_storage_tag(tag) {
         PID_TAG_MESSAGE_CLASS_W => "PidTagMessageClass",
         PID_TAG_SUBJECT_W => "PidTagSubject",
+        PID_TAG_SUBJECT_PREFIX_W => "PidTagSubjectPrefix",
         PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
         PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
         PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
         PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
+        PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS => "PidTagExtendedRuleMessageActions",
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => "PidTagAdditionalRenEntryIdsEx",
         PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
+        tag if property_ids_match(tag, PID_TAG_WLINK_SAVE_STAMP) => "PidTagWlinkSaveStamp",
+        tag if property_ids_match(tag, PID_TAG_WLINK_TYPE) => "PidTagWlinkType",
+        tag if property_ids_match(tag, PID_TAG_WLINK_FLAGS) => "PidTagWlinkFlags",
+        tag if property_ids_match(tag, PID_TAG_WLINK_ORDINAL) => "PidTagWlinkOrdinal",
+        tag if property_ids_match(tag, PID_TAG_WLINK_ENTRY_ID) => "PidTagWlinkEntryId",
+        tag if property_ids_match(tag, PID_TAG_WLINK_RECORD_KEY) => "PidTagWlinkRecordKey",
+        tag if property_ids_match(tag, PID_TAG_WLINK_STORE_ENTRY_ID) => "PidTagWlinkStoreEntryId",
+        tag if property_ids_match(tag, PID_TAG_WLINK_FOLDER_TYPE) => "PidTagWlinkFolderType",
+        tag if property_ids_match(tag, PID_TAG_WLINK_GROUP_CLSID) => "PidTagWlinkGroupClsid",
+        tag if property_ids_match(tag, PID_TAG_WLINK_GROUP_NAME_W) => "PidTagWlinkGroupName",
+        tag if property_ids_match(tag, PID_TAG_WLINK_SECTION) => "PidTagWlinkSection",
+        tag if property_ids_match(tag, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID) => {
+            "PidTagWlinkAddressBookStoreEid"
+        }
         0x7C09_0102 => "PidTagRoamingBinary",
         0x685D_0003 => "OutlookConfigurationStamp",
         _ => "unknown",
@@ -4757,6 +4773,23 @@ fn format_debug_named_property_context(session: &MapiSession, tags: &[u32]) -> S
         .join("|")
 }
 
+fn format_contents_table_named_property_context(
+    session: &MapiSession,
+    object: Option<&MapiObject>,
+) -> String {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        ..
+    }) = object
+    else {
+        return String::new();
+    };
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    format_debug_named_property_context(session, &selected_columns)
+}
+
 fn normalize_table_property_tags_for_session(session: &MapiSession, tags: Vec<u32>) -> Vec<u32> {
     tags.into_iter()
         .map(|tag| normalize_table_property_tag_for_session(session, tag))
@@ -6238,6 +6271,7 @@ fn log_outlook_contents_table_set_columns(
     folder_id: u64,
     associated: bool,
     columns: &[u32],
+    named_property_context: &str,
 ) {
     if !is_outlook_folder_table_debug_target(folder_id) {
         return;
@@ -6258,6 +6292,7 @@ fn log_outlook_contents_table_set_columns(
         set_columns_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
         requested_property_tag_count = columns.len(),
         requested_property_tags = %format_debug_property_tags(columns),
+        selected_named_property_context = %named_property_context,
         ipm_configuration_column_contract =
             %format_ipm_configuration_set_columns_contract(folder_id, associated, columns),
         "rca debug outlook contents table columns selected"
@@ -6268,6 +6303,7 @@ fn log_outlook_contents_table_sort(
     principal: &AccountPrincipal,
     request: &RopRequest,
     object: Option<&MapiObject>,
+    selected_named_property_context: &str,
     snapshot: &MapiMailStoreSnapshot,
 ) {
     let Some(MapiObject::ContentsTable {
@@ -6309,6 +6345,7 @@ fn log_outlook_contents_table_sort(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         ipm_configuration_contract_summary =
@@ -6327,6 +6364,7 @@ fn log_outlook_contents_table_restrict(
     principal: &AccountPrincipal,
     request: &RopRequest,
     object: Option<&MapiObject>,
+    selected_named_property_context: &str,
     snapshot: &MapiMailStoreSnapshot,
 ) {
     let Some(MapiObject::ContentsTable {
@@ -6366,6 +6404,7 @@ fn log_outlook_contents_table_restrict(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         ipm_configuration_contract_summary =
@@ -6386,6 +6425,7 @@ fn log_outlook_contents_table_query_rows(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    selected_named_property_context: &str,
     snapshot: &MapiMailStoreSnapshot,
 ) {
     let Some(MapiObject::ContentsTable {
@@ -6476,6 +6516,7 @@ fn log_outlook_contents_table_query_rows(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         ipm_configuration_contract_summary =
@@ -6510,6 +6551,8 @@ fn log_outlook_contents_table_query_rows_response(
     object: Option<&MapiObject>,
     response: &[u8],
     snapshot: &MapiMailStoreSnapshot,
+    selected_named_property_context: &str,
+    queried_position: usize,
 ) {
     let Some(MapiObject::ContentsTable {
         folder_id,
@@ -6538,7 +6581,7 @@ fn log_outlook_contents_table_query_rows_response(
             principal.account_id,
             *folder_id,
             *associated,
-            0,
+            queried_position,
             true,
             row_count as usize,
             sort_orders,
@@ -6566,6 +6609,7 @@ fn log_outlook_contents_table_query_rows_response(
         associated,
         requested_forward_read = request.query_forward_read(),
         requested_row_count = request.query_row_count().unwrap_or(0),
+        queried_position,
         current_position_after = *position,
         response_origin = %format!("0x{response_origin:02x}"),
         response_origin_name = match response_origin {
@@ -6578,6 +6622,7 @@ fn log_outlook_contents_table_query_rows_response(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         response_payload_bytes = response.len(),
         response_row_payload_preview = %response_row_payload_preview,
         associated_wire_row_summary = %associated_wire_row_summary,
@@ -6589,6 +6634,7 @@ fn log_outlook_contents_table_seek_row(
     principal: &AccountPrincipal,
     request: &RopRequest,
     object: Option<&MapiObject>,
+    selected_named_property_context: &str,
     snapshot: &MapiMailStoreSnapshot,
     before_position: Option<usize>,
     response: &[u8],
@@ -6639,6 +6685,7 @@ fn log_outlook_contents_table_seek_row(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         ipm_configuration_contract_summary =
@@ -6659,6 +6706,7 @@ fn log_outlook_contents_table_find_row(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    selected_named_property_context: &str,
     snapshot: &MapiMailStoreSnapshot,
     response: &[u8],
 ) {
@@ -6777,6 +6825,7 @@ fn log_outlook_contents_table_find_row(
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        selected_named_property_context,
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         ipm_configuration_contract_summary =
@@ -6816,7 +6865,7 @@ fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &
         default_navigation_shortcut_property_tags()
     } else if associated && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         default_conversation_action_property_tags()
-    } else if associated && folder_id == INBOX_FOLDER_ID {
+    } else if associated && matches!(folder_id, INBOX_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID) {
         default_associated_config_columns()
     } else {
         default_contents_columns()
@@ -7209,10 +7258,10 @@ fn format_outlook_query_row_values(
             .collect::<Vec<_>>()
             .join("|");
     }
-    if folder_id != INBOX_FOLDER_ID {
+    let mut rows = snapshot.associated_config_messages_for_folder(folder_id);
+    if rows.is_empty() {
         return String::new();
     }
-    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     select_query_window(rows.len(), position, forward_read, row_count)
         .iter()
@@ -7489,10 +7538,13 @@ fn format_inbox_associated_wire_row_summary(
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    if !associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+    if !associated || row_count == 0 || columns.is_empty() {
         return String::new();
     }
-    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    let mut rows = snapshot.associated_config_messages_for_folder(folder_id);
+    if rows.is_empty() {
+        return String::new();
+    }
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let column_shape = columns
@@ -11606,6 +11658,8 @@ where
                 let normalized_named_property_context = (requested_columns != normalized_columns)
                     .then(|| format_debug_named_property_context(session, &requested_columns))
                     .unwrap_or_default();
+                let selected_named_property_context =
+                    format_debug_named_property_context(session, &normalized_columns);
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable {
                         folder_id, columns, ..
@@ -11706,6 +11760,7 @@ where
                             *folder_id,
                             *associated,
                             columns,
+                            &selected_named_property_context,
                         );
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
@@ -11746,10 +11801,16 @@ where
                     collapsed_categories.clear();
                     *position = 0;
                     bookmarks.clear();
+                    let selected_named_property_context =
+                        format_contents_table_named_property_context(
+                            session,
+                            input_object(session, &handle_slots, &request),
+                        );
                     log_outlook_contents_table_sort(
                         principal,
                         &request,
                         input_object(session, &handle_slots, &request),
+                        &selected_named_property_context,
                         snapshot,
                     );
                     responses.extend_from_slice(&rop_sort_table_response(&request));
@@ -11794,10 +11855,16 @@ where
                         *restriction = parsed;
                         *position = 0;
                         bookmarks.clear();
+                        let selected_named_property_context =
+                            format_contents_table_named_property_context(
+                                session,
+                                input_object(session, &handle_slots, &request),
+                            );
                         log_outlook_contents_table_restrict(
                             principal,
                             &request,
                             input_object(session, &handle_slots, &request),
+                            &selected_named_property_context,
                             snapshot,
                         );
                         responses.extend_from_slice(&rop_restrict_response(&request));
@@ -11840,6 +11907,8 @@ where
                     emails,
                     snapshot,
                 );
+                let selected_named_property_context =
+                    format_contents_table_named_property_context(session, query_object);
                 log_calendar_hierarchy_query_rows_contract(principal, query_object, snapshot);
                 log_outlook_contents_table_query_rows(
                     principal,
@@ -11847,6 +11916,7 @@ where
                     query_object,
                     mailboxes,
                     emails,
+                    &selected_named_property_context,
                     snapshot,
                 );
                 let inbox_associated_query_context = format_inbox_associated_query_context(
@@ -11888,6 +11958,10 @@ where
                         message = "rca debug mapi inbox hierarchy query rows"
                     );
                 }
+                let queried_position = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::ContentsTable { position, .. }) => *position,
+                    _ => 0,
+                };
                 let response = rop_query_rows_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -11902,6 +11976,8 @@ where
                     input_object(session, &handle_slots, &request),
                     &response,
                     snapshot,
+                    &selected_named_property_context,
+                    queried_position,
                 );
                 responses.extend_from_slice(&response);
                 if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
@@ -11940,6 +12016,10 @@ where
             Some(RopId::SeekRow) => {
                 let before_position =
                     input_object(session, &handle_slots, &request).and_then(table_position);
+                let selected_named_property_context = format_contents_table_named_property_context(
+                    session,
+                    input_object(session, &handle_slots, &request),
+                );
                 let response = rop_seek_row_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -11952,6 +12032,7 @@ where
                     principal,
                     &request,
                     input_object(session, &handle_slots, &request),
+                    &selected_named_property_context,
                     snapshot,
                     before_position,
                     &response,
@@ -13048,6 +13129,10 @@ where
                 responses.extend_from_slice(&rop_message_status_response(&request, old_status));
             }
             Some(RopId::FindRow) => {
+                let selected_named_property_context = format_contents_table_named_property_context(
+                    session,
+                    input_object(session, &handle_slots, &request),
+                );
                 let response = rop_find_row_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -13062,6 +13147,7 @@ where
                     input_object(session, &handle_slots, &request),
                     mailboxes,
                     emails,
+                    &selected_named_property_context,
                     snapshot,
                     &response,
                 );
@@ -19282,7 +19368,39 @@ mod tests {
 
         assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
         assert!(context.contains("name=custom field"));
-        assert!(context.contains("0x836b001f:id=0x836b:type=0x001f:source=unresolved_fallback"));
+        assert!(context.contains("0x836b001f:id=0x836b:type=0x001f:source=well_known"));
+        assert!(context.contains("name=content-type"));
+        assert!(!context.contains("0x0037001f"));
+    }
+
+    #[test]
+    fn contents_table_named_property_context_reports_selected_columns() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x801f,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Name("view custom column".to_string()),
+            },
+        );
+        let table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W, 0x801f_001f],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        let context = format_contents_table_named_property_context(&session, Some(&table));
+
+        assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
+        assert!(context.contains("name=view custom column"));
         assert!(!context.contains("0x0037001f"));
     }
 
@@ -19444,7 +19562,10 @@ mod tests {
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
         );
-        assert!(!properties.contains_key(&PID_TAG_DEFAULT_VIEW_ENTRY_ID));
+        assert!(matches!(
+            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+            Some(MapiValue::Binary(value)) if !value.is_empty()
+        ));
         assert_eq!(
             properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
             Some(&MapiValue::U32(0))
@@ -20082,6 +20203,55 @@ mod tests {
     }
 
     #[test]
+    fn associated_config_wire_summary_uses_requested_position() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let first_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000011);
+        let second_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000012);
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(0x7011),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(0x7012),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: first_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.A".to_string(),
+                subject: "A".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: second_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.B".to_string(),
+                subject: "B".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+
+        let summary = format_inbox_associated_wire_row_summary(
+            account_id,
+            INBOX_FOLDER_ID,
+            true,
+            1,
+            true,
+            1,
+            &[],
+            &[PID_TAG_MESSAGE_CLASS_W],
+            &snapshot,
+        );
+
+        assert!(summary.contains("position=1"), "{summary}");
+        assert!(summary.contains("class=IPM.Configuration.B"), "{summary}");
+        assert!(!summary.contains("class=IPM.Configuration.A"), "{summary}");
+    }
+
+    #[test]
     fn common_views_query_row_values_report_selected_wlink_columns() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001);
@@ -20132,6 +20302,46 @@ mod tests {
         assert!(summary.contains("0x684c0102=binary:"));
         assert!(summary.contains("0x68910102=binary:"));
         assert!(summary.contains("0x80100102=binary:"));
+    }
+
+    #[test]
+    fn quick_step_associated_debug_summaries_report_custom_action_row() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let columns = [PID_TAG_MESSAGE_CLASS_W, PID_TAG_ROAMING_XML_STREAM];
+
+        assert_eq!(
+            effective_contents_table_columns(QUICK_STEP_SETTINGS_FOLDER_ID, true, &[]),
+            default_associated_config_columns()
+        );
+
+        let values = format_outlook_query_row_values(
+            account_id,
+            QUICK_STEP_SETTINGS_FOLDER_ID,
+            true,
+            0,
+            true,
+            1,
+            &[],
+            &columns,
+            &snapshot,
+        );
+        let wire = format_inbox_associated_wire_row_summary(
+            account_id,
+            QUICK_STEP_SETTINGS_FOLDER_ID,
+            true,
+            0,
+            true,
+            1,
+            &[],
+            &columns,
+            &snapshot,
+        );
+
+        assert!(values.contains("IPM.Microsoft.CustomAction"), "{values}");
+        assert!(values.contains("0x7c080102=binary:bytes="), "{values}");
+        assert!(wire.contains("class=IPM.Microsoft.CustomAction"), "{wire}");
+        assert!(wire.contains("query_rows_len="), "{wire}");
     }
 
     #[test]
@@ -21146,6 +21356,30 @@ mod tests {
         assert_eq!(
             set_property_debug_name(PID_TAG_FREE_BUSY_ENTRY_IDS),
             "PidTagFreeBusyEntryIds"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_SUBJECT_PREFIX_W),
+            "PidTagSubjectPrefix"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS),
+            "PidTagExtendedRuleMessageActions"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_WLINK_ENTRY_ID),
+            "PidTagWlinkEntryId"
+        );
+        assert_eq!(
+            set_property_debug_name(0x684F_0102),
+            "PidTagWlinkFolderType"
+        );
+        assert_eq!(
+            set_property_debug_name(0x6850_0102),
+            "PidTagWlinkGroupClsid"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID),
+            "PidTagWlinkAddressBookStoreEid"
         );
     }
 
