@@ -2215,12 +2215,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::AssociatedConfig { .. }) => {
-            matches!(
-                storage_tag,
-                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    | PID_TAG_MESSAGE_STATUS
-                    | PID_TAG_SENT_MAIL_SVR_EID
-            )
+            MapiPropertyTag::new(storage_tag).property_type().is_some()
         }
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
@@ -7507,9 +7502,14 @@ mod tests {
             Some(&object),
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ));
-        assert!(!modeled_zero_or_default_property(
+        assert!(modeled_zero_or_default_property(
             Some(&object),
             PID_TAG_ORIGINAL_MESSAGE_CLASS_W
+        ));
+        assert!(modeled_zero_or_default_property(Some(&object), 0x801D_0003));
+        assert!(!modeled_zero_or_default_property(
+            Some(&object),
+            0x801D_0000
         ));
     }
 
@@ -8046,15 +8046,14 @@ mod tests {
             config_id: crate::mapi::identity::mapi_store_id(0x4322),
             saved_message: None,
         };
-        let missing_known_errors = format_property_errors_for_debug(
+        assert!(!fallback_default_specific_property(
             Some(&config),
             &principal,
             &[],
             &[],
             &MapiMailStoreSnapshot::empty(),
-            &[0x801D_0003],
-        );
-        assert!(missing_known_errors.contains("0x801d0003:unknown:0x8004010f"));
+            0x801D_0003,
+        ));
 
         let unsupported_errors = format_property_errors_for_debug(
             Some(&config),

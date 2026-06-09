@@ -25,6 +25,7 @@ export function Sidebar(props: {
     { id: "drafts", label: props.copy.folders.drafts, count: props.counts.drafts },
     { id: "sent", label: props.copy.folders.sent, count: props.counts.sent },
     { id: "archive", label: props.copy.folders.archive, count: props.counts.archive },
+    { id: "trash", label: props.copy.folders.trash, count: props.counts.trash },
     { id: "junk", label: props.copy.folders.junk, count: props.counts.junk },
     { id: "outbox", label: props.copy.folders.outbox, count: props.counts.outbox },
     { id: "rss_feeds", label: props.copy.folders.rss_feeds, count: props.counts.rss_feeds },
@@ -125,7 +126,7 @@ export function Sidebar(props: {
                   }
                 }}
               >
-                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : item.id === "junk" ? "!" : item.id === "outbox" ? "↥" : "▤"}</span>
+                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : item.id === "trash" ? "⌫" : item.id === "junk" ? "!" : item.id === "outbox" ? "↥" : "▤"}</span>
                 <span className="sidebar-label">{item.label}</span>
                 <span className="sidebar-meta">{item.count ?? ""}</span>
               </button>

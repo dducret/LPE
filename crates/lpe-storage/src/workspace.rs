@@ -755,6 +755,7 @@ fn client_folder(role: &str) -> String {
         "drafts" => "drafts",
         "sent" => "sent",
         "archive" => "archive",
+        "trash" => "trash",
         "junk" => "junk",
         "outbox" => "outbox",
         "rss_feeds" => "rss_feeds",
@@ -832,5 +833,16 @@ fn client_address_book_id_for_role(role: &str) -> &'static str {
         crate::QUICK_CONTACTS_ROLE => crate::QUICK_CONTACTS_COLLECTION_ID,
         crate::IM_CONTACT_LIST_ROLE => crate::IM_CONTACT_LIST_COLLECTION_ID,
         _ => crate::DEFAULT_COLLECTION_ID,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_folder;
+
+    #[test]
+    fn client_folder_preserves_trash_role() {
+        assert_eq!(client_folder("trash"), "trash");
+        assert_eq!(client_folder("unknown"), "inbox");
     }
 }

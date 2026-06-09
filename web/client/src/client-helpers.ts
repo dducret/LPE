@@ -65,6 +65,7 @@ export function countFolders(messages: Message[]): Record<Folder, number> {
     drafts: 0,
     sent: 0,
     archive: 0,
+    trash: 0,
     junk: 0,
     outbox: 0,
     rss_feeds: 0,
