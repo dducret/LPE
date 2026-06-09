@@ -1456,6 +1456,9 @@ struct RopRequestDebugSummary {
     ids: Vec<u8>,
     ids_csv: String,
     names_csv: String,
+    total_count: usize,
+    truncated: bool,
+    all_release: bool,
     handle_count: usize,
     handle_table_summary: String,
     request_payload_bytes: usize,
@@ -1539,7 +1542,10 @@ fn log_execute_rop_debug(
         trace_id = %trace_id,
         request_rop_ids = %request.ids_csv,
         request_rop_names = %request.names_csv,
-        request_rop_count = request.ids.len(),
+        request_rop_count = request.total_count,
+        request_rop_debug_entry_count = request.ids.len(),
+        request_rop_debug_truncated = request.truncated,
+        request_all_rops_are_release = request.all_release,
         request_handle_count = request.handle_count,
         input_handle_table_summary = %request.handle_table_summary,
         request_extended_rop_buffer = request.extended,
@@ -1665,8 +1671,8 @@ fn log_execute_rop_debug(
     }
 
     if endpoint == "emsmdb"
-        && request.ids.iter().all(|rop_id| *rop_id == 0x01)
-        && !request.ids.is_empty()
+        && request.all_release
+        && request.total_count != 0
         && response.count == 0
     {
         tracing::info!(
@@ -1879,7 +1885,10 @@ fn log_execute_request_start_debug(
         request_rop_buffer_bytes = request_rop_buffer.len(),
         rop_ids = %request.ids_csv,
         rop_names = %request.names_csv,
-        rop_count = request.ids.len(),
+        rop_count = request.total_count,
+        rop_debug_entry_count = request.ids.len(),
+        rop_debug_truncated = request.truncated,
+        all_rops_are_release = request.all_release,
         handle_count = request.handle_count,
         handle_table = %request.handle_table_summary,
         extended = request.extended,
@@ -5086,6 +5095,7 @@ fn rop_long_term_id_from_id_response_for_scope(
 fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     let mut summary = RopRequestDebugSummary {
         extended: is_rpc_header_ext_rop_buffer(rop_buffer),
+        all_release: true,
         ..RopRequestDebugSummary::default()
     };
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
@@ -5099,9 +5109,18 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     summary.handle_table_bytes = handle_table.len();
 
     let mut cursor = Cursor::new(requests);
-    while cursor.remaining() > 0 && summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
+    while cursor.remaining() > 0 {
         match read_rop_request(&mut cursor) {
-            Ok(request) => summary.ids.push(request.typed().rop_id()),
+            Ok(request) => {
+                let rop_id = request.typed().rop_id();
+                summary.total_count += 1;
+                summary.all_release &= rop_id == RopId::Release.as_u8();
+                if summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
+                    summary.ids.push(rop_id);
+                } else {
+                    summary.truncated = true;
+                }
+            }
             Err(error) => {
                 let offset = cursor.position();
                 let remaining = cursor.remaining();
@@ -5111,9 +5130,9 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
                     .unwrap_or_default();
                 summary.parse_error = format!(
                     "{};offset={offset};remaining={remaining};next={preview};parsed_rop_count={}",
-                    error,
-                    summary.ids.len()
+                    error, summary.total_count
                 );
+                summary.all_release = false;
                 break;
             }
         }
@@ -19976,6 +19995,30 @@ mod tests {
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
         assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_debug_summary_distinguishes_truncated_release_prefix() {
+        let mut request_bytes = Vec::new();
+        for index in 0..MAX_ROP_DEBUG_ENTRIES {
+            request_bytes.extend_from_slice(&[RopId::Release.as_u8(), 0, index as u8]);
+        }
+        request_bytes.extend_from_slice(&[RopId::OpenFolder.as_u8(), 0, 0, 1]);
+        request_bytes.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
+        );
+        request_bytes.push(0);
+        let request_buffer =
+            rop_buffer_with_response(request_bytes, &vec![u32::MAX; MAX_ROP_DEBUG_ENTRIES + 1]);
+
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+
+        assert_eq!(request_summary.ids.len(), MAX_ROP_DEBUG_ENTRIES);
+        assert_eq!(request_summary.total_count, MAX_ROP_DEBUG_ENTRIES + 1);
+        assert!(request_summary.truncated);
+        assert!(!request_summary.all_release);
+        assert!(request_summary.ids.iter().all(|rop_id| *rop_id == 0x01));
+        assert!(request_summary.parse_error.is_empty());
     }
 
     #[test]

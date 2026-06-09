@@ -1954,7 +1954,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
     }
 }
 
-fn minimal_view_descriptor_binary() -> Vec<u8> {
+pub(in crate::mapi) fn minimal_view_descriptor_binary() -> Vec<u8> {
     let mut value = Vec::with_capacity(96);
     value.extend_from_slice(&[0; 8]);
     value.extend_from_slice(&8u32.to_le_bytes());
@@ -2028,7 +2028,7 @@ fn wlink_mail_folder_type_guid() -> [u8; 16] {
     ]
 }
 
-fn common_view_named_view_folder_type_guid() -> [u8; 16] {
+pub(in crate::mapi) fn common_view_named_view_folder_type_guid() -> [u8; 16] {
     [
         0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
