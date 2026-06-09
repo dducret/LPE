@@ -177,14 +177,14 @@ pub(in crate::mapi) fn rop_open_folder_response(request: &RopRequest, is_ghosted
 pub(in crate::mapi) fn rop_open_message_response(
     request: &RopRequest,
     subject: &str,
-    recipient_count: usize,
+    _recipient_count: usize,
 ) -> Vec<u8> {
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(0);
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, subject);
-    response.extend_from_slice(&(recipient_count as u16).to_le_bytes());
+    response.extend_from_slice(&0u16.to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -197,7 +197,7 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    let (subject, recipient_count) = match object {
+    let subject = match object {
         Some(MapiObject::Message {
             folder_id,
             message_id,
@@ -209,76 +209,54 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
             })
             .or(saved_email.as_ref().map(|saved| &saved.email))
         {
-            Some(email) => (email.subject.clone(), message_recipients(email).len()),
+            Some(email) => email.subject.clone(),
             None => {
                 return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
             }
         },
-        Some(MapiObject::PendingMessage {
+        Some(MapiObject::PendingMessage { properties, .. }) => pending_text_property(
             properties,
-            recipients,
-            ..
-        }) => (
-            pending_text_property(
-                properties,
-                &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-            ),
-            recipients.len(),
+            &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
         ),
-        Some(MapiObject::PendingContact { properties, .. }) => (
-            pending_text_property(
-                properties,
-                &[
-                    PID_TAG_DISPLAY_NAME_W,
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                ],
-            ),
-            0,
+        Some(MapiObject::PendingContact { properties, .. }) => pending_text_property(
+            properties,
+            &[
+                PID_TAG_DISPLAY_NAME_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+            ],
         ),
-        Some(MapiObject::PendingEvent { properties, .. }) => (
-            pending_text_property(
-                properties,
-                &[
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_DISPLAY_NAME_W,
-                ],
-            ),
-            0,
+        Some(MapiObject::PendingEvent { properties, .. }) => pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
         ),
-        Some(MapiObject::PendingTask { properties, .. }) => (
-            pending_text_property(
-                properties,
-                &[
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_DISPLAY_NAME_W,
-                ],
-            ),
-            0,
+        Some(MapiObject::PendingTask { properties, .. }) => pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
         ),
-        Some(MapiObject::PendingNote { properties, .. }) => (
-            pending_text_property(
-                properties,
-                &[
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_DISPLAY_NAME_W,
-                ],
-            ),
-            0,
+        Some(MapiObject::PendingNote { properties, .. }) => pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
         ),
-        Some(MapiObject::PendingJournalEntry { properties, .. }) => (
-            pending_text_property(
-                properties,
-                &[
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_DISPLAY_NAME_W,
-                ],
-            ),
-            0,
+        Some(MapiObject::PendingJournalEntry { properties, .. }) => pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
         ),
         _ => return rop_error_response(0x10, request.response_handle_index(), 0x0000_04B9),
     };
@@ -288,7 +266,7 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     response.push(0);
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, &subject);
-    response.extend_from_slice(&(recipient_count as u16).to_le_bytes());
+    response.extend_from_slice(&0u16.to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -7133,6 +7111,56 @@ mod tests {
         let existing = rop_create_folder_response(&request, QUICK_STEP_SETTINGS_FOLDER_ID, true);
         assert_eq!(existing.len(), 16);
         assert_eq!(existing[14], 1);
+    }
+
+    #[test]
+    fn open_message_response_does_not_advertise_missing_recipient_rows() {
+        let request = RopRequest {
+            rop_id: RopId::OpenMessage.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(2),
+            payload: Vec::new(),
+        };
+
+        let response = rop_open_message_response(&request, "Subject", 3);
+
+        assert_eq!(response[0], RopId::OpenMessage.as_u8());
+        assert_eq!(response[1], 2);
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(&response[response.len() - 5..response.len() - 3], &[0, 0]);
+        assert_eq!(&response[response.len() - 3..response.len() - 1], &[0, 0]);
+        assert_eq!(response[response.len() - 1], 0);
+    }
+
+    #[test]
+    fn reload_cached_information_does_not_advertise_missing_recipient_rows() {
+        let request = RopRequest {
+            rop_id: RopId::ReloadCachedInformation.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let object = MapiObject::PendingMessage {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::from([(PID_TAG_SUBJECT_W, MapiValue::String("Subject".into()))]),
+            recipients: vec![PendingRecipient {
+                row_id: 0,
+                recipient_type: 1,
+                address: "alice@example.test".into(),
+                display_name: Some("Alice".into()),
+            }],
+        };
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let response =
+            rop_reload_cached_information_response(&request, Some(&object), &[], &[], &snapshot);
+
+        assert_eq!(response[0], RopId::ReloadCachedInformation.as_u8());
+        assert_eq!(response[1], 2);
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(&response[response.len() - 5..response.len() - 3], &[0, 0]);
+        assert_eq!(&response[response.len() - 3..response.len() - 1], &[0, 0]);
+        assert_eq!(response[response.len() - 1], 0);
     }
 
     #[test]

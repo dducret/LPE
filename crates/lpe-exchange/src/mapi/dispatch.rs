@@ -2280,6 +2280,120 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn log_open_message_debug(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    handle: u32,
+    folder_id: u64,
+    message_id: u64,
+    source: &str,
+    email: &JmapEmail,
+    response_len: usize,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x03",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        output_handle_index = request.output_handle_index.unwrap_or(0),
+        output_handle_id = handle,
+        object_kind = "message",
+        open_message_source = source,
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        item_id = %format!("0x{message_id:016x}"),
+        subject_chars = email.subject.chars().count(),
+        body_text_bytes = email.body_text.len(),
+        body_text_chars = email.body_text.chars().count(),
+        body_html_bytes = email
+            .body_html_sanitized
+            .as_ref()
+            .map(|body| body.len())
+            .unwrap_or(0),
+        recipient_count = message_recipients(email).len(),
+        has_attachments = email.has_attachments,
+        unread = email.unread,
+        size_octets = email.size_octets,
+        response_rop_bytes = response_len,
+        "rca debug mapi open message"
+    );
+}
+
+fn log_message_getprops_response_debug(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    response_len: usize,
+) {
+    let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+        saved_email,
+    }) = object
+    else {
+        return;
+    };
+    let (message_source, email) = if let Some(email) =
+        message_for_id(*folder_id, *message_id, mailboxes, emails)
+    {
+        ("mailbox", Some(email))
+    } else if let Some(message) = search_folder_message_for_id(snapshot, *folder_id, *message_id) {
+        ("search_folder", Some(&message.email))
+    } else if let Some(saved) = saved_email.as_ref() {
+        ("saved_handle", Some(&saved.email))
+    } else {
+        ("missing", None)
+    };
+    let property_tags = request.property_tags();
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = "message",
+        message_source = message_source,
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        item_id = %format!("0x{message_id:016x}"),
+        requested_property_tag_count = property_tags.len(),
+        requested_property_tags = %format_debug_property_tags(&property_tags),
+        requested_body_or_rendering_property_count = property_tags
+            .iter()
+            .filter(|tag| matches!(
+                **tag,
+                PID_TAG_BODY_STRING8
+                    | PID_TAG_BODY_W
+                    | PID_TAG_RTF_COMPRESSED
+                    | PID_TAG_BODY_HTML_W
+                    | PID_TAG_HTML_BINARY
+                    | PID_TAG_NATIVE_BODY
+                    | PID_TAG_RTF_IN_SYNC
+            ))
+            .count(),
+        subject_chars = email.map(|email| email.subject.chars().count()).unwrap_or(0),
+        body_text_bytes = email.map(|email| email.body_text.len()).unwrap_or(0),
+        body_html_bytes = email
+            .and_then(|email| email.body_html_sanitized.as_ref().map(|body| body.len()))
+            .unwrap_or(0),
+        recipient_count = email.map(message_recipients).map(|recipients| recipients.len()).unwrap_or(0),
+        has_attachments = email.map(|email| email.has_attachments).unwrap_or(false),
+        unread = email.map(|email| email.unread).unwrap_or(false),
+        response_rop_bytes = response_len,
+        "rca debug mapi message get properties response"
+    );
+}
+
 fn format_live_handle_debug_summary(session: &MapiSession) -> String {
     session
         .handles
@@ -9243,11 +9357,22 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(
+                    let response = rop_open_message_response(
                         &request,
                         &email.subject,
                         message_recipients(email).len(),
-                    ));
+                    );
+                    log_open_message_debug(
+                        principal,
+                        &request,
+                        handle,
+                        folder_id,
+                        message_id,
+                        "mailbox",
+                        email,
+                        response.len(),
+                    );
+                    responses.extend_from_slice(&response);
                     output_handles.push(handle);
                 } else if let Some(message) =
                     search_folder_message_for_id(snapshot, folder_id, message_id)
@@ -9261,11 +9386,22 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(
+                    let response = rop_open_message_response(
                         &request,
                         &message.email.subject,
                         message_recipients(&message.email).len(),
-                    ));
+                    );
+                    log_open_message_debug(
+                        principal,
+                        &request,
+                        handle,
+                        folder_id,
+                        message_id,
+                        "search_folder",
+                        &message.email,
+                        response.len(),
+                    );
+                    responses.extend_from_slice(&response);
                     output_handles.push(handle);
                 } else if let Some(email) = unique_message_for_id(message_id, emails) {
                     let canonical_folder_id = canonical_message_folder_id(email, mailboxes);
@@ -9295,11 +9431,22 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(
+                    let response = rop_open_message_response(
                         &request,
                         &email.subject,
                         message_recipients(email).len(),
-                    ));
+                    );
+                    log_open_message_debug(
+                        principal,
+                        &request,
+                        handle,
+                        handle_folder_id,
+                        message_id,
+                        "unique_message_id_folder_mismatch",
+                        email,
+                        response.len(),
+                    );
+                    responses.extend_from_slice(&response);
                     output_handles.push(handle);
                 } else if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
                     let handle = session.allocate_output_handle(
@@ -10035,6 +10182,15 @@ where
                     emails_for_request,
                     snapshot,
                     &custom_values,
+                );
+                log_message_getprops_response_debug(
+                    principal,
+                    &request,
+                    object,
+                    mailboxes,
+                    emails_for_request,
+                    snapshot,
+                    property_response.len(),
                 );
                 responses.extend_from_slice(&property_response);
                 if is_inbox_folder_type_probe {
