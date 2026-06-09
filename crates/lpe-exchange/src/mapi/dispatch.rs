@@ -6612,6 +6612,8 @@ fn log_outlook_contents_table_find_row(
     principal: &AccountPrincipal,
     request: &RopRequest,
     object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     response: &[u8],
 ) {
@@ -6632,6 +6634,11 @@ fn log_outlook_contents_table_find_row(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let total_row_count = if *associated {
+        associated_folder_message_count(*folder_id, snapshot)
+    } else {
+        folder_message_count(*folder_id, mailboxes, emails, snapshot)
+    };
     let found_row_value_summary = if response.get(7).copied().unwrap_or(0) == 1 {
         format_outlook_query_row_values(
             principal.account_id,
@@ -6662,6 +6669,21 @@ fn log_outlook_contents_table_find_row(
     } else {
         String::new()
     };
+    let normal_message_find_row_summary = if !*associated {
+        format_normal_message_query_row_summary(
+            *folder_id,
+            *associated,
+            *position,
+            true,
+            total_row_count.min(5) as usize,
+            sort_orders,
+            &selected_columns,
+            mailboxes,
+            emails,
+        )
+    } else {
+        String::new()
+    };
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -6682,6 +6704,7 @@ fn log_outlook_contents_table_find_row(
         restriction_decoded = %format_debug_restriction(request_restriction_bytes(request)),
         response_found = response.get(7).copied().unwrap_or(0),
         current_position = *position,
+        table_total_row_count = total_row_count,
         table_has_restriction = restriction.is_some(),
         table_sort_order_count = sort_orders.len(),
         table_sort_orders = %format_debug_sort_orders(sort_orders),
@@ -6697,9 +6720,10 @@ fn log_outlook_contents_table_find_row(
                 &selected_columns,
                 sort_orders,
                 snapshot
-            ),
+        ),
         find_row_value_summary = %found_row_value_summary,
         find_row_wire_summary = %found_wire_row_summary,
+        normal_message_find_row_summary = %normal_message_find_row_summary,
         response_row_wire_preview = %if response.get(7).copied().unwrap_or(0) == 1 {
             hex_preview(response.get(8..).unwrap_or_default(), 160)
         } else {
@@ -6865,7 +6889,14 @@ fn ipm_configuration_row_issues(
 }
 
 fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
-    matches!(folder_id, INBOX_FOLDER_ID | COMMON_VIEWS_FOLDER_ID)
+    matches!(
+        folder_id,
+        INBOX_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | SENT_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | QUICK_STEP_SETTINGS_FOLDER_ID
+    )
 }
 
 fn request_restriction_bytes(request: &RopRequest) -> &[u8] {
@@ -7108,7 +7139,7 @@ fn format_normal_message_query_row_summary(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
 ) -> String {
-    if associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+    if associated || row_count == 0 || columns.is_empty() {
         return String::new();
     }
 
@@ -12795,6 +12826,8 @@ where
                     principal,
                     &request,
                     input_object(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
                     snapshot,
                     &response,
                 );
