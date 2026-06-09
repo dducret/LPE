@@ -6674,11 +6674,30 @@ fn log_outlook_contents_table_find_row(
     else {
         return;
     };
-    if !is_outlook_folder_table_debug_target(*folder_id) {
+    let response_return_value = rop_response_return_value(response);
+    if !is_outlook_folder_table_debug_target(*folder_id) && response_return_value != 0x8004_010F {
         return;
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let restriction_property_tags = restriction_property_tags_from_request(request);
+    let find_row_failure_candidate_summary = if response_return_value == 0x8004_010F && !*associated
+    {
+        format_normal_message_find_row_failure_candidates(
+            *folder_id,
+            *position,
+            request.find_backward(),
+            request,
+            restriction.as_ref(),
+            sort_orders,
+            &selected_columns,
+            &restriction_property_tags,
+            mailboxes,
+            emails,
+        )
+    } else {
+        String::new()
+    };
     let total_row_count = if *associated {
         associated_folder_message_count(*folder_id, snapshot)
     } else {
@@ -6747,6 +6766,8 @@ fn log_outlook_contents_table_find_row(
         restriction_bytes = request_restriction_bytes(request).len(),
         restriction_preview = %hex_preview(request_restriction_bytes(request), 96),
         restriction_decoded = %format_debug_restriction(request_restriction_bytes(request)),
+        restriction_property_tags = %format_debug_property_tags(&restriction_property_tags),
+        response_return_value = %format!("0x{response_return_value:08x}"),
         response_found = response.get(7).copied().unwrap_or(0),
         current_position = *position,
         table_total_row_count = total_row_count,
@@ -6769,6 +6790,7 @@ fn log_outlook_contents_table_find_row(
         find_row_value_summary = %found_row_value_summary,
         find_row_wire_summary = %found_wire_row_summary,
         normal_message_find_row_summary = %normal_message_find_row_summary,
+        find_row_failure_candidate_summary = %find_row_failure_candidate_summary,
         response_row_wire_preview = %if response.get(7).copied().unwrap_or(0) == 1 {
             hex_preview(response.get(8..).unwrap_or_default(), 160)
         } else {
@@ -6776,6 +6798,14 @@ fn log_outlook_contents_table_find_row(
         },
         "rca debug outlook contents table find row"
     );
+}
+
+fn rop_response_return_value(response: &[u8]) -> u32 {
+    response
+        .get(2..6)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0)
 }
 
 fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &[u32]) -> Vec<u32> {
@@ -6950,6 +6980,39 @@ fn request_restriction_bytes(request: &RopRequest) -> &[u8] {
     };
     let size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
     request.payload.get(3..3 + size).unwrap_or_default()
+}
+
+fn restriction_property_tags_from_request(request: &RopRequest) -> Vec<u32> {
+    request
+        .restriction()
+        .ok()
+        .flatten()
+        .map(|restriction| {
+            let mut tags = Vec::new();
+            collect_restriction_property_tags(&restriction, &mut tags);
+            tags
+        })
+        .unwrap_or_default()
+}
+
+fn collect_restriction_property_tags(restriction: &MapiRestriction, tags: &mut Vec<u32>) {
+    match restriction {
+        MapiRestriction::And(children) | MapiRestriction::Or(children) => {
+            for child in children {
+                collect_restriction_property_tags(child, tags);
+            }
+        }
+        MapiRestriction::Not(child) => collect_restriction_property_tags(child, tags),
+        MapiRestriction::Content { property_tag, .. }
+        | MapiRestriction::Property { property_tag, .. }
+        | MapiRestriction::Bitmask { property_tag, .. }
+        | MapiRestriction::Size { property_tag, .. }
+        | MapiRestriction::Exist { property_tag } => {
+            if !tags.contains(property_tag) {
+                tags.push(*property_tag);
+            }
+        }
+    }
 }
 
 fn format_debug_restriction(bytes: &[u8]) -> String {
@@ -7235,6 +7298,108 @@ fn format_normal_message_query_row_summary(
         selected.len().min(5),
         row_summaries
     )
+}
+
+fn format_normal_message_find_row_failure_candidates(
+    folder_id: u64,
+    position: usize,
+    find_backward: bool,
+    request: &RopRequest,
+    table_restriction: Option<&MapiRestriction>,
+    sort_orders: &[MapiSortOrder],
+    selected_columns: &[u32],
+    restriction_property_tags: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> String {
+    let mut rows = emails_for_folder(folder_id, mailboxes, emails);
+    rows.retain(|email| restriction_matches_email(table_restriction, email));
+    sort_emails(&mut rows, sort_orders);
+    let candidate_tags = candidate_find_row_debug_tags(selected_columns, restriction_property_tags);
+    let matching_indices = request
+        .restriction()
+        .ok()
+        .flatten()
+        .map(|find_restriction| {
+            rows.iter()
+                .enumerate()
+                .filter_map(|(index, email)| {
+                    restriction_matches_email(Some(&find_restriction), email).then_some(index)
+                })
+                .take(5)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let selected = select_query_window(rows.len(), position, !find_backward, rows.len().min(5));
+    let row_summaries = selected
+        .iter()
+        .map(|index| {
+            let email = rows[*index];
+            let values = candidate_tags
+                .iter()
+                .map(|tag| {
+                    let value = normal_message_debug_property_value(email, *tag)
+                        .map(|value| format_normal_message_debug_value(*tag, &value))
+                        .unwrap_or_else(|| "missing".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "index={};mid=0x{:016x};subject={};class={};values={}",
+                index,
+                mapi_message_id(email),
+                email.subject,
+                message_class_for_email(email),
+                values
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "total={};position={};backward={};matching_index_count_limited={};matching_indices={};candidate_tags={};summarized={};{}",
+        rows.len(),
+        position,
+        find_backward,
+        matching_indices.len(),
+        matching_indices
+            .iter()
+            .map(|index| index.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        format_debug_property_tags(&candidate_tags),
+        selected.len(),
+        row_summaries
+    )
+}
+
+fn candidate_find_row_debug_tags(
+    selected_columns: &[u32],
+    restriction_property_tags: &[u32],
+) -> Vec<u32> {
+    let mut tags = Vec::new();
+    for tag in selected_columns
+        .iter()
+        .chain(restriction_property_tags.iter())
+    {
+        if !tags.contains(tag) {
+            tags.push(*tag);
+        }
+    }
+    for tag in [
+        PID_TAG_MID,
+        PID_TAG_SEARCH_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_CLIENT_SUBMIT_TIME,
+    ] {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
 }
 
 fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {

@@ -540,6 +540,7 @@ enum HierarchyRow<'a> {
     Special(u64),
 }
 
+#[derive(Clone, Copy)]
 enum SearchContentRow<'a> {
     Event(&'a MapiEvent),
     Message(&'a MapiMessage),
@@ -3021,6 +3022,19 @@ fn reminder_search_content_rows<'a>(
     rows
 }
 
+fn search_content_row_matches(
+    row: &SearchContentRow<'_>,
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    match row {
+        SearchContentRow::Event(event) => restriction_matches_event(restriction, &event.event),
+        SearchContentRow::Message(message) => {
+            restriction_matches_email(restriction, &message.email)
+        }
+        SearchContentRow::Task(task) => restriction_matches_task(restriction, &task.task),
+    }
+}
+
 fn sort_search_content_rows(rows: &mut [SearchContentRow<'_>], sort_orders: &[MapiSortOrder]) {
     if sort_orders.is_empty() {
         return;
@@ -3646,6 +3660,27 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
                 }
+            } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                let rows = snapshot
+                    .delegate_freebusy_messages()
+                    .iter()
+                    .collect::<Vec<_>>();
+                if let Some((index, message)) =
+                    find_row(rows.as_slice(), *position, request, |message| {
+                        restriction_matches(Some(&restriction), |property_tag| {
+                            delegate_freebusy_property_value(message, property_tag)
+                        })
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_delegate_freebusy_row(message, &columns),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
             } else if *associated
                 && !snapshot
                     .associated_config_messages_for_folder(*folder_id)
@@ -3668,6 +3703,265 @@ pub(in crate::mapi) fn rop_find_row_response(
                             mailbox_guid,
                             &columns,
                         ),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == CALENDAR_FOLDER_ID {
+                let mut rows = snapshot.events_for_folder(*folder_id);
+                rows.retain(|event| {
+                    restriction_matches_event(table_restriction.as_ref(), &event.event)
+                });
+                sort_events(&mut rows, sort_orders);
+                if let Some((index, event)) =
+                    find_row(rows.as_slice(), *position, request, |event| {
+                        restriction_matches_event(Some(&restriction), &event.event)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_event_row_with_attachments(
+                            &event.event,
+                            event.id,
+                            event.folder_id,
+                            !event.attachments.is_empty(),
+                            &columns,
+                        ),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
+                match folder.kind {
+                    MapiCollaborationFolderKind::Contacts => {
+                        let mut rows = snapshot.contacts_for_folder(*folder_id);
+                        rows.retain(|contact| {
+                            restriction_matches_contact(
+                                table_restriction.as_ref(),
+                                &contact.contact,
+                            )
+                        });
+                        sort_contacts(&mut rows, sort_orders);
+                        if let Some((index, contact)) =
+                            find_row(rows.as_slice(), *position, request, |contact| {
+                                restriction_matches_contact(Some(&restriction), &contact.contact)
+                            })
+                        {
+                            *position = index;
+                            response.push(1);
+                            write_standard_property_row(
+                                &mut response,
+                                &serialize_contact_row(
+                                    &contact.contact,
+                                    contact.id,
+                                    contact.folder_id,
+                                    &columns,
+                                ),
+                            );
+                        } else {
+                            return rop_error_response(
+                                0x4F,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            );
+                        }
+                    }
+                    MapiCollaborationFolderKind::Calendar => {
+                        let mut rows = snapshot.events_for_folder(*folder_id);
+                        rows.retain(|event| {
+                            restriction_matches_event(table_restriction.as_ref(), &event.event)
+                        });
+                        sort_events(&mut rows, sort_orders);
+                        if let Some((index, event)) =
+                            find_row(rows.as_slice(), *position, request, |event| {
+                                restriction_matches_event(Some(&restriction), &event.event)
+                            })
+                        {
+                            *position = index;
+                            response.push(1);
+                            write_standard_property_row(
+                                &mut response,
+                                &serialize_event_row_with_attachments(
+                                    &event.event,
+                                    event.id,
+                                    event.folder_id,
+                                    !event.attachments.is_empty(),
+                                    &columns,
+                                ),
+                            );
+                        } else {
+                            return rop_error_response(
+                                0x4F,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            );
+                        }
+                    }
+                    MapiCollaborationFolderKind::Task => {
+                        let mut rows = snapshot.tasks_for_folder(*folder_id);
+                        rows.retain(|task| {
+                            restriction_matches_task(table_restriction.as_ref(), &task.task)
+                        });
+                        sort_tasks(&mut rows, sort_orders);
+                        if let Some((index, task)) =
+                            find_row(rows.as_slice(), *position, request, |task| {
+                                restriction_matches_task(Some(&restriction), &task.task)
+                            })
+                        {
+                            *position = index;
+                            response.push(1);
+                            write_standard_property_row(
+                                &mut response,
+                                &serialize_task_row(&task.task, task.id, task.folder_id, &columns),
+                            );
+                        } else {
+                            return rop_error_response(
+                                0x4F,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            );
+                        }
+                    }
+                }
+            } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
+                let mut rows = snapshot.contacts_search_results();
+                rows.retain(|contact| {
+                    restriction_matches_contact(table_restriction.as_ref(), &contact.contact)
+                });
+                sort_contacts(&mut rows, sort_orders);
+                if let Some((index, contact)) =
+                    find_row(rows.as_slice(), *position, request, |contact| {
+                        restriction_matches_contact(Some(&restriction), &contact.contact)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_contact_row(
+                            &contact.contact,
+                            contact.id,
+                            CONTACTS_SEARCH_FOLDER_ID,
+                            &columns,
+                        ),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == TODO_SEARCH_FOLDER_ID {
+                let mut rows = todo_search_content_rows(snapshot, table_restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                let row_refs = rows.iter().collect::<Vec<_>>();
+                if let Some((index, row)) =
+                    find_row(row_refs.as_slice(), *position, request, |row| {
+                        search_content_row_matches(row, Some(&restriction))
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_search_content_row(*row, snapshot, &columns, false),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
+                let mut rows = snapshot.tracked_mail_processing_messages();
+                rows.retain(|message| {
+                    restriction_matches_email(table_restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut rows, sort_orders);
+                if let Some((index, message)) =
+                    find_row(rows.as_slice(), *position, request, |message| {
+                        restriction_matches_email(Some(&restriction), &message.email)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_message_row(&message.email, &columns),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == REMINDERS_FOLDER_ID {
+                let mut rows = reminder_search_content_rows(snapshot, table_restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                let row_refs = rows.iter().collect::<Vec<_>>();
+                if let Some((index, row)) =
+                    find_row(row_refs.as_slice(), *position, request, |row| {
+                        search_content_row_matches(row, Some(&restriction))
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_search_content_row(*row, snapshot, &columns, true),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == NOTES_FOLDER_ID {
+                let mut rows = snapshot.notes_for_folder(*folder_id);
+                rows.retain(|note| {
+                    restriction_matches_note(table_restriction.as_ref(), &note.note)
+                });
+                sort_notes(&mut rows, sort_orders);
+                if let Some((index, note)) = find_row(rows.as_slice(), *position, request, |note| {
+                    restriction_matches_note(Some(&restriction), &note.note)
+                }) {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_note_row(&note.note, note.id, note.folder_id, &columns),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if *folder_id == JOURNAL_FOLDER_ID {
+                let mut rows = snapshot.journal_entries_for_folder(*folder_id);
+                rows.retain(|entry| {
+                    restriction_matches_journal_entry(table_restriction.as_ref(), &entry.entry)
+                });
+                sort_journal_entries(&mut rows, sort_orders);
+                if let Some((index, entry)) =
+                    find_row(rows.as_slice(), *position, request, |entry| {
+                        restriction_matches_journal_entry(Some(&restriction), &entry.entry)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_journal_entry_row(
+                            &entry.entry,
+                            entry.id,
+                            entry.folder_id,
+                            &columns,
+                        ),
+                    );
+                } else {
+                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                }
+            } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
+                let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
+                sort_recoverable_items(&mut rows, sort_orders);
+                if let Some((index, item)) = find_row(rows.as_slice(), *position, request, |item| {
+                    restriction_matches(Some(&restriction), |property_tag| {
+                        recoverable_item_property_value(item, property_tag)
+                    })
+                }) {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_recoverable_item_row(item, &columns),
                     );
                 } else {
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
@@ -3834,6 +4128,34 @@ pub(in crate::mapi) fn table_position_and_count(
         }) => {
             let total = if *associated {
                 associated_folder_message_count(*folder_id, snapshot) as usize
+            } else if *folder_id == CALENDAR_FOLDER_ID {
+                snapshot
+                    .events_for_folder(*folder_id)
+                    .into_iter()
+                    .filter(|event| restriction_matches_event(restriction.as_ref(), &event.event))
+                    .count()
+            } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
+                match folder.kind {
+                    MapiCollaborationFolderKind::Contacts => snapshot
+                        .contacts_for_folder(*folder_id)
+                        .into_iter()
+                        .filter(|contact| {
+                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                        })
+                        .count(),
+                    MapiCollaborationFolderKind::Calendar => snapshot
+                        .events_for_folder(*folder_id)
+                        .into_iter()
+                        .filter(|event| {
+                            restriction_matches_event(restriction.as_ref(), &event.event)
+                        })
+                        .count(),
+                    MapiCollaborationFolderKind::Task => snapshot
+                        .tasks_for_folder(*folder_id)
+                        .into_iter()
+                        .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
+                        .count(),
+                }
             } else if *folder_id == NOTES_FOLDER_ID {
                 snapshot
                     .notes_for_folder(*folder_id)
@@ -4024,6 +4346,40 @@ pub(in crate::mapi) fn table_row_keys(
             restriction,
             ..
         } => {
+            if *folder_id == CALENDAR_FOLDER_ID {
+                let mut rows = snapshot.events_for_folder(*folder_id);
+                rows.retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
+                sort_events(&mut rows, sort_orders);
+                return rows.into_iter().map(|event| event.id).collect();
+            }
+            if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
+                return match folder.kind {
+                    MapiCollaborationFolderKind::Contacts => {
+                        let mut rows = snapshot.contacts_for_folder(*folder_id);
+                        rows.retain(|contact| {
+                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                        });
+                        sort_contacts(&mut rows, sort_orders);
+                        rows.into_iter().map(|contact| contact.id).collect()
+                    }
+                    MapiCollaborationFolderKind::Calendar => {
+                        let mut rows = snapshot.events_for_folder(*folder_id);
+                        rows.retain(|event| {
+                            restriction_matches_event(restriction.as_ref(), &event.event)
+                        });
+                        sort_events(&mut rows, sort_orders);
+                        rows.into_iter().map(|event| event.id).collect()
+                    }
+                    MapiCollaborationFolderKind::Task => {
+                        let mut rows = snapshot.tasks_for_folder(*folder_id);
+                        rows.retain(|task| {
+                            restriction_matches_task(restriction.as_ref(), &task.task)
+                        });
+                        sort_tasks(&mut rows, sort_orders);
+                        rows.into_iter().map(|task| task.id).collect()
+                    }
+                };
+            }
             if *folder_id == NOTES_FOLDER_ID {
                 let mut rows = snapshot.notes_for_folder(*folder_id);
                 rows.retain(|note| restriction_matches_note(restriction.as_ref(), &note.note));
@@ -6204,6 +6560,167 @@ mod tests {
     }
 
     #[test]
+    fn contacts_contents_find_row_matches_display_name() {
+        let account_id = Uuid::from_u128(0x7171);
+        let contact_id = Uuid::from_u128(0x7172);
+        crate::mapi::identity::remember_mapi_identity(
+            contact_id,
+            crate::mapi::identity::mapi_store_id(0x7172),
+        );
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        };
+        let collection = CollaborationCollection {
+            id: "default".to_string(),
+            kind: "contacts".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            display_name: "Contacts".to_string(),
+            is_owned: true,
+            rights: rights.clone(),
+        };
+        let contact = AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            rights,
+            name: "Denis Ducret".to_string(),
+            role: String::new(),
+            email: "denis@example.test".to_string(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            vec![contact],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_MID, PID_TAG_DISPLAY_NAME_W, PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_DISPLAY_NAME_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_DISPLAY_NAME_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Denis Ducret");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        let name = "Denis Ducret"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(response
+            .windows(name.len())
+            .any(|window| window == name.as_slice()));
+    }
+
+    #[test]
+    fn calendar_contents_find_row_matches_subject() {
+        let account_id = Uuid::from_u128(0x8181);
+        let event_id = Uuid::from_u128(0x8182);
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(0x8182),
+        );
+        let mut event = default_event_for_mapping(account_id, "default");
+        event.id = event_id;
+        event.title = "Project review".to_string();
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![event],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CALENDAR_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W, PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Project review");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        let title = "Project review"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(response
+            .windows(title.len())
+            .any(|window| window == title.as_slice()));
+    }
+
+    #[test]
     fn common_views_find_row_matches_default_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
@@ -7745,6 +8262,56 @@ pub(in crate::mapi) fn serialize_recoverable_item_row(
         }
     }
     row
+}
+
+fn recoverable_item_property_value(
+    item: &crate::mapi_store::MapiRecoverableItemMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(item.id);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(item.id)),
+        PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE => Some(MapiValue::U32(0)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(item.item.subject.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
+        PID_TAG_MESSAGE_DELIVERY_TIME
+        | PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::I64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&item.item.received_at) as i64,
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_READ => Some(MapiValue::Bool(true)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::U32(
+            item.item.size_octets.clamp(0, u32::MAX as i64) as u32,
+        )),
+        PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => {
+            Some(MapiValue::String(item.item.sender_address.clone()))
+        }
+        PID_TAG_DISPLAY_TO_W | PID_TAG_DISPLAY_CC_W | PID_TAG_BODY_W => {
+            Some(MapiValue::String(String::new()))
+        }
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(item.item.has_attachments)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item.id),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            item.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(item.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn serialize_navigation_shortcut_row(
