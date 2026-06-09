@@ -19562,10 +19562,7 @@ mod tests {
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
         );
-        assert!(matches!(
-            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            Some(MapiValue::Binary(value)) if !value.is_empty()
-        ));
+        assert_eq!(properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID), None);
         assert_eq!(
             properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
             Some(&MapiValue::U32(0))

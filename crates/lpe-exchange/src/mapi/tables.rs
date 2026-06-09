@@ -7424,7 +7424,9 @@ mod tests {
     #[test]
     fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         let message = MapiAssociatedConfigMessage {
-            id: crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
+            id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 91,
+            ),
             folder_id: INBOX_FOLDER_ID,
             canonical_id: Uuid::from_u128(0x6d617069_696e_5669_8000_000000000001),
             message_class: crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
@@ -7715,7 +7717,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
+            None
         );
         assert_eq!(
             special_folder_property_value(
@@ -7723,7 +7725,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_folder_view_entry_id(account_id, SENT_FOLDER_ID)
+            None
         );
         assert_eq!(
             special_folder_property_value(
@@ -7731,7 +7733,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_folder_view_entry_id(account_id, CALENDAR_FOLDER_ID)
+            None
         );
         assert_eq!(
             special_folder_property_value(
@@ -7739,7 +7741,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_folder_view_entry_id(account_id, CONTACTS_FOLDER_ID)
+            None
         );
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),

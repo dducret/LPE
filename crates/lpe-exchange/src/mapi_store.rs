@@ -207,16 +207,10 @@ const OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS: &str =
     "IPM.Microsoft.FolderDesign.NamedView";
-pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
 const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
 const OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
-pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
-pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
@@ -230,7 +224,6 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
             | OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID
-            | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
     )
 }
 
@@ -238,11 +231,8 @@ pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -
     item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
 }
 
-pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
-    matches!(
-        item_id,
-        OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID | OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID
-    )
+pub(crate) fn is_outlook_common_views_default_named_view_id(_item_id: u64) -> bool {
+    false
 }
 
 fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
@@ -277,14 +267,6 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             canonical_id: Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000001),
             message_class: OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS.to_string(),
             subject: OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS.to_string(),
-            properties_json: serde_json::json!({}),
-        },
-        MapiAssociatedConfigMessage {
-            id: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-            folder_id,
-            canonical_id: Uuid::from_u128(0x6d617069_696e_5669_8000_000000000001),
-            message_class: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
-            subject: "Compact".to_string(),
             properties_json: serde_json::json!({}),
         },
     ]
@@ -335,24 +317,7 @@ fn outlook_common_views_navigation_shortcut_defaults() -> Vec<MapiNavigationShor
 }
 
 fn outlook_common_views_named_view_defaults() -> Vec<MapiCommonViewNamedViewMessage> {
-    vec![
-        MapiCommonViewNamedViewMessage {
-            id: OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_7669_6577_8000_000000000001),
-            name: "Compact".to_string(),
-            view_flags: 14_745_605,
-            view_type: 8,
-        },
-        MapiCommonViewNamedViewMessage {
-            id: OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_7669_6577_8000_000000000002),
-            name: "Sent To".to_string(),
-            view_flags: 15_269_893,
-            view_type: 8,
-        },
-    ]
+    Vec::new()
 }
 
 pub(crate) enum MapiCommonViewsMessage {
@@ -2285,10 +2250,6 @@ mod tests {
                 OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS,
                 OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
             ),
-            (
-                OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
-                OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-            ),
         ] {
             assert_eq!(
                 messages
@@ -2321,6 +2282,9 @@ mod tests {
             );
             assert!(snapshot.has_associated_config_identity_id(message_id));
         }
+        assert!(!messages
+            .iter()
+            .any(|message| message.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS));
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_6561_7343_8000_000000000002);
@@ -2438,7 +2402,7 @@ mod tests {
         assert_eq!(snapshot.common_views_messages().count(), 0);
         let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 4);
+        assert_eq!(messages.len(), 2);
         assert_eq!(
             messages
                 .iter()
@@ -2474,12 +2438,9 @@ mod tests {
             inbox.group_header_id,
             Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID)
         );
-        assert!(messages
+        assert!(!messages
             .iter()
-            .any(|message| matches!(message, MapiCommonViewsMessage::NamedView(view) if view.name == "Compact")));
-        assert!(messages
-            .iter()
-            .any(|message| matches!(message, MapiCommonViewsMessage::NamedView(view) if view.name == "Sent To")));
+            .any(|message| matches!(message, MapiCommonViewsMessage::NamedView(_))));
         assert!(snapshot
             .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
             .is_none());
@@ -2523,9 +2484,9 @@ mod tests {
             })
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
-        assert!(messages
+        assert!(!messages
             .iter()
-            .any(|message| matches!(message, MapiCommonViewsMessage::NamedView(view) if view.name == "Compact")));
+            .any(|message| matches!(message, MapiCommonViewsMessage::NamedView(_))));
         assert!(snapshot
             .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
             .is_none());

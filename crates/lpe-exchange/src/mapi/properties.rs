@@ -1485,20 +1485,10 @@ pub(in crate::mapi) fn default_view_supported_container_class(container_class: &
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
-    mailbox_guid: Uuid,
-    folder_id: u64,
+    _mailbox_guid: Uuid,
+    _folder_id: u64,
 ) -> Option<MapiValue> {
-    let view_id = if folder_id == SENT_FOLDER_ID {
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID
-    } else {
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID
-    };
-    crate::mapi::identity::message_entry_id_from_object_ids(
-        mailbox_guid,
-        COMMON_VIEWS_FOLDER_ID,
-        view_id,
-    )
-    .map(MapiValue::Binary)
+    None
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -7265,7 +7255,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id,
             ),
-            default_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
+            None
         );
     }
 
@@ -7306,7 +7296,7 @@ mod tests {
         );
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            default_folder_view_entry_id(account_id, CONTACTS_FOLDER_ID)
+            None
         );
     }
 
