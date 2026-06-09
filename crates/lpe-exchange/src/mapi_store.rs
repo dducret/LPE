@@ -217,6 +217,9 @@ pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
 pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
+const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
+const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
 const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID: Uuid =
     Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
 
@@ -281,6 +284,19 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             properties_json: serde_json::json!({}),
         },
     ]
+}
+
+fn outlook_quick_step_associated_config_defaults(
+    folder_id: u64,
+) -> Vec<MapiAssociatedConfigMessage> {
+    vec![MapiAssociatedConfigMessage {
+        id: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID,
+        folder_id,
+        canonical_id: Uuid::from_u128(0x6d617069_7173_4361_8000_000000000001),
+        message_class: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+        subject: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+        properties_json: serde_json::json!({}),
+    }]
 }
 
 fn outlook_common_views_navigation_shortcut_defaults() -> Vec<MapiNavigationShortcutMessage> {
@@ -1339,6 +1355,15 @@ impl MapiMailStoreSnapshot {
                     messages.push(default_message);
                 }
             }
+        } else if folder_id == crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID {
+            for default_message in outlook_quick_step_associated_config_defaults(folder_id) {
+                if !messages
+                    .iter()
+                    .any(|message| message.message_class == default_message.message_class)
+                {
+                    messages.push(default_message);
+                }
+            }
         }
         messages
     }
@@ -1355,6 +1380,13 @@ impl MapiMailStoreSnapshot {
                 outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
                     .into_iter()
                     .find(|message| message.id == item_id)
+            })
+            .or_else(|| {
+                outlook_quick_step_associated_config_defaults(
+                    crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+                )
+                .into_iter()
+                .find(|message| message.id == item_id)
             })
     }
 
@@ -2320,6 +2352,75 @@ mod tests {
                 .find(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
                 .map(|message| message.subject.as_str()),
             Some("Client EAS config")
+        );
+    }
+
+    #[test]
+    fn quick_step_settings_include_default_custom_action_without_duplicate() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let messages = snapshot.associated_config_messages_for_folder(
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+        );
+
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.message_class == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS)
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshot
+                .associated_config_message_for_id(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID)
+                .map(|message| message.message_class),
+            Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
+        );
+        assert_eq!(
+            snapshot
+                .associated_config_message_for_folder_and_source_key_id(
+                    crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+                    OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID,
+                )
+                .map(|message| message.message_class),
+            Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
+        );
+        assert!(snapshot.has_associated_config_identity_id(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID));
+
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let persisted_id = Uuid::from_u128(0x6d617069_7173_4361_8000_000000000002);
+        crate::mapi::identity::remember_mapi_identity(
+            persisted_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 171,
+            ),
+        );
+        let persisted = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_id,
+                account_id,
+                folder_id: crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+                message_class: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+                subject: "Client custom action".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+
+        let persisted_messages = persisted.associated_config_messages_for_folder(
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+        );
+        assert_eq!(
+            persisted_messages
+                .iter()
+                .filter(|message| message.message_class == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS)
+                .count(),
+            1
+        );
+        assert_eq!(
+            persisted_messages
+                .iter()
+                .find(|message| message.message_class == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS)
+                .map(|message| message.subject.as_str()),
+            Some("Client custom action")
         );
     }
 
