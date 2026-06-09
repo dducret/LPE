@@ -1016,8 +1016,8 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if message_class == "IPF.Note" => {
-            default_mail_folder_view_entry_id(mailbox_guid, folder_id)
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if default_view_supported_container_class(message_class) => {
+            default_folder_view_entry_id(mailbox_guid, folder_id)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
@@ -7325,6 +7325,14 @@ mod tests {
             associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
             Some(MapiValue::Binary(Vec::new()))
         );
+        assert_eq!(
+            associated_config_property_value(&message, PID_NAME_CONTENT_CLASS_W_TAG),
+            Some(MapiValue::String("urn:content-classes:message".to_string()))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_NAME_CONTENT_TYPE_W_TAG),
+            Some(MapiValue::String("text/xml".to_string()))
+        );
         let explicit_marker = MapiAssociatedConfigMessage {
             properties_json: serde_json::json!({
                 "0x685d0003": {"type": "u32", "value": 42}
@@ -7699,7 +7707,7 @@ mod tests {
     }
 
     #[test]
-    fn special_folder_property_projects_view_defaults_for_mail_folders_only() {
+    fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
         assert_eq!(
             special_folder_property_value(
@@ -7707,7 +7715,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_mail_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
+            default_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
         );
         assert_eq!(
             special_folder_property_value(
@@ -7715,7 +7723,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            default_mail_folder_view_entry_id(account_id, SENT_FOLDER_ID)
+            default_folder_view_entry_id(account_id, SENT_FOLDER_ID)
         );
         assert_eq!(
             special_folder_property_value(
@@ -7723,7 +7731,15 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            None
+            default_folder_view_entry_id(account_id, CALENDAR_FOLDER_ID)
+        );
+        assert_eq!(
+            special_folder_property_value(
+                CONTACTS_FOLDER_ID,
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                account_id
+            ),
+            default_folder_view_entry_id(account_id, CONTACTS_FOLDER_ID)
         );
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
@@ -8520,6 +8536,16 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
                 Some(MapiValue::Binary(Vec::new()))
+            }
+            PID_NAME_CONTENT_CLASS_W_TAG
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::String("urn:content-classes:message".to_string()))
+            }
+            PID_NAME_CONTENT_TYPE_W_TAG
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::String("text/xml".to_string()))
             }
             PID_TAG_VIEW_DESCRIPTOR_FLAGS
                 if message.message_class

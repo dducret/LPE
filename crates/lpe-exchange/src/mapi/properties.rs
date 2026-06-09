@@ -451,6 +451,8 @@ pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_BINARY: u32 = 0x7001_0102;
+pub(in crate::mapi) const PID_NAME_CONTENT_CLASS_W_TAG: u32 = 0x801F_001F;
+pub(in crate::mapi) const PID_NAME_CONTENT_TYPE_W_TAG: u32 = 0x836B_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
@@ -516,6 +518,7 @@ pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8001;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8002;
 pub(in crate::mapi) const PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG:
     u32 = 0x8010_0102;
+pub(in crate::mapi) const OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG: u32 = 0x8FFF_0102;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
@@ -775,6 +778,22 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             kind: MapiNamedPropertyKind::Name("Keywords".to_string()),
         },
     )))
+    .chain([
+        (
+            MapiPropertyTag::new(PID_NAME_CONTENT_CLASS_W_TAG).property_id(),
+            MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("content-class".to_string()),
+            },
+        ),
+        (
+            MapiPropertyTag::new(PID_NAME_CONTENT_TYPE_W_TAG).property_id(),
+            MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("content-type".to_string()),
+            },
+        ),
+    ])
     .collect()
 }
 
@@ -1360,8 +1379,10 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if folder_message_class(mailbox) == "IPF.Note" => {
-            default_mail_folder_view_entry_id(mailbox_guid, mapi_folder_id(mailbox))
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            if default_view_supported_container_class(folder_message_class(mailbox)) =>
+        {
+            default_folder_view_entry_id(mailbox_guid, mapi_folder_id(mailbox))
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
@@ -1447,7 +1468,20 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
     vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]
 }
 
-pub(in crate::mapi) fn default_mail_folder_view_entry_id(
+pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
+    matches!(
+        container_class,
+        "IPF.Note"
+            | "IPF.Appointment"
+            | "IPF.Contact"
+            | "IPF.Contact.MOC.QuickContacts"
+            | "IPF.Task"
+            | "IPF.StickyNote"
+            | "IPF.Journal"
+    )
+}
+
+pub(in crate::mapi) fn default_folder_view_entry_id(
     mailbox_guid: Uuid,
     folder_id: u64,
 ) -> Option<MapiValue> {
@@ -1519,6 +1553,9 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
                 folder.kind,
             ))
             .map(|message_class| MapiValue::String(message_class.to_string()))
+        }
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID => {
+            default_folder_view_entry_id(folder.collection.owner_account_id, folder.id)
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
@@ -1844,8 +1881,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
                 crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
             })
             .map(MapiValue::Binary),
-        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
-            if message.shortcut_type != 4 =>
+        property_tag
+            if is_sharing_local_folder_id_property_tag(property_tag)
+                && message.shortcut_type != 4 =>
         {
             message
                 .target_folder_id
@@ -1874,6 +1912,14 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         }
         _ => None,
     }
+}
+
+fn is_sharing_local_folder_id_property_tag(property_tag: u32) -> bool {
+    matches!(
+        property_tag,
+        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
+            | OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG
+    )
 }
 
 pub(in crate::mapi) fn common_view_named_view_property_value(
@@ -3399,6 +3445,12 @@ fn property_stream_data(
                     mailbox_guid,
                     property_tag,
                 )
+            }),
+        MapiObject::CommonViewNamedView { folder_id, view_id } => snapshot
+            .common_view_named_view_message_for_id(*view_id)
+            .filter(|message| message.folder_id == *folder_id)
+            .and_then(|message| {
+                common_view_named_view_property_value(&message, mailbox_guid, property_tag)
             }),
         _ => return None,
     };
@@ -7210,19 +7262,20 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id,
             ),
-            default_mail_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
+            default_folder_view_entry_id(account_id, INBOX_FOLDER_ID)
         );
     }
 
     #[test]
     fn collaboration_folder_projects_default_post_message_class_for_contacts() {
+        let account_id = Uuid::from_u128(0xcccccccc_cccc_4ccc_8ccc_cccccccccccc);
         let collection = MapiCollaborationFolder {
             id: CONTACTS_FOLDER_ID,
             kind: MapiCollaborationFolderKind::Contacts,
             collection: CollaborationCollection {
                 id: "contacts-default".to_string(),
                 kind: "contacts".to_string(),
-                owner_account_id: Uuid::nil(),
+                owner_account_id: account_id,
                 owner_email: "alice@example.test".to_string(),
                 owner_display_name: "Alice".to_string(),
                 display_name: "Contacts".to_string(),
@@ -7247,6 +7300,10 @@ mod tests {
                 PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8
             ),
             Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+            default_folder_view_entry_id(account_id, CONTACTS_FOLDER_ID)
         );
     }
 
@@ -7737,6 +7794,31 @@ mod tests {
                 PID_LID_CONTACT_LINK_NAME_W_TAG
             ),
             Some(MapiValue::String("Adam Barr".to_string()))
+        );
+    }
+
+    #[test]
+    fn internet_header_content_named_properties_have_stable_ids() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("content-class".to_string()),
+            }),
+            Some(MapiPropertyTag::new(PID_NAME_CONTENT_CLASS_W_TAG).property_id())
+        );
+        assert_eq!(
+            well_known_named_property_id(&normalize_named_property(MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("Content-Class".to_string()),
+            })),
+            Some(MapiPropertyTag::new(PID_NAME_CONTENT_CLASS_W_TAG).property_id())
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("content-type".to_string()),
+            }),
+            Some(MapiPropertyTag::new(PID_NAME_CONTENT_TYPE_W_TAG).property_id())
         );
     }
 
@@ -9615,6 +9697,67 @@ mod tests {
     }
 
     #[test]
+    fn common_view_named_view_descriptor_opens_as_stream() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let view_id = crate::mapi::identity::mapi_store_id(0x7fff_ffff_fff7);
+        let mut handles = std::collections::HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::CommonViewNamedView {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                view_id,
+            },
+        );
+        let session = MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "test@example.com".to_string(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
+            last_seen_at: std::time::SystemTime::UNIX_EPOCH,
+            first_request_type: String::new(),
+            first_request_id: String::new(),
+            last_request_type: String::new(),
+            last_request_id: String::new(),
+            request_count: 0,
+            execute_request_count: 0,
+            next_handle: 2,
+            handles,
+            message_statuses: std::collections::HashMap::new(),
+            saved_search_folder_definitions: std::collections::HashMap::new(),
+            special_folder_aliases: std::collections::HashMap::new(),
+            deleted_advertised_special_folders: std::collections::HashSet::new(),
+            named_properties: std::collections::HashMap::new(),
+            named_property_ids: std::collections::HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: std::collections::VecDeque::new(),
+            completed_execute_requests: std::collections::HashMap::new(),
+            completed_execute_request_order: std::collections::VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+            inbox_associated_config_stream_handles: std::collections::HashSet::new(),
+            logon_identity: None,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let (stream, writable_target) = property_stream_data(
+            &session,
+            1,
+            PID_TAG_VIEW_DESCRIPTOR_BINARY,
+            0,
+            &[],
+            account_id,
+            &snapshot,
+        )
+        .expect("common view descriptor stream");
+
+        assert_eq!(stream, minimal_view_descriptor_binary());
+        assert_eq!(stream.len(), 96);
+        assert!(writable_target.is_none());
+    }
+
+    #[test]
     fn mapi_mailbox_display_name_normalizes_canonical_inbox() {
         let inbox = mailbox(
             "11111111-1111-1111-1111-111111111111",
@@ -9675,6 +9818,14 @@ mod tests {
                 &shortcut,
                 account_id,
                 PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+            ),
+            Some(MapiValue::Binary(expected.clone()))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(
+                &shortcut,
+                account_id,
+                OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG,
             ),
             Some(MapiValue::Binary(expected))
         );
