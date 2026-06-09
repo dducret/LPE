@@ -2245,6 +2245,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
+                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
@@ -2270,6 +2271,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
+                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
@@ -7989,7 +7991,7 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
             OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
         ));
-        assert!(fallback_default_specific_property(
+        assert!(!fallback_default_specific_property(
             Some(&folder),
             &principal,
             &[],
@@ -8035,13 +8037,9 @@ mod tests {
             &[],
             &[],
             &MapiMailStoreSnapshot::empty(),
-            &[
-                OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-            ],
+            &[OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C],
         );
         assert!(folder_errors.contains("0x120c0102:OutlookUndocumentedFolderBinary120C:0x8004010f"));
-        assert!(folder_errors.contains("0x36160102:PidTagDefaultViewEntryId:0x8004010f"));
 
         let config = MapiObject::AssociatedConfig {
             folder_id: INBOX_FOLDER_ID,
@@ -8118,7 +8116,7 @@ mod tests {
             properties: HashMap::new(),
         };
 
-        assert!(!modeled_zero_or_default_property(
+        assert!(modeled_zero_or_default_property(
             Some(&folder),
             PID_TAG_DEFAULT_VIEW_ENTRY_ID
         ));
