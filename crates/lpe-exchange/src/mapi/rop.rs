@@ -2186,7 +2186,12 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::AssociatedConfig { .. }) => {
-            storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+            matches!(
+                storage_tag,
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    | PID_TAG_MESSAGE_STATUS
+                    | PID_TAG_SENT_MAIL_SVR_EID
+            )
         }
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
@@ -2194,7 +2199,34 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
                 | PID_TAG_VIEW_DESCRIPTOR_BINARY
         ),
-        Some(MapiObject::Folder { .. }) | None => {
+        Some(MapiObject::Folder { folder_id, .. }) => {
+            is_acl_member_name_property_tag(tag)
+                || is_modeled_empty_special_folder_class_property(*folder_id, storage_tag)
+                || matches!(
+                    storage_tag,
+                    PID_TAG_CONTENT_COUNT
+                        | PID_TAG_CONTENT_UNREAD_COUNT
+                        | PID_TAG_DELETED_COUNT_TOTAL
+                        | PID_TAG_SUBFOLDERS
+                        | PID_TAG_PARENT_FOLDER_ID
+                        | PID_TAG_PARENT_SOURCE_KEY
+                        | PID_TAG_FOLDER_TYPE
+                        | PID_TAG_ARCHIVE_TAG
+                        | PID_TAG_POLICY_TAG
+                        | PID_TAG_RETENTION_PERIOD
+                        | PID_TAG_RETENTION_FLAGS
+                        | PID_TAG_ARCHIVE_PERIOD
+                        | PID_TAG_FOLDER_FORM_FLAGS
+                        | PID_TAG_FOLDER_WEBVIEWINFO
+                        | PID_TAG_FOLDER_XVIEWINFO_E
+                        | PID_TAG_FOLDER_VIEWS_ONLY
+                        | PID_TAG_DEFAULT_FORM_NAME_W
+                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
+                        | PID_TAG_FOLDER_FORM_STORAGE
+                        | PID_TAG_FOLDER_VIEWLIST_FLAGS
+                )
+        }
+        None => {
             is_acl_member_name_property_tag(tag)
                 || matches!(
                     storage_tag,
@@ -2222,6 +2254,24 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         }
         _ => false,
     }
+}
+
+fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u32) -> bool {
+    matches!(
+        folder_id,
+        ROOT_FOLDER_ID
+            | DEFERRED_ACTION_FOLDER_ID
+            | SPOOLER_QUEUE_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | VIEWS_FOLDER_ID
+            | FREEBUSY_DATA_FOLDER_ID
+    ) && matches!(
+        storage_tag,
+        PID_TAG_CONTAINER_CLASS_W
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8
+            | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
+    )
 }
 
 fn property_row_kind_for_debug(
@@ -2659,9 +2709,27 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
+        PID_TAG_VIEW_DESCRIPTOR_CLSID => "PidTagViewDescriptorCLSID",
+        PID_TAG_VIEW_DESCRIPTOR_FLAGS => "PidTagViewDescriptorFlags",
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => "OutlookCommonViewDescriptorBinary6835",
+        PID_TAG_VIEW_DESCRIPTOR_VERSION => "PidTagViewDescriptorVersion",
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => "OutlookCommonViewDescriptorBinary683C",
+        PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE => "PidTagViewDescriptorFolderType",
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => "PidTagViewDescriptorViewMode",
         PID_TAG_VIEW_DESCRIPTOR_BINARY => "PidTagViewDescriptorBinary",
+        PID_TAG_WLINK_GROUP_HEADER_ID => "PidTagWlinkGroupHeaderId",
+        PID_TAG_WLINK_SAVE_STAMP => "PidTagWlinkSaveStamp",
+        PID_TAG_WLINK_TYPE => "PidTagWlinkType",
+        PID_TAG_WLINK_FLAGS => "PidTagWlinkFlags",
+        PID_TAG_WLINK_ORDINAL => "PidTagWlinkOrdinal",
+        PID_TAG_WLINK_ENTRY_ID => "PidTagWlinkEntryId",
+        PID_TAG_WLINK_RECORD_KEY => "PidTagWlinkRecordKey",
+        PID_TAG_WLINK_STORE_ENTRY_ID => "PidTagWlinkStoreEntryId",
+        PID_TAG_WLINK_FOLDER_TYPE => "PidTagWlinkFolderType",
+        PID_TAG_WLINK_GROUP_CLSID => "PidTagWlinkGroupClsid",
+        PID_TAG_WLINK_GROUP_NAME_W => "PidTagWlinkGroupName",
+        PID_TAG_WLINK_SECTION => "PidTagWlinkSection",
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID => "PidTagWlinkAddressBookStoreEid",
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => "OutlookAssociatedConfigBinary0E0B",
         PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
@@ -2714,6 +2782,10 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_READ => "PidTagRead",
         PID_TAG_INTERNET_CODEPAGE => "PidTagInternetCodepage",
         PID_TAG_MESSAGE_LOCALE_ID => "PidTagMessageLocaleId",
+        PID_TAG_INTERNET_MESSAGE_ID_W => "PidTagInternetMessageId",
+        PID_TAG_FLAG_STATUS => "PidTagFlagStatus",
+        PID_TAG_SWAPPED_TODO_STORE => "PidTagSwappedToDoStore",
+        PID_TAG_LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
         PID_TAG_RESOURCE_FLAGS => "PidTagResourceFlags",
         PID_TAG_USER_ENTRY_ID => "PidTagUserEntryId",
@@ -2733,6 +2805,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
         PID_TAG_STORAGE_QUOTA_LIMIT => "PidTagStorageQuotaLimit",
         PID_TAG_PST_PATH_W => "PidTagPstPath",
+        PID_TAG_ATTACH_NUM => "PidTagAttachNumber",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
@@ -2781,9 +2854,48 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
         0x7C09_0102 => "PidTagRoamingBinary",
         0x685D_0003 => "OutlookConfigurationStamp",
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_CLSID) => {
+            "PidTagViewDescriptorCLSID"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FLAGS) => {
+            "PidTagViewDescriptorFlags"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_VERSION) => {
+            "PidTagViewDescriptorVersion"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) => {
+            "PidTagViewDescriptorFolderType"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE) => {
+            "PidTagViewDescriptorViewMode"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_GROUP_HEADER_ID) => {
+            "PidTagWlinkGroupHeaderId"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_SAVE_STAMP) => "PidTagWlinkSaveStamp",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_TYPE) => "PidTagWlinkType",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_FLAGS) => "PidTagWlinkFlags",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_ORDINAL) => "PidTagWlinkOrdinal",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_ENTRY_ID) => "PidTagWlinkEntryId",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_RECORD_KEY) => "PidTagWlinkRecordKey",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_STORE_ENTRY_ID) => {
+            "PidTagWlinkStoreEntryId"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_FOLDER_TYPE) => "PidTagWlinkFolderType",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_GROUP_CLSID) => "PidTagWlinkGroupClsid",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_GROUP_NAME_W) => "PidTagWlinkGroupName",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_SECTION) => "PidTagWlinkSection",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID) => {
+            "PidTagWlinkAddressBookStoreEid"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_USER_GUID) => "PidTagUserGuid",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
         _ => "unknown",
     }
+}
+
+fn debug_property_id_matches(tag: u32, known_tag: u32) -> bool {
+    tag & 0xffff_0000 == known_tag & 0xffff_0000
 }
 
 fn default_folder_property_mappings_for_debug(tags: &[u32]) -> Vec<String> {
@@ -4481,13 +4593,11 @@ impl RopRequest {
                 .ok()?,
         ) as usize;
         let ids_offset = count_offset + 2;
-        Some(
-            self.payload
-                .get(ids_offset..ids_offset + count * 8)?
-                .chunks_exact(8)
-                .filter_map(crate::mapi::identity::object_id_from_wire_id)
-                .collect(),
-        )
+        self.payload
+            .get(ids_offset..ids_offset + count * 8)?
+            .chunks_exact(8)
+            .map(crate::mapi::identity::object_id_from_wire_id)
+            .collect()
     }
 
     pub(in crate::mapi) fn search_criteria_flags(&self) -> Option<u32> {
@@ -7105,16 +7215,104 @@ mod tests {
             "PidTagMessageLocaleId"
         );
         assert_eq!(
+            property_tag_debug_name(PID_TAG_INTERNET_MESSAGE_ID_W),
+            "PidTagInternetMessageId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_FLAG_STATUS),
+            "PidTagFlagStatus"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SWAPPED_TODO_STORE),
+            "PidTagSwappedToDoStore"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_LAST_MODIFICATION_TIME),
+            "PidTagLastModificationTime"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_CLSID),
+            "PidTagViewDescriptorCLSID"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_FLAGS),
+            "PidTagViewDescriptorFlags"
+        );
+        assert_eq!(
             property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
             "OutlookCommonViewDescriptorBinary6835"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_VERSION),
+            "PidTagViewDescriptorVersion"
         );
         assert_eq!(
             property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C),
             "OutlookCommonViewDescriptorBinary683C"
         );
         assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE),
+            "PidTagViewDescriptorFolderType"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
+            "PidTagViewDescriptorViewMode"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_BINARY),
             "PidTagViewDescriptorBinary"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_GROUP_HEADER_ID),
+            "PidTagWlinkGroupHeaderId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_SAVE_STAMP),
+            "PidTagWlinkSaveStamp"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_TYPE),
+            "PidTagWlinkType"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_FLAGS),
+            "PidTagWlinkFlags"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_ORDINAL),
+            "PidTagWlinkOrdinal"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_ENTRY_ID),
+            "PidTagWlinkEntryId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_RECORD_KEY),
+            "PidTagWlinkRecordKey"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_STORE_ENTRY_ID),
+            "PidTagWlinkStoreEntryId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_FOLDER_TYPE),
+            "PidTagWlinkFolderType"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_GROUP_CLSID),
+            "PidTagWlinkGroupClsid"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_GROUP_NAME_W),
+            "PidTagWlinkGroupName"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_SECTION),
+            "PidTagWlinkSection"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID),
+            "PidTagWlinkAddressBookStoreEid"
         );
         assert_eq!(
             property_tag_debug_name(OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
@@ -7157,6 +7355,38 @@ mod tests {
             "PidTagAssociatedSharingProvider"
         );
         assert_eq!(property_tag_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ATTACH_NUM),
+            "PidTagAttachNumber"
+        );
+        assert_eq!(property_tag_debug_name(0x6707_001F), "PidTagUserGuid");
+        assert_eq!(
+            property_tag_debug_name(0x6842_000B),
+            "PidTagWlinkGroupHeaderId"
+        );
+        assert_eq!(property_tag_debug_name(0x684A_101F), "PidTagWlinkFlags");
+        assert_eq!(property_tag_debug_name(0x684B_000B), "PidTagWlinkOrdinal");
+        assert_eq!(
+            property_tag_debug_name(0x6841_001F),
+            "PidTagViewDescriptorViewMode"
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn set_search_criteria_rejects_invalid_folder_id_scope() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::SetSearchCriteria.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        assert_eq!(request.search_criteria_folder_ids(), None);
     }
 
     #[test]
@@ -7185,6 +7415,32 @@ mod tests {
         assert!(summary.contains("semantic_shape=binary:bytes=4:preview=01020304"));
         assert!(summary.contains("fallback_default=true"));
         assert!(summary.contains("property_json_tags=0x0e0b0102"));
+    }
+
+    #[test]
+    fn associated_config_zero_metadata_defaults_are_intentional() {
+        let object = MapiObject::AssociatedConfig {
+            folder_id: INBOX_FOLDER_ID,
+            config_id: 0x7fff_ffff_fffb_0001,
+            saved_message: None,
+        };
+
+        assert!(modeled_zero_or_default_property(
+            Some(&object),
+            PID_TAG_MESSAGE_STATUS
+        ));
+        assert!(modeled_zero_or_default_property(
+            Some(&object),
+            PID_TAG_SENT_MAIL_SVR_EID
+        ));
+        assert!(modeled_zero_or_default_property(
+            Some(&object),
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ));
+        assert!(!modeled_zero_or_default_property(
+            Some(&object),
+            PID_TAG_ORIGINAL_MESSAGE_CLASS_W
+        ));
     }
 
     #[test]
@@ -7693,6 +7949,52 @@ mod tests {
         ] {
             assert!(modeled_zero_or_default_property(
                 Some(&folder),
+                property_tag
+            ));
+        }
+    }
+
+    #[test]
+    fn empty_class_defaults_are_modeled_only_for_none_special_folders() {
+        for folder_id in [
+            ROOT_FOLDER_ID,
+            DEFERRED_ACTION_FOLDER_ID,
+            SPOOLER_QUEUE_FOLDER_ID,
+            COMMON_VIEWS_FOLDER_ID,
+            VIEWS_FOLDER_ID,
+            FREEBUSY_DATA_FOLDER_ID,
+        ] {
+            let folder = MapiObject::Folder {
+                folder_id,
+                properties: HashMap::new(),
+            };
+
+            for property_tag in [
+                PID_TAG_CONTAINER_CLASS_W,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ] {
+                assert!(modeled_zero_or_default_property(
+                    Some(&folder),
+                    property_tag
+                ));
+            }
+        }
+
+        let inbox = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        for property_tag in [
+            PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        ] {
+            assert!(!modeled_zero_or_default_property(
+                Some(&inbox),
                 property_tag
             ));
         }

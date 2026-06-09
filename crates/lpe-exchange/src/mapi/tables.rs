@@ -6574,8 +6574,28 @@ mod tests {
             Some(MapiValue::String("Message list settings".to_string()))
         );
         assert_eq!(
+            associated_config_property_value(&message, PID_TAG_MESSAGE_CLASS_W),
+            Some(MapiValue::String(
+                "IPM.Configuration.MessageListSettings".to_string()
+            ))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_ORIGINAL_MESSAGE_CLASS_W),
+            Some(MapiValue::String(
+                "IPM.Configuration.MessageListSettings".to_string()
+            ))
+        );
+        assert_eq!(
             associated_config_property_value(&message, PID_TAG_MESSAGE_STATUS),
             Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_ACCESS_LEVEL),
+            Some(MapiValue::U32(1))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_SENT_MAIL_SVR_EID),
+            Some(MapiValue::Binary(Vec::new()))
         );
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_SEARCH_KEY),
@@ -7579,9 +7599,13 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
                 Some(MapiValue::String(message.subject.clone()))
             }
-            PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(message.message_class.clone())),
+            PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
+                Some(MapiValue::String(message.message_class.clone()))
+            }
             PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
             PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
+            PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+            PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
             PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
             PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
                 message

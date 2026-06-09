@@ -4668,6 +4668,26 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
     }
 }
 
+fn delegate_freebusy_message_for_open<'a>(
+    snapshot: &'a MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<&'a crate::mapi_store::MapiDelegateFreeBusyMessage> {
+    (folder_id == FREEBUSY_DATA_FOLDER_ID)
+        .then(|| snapshot.delegate_freebusy_message_for_id(message_id))
+        .flatten()
+}
+
+fn conversation_action_message_for_open<'a>(
+    snapshot: &'a MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<&'a crate::mapi_store::MapiConversationActionMessage> {
+    (folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
+        .then(|| snapshot.conversation_action_message_for_id(message_id))
+        .flatten()
+}
+
 fn format_debug_property_tags(tags: &[u32]) -> String {
     tags.iter()
         .map(|tag| format!("{tag:#010x}"))
@@ -4695,6 +4715,101 @@ fn format_debug_named_properties(properties: &[MapiNamedProperty]) -> String {
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn format_debug_named_property_context(session: &MapiSession, tags: &[u32]) -> String {
+    tags.iter()
+        .copied()
+        .filter(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID)
+        .map(|tag| {
+            let property_tag = MapiPropertyTag::new(tag);
+            let property_id = property_tag.property_id();
+            let property_type = property_tag.property_type_code();
+            let (property, source) = if let Some(property) =
+                session.named_property_ids.get(&property_id).cloned()
+            {
+                (property, "session")
+            } else if let Some(property) = well_known_named_property_for_id(property_id) {
+                (property, "well_known")
+            } else {
+                (session.property_name_for_id(property_id), "unresolved_fallback")
+            };
+            let kind = match &property.kind {
+                MapiNamedPropertyKind::Lid(lid) => format!("lid={lid:#010x}"),
+                MapiNamedPropertyKind::Name(name) => format!("name={name}"),
+            };
+            format!(
+                "{tag:#010x}:id={property_id:#06x}:type={property_type:#06x}:source={source}:guid={}:{}",
+                hex_preview(&property.guid, 16),
+                kind
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn format_debug_search_criteria_scope(request: &RopRequest) -> String {
+    if request.rop_id != RopId::SetSearchCriteria.as_u8() {
+        return String::new();
+    }
+    let Some(restriction_size_bytes) = request.payload.get(..2) else {
+        return "parse=missing_restriction_size".to_string();
+    };
+    let Ok(restriction_size_bytes) = restriction_size_bytes.try_into() else {
+        return "parse=invalid_restriction_size".to_string();
+    };
+    let restriction_size = u16::from_le_bytes(restriction_size_bytes) as usize;
+    let Some(restriction_bytes) = request.payload.get(2..2 + restriction_size) else {
+        return format!("parse=truncated_restriction;restriction_bytes={restriction_size}");
+    };
+    let count_offset = 2 + restriction_size;
+    let Some(folder_count_bytes) = request.payload.get(count_offset..count_offset + 2) else {
+        return format!("parse=missing_folder_count;restriction_bytes={restriction_size}");
+    };
+    let Ok(folder_count_bytes) = folder_count_bytes.try_into() else {
+        return format!("parse=invalid_folder_count;restriction_bytes={restriction_size}");
+    };
+    let folder_count = u16::from_le_bytes(folder_count_bytes) as usize;
+    let folder_ids_offset = count_offset + 2;
+    let folder_ids_end = folder_ids_offset + folder_count * 8;
+    let Some(folder_id_bytes) = request.payload.get(folder_ids_offset..folder_ids_end) else {
+        return format!(
+            "parse=truncated_folder_ids;restriction_bytes={restriction_size};folder_count={folder_count}"
+        );
+    };
+    let flags_offset = folder_ids_end;
+    let Some(flags_bytes) = request.payload.get(flags_offset..flags_offset + 4) else {
+        return format!(
+            "parse=missing_flags;restriction_bytes={restriction_size};folder_count={folder_count};raw_folder_ids={}",
+            hex_preview(folder_id_bytes, 96)
+        );
+    };
+    let Ok(flags_bytes) = flags_bytes.try_into() else {
+        return format!(
+            "parse=invalid_flags;restriction_bytes={restriction_size};folder_count={folder_count};raw_folder_ids={}",
+            hex_preview(folder_id_bytes, 96)
+        );
+    };
+    let folder_ids = folder_id_bytes
+        .chunks_exact(8)
+        .map(|bytes| {
+            crate::mapi::identity::object_id_from_wire_id(bytes)
+                .map(|folder_id| format!("0x{folder_id:016x}"))
+                .unwrap_or_else(|| format!("invalid:{}", bytes_to_hex(bytes)))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let flags = u32::from_le_bytes(flags_bytes);
+    let parse = if request.search_criteria_folder_ids().is_some() {
+        "ok"
+    } else {
+        "invalid_folder_id"
+    };
+    format!(
+        "parse={parse};restriction_bytes={restriction_size};restriction={};folder_count={folder_count};folder_ids={folder_ids};flags={flags:#010x};raw_folder_ids={}",
+        format_debug_restriction(restriction_bytes),
+        hex_preview(folder_id_bytes, 96)
+    )
 }
 
 fn upload_state_property_name(tag: u32) -> &'static str {
@@ -5218,6 +5333,11 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     {
         return Some("contents_table_probe");
     }
+    if request_rop_ids.contains(&0x05)
+        && (request_rop_ids.contains(&0x15) || request_rop_ids.contains(&0x4F))
+    {
+        return Some("contents_table_batch");
+    }
     if request_rop_ids
         .iter()
         .all(|rop_id| matches!(*rop_id, 0x01 | 0x07))
@@ -5383,13 +5503,30 @@ fn next_response_rop_start(
     next_expected_rop_id: Option<u8>,
 ) -> Option<usize> {
     next_expected_rop_id.and_then(|rop_id| {
-        responses.get(start + 1..).and_then(|remaining| {
-            remaining
+        let mut cursor = start.saturating_add(1);
+        while cursor < responses.len() {
+            let found = responses
+                .get(cursor..)?
                 .iter()
-                .position(|candidate| *candidate == rop_id)
-                .map(|found| start + 1 + found)
-        })
+                .position(|candidate| *candidate == rop_id)?;
+            let candidate_start = cursor + found;
+            if read_response_error_code(responses, candidate_start)
+                .is_some_and(is_plausible_response_return_value)
+            {
+                return Some(candidate_start);
+            }
+            cursor = candidate_start.saturating_add(1);
+        }
+        None
     })
+}
+
+fn is_plausible_response_return_value(value: u32) -> bool {
+    value == 0
+        || value <= 0x0000_0fff
+        || (0x0004_0000..=0x0004_ffff).contains(&value)
+        || (0x8004_0000..=0x8004_ffff).contains(&value)
+        || (0x8007_0000..=0x8007_ffff).contains(&value)
 }
 
 fn rop_buffer_size_word(rop_buffer: &[u8]) -> Option<u16> {
@@ -6267,11 +6404,14 @@ fn log_outlook_contents_table_query_rows_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
     response: &[u8],
+    snapshot: &MapiMailStoreSnapshot,
 ) {
     let Some(MapiObject::ContentsTable {
         folder_id,
         associated,
+        columns,
         position,
+        sort_orders,
         ..
     }) = object
     else {
@@ -6282,6 +6422,31 @@ fn log_outlook_contents_table_query_rows_response(
     }
 
     let response_origin = response.get(6).copied().unwrap_or(0xff);
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let row_count = response
+        .get(7..9)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(0);
+    let associated_wire_row_summary = if *associated {
+        format_inbox_associated_wire_row_summary(
+            principal.account_id,
+            *folder_id,
+            *associated,
+            0,
+            true,
+            row_count as usize,
+            sort_orders,
+            &selected_columns,
+            snapshot,
+        )
+    } else {
+        String::new()
+    };
+    let response_row_payload_preview = response
+        .get(9..)
+        .map(|bytes| hex_preview(bytes, 160))
+        .unwrap_or_default();
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -6304,11 +6469,13 @@ fn log_outlook_contents_table_query_rows_response(
             0x02 => "BOOKMARK_END",
             _ => "unknown",
         },
-        response_row_count = response
-            .get(7..9)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u16::from_le_bytes)
-            .unwrap_or(0),
+        response_row_count = row_count,
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        response_payload_bytes = response.len(),
+        response_row_payload_preview = %response_row_payload_preview,
+        associated_wire_row_summary = %associated_wire_row_summary,
         "rca debug outlook contents table query rows response"
     );
 }
@@ -8896,6 +9063,56 @@ where
                             0x8004_010F,
                         ));
                     }
+                } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
+                    if let Some(message) =
+                        delegate_freebusy_message_for_open(snapshot, folder_id, message_id)
+                    {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::DelegateFreeBusyMessage {
+                                folder_id,
+                                message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &message.message.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
+                } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    if let Some(message) =
+                        conversation_action_message_for_open(snapshot, folder_id, message_id)
+                    {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::ConversationAction {
+                                folder_id,
+                                conversation_action_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &conversation_action_subject(&message.action),
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
                 } else if let Some(message) = snapshot
                     .associated_config_message_for_id(message_id)
                     .filter(|message| message.folder_id == folder_id)
@@ -8946,52 +9163,6 @@ where
                         0,
                     ));
                     output_handles.push(handle);
-                } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
-                    if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
-                        let handle = session.allocate_output_handle(
-                            request.output_handle_index,
-                            MapiObject::ConversationAction {
-                                folder_id,
-                                conversation_action_id: message_id,
-                            },
-                        );
-                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                        responses.extend_from_slice(&rop_open_message_response(
-                            &request,
-                            &conversation_action_subject(&message.action),
-                            0,
-                        ));
-                        output_handles.push(handle);
-                    } else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x03,
-                            request.output_handle_index.unwrap_or(0),
-                            0x8004_010F,
-                        ));
-                    }
-                } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
-                    if let Some(message) = snapshot.delegate_freebusy_message_for_id(message_id) {
-                        let handle = session.allocate_output_handle(
-                            request.output_handle_index,
-                            MapiObject::DelegateFreeBusyMessage {
-                                folder_id,
-                                message_id,
-                            },
-                        );
-                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                        responses.extend_from_slice(&rop_open_message_response(
-                            &request,
-                            &message.message.subject,
-                            0,
-                        ));
-                        output_handles.push(handle);
-                    } else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x03,
-                            request.output_handle_index.unwrap_or(0),
-                            0x8004_010F,
-                        ));
-                    }
                 } else if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
                     if let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id) {
                         let handle = session.allocate_output_handle(
@@ -9484,6 +9655,25 @@ where
                 } else {
                     None
                 };
+                let named_property_context =
+                    format_debug_named_property_context(session, &request.property_tags());
+                if !named_property_context.is_empty() {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x07",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = mapi_object_debug_kind(object),
+                        folder_id = %mapi_object_debug_folder_id(object),
+                        requested_property_tags = %format_debug_property_tags(&request.property_tags()),
+                        named_property_context = %named_property_context,
+                        "rca debug mapi get properties named property context"
+                    );
+                }
                 let property_response = rop_get_properties_specific_response_with_custom(
                     &request,
                     object,
@@ -11386,6 +11576,7 @@ where
                     &request,
                     input_object(session, &handle_slots, &request),
                     &response,
+                    snapshot,
                 );
                 responses.extend_from_slice(&response);
                 if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
@@ -14068,6 +14259,7 @@ where
                     folder_role = debug_role_for_folder_id(*folder_id),
                     definition_found = definition.is_some(),
                     fallback_builtin_role = builtin_search_role_for_folder_id(*folder_id).unwrap_or(""),
+                    search_criteria_scope = %format_debug_search_criteria_scope(&request),
                     message = "rca debug mapi set search criteria lookup"
                 );
                 let Some(definition) = definition else {
@@ -14097,6 +14289,22 @@ where
                 let criteria = match bounded_search_criteria_from_rop(&request, mailboxes) {
                     Ok(criteria) => criteria,
                     Err(error) => {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            mapi_request_id = request_id,
+                            request_rop_id = "0x30",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            search_criteria_scope = %format_debug_search_criteria_scope(&request),
+                            search_criteria_error = %format!("{error:#010x}"),
+                            "rca debug mapi set search criteria rejected"
+                        );
                         responses.extend_from_slice(&rop_error_response(
                             0x30,
                             request.response_handle_index(),
@@ -17829,8 +18037,12 @@ where
             "rca debug mapi post hierarchy close reason context"
         );
     }
-    let response_handles =
-        response_handle_table(&handle_slots, &output_handles, echo_input_handle_table);
+    let response_handles = execute_response_handle_table(
+        &responses,
+        &handle_slots,
+        &output_handles,
+        echo_input_handle_table,
+    );
     let response = if extended {
         rop_buffer_with_response_spec(responses, &response_handles)
     } else {
@@ -17841,6 +18053,18 @@ where
     } else {
         response
     }
+}
+
+fn execute_response_handle_table(
+    responses: &[u8],
+    handle_slots: &[u32],
+    output_handles: &[u32],
+    echo_input_handle_table: bool,
+) -> Vec<u32> {
+    if responses.is_empty() {
+        return Vec::new();
+    }
+    response_handle_table(handle_slots, output_handles, echo_input_handle_table)
 }
 
 fn property_tags_are_supported(property_tags: &[u32]) -> bool {
@@ -18714,6 +18938,28 @@ mod tests {
     }
 
     #[test]
+    fn debug_named_property_context_reports_session_and_unresolved_properties() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x801f,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Name("custom field".to_string()),
+            },
+        );
+
+        let context = format_debug_named_property_context(
+            &session,
+            &[0x801f_001f, PID_TAG_SUBJECT_W, 0x836b_001f],
+        );
+
+        assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
+        assert!(context.contains("name=custom field"));
+        assert!(context.contains("0x836b001f:id=0x836b:type=0x001f:source=unresolved_fallback"));
+        assert!(!context.contains("0x0037001f"));
+    }
+
+    #[test]
     fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
         let session = test_mapi_session();
         let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
@@ -19182,6 +19428,117 @@ mod tests {
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID
         ));
         assert!(!synthetic_folder_allows_create_message(0x7777_0001));
+    }
+
+    #[test]
+    fn freebusy_open_prefers_delegate_message_over_stale_associated_config_identity() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let delegate_id = Uuid::from_u128(0x64656c65_6761_7465_8000_000000000001);
+        let stale_config_id = Uuid::from_u128(0x636f6e66_6967_6672_8000_000000000001);
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 311,
+        );
+        crate::mapi::identity::remember_mapi_identity(delegate_id, object_id);
+        crate::mapi::identity::remember_mapi_identity(stale_config_id, object_id);
+
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_delegate_freebusy_messages(vec![lpe_storage::DelegateFreeBusyMessageObject {
+                id: delegate_id,
+                account_id,
+                owner_account_id: account_id,
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "Free/busy for owner@example.test".to_string(),
+                body_text: "busy".to_string(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: "{}".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+            .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+                id: stale_config_id,
+                account_id,
+                folder_id: FREEBUSY_DATA_FOLDER_ID,
+                message_class: "IPM.Configuration.FreeBusy".to_string(),
+                subject: "Stale FreeBusy associated config".to_string(),
+                properties_json: serde_json::json!({}),
+            }]);
+
+        let selected =
+            delegate_freebusy_message_for_open(&snapshot, FREEBUSY_DATA_FOLDER_ID, object_id);
+
+        assert_eq!(
+            selected.map(|message| message.message.subject.as_str()),
+            Some("Free/busy for owner@example.test")
+        );
+    }
+
+    #[test]
+    fn conversation_action_open_prefers_action_over_stale_associated_config_identity() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let action_id = Uuid::from_u128(0x636f6e76_6163_746e_8000_000000000001);
+        let stale_config_id = Uuid::from_u128(0x636f6e66_6967_6361_8000_000000000001);
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 312,
+        );
+        crate::mapi::identity::remember_mapi_identity(action_id, object_id);
+        crate::mapi::identity::remember_mapi_identity(stale_config_id, object_id);
+
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_conversation_actions(vec![lpe_storage::ConversationAction {
+                id: action_id,
+                conversation_id: action_id,
+                subject: "Conversation Action".to_string(),
+                categories_json: "[]".to_string(),
+                move_folder_entry_id: None,
+                move_store_entry_id: None,
+                move_target_mailbox_id: None,
+                max_delivery_time: None,
+                last_applied_time: None,
+                version: lpe_storage::CONVERSATION_ACTION_VERSION,
+                processed: 0,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            }])
+            .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+                id: stale_config_id,
+                account_id,
+                folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                message_class: "IPM.Configuration.StaleConversationAction".to_string(),
+                subject: "Stale Conversation Action associated config".to_string(),
+                properties_json: serde_json::json!({}),
+            }]);
+
+        let selected = conversation_action_message_for_open(
+            &snapshot,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            object_id,
+        );
+
+        assert_eq!(
+            selected.map(|message| message.action.subject.as_str()),
+            Some("Conversation Action")
+        );
+    }
+
+    #[test]
+    fn release_only_execute_response_has_no_output_handle_table() {
+        let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], true);
+
+        assert!(response_handles.is_empty());
+    }
+
+    #[test]
+    fn mixed_release_execute_response_preserves_output_handle_table() {
+        let response_handles = execute_response_handle_table(
+            &[0x02, 0x01, 0, 0, 0, 0, 0, 0],
+            &[u32::MAX, 77],
+            &[77],
+            true,
+        );
+
+        assert_eq!(response_handles, vec![u32::MAX, 77]);
     }
 
     #[test]
@@ -19887,6 +20244,37 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_response_summary_skips_implausible_getprops_payload_rop_marker() {
+        let mut responses = vec![0x07, 0x01];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.extend_from_slice(&OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835.to_le_bytes());
+        responses.extend_from_slice(&8u32.to_le_bytes());
+        responses.extend_from_slice(&[0x01, 0x02, 0x07, 0x74, 0x1f, 0x6f, 0xd3, 0x03]);
+        let first_getprops_end = responses.len();
+        responses.extend_from_slice(&[0x07, 0x01]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        responses.extend_from_slice(&0u16.to_le_bytes());
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[0x0000_0001]));
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x07, 0x07]);
+
+        assert_eq!(response_summary.ids_csv, "0x07,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x07:0x00000000,0x07:0x00000000"
+        );
+        assert!(response_summary.frames.contains(&format!(
+            "0x07@0..{first_getprops_end}:len={first_getprops_end}:out=1:rv=0x00000000"
+        )));
+        assert!(!response_summary.results_csv.contains("0xd36f1f74"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
     fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
         let mut responses = Vec::new();
         responses.push(0x02);
@@ -19970,6 +20358,12 @@ mod tests {
             Some("contents_table_probe")
         );
         assert_eq!(
+            execute_response_framing_context(&[
+                0x05, 0x12, 0x13, 0x18, 0x4F, 0x56, 0x04, 0x12, 0x15, 0x29, 0x07, 0x14,
+            ]),
+            Some("contents_table_batch")
+        );
+        assert_eq!(
             execute_response_framing_context(&[0x01, 0x02, 0x07]),
             Some("openfolder_getprops_probe")
         );
@@ -20002,6 +20396,28 @@ mod tests {
             builtin_search_role_for_folder_id(REMINDERS_FOLDER_ID),
             Some("reminders")
         );
+    }
+
+    #[test]
+    fn search_criteria_debug_scope_reports_invalid_folder_ids() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&0u64.to_le_bytes());
+        payload.extend_from_slice(&SEARCH_RUNNING_FLAG.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::SetSearchCriteria.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let context = format_debug_search_criteria_scope(&request);
+
+        assert!(context.contains("parse=invalid_folder_id"));
+        assert!(context.contains("folder_count=1"));
+        assert!(context.contains("invalid:0000000000000000"));
+        assert!(context.contains("flags=0x00000001"));
     }
 
     #[test]
