@@ -1732,7 +1732,9 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
             &email.id,
         ))),
-        PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(message_search_key(email.id))),
+        PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &email.id,
+        ))),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_mailbox_role(&email.mailbox_id, &email.mailbox_role),
         )),
@@ -2138,13 +2140,6 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
     let mut value = Vec::with_capacity(22);
     value.extend_from_slice(&[0x01, 0, 0, 0, 0, 0]);
     value.extend_from_slice(conversation_id.as_bytes());
-    value
-}
-
-fn message_search_key(message_id: Uuid) -> Vec<u8> {
-    let mut value = Vec::with_capacity(23);
-    value.extend_from_slice(b"LPEMSG:");
-    value.extend_from_slice(message_id.as_bytes());
     value
 }
 
@@ -7756,6 +7751,12 @@ mod tests {
         );
 
         let mailbox_id = Uuid::from_u128(0x3333);
+        crate::mapi::identity::remember_mapi_identity(
+            Uuid::from_u128(0x1111),
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 111,
+            ),
+        );
         let email = JmapEmail {
             id: Uuid::from_u128(0x1111),
             thread_id: Uuid::from_u128(0x2222),
@@ -7874,7 +7875,9 @@ mod tests {
         );
         assert_eq!(
             email_property_value(&email, PID_TAG_SEARCH_KEY),
-            Some(MapiValue::Binary(message_search_key(email.id)))
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+                &email.id
+            )))
         );
         assert_eq!(
             email_property_value(&email, PID_TAG_DISPLAY_BCC_W),

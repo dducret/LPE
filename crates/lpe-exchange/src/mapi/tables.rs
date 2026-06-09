@@ -6081,6 +6081,129 @@ mod tests {
     }
 
     #[test]
+    fn contents_find_row_matches_message_search_key() {
+        let mailbox_id = Uuid::from_u128(0x3333);
+        let email_id = Uuid::from_u128(0x4444);
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 444,
+            ),
+        );
+        let search_key = crate::mapi_mailstore::source_key_for_uuid(&email_id);
+        let email = JmapEmail {
+            id: email_id,
+            thread_id: Uuid::from_u128(0x5555),
+            mailbox_id,
+            mailbox_role: "sent".to_string(),
+            mailbox_name: "Sent".to_string(),
+            modseq: 7,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![lpe_storage::JmapEmailMailboxState {
+                mailbox_id,
+                role: "sent".to_string(),
+                name: "Sent".to_string(),
+                modseq: 7,
+                unread: false,
+                flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                categories: Vec::new(),
+                draft: false,
+            }],
+            received_at: "2026-05-20T10:00:00Z".to_string(),
+            sent_at: Some("2026-05-20T10:00:00Z".to_string()),
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Search key probe".to_string(),
+            preview: "Preview".to_string(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: Some("<search-key-probe@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        let mut table = MapiObject::ContentsTable {
+            folder_id: SENT_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SEARCH_KEY, PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SEARCH_KEY.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SEARCH_KEY.to_le_bytes());
+        write_rop_binary(&mut restriction, &search_key);
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_find_row_response(
+            &request,
+            Some(&mut table),
+            &[],
+            &[email],
+            &MapiMailStoreSnapshot::empty(),
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        assert!(response
+            .windows(search_key.len())
+            .any(|window| window == search_key.as_slice()));
+    }
+
+    #[test]
     fn common_views_find_row_matches_default_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
