@@ -5212,14 +5212,15 @@ fn summarize_response_rop_buffer(
         .collect::<Vec<_>>();
     let mut frames = Vec::new();
     for (expected_index, expected_rop_id) in expected_ids.iter().copied().enumerate() {
-        let Some(found) = responses.get(offset..).and_then(|remaining| {
-            remaining
-                .iter()
-                .position(|rop_id| *rop_id == expected_rop_id)
-        }) else {
+        let Some(found_offset) = next_response_rop_start_from(
+            responses,
+            offset,
+            expected_rop_id,
+            expected_ids.get(expected_index + 1).copied(),
+        ) else {
             break;
         };
-        offset += found;
+        offset = found_offset;
         let rop_id = responses[offset];
         ids.push(rop_id);
         let error_code = read_response_error_code(responses, offset);
@@ -5477,6 +5478,10 @@ fn next_response_rop_start_validated(
             .position(|candidate| *candidate == next_expected_rop_id)?;
         let candidate_start = cursor + found;
         let error_code = read_response_error_code(responses, candidate_start);
+        if !error_code.is_some_and(is_plausible_response_return_value) {
+            cursor = candidate_start.saturating_add(1);
+            continue;
+        }
         if let Some(end) = response_rop_fixed_frame_end(
             responses,
             candidate_start,
@@ -5491,6 +5496,42 @@ fn next_response_rop_start_validated(
             {
                 return Some(candidate_start);
             }
+        }
+        cursor = candidate_start.saturating_add(1);
+    }
+    None
+}
+
+fn next_response_rop_start_from(
+    responses: &[u8],
+    search_start: usize,
+    expected_rop_id: u8,
+    following_expected_rop_id: Option<u8>,
+) -> Option<usize> {
+    let mut cursor = search_start;
+    while cursor < responses.len() {
+        let found = responses
+            .get(cursor..)?
+            .iter()
+            .position(|candidate| *candidate == expected_rop_id)?;
+        let candidate_start = cursor + found;
+        let error_code = read_response_error_code(responses, candidate_start);
+        if !error_code.is_some_and(is_plausible_response_return_value) {
+            cursor = candidate_start.saturating_add(1);
+            continue;
+        }
+        if let Some(end) =
+            response_rop_fixed_frame_end(responses, candidate_start, expected_rop_id, error_code)
+                .filter(|end| *end <= responses.len())
+        {
+            if following_expected_rop_id
+                .and_then(|rop_id| responses.get(end).map(|candidate| *candidate == rop_id))
+                .unwrap_or(true)
+            {
+                return Some(candidate_start);
+            }
+        } else {
+            return Some(candidate_start);
         }
         cursor = candidate_start.saturating_add(1);
     }
@@ -20116,6 +20157,57 @@ mod tests {
         assert!(response_summary
             .frames
             .contains("0x05@35..45:len=10:out=1:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_response_summary_skips_implausible_query_rows_payload_marker() {
+        let table_request = RopRequest {
+            rop_id: 0x05,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0x02],
+        };
+        let set_columns_request = RopRequest {
+            rop_id: 0x12,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let sort_table_request = RopRequest {
+            rop_id: 0x13,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let seek_row_response = vec![0x18, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut find_row_response = vec![0x4f, 0x01, 0, 0, 0, 0, 0, 1];
+        find_row_response.extend_from_slice(&[0x01, 0x00, 0x15, 0x49, 0x00, 0x50, 0x00, 0x46]);
+        let query_rows_response = vec![0x15, 0x03, 0, 0, 0, 0, 0, 0, 0];
+        let mut responses = rop_get_contents_table_response(&table_request, 2);
+        responses.extend_from_slice(&rop_set_columns_response(&set_columns_request));
+        responses.extend_from_slice(&rop_sort_table_response(&sort_table_request));
+        responses.extend_from_slice(&seek_row_response);
+        responses.extend_from_slice(&find_row_response);
+        responses.extend_from_slice(&query_rows_response);
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[1, 2, 3, 4]));
+        let response_summary =
+            summarize_response_rop_buffer(&response_buffer, &[0x05, 0x12, 0x13, 0x18, 0x4f, 0x15]);
+
+        assert_eq!(response_summary.ids_csv, "0x05,0x12,0x13,0x18,0x4f,0x15");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x05:0x00000000,0x12:0x00000000,0x13:0x00000000,0x18:0x00000000,0x4f:0x00000000,0x15:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x4f@35..51:len=16:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x15@51..60:len=9:out=3:rv=0x00000000"));
+        assert!(!response_summary.results_csv.contains("0x15:0x46005000"));
         assert!(response_summary.parse_error.is_empty());
     }
 
