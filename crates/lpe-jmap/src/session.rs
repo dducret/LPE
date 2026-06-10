@@ -200,6 +200,7 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "rules": true,
                 "sharing": true,
                 "durableChanges": true,
+                "recipientSuggestions": true,
             }),
         ),
         (JMAP_VACATION_RESPONSE_CAPABILITY.to_string(), json!({})),

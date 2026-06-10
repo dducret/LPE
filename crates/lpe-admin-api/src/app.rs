@@ -61,17 +61,19 @@ use crate::{
         delete_client_contact, delete_client_event, delete_client_note, delete_client_task,
         delete_draft_message, delete_journal_entry, delete_public_folder,
         delete_public_folder_item, delete_public_folder_permission, delete_public_folder_replica,
-        delete_search_folder, get_client_note, get_client_task, get_journal_entry,
-        get_public_folder, get_search_folder, list_client_notes, list_client_task_lists,
-        list_client_tasks, list_journal_entries, list_public_folder_children,
+        delete_search_folder, dismiss_recipient_suggestion, get_client_contact, get_client_note,
+        get_client_task, get_journal_entry, get_public_folder, get_search_folder,
+        list_client_contacts, list_client_notes, list_client_task_lists, list_client_tasks,
+        list_contact_books, list_journal_entries, list_public_folder_children,
         list_public_folder_items, list_public_folder_per_user_state,
         list_public_folder_permissions, list_public_folder_replicas, list_public_folder_trees,
-        list_recoverable_items, list_search_folders, outlook_profile_state,
+        list_recoverable_items, list_search_folders, outlook_profile_state, patch_client_contact,
         patch_public_folder_item, patch_public_folder_per_user_state, post_public_folder_item,
         purge_recoverable_item, put_public_folder_permission, put_public_folder_replica,
-        query_client_reminders, restore_recoverable_item, save_draft_message, submit_message,
-        update_message_flag, update_public_folder, upsert_client_contact, upsert_client_event,
-        upsert_client_note, upsert_client_task, upsert_journal_entry, upsert_search_folder,
+        query_client_reminders, query_recipient_suggestions, restore_recoverable_item,
+        save_draft_message, submit_message, update_message_flag, update_public_folder,
+        upsert_client_contact, upsert_client_event, upsert_client_note, upsert_client_task,
+        upsert_journal_entry, upsert_search_folder,
     },
 };
 
@@ -250,8 +252,25 @@ pub fn router(storage: Storage) -> Router {
             "/mail/messages/{message_id}/draft",
             delete(delete_draft_message),
         )
-        .route("/mail/contacts", post(upsert_client_contact))
-        .route("/mail/contacts/{contact_id}", delete(delete_client_contact))
+        .route("/mail/contact-books", get(list_contact_books))
+        .route(
+            "/mail/contacts",
+            get(list_client_contacts).post(upsert_client_contact),
+        )
+        .route(
+            "/mail/contacts/{contact_id}",
+            get(get_client_contact)
+                .patch(patch_client_contact)
+                .delete(delete_client_contact),
+        )
+        .route(
+            "/mail/recipient-suggestions",
+            get(query_recipient_suggestions),
+        )
+        .route(
+            "/mail/recipient-suggestions/{suggestion_id}/dismiss",
+            post(dismiss_recipient_suggestion),
+        )
         .route("/mail/calendar/events", post(upsert_client_event))
         .route(
             "/mail/calendar/events/{event_id}",

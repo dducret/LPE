@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use lpe_storage::{
-    AccessibleContact, AuthenticatedAccount, CollaborationCollection, UpsertClientContactInput,
+    AccessibleContact, AuthenticatedAccount, CollaborationCollection, ContactNameFields,
+    ContactSourceFields, RecipientSuggestion, UpsertClientContactInput,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -9,11 +10,12 @@ use uuid::Uuid;
 use crate::{
     convert::{apply_jmap_property_patch, has_jmap_property_patch, insert_if},
     error::set_error,
-    parse::{parse_first_property_object_string, parse_uuid, parse_uuid_list},
+    parse::{parse_uuid, parse_uuid_list},
     protocol::{
         AddressBookGetArguments, AddressBookQueryArguments, ChangesArguments,
         ContactCardGetArguments, ContactCardQueryArguments, ContactCardQueryFilter,
         ContactCardSetArguments, EntityQuerySort, QueryChangesArguments,
+        RecipientSuggestionQueryArguments,
     },
     state::{query_changes_response, query_position, StateEntry},
     validation::{validate_contact_filter, validate_entity_sort},
@@ -419,6 +421,54 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }))
     }
 
+    pub(crate) async fn handle_recipient_suggestion_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: RecipientSuggestionQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
+        let suggestions = self
+            .store
+            .query_recipient_suggestions(account_id, arguments.query.as_deref())
+            .await?;
+        let all_ids = suggestions
+            .iter()
+            .map(|suggestion| suggestion.id.to_string())
+            .collect::<Vec<_>>();
+        let position = query_position(
+            &all_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": crate::encode_query_state(
+                account_id,
+                "RecipientSuggestion",
+                arguments.query.map(Value::String),
+                None,
+                all_ids.clone(),
+            )?,
+            "canCalculateChanges": false,
+            "position": position,
+            "ids": all_ids.iter().skip(position).take(limit).cloned().collect::<Vec<_>>(),
+            "total": suggestions.len(),
+            "list": suggestions
+                .iter()
+                .skip(position)
+                .take(limit)
+                .map(recipient_suggestion_to_value)
+                .collect::<Vec<_>>(),
+        }))
+    }
+
     async fn contact_update_input(
         &self,
         account_id: Uuid,
@@ -501,6 +551,8 @@ fn contact_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "name".to_string(),
                 "emails".to_string(),
                 "phones".to_string(),
+                "addresses".to_string(),
+                "onlineServices".to_string(),
                 "organizations".to_string(),
                 "titles".to_string(),
                 "notes".to_string(),
@@ -522,54 +574,79 @@ fn contact_to_value(contact: &AccessibleContact, properties: &HashSet<String>) -
             json!({
                 "@type": "Name",
                 "full": contact.name,
+                "prefix": contact.structured_name.prefix,
+                "given": contact.structured_name.given,
+                "middle": contact.structured_name.middle,
+                "family": contact.structured_name.family,
+                "suffix": contact.structured_name.suffix,
+                "nickname": contact.structured_name.nickname,
+                "phoneticGiven": contact.structured_name.phonetic_given,
+                "phoneticFamily": contact.structured_name.phonetic_family,
             }),
         );
     }
-    if properties.contains("emails") && !contact.email.trim().is_empty() {
-        object.insert(
-            "emails".to_string(),
-            json!({
-                "main": {
-                    "@type": "EmailAddress",
-                    "address": contact.email,
-                    "contexts": {"work": true},
-                    "pref": 1,
-                }
-            }),
+    if properties.contains("emails") {
+        insert_non_empty_object(
+            &mut object,
+            "emails",
+            contact_array_to_named_object(&contact.emails_json, "email", "address"),
         );
     }
-    if properties.contains("phones") && !contact.phone.trim().is_empty() {
-        object.insert(
-            "phones".to_string(),
-            json!({
-                "main": {
-                    "@type": "Phone",
-                    "number": contact.phone,
-                    "contexts": {"work": true},
-                }
-            }),
+    if properties.contains("phones") {
+        insert_non_empty_object(
+            &mut object,
+            "phones",
+            contact_array_to_named_object(&contact.phones_json, "phone", "number"),
         );
     }
-    if properties.contains("organizations") && !contact.team.trim().is_empty() {
+    if properties.contains("addresses") {
+        insert_non_empty_object(
+            &mut object,
+            "addresses",
+            contact_array_to_named_object(&contact.addresses_json, "address", "full"),
+        );
+    }
+    if properties.contains("onlineServices") {
+        insert_non_empty_object(
+            &mut object,
+            "onlineServices",
+            contact_array_to_named_object(&contact.urls_json, "url", "uri"),
+        );
+    }
+    if properties.contains("organizations")
+        && (!contact.team.trim().is_empty() || !contact.organization_name.trim().is_empty())
+    {
         object.insert(
             "organizations".to_string(),
             json!({
                 "main": {
                     "@type": "Organization",
-                    "name": contact.team,
+                    "name": if contact.organization_name.trim().is_empty() {
+                        contact.team.clone()
+                    } else {
+                        contact.organization_name.clone()
+                    },
+                    "unit": contact.team,
                     "contexts": {"work": true},
                 }
             }),
         );
     }
-    if properties.contains("titles") && !contact.role.trim().is_empty() {
+    if properties.contains("titles")
+        && (!contact.role.trim().is_empty() || !contact.job_title.trim().is_empty())
+    {
         object.insert(
             "titles".to_string(),
             json!({
                 "main": {
                     "@type": "Title",
                     "kind": "title",
-                    "name": contact.role,
+                    "name": if contact.job_title.trim().is_empty() {
+                        contact.role.clone()
+                    } else {
+                        contact.job_title.clone()
+                    },
+                    "role": contact.role,
                 }
             }),
         );
@@ -594,6 +671,59 @@ fn contact_to_value(contact: &AccessibleContact, properties: &HashSet<String>) -
     Value::Object(object)
 }
 
+fn recipient_suggestion_to_value(suggestion: &RecipientSuggestion) -> Value {
+    json!({
+        "id": suggestion.id.to_string(),
+        "@type": "RecipientSuggestion",
+        "email": suggestion.email,
+        "displayName": suggestion.display_name,
+        "sourceKind": suggestion.source_kind,
+        "useCount": suggestion.use_count,
+        "lastUsedAt": suggestion.last_used_at,
+        "contactId": suggestion.contact_id.map(|id| id.to_string()),
+    })
+}
+
+fn insert_non_empty_object(object: &mut Map<String, Value>, key: &str, value: Value) {
+    if value.as_object().is_some_and(|object| !object.is_empty()) {
+        object.insert(key.to_string(), value);
+    }
+}
+
+fn contact_array_to_named_object(value: &Value, source_key: &str, target_key: &str) -> Value {
+    let mut object = Map::new();
+    let Some(items) = value.as_array() else {
+        return Value::Object(object);
+    };
+    for (index, item) in items.iter().enumerate() {
+        let Some(source) = item.as_object() else {
+            continue;
+        };
+        let mut entry = source.clone();
+        if let Some(value) = entry.remove(source_key) {
+            entry.insert(target_key.to_string(), value);
+        }
+        entry.entry("@type".to_string()).or_insert_with(|| {
+            Value::String(
+                match source_key {
+                    "email" => "EmailAddress",
+                    "phone" => "Phone",
+                    "url" => "OnlineService",
+                    _ => "Address",
+                }
+                .to_string(),
+            )
+        });
+        let key = if index == 0 {
+            "main".to_string()
+        } else {
+            format!("item{}", index + 1)
+        };
+        object.insert(key, Value::Object(entry));
+    }
+    Value::Object(object)
+}
+
 fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQueryFilter) -> bool {
     if let Some(address_book_id) = filter.in_address_book.as_deref() {
         if address_book_id != contact.collection_id {
@@ -604,13 +734,19 @@ fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQuery
         let needle = text.trim().to_lowercase();
         if !needle.is_empty() {
             let haystack = format!(
-                "{} {} {} {} {} {}",
+                "{} {} {} {} {} {} {} {} {} {} {} {}",
                 contact.name,
                 contact.email,
                 contact.role,
                 contact.phone,
                 contact.team,
-                contact.notes
+                contact.notes,
+                contact.structured_name.nickname,
+                contact.emails_json,
+                contact.phones_json,
+                contact.addresses_json,
+                contact.urls_json,
+                contact.organization_name,
             )
             .to_lowercase();
             if !haystack.contains(&needle) {
@@ -679,6 +815,45 @@ fn parse_contact_input(
             phone: parse_contact_phone(object.get("phones"))?,
             team: parse_contact_organization(object.get("organizations"))?,
             notes: parse_contact_note(object.get("notes"))?,
+            structured_name: parse_contact_name_fields(object.get("name"))?,
+            emails_json: Some(parse_contact_property_array(
+                object.get("emails"),
+                "address",
+                "email",
+            )?),
+            phones_json: Some(parse_contact_property_array(
+                object.get("phones"),
+                "number",
+                "phone",
+            )?),
+            addresses_json: Some(parse_contact_property_array(
+                object.get("addresses"),
+                "full",
+                "address",
+            )?),
+            urls_json: Some(parse_contact_property_array(
+                object.get("onlineServices").or_else(|| object.get("urls")),
+                "uri",
+                "url",
+            )?),
+            organization_name: parse_contact_organization_name(object.get("organizations"))?,
+            job_title: parse_contact_job_title(object.get("titles"))?,
+            raw_vcard: object
+                .get("rawVCard")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            source: ContactSourceFields {
+                import_source: "jmap".to_string(),
+                source_uid: object
+                    .get("uid")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+                source_etag: None,
+                source_payload_json: object
+                    .get("source")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(Map::new())),
+            },
         },
     ))
 }
@@ -686,8 +861,9 @@ fn parse_contact_input(
 fn reject_unknown_contact_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "id" | "uid" | "kind" | "name" | "emails" | "phones" | "organizations" | "titles"
-            | "notes" | "addressBookIds" => {}
+            "id" | "uid" | "kind" | "name" | "emails" | "phones" | "addresses"
+            | "onlineServices" | "urls" | "organizations" | "titles" | "notes"
+            | "addressBookIds" | "rawVCard" | "source" => {}
             _ => bail!("unsupported contact card property: {key}"),
         }
     }
@@ -730,23 +906,146 @@ fn parse_contact_name(value: Option<&Value>) -> Result<String> {
     bail!("name.full is required")
 }
 
+fn parse_contact_name_fields(value: Option<&Value>) -> Result<ContactNameFields> {
+    let Some(value) = value else {
+        return Ok(ContactNameFields::default());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("name must be an object"))?;
+    let family = {
+        let family = contact_object_string(object, "family");
+        if family.is_empty() {
+            contact_object_string(object, "surname")
+        } else {
+            family
+        }
+    };
+    Ok(ContactNameFields {
+        prefix: contact_object_string(object, "prefix"),
+        given: contact_object_string(object, "given"),
+        middle: contact_object_string(object, "middle"),
+        family,
+        suffix: contact_object_string(object, "suffix"),
+        nickname: contact_object_string(object, "nickname"),
+        phonetic_given: contact_object_string(object, "phoneticGiven"),
+        phonetic_family: contact_object_string(object, "phoneticFamily"),
+    })
+}
+
+fn contact_object_string(object: &Map<String, Value>, key: &str) -> String {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string()
+}
+
 fn parse_contact_email(value: Option<&Value>) -> Result<String> {
-    parse_first_property_object_string(value, "emails", "address")
-        .map(|email| normalize_email(&email))
+    parse_contact_property_string(value, "emails", "address").map(|email| normalize_email(&email))
 }
 
 fn parse_contact_phone(value: Option<&Value>) -> Result<String> {
-    parse_first_property_object_string(value, "phones", "number")
+    parse_contact_property_string(value, "phones", "number")
 }
 
 fn parse_contact_organization(value: Option<&Value>) -> Result<String> {
-    parse_first_property_object_string(value, "organizations", "name")
+    parse_contact_property_string(value, "organizations", "unit").and_then(|unit| {
+        if unit.is_empty() {
+            parse_contact_property_string(value, "organizations", "name")
+        } else {
+            Ok(unit)
+        }
+    })
 }
 
 fn parse_contact_title(value: Option<&Value>) -> Result<String> {
-    parse_first_property_object_string(value, "titles", "name")
+    parse_contact_property_string(value, "titles", "role").and_then(|role| {
+        if role.is_empty() {
+            parse_contact_property_string(value, "titles", "name")
+        } else {
+            Ok(role)
+        }
+    })
 }
 
 fn parse_contact_note(value: Option<&Value>) -> Result<String> {
-    parse_first_property_object_string(value, "notes", "note")
+    parse_contact_property_string(value, "notes", "note")
+}
+
+fn parse_contact_organization_name(value: Option<&Value>) -> Result<String> {
+    parse_contact_property_string(value, "organizations", "name")
+}
+
+fn parse_contact_job_title(value: Option<&Value>) -> Result<String> {
+    parse_contact_property_string(value, "titles", "name")
+}
+
+fn parse_contact_property_string(
+    value: Option<&Value>,
+    property_name: &str,
+    field_name: &str,
+) -> Result<String> {
+    let Some(value) = value else {
+        return Ok(String::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{property_name} must be an object"))?;
+    let first = object
+        .get("main")
+        .or_else(|| object.values().next())
+        .cloned();
+    let Some(first) = first else {
+        return Ok(String::new());
+    };
+    let first = first
+        .as_object()
+        .ok_or_else(|| anyhow!("{property_name} entries must be objects"))?;
+    Ok(first
+        .get(field_name)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string())
+}
+
+fn parse_contact_property_array(
+    value: Option<&Value>,
+    source_key: &str,
+    target_key: &str,
+) -> Result<Value> {
+    let Some(value) = value else {
+        return Ok(Value::Array(Vec::new()));
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("contact property must be an object"))?;
+    let mut items = Vec::new();
+    if let Some(entry) = object.get("main") {
+        items.push(parse_contact_property_entry(entry, source_key, target_key)?);
+    }
+    for (key, entry) in object {
+        if key == "main" {
+            continue;
+        }
+        items.push(parse_contact_property_entry(entry, source_key, target_key)?);
+    }
+    Ok(Value::Array(items))
+}
+
+fn parse_contact_property_entry(
+    entry: &Value,
+    source_key: &str,
+    target_key: &str,
+) -> Result<Value> {
+    let entry = entry
+        .as_object()
+        .ok_or_else(|| anyhow!("contact property entries must be objects"))?;
+    let mut output = entry.clone();
+    if let Some(value) = output.remove(source_key) {
+        output.insert(target_key.to_string(), value);
+    }
+    Ok(Value::Object(output))
 }

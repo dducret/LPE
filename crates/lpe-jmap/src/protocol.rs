@@ -367,6 +367,17 @@ pub struct ContactCardSetArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecipientSuggestionQueryArguments {
+    pub account_id: Option<String>,
+    pub query: Option<String>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,

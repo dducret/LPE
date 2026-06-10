@@ -62,7 +62,7 @@ pub struct CollaborationCollection {
     pub rights: CollaborationRights,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContactNameFields {
     pub prefix: String,
@@ -90,7 +90,7 @@ impl Default for ContactNameFields {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContactSourceFields {
     pub import_source: String,
@@ -1624,6 +1624,15 @@ impl Storage {
                     phone: input.phone,
                     team: input.team,
                     notes: input.notes,
+                    structured_name: input.structured_name,
+                    emails_json: input.emails_json,
+                    phones_json: input.phones_json,
+                    addresses_json: input.addresses_json,
+                    urls_json: input.urls_json,
+                    organization_name: input.organization_name,
+                    job_title: input.job_title,
+                    raw_vcard: input.raw_vcard,
+                    source: input.source,
                 },
                 contact_book_role,
             )
@@ -1663,6 +1672,15 @@ impl Storage {
                 phone: input.phone,
                 team: input.team,
                 notes: input.notes,
+                structured_name: input.structured_name,
+                emails_json: input.emails_json,
+                phones_json: input.phones_json,
+                addresses_json: input.addresses_json,
+                urls_json: input.urls_json,
+                organization_name: input.organization_name,
+                job_title: input.job_title,
+                raw_vcard: input.raw_vcard,
+                source: input.source,
             },
             contact_book_role,
         )

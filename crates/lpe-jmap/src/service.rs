@@ -444,6 +444,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             self.handle_contact_set(account, arguments, &mut created_ids)
                                 .await
                         }
+                        "RecipientSuggestion/query" => {
+                            self.handle_recipient_suggestion_query(account, arguments)
+                                .await
+                        }
                         "Calendar/get" => self.handle_calendar_get(account, arguments).await,
                         "Calendar/query" => self.handle_calendar_query(account, arguments).await,
                         "Calendar/queryChanges" => {
@@ -2939,7 +2943,8 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "DurableChange/changes"
         | "DurableChange/set"
         | "DurableChange/import"
-        | "DurableChange/copy" => Some(JMAP_LPE_OUTLOOK_CAPABILITY),
+        | "DurableChange/copy"
+        | "RecipientSuggestion/query" => Some(JMAP_LPE_OUTLOOK_CAPABILITY),
         "Blob/upload" | "Blob/get" | "Blob/query" | "Blob/queryChanges" | "Blob/changes"
         | "Blob/set" | "Blob/import" | "Blob/lookup" => Some(JMAP_BLOB_CAPABILITY),
         "Blob/copy" => Some(JMAP_CORE_CAPABILITY),

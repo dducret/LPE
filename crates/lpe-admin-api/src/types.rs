@@ -1,9 +1,10 @@
 use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
-    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, DelegateAccessObject,
-    DelegateFreeBusyMessageObject, FreeBusyBlock, MailFlowEntry, MailboxDelegationOverview,
-    SieveScriptDocument, SieveScriptSummary, TaskListGrant,
+    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, ContactNameFields,
+    ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
+    MailFlowEntry, MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary,
+    TaskListGrant,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -479,9 +480,9 @@ pub struct SubmitRecipientRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertClientContactRequest {
     pub id: Option<Uuid>,
-    #[serde(rename = "collectionId")]
     pub collection_id: Option<String>,
     pub name: String,
     pub role: String,
@@ -489,6 +490,45 @@ pub struct UpsertClientContactRequest {
     pub phone: String,
     pub team: String,
     pub notes: String,
+    #[serde(default)]
+    pub structured_name: ContactNameFields,
+    pub emails_json: Option<Value>,
+    pub phones_json: Option<Value>,
+    pub addresses_json: Option<Value>,
+    pub urls_json: Option<Value>,
+    #[serde(default)]
+    pub organization_name: String,
+    #[serde(default)]
+    pub job_title: String,
+    #[serde(default)]
+    pub raw_vcard: Option<String>,
+    #[serde(default)]
+    pub source: ContactSourceFields,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchClientContactRequest {
+    pub name: Option<String>,
+    pub role: Option<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub team: Option<String>,
+    pub notes: Option<String>,
+    pub structured_name: Option<ContactNameFields>,
+    pub emails_json: Option<Value>,
+    pub phones_json: Option<Value>,
+    pub addresses_json: Option<Value>,
+    pub urls_json: Option<Value>,
+    pub organization_name: Option<String>,
+    pub job_title: Option<String>,
+    pub raw_vcard: Option<String>,
+    pub source: Option<ContactSourceFields>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecipientSuggestionQuery {
+    pub q: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

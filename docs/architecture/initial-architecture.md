@@ -91,6 +91,11 @@
 | `/api/mail/auth/login` | mailbox login |
 | `/api/mail/auth/me` | mailbox session identity |
 | `/api/mail/workspace` | workspace snapshot |
+| `/api/mail/contact-books` | accessible canonical contact-book list |
+| `/api/mail/contacts` | canonical contact list and create API |
+| `/api/mail/contacts/{contact_id}` | canonical contact fetch, patch, and delete API |
+| `/api/mail/recipient-suggestions` | private owner-scoped compose recipient suggestions |
+| `/api/mail/recipient-suggestions/{suggestion_id}/dismiss` | dismiss a private owner-scoped recipient suggestion |
 | `/api/mail/tasks` | task API |
 | `/api/mail/notes` | canonical notes API |
 | `/api/mail/journal` | canonical journal API |

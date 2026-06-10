@@ -32,6 +32,7 @@
   - `ContactCard/queryChanges`
   - `ContactCard/import`
   - `ContactCard/copy`
+  - private `RecipientSuggestion/query`
   - `Calendar/get`
   - `Calendar/query`
   - `Calendar/changes`
@@ -85,8 +86,8 @@
   - one canonical `default` address book per account
   - Outlook-compatible contact folders such as `suggested_contacts` are canonical `contact_books` roles and contain durable `contacts`; they are not the same thing as private recipient suggestions
   - one canonical `default` calendar per account plus owned custom calendars in `calendars`
-  - contacts map to canonical `contacts`
-  - recipient suggestions map to the private owner-scoped `recipient_suggestions` table only when a compose-assistance surface is explicitly implemented; they are not returned by `ContactCard/*`, `AddressBook/*`, search, AI projections, or shared contact grants
+  - contacts map to canonical `contacts`, including structured names, nicknames, multiple email addresses, phone numbers, postal addresses, URLs, organization/title fields, notes, vCard/source metadata, and Outlook-visible contact-book roles
+  - recipient suggestions map to the private owner-scoped `recipient_suggestions` table through private `RecipientSuggestion/query`; they are not returned by `ContactCard/*`, `AddressBook/*`, search, AI projections, or shared contact grants
   - events map to canonical `calendar_events`
   - private `Note` maps to canonical `notes`
   - private `JournalEntry` maps to canonical `journal_entries`
@@ -97,6 +98,7 @@
   - `CalendarEvent` participant metadata is stored in `calendar_events.attendees_json` as an object containing organizer and attendee fields; older array-only attendee payloads are migrated into the object form.
   - `Calendar` writes are limited to owned custom calendar collections and the canonical `name` field. The default calendar is always present, is projected with id `default`, and cannot be renamed or deleted through JMAP.
   - `CalendarEvent/get`, `CalendarEvent/set`, `CalendarEvent/query`, and `CalendarEvent/changes` are limited to canonical calendar fields already owned by LPE: `id`, `uid`, `@type`, `title`, `start`, `duration`, `timeZone`, `allDay`, `status`, `sequence`, `recurrenceRule`, opaque `recurrence`, opaque `recurrenceOverrides`, `locations` by name, `organizer`, `participants`, `description`, `descriptionContentType`, `bodyHtml`, `calendarIds`, and `links`. Event scalar fields map to `calendar_events`; `links` stores upload-backed event attachments in `calendar_event_attachments` and projects them back with `calendar-attachment:` blob ids. This is not a full JSCalendar implementation; unsupported fields are rejected rather than stored as protocol-local extensions.
+  - `ContactCard/get`, `ContactCard/set`, `ContactCard/query`, and `ContactCard/changes` project canonical contact rows, not recipient suggestions. They preserve old narrow `name`/primary `email`/primary `phone` behavior while mapping richer canonical fields through `name`, `emails`, `phones`, `addresses`, `onlineServices`, `organizations`, `titles`, `notes`, `addressBookIds`, and source metadata accepted by the bounded implementation.
   - `Share` returns a stable object-specific projection with `id`, `@type: "Share"`, `type`, `grantId`, owner and grantee account metadata, `rights`, and `created`/`updated` timestamps. Calendar shares include `calendarId` and `calendarName` when the grant targets a concrete calendar collection. Sender shares include `senderRight`; task-list shares include `taskListId` and `taskListName`.
   - `DurableChange` returns the singleton `canonical` object with `@type: "DurableChange"`, `scope: "account"`, `cursor`, `isAppendOnly: true`, `mayRead: true`, `mayWrite: false`, and category objects listing affected JMAP object families.
 - Push:
@@ -119,6 +121,7 @@
   - generic private canonical `query` responses use deterministic id ordering for stable client pagination
   - query/change behavior uses canonical timestamps and state
   - private Outlook compatibility methods must not overload JMAP Mail `Mailbox` or `Email`
+  - private `RecipientSuggestion/query` is an LPE compose-assistance method under `https://l-p-e.ch/jmap/outlook`; it returns ranked private suggestions and does not create a public JMAP contacts capability claim
   - `Calendar/set`, `Calendar/import`, and `Calendar/copy` create, rename, and delete owned custom canonical calendars only; event writes use `CalendarEvent/*` against the canonical calendar tables
 
 ## Reference Table/List
@@ -127,6 +130,7 @@
 | --- | --- |
 | `AddressBook` | canonical default address book |
 | `ContactCard` | `contacts` |
+| private `RecipientSuggestion` | `recipient_suggestions` |
 | `Calendar` | canonical default calendar |
 | `CalendarEvent` | `calendar_events` |
 | private `Note` | `notes` |

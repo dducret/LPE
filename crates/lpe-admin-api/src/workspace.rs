@@ -4,16 +4,17 @@ use axum::{
     Json,
 };
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
-    ClientTask, ClientTaskList, ClientWorkspace, CreatePublicFolderInput,
-    CreatePublicFolderTreeInput, HealthResponse, JmapEmail, JmapEmailFollowupUpdate, JournalEntry,
-    MailboxAccountAccess, OutlookProfileState, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderReplicaInput, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
+    ClientNote, ClientReminder, ClientTask, ClientTaskList, ClientWorkspace,
+    CollaborationCollection, CreatePublicFolderInput, CreatePublicFolderTreeInput, HealthResponse,
+    JmapEmail, JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica,
+    PublicFolderReplicaInput, PublicFolderTree, RecipientSuggestion, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -23,12 +24,13 @@ use crate::{
     observability, require_account,
     types::{
         ApiResult, CreatePublicFolderRequest, CreatePublicFolderTreeRequest,
-        PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
-        PublicFolderReplicaRequest, RecoverableItemsQueryRequest, ReminderQueryRequest,
-        RestoreRecoverableItemRequest, SubmitMessageRequest, SubmitRecipientRequest,
-        UpdateMessageFlagRequest, UpdatePublicFolderRequest, UpsertClientContactRequest,
-        UpsertClientEventRequest, UpsertClientNoteRequest, UpsertClientTaskRequest,
-        UpsertJournalEntryRequest, UpsertPublicFolderItemRequest, UpsertSearchFolderRequest,
+        PatchClientContactRequest, PublicFolderPerUserStatePatchBatchRequest,
+        PublicFolderPermissionRequest, PublicFolderReplicaRequest, RecipientSuggestionQuery,
+        RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
+        SubmitMessageRequest, SubmitRecipientRequest, UpdateMessageFlagRequest,
+        UpdatePublicFolderRequest, UpsertClientContactRequest, UpsertClientEventRequest,
+        UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
+        UpsertPublicFolderItemRequest, UpsertSearchFolderRequest,
     },
 };
 
@@ -1035,46 +1037,107 @@ pub(crate) async fn upsert_client_contact(
     Json(request): Json<UpsertClientContactRequest>,
 ) -> ApiResult<ClientContact> {
     let account = require_account(&storage, &headers).await?;
-    let input = UpsertClientContactInput {
-        id: request.id,
-        account_id: account.account_id,
-        name: request.name,
-        role: request.role,
-        email: request.email,
-        phone: request.phone,
-        team: request.team,
-        notes: request.notes,
-    };
-    let contact = if let Some(contact_id) = request.id {
+    let contact_id = request.id;
+    let collection_id = request.collection_id.clone();
+    let input = contact_input_from_request(account.account_id, request);
+    let contact = if let Some(contact_id) = contact_id {
         storage
             .update_accessible_contact(account.account_id, contact_id, input)
             .await
             .map_err(bad_request_error)?
     } else {
         storage
-            .create_accessible_contact(account.account_id, request.collection_id.as_deref(), input)
+            .create_accessible_contact(account.account_id, collection_id.as_deref(), input)
             .await
             .map_err(bad_request_error)?
     };
-    Ok(Json(ClientContact {
-        id: contact.id,
-        address_book_id: contact.collection_id,
-        name: contact.name,
-        role: contact.role,
-        email: contact.email,
-        phone: contact.phone,
-        team: contact.team,
-        notes: contact.notes,
-        structured_name: contact.structured_name,
-        emails_json: contact.emails_json,
-        phones_json: contact.phones_json,
-        addresses_json: contact.addresses_json,
-        urls_json: contact.urls_json,
-        organization_name: contact.organization_name,
-        job_title: contact.job_title,
-        raw_vcard: contact.raw_vcard,
-        source: contact.source,
-    }))
+    Ok(Json(client_contact_from_accessible(contact)))
+}
+
+pub(crate) async fn list_contact_books(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<CollaborationCollection>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_accessible_contact_collections(account.account_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn list_client_contacts(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<ClientContact>> {
+    let account = require_account(&storage, &headers).await?;
+    let contacts = storage
+        .fetch_accessible_contacts(account.account_id)
+        .await
+        .map_err(bad_request_error)?
+        .into_iter()
+        .map(client_contact_from_accessible)
+        .collect();
+    Ok(Json(contacts))
+}
+
+pub(crate) async fn get_client_contact(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(contact_id): AxumPath<Uuid>,
+) -> ApiResult<ClientContact> {
+    let account = require_account(&storage, &headers).await?;
+    let contact = storage
+        .fetch_accessible_contacts_by_ids(account.account_id, &[contact_id])
+        .await
+        .map_err(bad_request_error)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "contact not found".to_string()))?;
+    Ok(Json(client_contact_from_accessible(contact)))
+}
+
+pub(crate) async fn patch_client_contact(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(contact_id): AxumPath<Uuid>,
+    Json(request): Json<PatchClientContactRequest>,
+) -> ApiResult<ClientContact> {
+    let account = require_account(&storage, &headers).await?;
+    let existing = storage
+        .fetch_accessible_contacts_by_ids(account.account_id, &[contact_id])
+        .await
+        .map_err(bad_request_error)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "contact not found".to_string()))?;
+    let input = UpsertClientContactInput {
+        id: Some(contact_id),
+        account_id: account.account_id,
+        name: request.name.unwrap_or(existing.name),
+        role: request.role.unwrap_or(existing.role),
+        email: request.email.unwrap_or(existing.email),
+        phone: request.phone.unwrap_or(existing.phone),
+        team: request.team.unwrap_or(existing.team),
+        notes: request.notes.unwrap_or(existing.notes),
+        structured_name: request.structured_name.unwrap_or(existing.structured_name),
+        emails_json: Some(request.emails_json.unwrap_or(existing.emails_json)),
+        phones_json: Some(request.phones_json.unwrap_or(existing.phones_json)),
+        addresses_json: Some(request.addresses_json.unwrap_or(existing.addresses_json)),
+        urls_json: Some(request.urls_json.unwrap_or(existing.urls_json)),
+        organization_name: request
+            .organization_name
+            .unwrap_or(existing.organization_name),
+        job_title: request.job_title.unwrap_or(existing.job_title),
+        raw_vcard: request.raw_vcard.or(existing.raw_vcard),
+        source: request.source.unwrap_or(existing.source),
+    };
+    let contact = storage
+        .update_accessible_contact(account.account_id, contact_id, input)
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(client_contact_from_accessible(contact)))
 }
 
 pub(crate) async fn delete_client_contact(
@@ -1092,6 +1155,83 @@ pub(crate) async fn delete_client_contact(
         service: "lpe-admin-api",
         status: "ok",
     }))
+}
+
+pub(crate) async fn query_recipient_suggestions(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Query(request): Query<RecipientSuggestionQuery>,
+) -> ApiResult<Vec<RecipientSuggestion>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .query_recipient_suggestions(account.account_id, request.q.as_deref())
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn dismiss_recipient_suggestion(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(suggestion_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .dismiss_recipient_suggestion(account.account_id, suggestion_id)
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+fn contact_input_from_request(
+    account_id: Uuid,
+    request: UpsertClientContactRequest,
+) -> UpsertClientContactInput {
+    UpsertClientContactInput {
+        id: request.id,
+        account_id,
+        name: request.name,
+        role: request.role,
+        email: request.email,
+        phone: request.phone,
+        team: request.team,
+        notes: request.notes,
+        structured_name: request.structured_name,
+        emails_json: request.emails_json,
+        phones_json: request.phones_json,
+        addresses_json: request.addresses_json,
+        urls_json: request.urls_json,
+        organization_name: request.organization_name,
+        job_title: request.job_title,
+        raw_vcard: request.raw_vcard,
+        source: request.source,
+    }
+}
+
+fn client_contact_from_accessible(contact: AccessibleContact) -> ClientContact {
+    ClientContact {
+        id: contact.id,
+        address_book_id: contact.collection_id,
+        name: contact.name,
+        role: contact.role,
+        email: contact.email,
+        phone: contact.phone,
+        team: contact.team,
+        notes: contact.notes,
+        structured_name: contact.structured_name,
+        emails_json: contact.emails_json,
+        phones_json: contact.phones_json,
+        addresses_json: contact.addresses_json,
+        urls_json: contact.urls_json,
+        organization_name: contact.organization_name,
+        job_title: contact.job_title,
+        raw_vcard: contact.raw_vcard,
+        source: contact.source,
+    }
 }
 
 pub(crate) async fn upsert_client_event(

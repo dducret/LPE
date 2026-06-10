@@ -1242,6 +1242,7 @@ where
                     phone: String::new(),
                     team: String::new(),
                     notes: String::new(),
+                    ..Default::default()
                 },
             )
             .await?;
@@ -6814,6 +6815,7 @@ fn parse_create_contact_input(
             .unwrap_or_default(),
         team: element_text(contact, "CompanyName").unwrap_or_default(),
         notes,
+        ..Default::default()
     })
 }
 
@@ -6892,6 +6894,7 @@ fn parse_update_contact_input(
             &existing.team,
         ),
         notes,
+        ..Default::default()
     }
 }
 

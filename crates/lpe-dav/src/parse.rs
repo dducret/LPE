@@ -54,6 +54,7 @@ pub(crate) fn parse_vcard(
         phone,
         team,
         notes,
+        ..Default::default()
     })
 }
 

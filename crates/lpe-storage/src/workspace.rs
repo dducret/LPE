@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
@@ -127,7 +128,8 @@ impl ClientContact {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertClientContactInput {
     pub id: Option<Uuid>,
     pub account_id: Uuid,
@@ -137,6 +139,36 @@ pub struct UpsertClientContactInput {
     pub phone: String,
     pub team: String,
     pub notes: String,
+    #[serde(default)]
+    pub structured_name: ContactNameFields,
+    #[serde(default)]
+    pub emails_json: Option<Value>,
+    #[serde(default)]
+    pub phones_json: Option<Value>,
+    #[serde(default)]
+    pub addresses_json: Option<Value>,
+    #[serde(default)]
+    pub urls_json: Option<Value>,
+    #[serde(default)]
+    pub organization_name: String,
+    #[serde(default)]
+    pub job_title: String,
+    #[serde(default)]
+    pub raw_vcard: Option<String>,
+    #[serde(default)]
+    pub source: ContactSourceFields,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipientSuggestion {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub source_kind: String,
+    pub use_count: i32,
+    pub last_used_at: String,
+    pub contact_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -346,10 +378,15 @@ impl Storage {
         contact_book_role: &str,
     ) -> Result<ClientContact> {
         let name = input.name.trim();
-        let email = normalize_email(&input.email);
+        let emails_json = contact_emails_json(&input)?;
+        let email = contact_primary_email(&emails_json);
         if name.is_empty() || email.is_empty() {
             bail!("contact name and email are required");
         }
+        let phones_json = contact_phones_json(&input)?;
+        let addresses_json = contact_array_json(input.addresses_json)?;
+        let urls_json = contact_array_json(input.urls_json)?;
+        let source_payload_json = contact_source_payload_json(input.source.source_payload_json)?;
 
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
@@ -365,34 +402,52 @@ impl Storage {
             r#"
             INSERT INTO contacts (
                 id, tenant_id, owner_account_id, contact_book_id, uid,
-                display_name, role, emails_json, phones_json, organization_unit, notes
+                display_name, name_prefix, given_name, middle_name, family_name, name_suffix,
+                nickname, phonetic_given_name, phonetic_family_name, job_title, role,
+                organization_name, organization_unit, emails_json, phones_json, addresses_json,
+                urls_json, notes, raw_vcard, import_source, source_uid, source_etag,
+                source_payload_json
             )
             VALUES (
                 $1, $2, $3, $4, $1::text,
-                $5, $6,
-                jsonb_build_array(jsonb_build_object('email', $7::text, 'label', 'work', 'isDefault', true)),
-                CASE
-                    WHEN NULLIF($8, '') IS NULL THEN '[]'::jsonb
-                    ELSE jsonb_build_array(jsonb_build_object('phone', $8::text, 'label', 'work'))
-                END,
-                $9,
-                $10
+                $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15,
+                $16, $17, $18, $19, $20,
+                $21, $22, $23, $24, $25, $26,
+                $27
             )
             ON CONFLICT (id) DO UPDATE SET
                 contact_book_id = EXCLUDED.contact_book_id,
                 uid = EXCLUDED.uid,
                 display_name = EXCLUDED.display_name,
+                name_prefix = EXCLUDED.name_prefix,
+                given_name = EXCLUDED.given_name,
+                middle_name = EXCLUDED.middle_name,
+                family_name = EXCLUDED.family_name,
+                name_suffix = EXCLUDED.name_suffix,
+                nickname = EXCLUDED.nickname,
+                phonetic_given_name = EXCLUDED.phonetic_given_name,
+                phonetic_family_name = EXCLUDED.phonetic_family_name,
+                job_title = EXCLUDED.job_title,
                 role = EXCLUDED.role,
+                organization_name = EXCLUDED.organization_name,
+                organization_unit = EXCLUDED.organization_unit,
                 emails_json = EXCLUDED.emails_json,
                 phones_json = EXCLUDED.phones_json,
-                organization_unit = EXCLUDED.organization_unit,
+                addresses_json = EXCLUDED.addresses_json,
+                urls_json = EXCLUDED.urls_json,
                 notes = EXCLUDED.notes,
+                raw_vcard = EXCLUDED.raw_vcard,
+                import_source = EXCLUDED.import_source,
+                source_uid = EXCLUDED.source_uid,
+                source_etag = EXCLUDED.source_etag,
+                source_payload_json = EXCLUDED.source_payload_json,
                 updated_at = NOW()
             WHERE contacts.tenant_id = EXCLUDED.tenant_id
               AND contacts.owner_account_id = EXCLUDED.owner_account_id
             RETURNING
                 id,
-                $11::text AS address_book_id,
+                $28::text AS address_book_id,
                 display_name AS name,
                 role,
                 COALESCE(emails_json->0->>'email', '') AS email,
@@ -425,11 +480,36 @@ impl Storage {
         .bind(input.account_id)
         .bind(contact_book_id)
         .bind(name)
+        .bind(input.structured_name.prefix.trim())
+        .bind(input.structured_name.given.trim())
+        .bind(input.structured_name.middle.trim())
+        .bind(input.structured_name.family.trim())
+        .bind(input.structured_name.suffix.trim())
+        .bind(input.structured_name.nickname.trim())
+        .bind(input.structured_name.phonetic_given.trim())
+        .bind(input.structured_name.phonetic_family.trim())
+        .bind(input.job_title.trim())
         .bind(input.role.trim())
-        .bind(email)
-        .bind(input.phone.trim())
+        .bind(if input.organization_name.trim().is_empty() {
+            input.team.trim()
+        } else {
+            input.organization_name.trim()
+        })
         .bind(input.team.trim())
+        .bind(emails_json)
+        .bind(phones_json)
+        .bind(addresses_json)
+        .bind(urls_json)
         .bind(input.notes.trim())
+        .bind(input.raw_vcard.as_deref())
+        .bind(if input.source.import_source.trim().is_empty() {
+            "local"
+        } else {
+            input.source.import_source.trim()
+        })
+        .bind(input.source.source_uid.as_deref())
+        .bind(input.source.source_etag.as_deref())
+        .bind(source_payload_json)
         .bind(client_address_book_id_for_role(contact_book_role))
         .fetch_one(&mut *tx)
         .await?;
@@ -839,6 +919,137 @@ impl Storage {
 
         Ok(rows.into_iter().map(map_contact).collect())
     }
+
+    pub async fn query_recipient_suggestions(
+        &self,
+        account_id: Uuid,
+        query: Option<&str>,
+    ) -> Result<Vec<RecipientSuggestion>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let needle = query.unwrap_or_default().trim().to_lowercase();
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                normalized_email,
+                display_name,
+                source_kind,
+                use_count,
+                to_char(last_used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_used_at,
+                contact_id
+            FROM recipient_suggestions
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND dismissed_at IS NULL
+              AND (
+                $3 = ''
+                OR normalized_email LIKE '%' || $3 || '%'
+                OR lower(display_name) LIKE '%' || $3 || '%'
+              )
+            ORDER BY use_count DESC, last_used_at DESC, lower(display_name), normalized_email
+            LIMIT 50
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(needle)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(RecipientSuggestion {
+                    id: row.try_get("id")?,
+                    email: row.try_get("normalized_email")?,
+                    display_name: row.try_get("display_name")?,
+                    source_kind: row.try_get("source_kind")?,
+                    use_count: row.try_get("use_count")?,
+                    last_used_at: row.try_get("last_used_at")?,
+                    contact_id: row.try_get("contact_id")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn dismiss_recipient_suggestion(
+        &self,
+        account_id: Uuid,
+        suggestion_id: Uuid,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let result = sqlx::query(
+            r#"
+            UPDATE recipient_suggestions
+            SET dismissed_at = NOW(), updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = $3
+              AND dismissed_at IS NULL
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(suggestion_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            bail!("recipient suggestion not found");
+        }
+        Ok(())
+    }
+}
+
+fn contact_emails_json(input: &UpsertClientContactInput) -> Result<Value> {
+    if let Some(value) = input.emails_json.clone() {
+        return contact_array_json(Some(value));
+    }
+    Ok(serde_json::json!([{
+        "email": normalize_email(&input.email),
+        "label": "work",
+        "isDefault": true
+    }]))
+}
+
+fn contact_phones_json(input: &UpsertClientContactInput) -> Result<Value> {
+    if let Some(value) = input.phones_json.clone() {
+        return contact_array_json(Some(value));
+    }
+    if input.phone.trim().is_empty() {
+        return Ok(Value::Array(Vec::new()));
+    }
+    Ok(serde_json::json!([{
+        "phone": input.phone.trim(),
+        "label": "work"
+    }]))
+}
+
+fn contact_array_json(value: Option<Value>) -> Result<Value> {
+    match value {
+        Some(array @ Value::Array(_)) => Ok(array),
+        Some(_) => bail!("contact JSON field must be an array"),
+        None => Ok(Value::Array(Vec::new())),
+    }
+}
+
+fn contact_source_payload_json(value: Value) -> Result<Value> {
+    match value {
+        Value::Object(_) => Ok(value),
+        _ => bail!("contact source payload must be an object"),
+    }
+}
+
+fn contact_primary_email(value: &Value) -> String {
+    value
+        .as_array()
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                item.get("email")
+                    .or_else(|| item.get("address"))
+                    .and_then(Value::as_str)
+            })
+        })
+        .map(normalize_email)
+        .unwrap_or_default()
 }
 
 fn body_paragraphs(body_text: &str) -> Vec<String> {

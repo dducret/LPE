@@ -8,11 +8,12 @@ use lpe_storage::{
     JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
     JmapStringObjectChange, JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
-    MailboxDelegationGrantInput, MailboxRule, OutlookProfileState, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput, SenderDelegationRight,
-    SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
+    MailboxDelegationGrantInput, MailboxRule, OutlookProfileState, RecipientSuggestion,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
 };
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -307,6 +308,11 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         principal_account_id: Uuid,
         contact_id: Uuid,
     ) -> Result<()>;
+    async fn query_recipient_suggestions(
+        &self,
+        account_id: Uuid,
+        query: Option<&str>,
+    ) -> Result<Vec<RecipientSuggestion>>;
     async fn fetch_accessible_calendar_collections(
         &self,
         principal_account_id: Uuid,
@@ -928,6 +934,14 @@ impl JmapStore for Storage {
     ) -> Result<()> {
         self.delete_accessible_contact(principal_account_id, contact_id)
             .await
+    }
+
+    async fn query_recipient_suggestions(
+        &self,
+        account_id: Uuid,
+        query: Option<&str>,
+    ) -> Result<Vec<RecipientSuggestion>> {
+        self.query_recipient_suggestions(account_id, query).await
     }
 
     async fn fetch_accessible_calendar_collections(

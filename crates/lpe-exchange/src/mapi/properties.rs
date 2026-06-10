@@ -4128,6 +4128,7 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             .unwrap_or_else(|| existing.team.clone()),
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
+        ..Default::default()
     }
 }
 

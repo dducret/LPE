@@ -30,7 +30,7 @@ use lpe_storage::{
     CollaborationRights, CreateTaskListInput, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    MailboxAccountAccess, MailboxRule, OutlookProfileState, SavedDraftMessage,
+    MailboxAccountAccess, MailboxRule, OutlookProfileState, RecipientSuggestion, SavedDraftMessage,
     SearchFolderDefinition, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
     UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
     UpsertSearchFolderInput,
@@ -53,6 +53,7 @@ struct FakeStore {
     sender_identities: Vec<SenderIdentity>,
     email_submissions: Vec<JmapEmailSubmission>,
     contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
+    recipient_suggestions: Arc<Mutex<Vec<RecipientSuggestion>>>,
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<ClientContact>>>,
     events: Arc<Mutex<Vec<ClientEvent>>>,
@@ -304,6 +305,15 @@ impl FakeStore {
             phone: contact.phone,
             team: contact.team,
             notes: contact.notes,
+            structured_name: contact.structured_name,
+            emails_json: contact.emails_json,
+            phones_json: contact.phones_json,
+            addresses_json: contact.addresses_json,
+            urls_json: contact.urls_json,
+            organization_name: contact.organization_name,
+            job_title: contact.job_title,
+            raw_vcard: contact.raw_vcard,
+            source: contact.source,
             ..Default::default()
         }
     }
@@ -527,6 +537,21 @@ impl FakeStore {
             phone: "+33123456789".to_string(),
             team: "North".to_string(),
             notes: "VIP".to_string(),
+            emails_json: json!([
+                {"email": "bob@example.test", "label": "work", "isDefault": true},
+                {"email": "bobby@example.test", "label": "home"}
+            ]),
+            phones_json: json!([
+                {"phone": "+33123456789", "label": "work"}
+            ]),
+            addresses_json: json!([
+                {"address": "1 Rue Example", "city": "Paris", "country": "FR"}
+            ]),
+            urls_json: json!([
+                {"url": "https://example.test/bob", "label": "profile"}
+            ]),
+            organization_name: "Example Ltd".to_string(),
+            job_title: "Account Executive".to_string(),
             ..Default::default()
         }
     }
@@ -1562,6 +1587,21 @@ impl JmapStore for FakeStore {
             phone: input.phone,
             team: input.team,
             notes: input.notes,
+            structured_name: input.structured_name,
+            emails_json: input
+                .emails_json
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            phones_json: input
+                .phones_json
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            addresses_json: input
+                .addresses_json
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+            urls_json: input.urls_json.unwrap_or_else(|| Value::Array(Vec::new())),
+            organization_name: input.organization_name,
+            job_title: input.job_title,
+            raw_vcard: input.raw_vcard,
+            source: input.source,
             ..Default::default()
         };
         let mut contacts = self.contacts.lock().unwrap();
@@ -1593,6 +1633,34 @@ impl JmapStore for FakeStore {
             bail!("contact not found");
         }
         Ok(())
+    }
+
+    async fn query_recipient_suggestions(
+        &self,
+        _account_id: Uuid,
+        query: Option<&str>,
+    ) -> Result<Vec<RecipientSuggestion>> {
+        let needle = query.unwrap_or_default().trim().to_lowercase();
+        let mut suggestions = self
+            .recipient_suggestions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|suggestion| {
+                needle.is_empty()
+                    || suggestion.email.to_lowercase().contains(&needle)
+                    || suggestion.display_name.to_lowercase().contains(&needle)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        suggestions.sort_by(|left, right| {
+            right
+                .use_count
+                .cmp(&left.use_count)
+                .then_with(|| right.last_used_at.cmp(&left.last_used_at))
+                .then_with(|| left.email.cmp(&right.email))
+        });
+        Ok(suggestions)
     }
 
     async fn fetch_accessible_calendar_collections(
@@ -11726,6 +11794,70 @@ async fn contacts_methods_use_canonical_contact_store() {
     assert!(contacts
         .iter()
         .any(|contact| contact.email == "carol@example.test"));
+}
+
+#[tokio::test]
+async fn recipient_suggestion_query_is_private_and_separate_from_contacts() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(Vec::new())),
+        recipient_suggestions: Arc::new(Mutex::new(vec![
+            RecipientSuggestion {
+                id: Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
+                email: "ada@example.test".to_string(),
+                display_name: "Ada Example".to_string(),
+                source_kind: "sent_to".to_string(),
+                use_count: 3,
+                last_used_at: "2026-06-01T12:00:00Z".to_string(),
+                contact_id: None,
+            },
+            RecipientSuggestion {
+                id: Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap(),
+                email: "ada.alt@example.test".to_string(),
+                display_name: "Ada Alt".to_string(),
+                source_kind: "sent_cc".to_string(),
+                use_count: 7,
+                last_used_at: "2026-06-02T12:00:00Z".to_string(),
+                contact_id: None,
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "RecipientSuggestion/query".to_string(),
+                        json!({"query": "ada"}),
+                        "recipient".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "ContactCard/query".to_string(),
+                        json!({"filter": {"text": "ada"}}),
+                        "contacts".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "RecipientSuggestion/query");
+    assert_eq!(response.method_responses[0].1["total"], 2);
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["email"],
+        "ada.alt@example.test"
+    );
+    assert_eq!(response.method_responses[1].0, "ContactCard/query");
+    assert_eq!(response.method_responses[1].1["total"], 0);
 }
 
 #[tokio::test]

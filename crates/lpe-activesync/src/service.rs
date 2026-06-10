@@ -3567,6 +3567,7 @@ fn parse_contact_input(
             .or_else(|| existing.map(|contact| contact.team.clone()))
             .unwrap_or_default(),
         notes,
+        ..Default::default()
     })
 }
 
