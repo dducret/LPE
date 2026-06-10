@@ -207,8 +207,6 @@ const OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS: &str =
     "IPM.Microsoft.FolderDesign.NamedView";
-pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
@@ -2434,8 +2432,9 @@ mod tests {
         assert!(!messages
             .iter()
             .any(|message| message.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS));
+        let compact_view_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
         assert!(snapshot
-            .associated_config_message_for_id(OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID)
+            .associated_config_message_for_id(compact_view_config_id)
             .is_none());
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
