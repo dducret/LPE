@@ -35,6 +35,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - authenticated endpoints only
 - EWS adapter rules:
   - reads and writes canonical mailbox, contacts, calendar, and task state
+  - contact updates preserve canonical rich fields, vCard/source metadata, and unsupported structured arrays when an EWS request omits them; explicit delete/update instructions clear only the addressed fields
   - treats Outlook-visible Suggested Contacts as the canonical `contact_books.role = 'suggested_contacts'` folder containing durable `contacts`
   - does not expose private `recipient_suggestions` rows as contacts, directory entries, shared contact grants, search results, or AI-facing data
   - uses canonical submission for sending
@@ -44,6 +45,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 - MAPI rules:
   - `EMSMDB` maps mailbox synchronization to canonical mailbox state
   - `NSPI` maps address-book behavior to canonical account/contact visibility
+  - contact property updates merge into canonical contacts and do not erase rich contact fields, vCard/source metadata, or structured arrays that the MAPI property set did not address
   - recipient autocomplete suggestions are owner-scoped compose assistance and must not become NSPI address-book rows; `Bcc` recipients are never learned or projected as suggestions
   - session context must remain authenticated and bounded to the mailbox principal
   - send and draft flows must use canonical submission and draft persistence

@@ -6,11 +6,79 @@ use lpe_storage::{
     MailFlowEntry, MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary,
     TaskListGrant,
 };
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
 pub type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchField<T> {
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<T> Default for PatchField<T> {
+    fn default() -> Self {
+        Self::Missing
+    }
+}
+
+impl<T> PatchField<T> {
+    pub fn is_present(&self) -> bool {
+        !matches!(self, Self::Missing)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for PatchField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PatchFieldVisitor<T>(std::marker::PhantomData<T>);
+
+        impl<'de, T> Visitor<'de> for PatchFieldVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = PatchField<T>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a patch field value or null")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(PatchField::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(PatchField::Null)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                T::deserialize(deserializer).map(PatchField::Value)
+            }
+        }
+
+        deserializer.deserialize_option(PatchFieldVisitor(std::marker::PhantomData))
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -503,7 +571,7 @@ pub struct UpsertClientContactRequest {
     #[serde(default)]
     pub raw_vcard: Option<String>,
     #[serde(default)]
-    pub source: ContactSourceFields,
+    pub source: Option<ContactSourceFields>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -522,13 +590,36 @@ pub struct PatchClientContactRequest {
     pub urls_json: Option<Value>,
     pub organization_name: Option<String>,
     pub job_title: Option<String>,
-    pub raw_vcard: Option<String>,
+    #[serde(default)]
+    pub raw_vcard: PatchField<String>,
     pub source: Option<ContactSourceFields>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RecipientSuggestionQuery {
     pub q: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PatchClientContactRequest, PatchField};
+
+    #[test]
+    fn patch_contact_raw_vcard_distinguishes_omitted_null_and_value() {
+        let omitted: PatchClientContactRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(omitted.raw_vcard, PatchField::Missing);
+
+        let cleared: PatchClientContactRequest =
+            serde_json::from_str(r#"{"rawVcard":null}"#).unwrap();
+        assert_eq!(cleared.raw_vcard, PatchField::Null);
+
+        let replaced: PatchClientContactRequest =
+            serde_json::from_str(r#"{"rawVcard":"BEGIN:VCARD\nEND:VCARD"}"#).unwrap();
+        assert_eq!(
+            replaced.raw_vcard,
+            PatchField::Value("BEGIN:VCARD\nEND:VCARD".to_string())
+        );
+    }
 }
 
 #[derive(Debug, Deserialize)]

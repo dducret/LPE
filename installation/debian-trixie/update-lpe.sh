@@ -831,8 +831,23 @@ CREATE TABLE IF NOT EXISTS public.recipient_suggestions (
     CHECK (last_used_at >= first_seen_at),
     CHECK (dismissed_at IS NULL OR dismissed_at >= first_seen_at),
     FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, contact_id) REFERENCES public.contacts (tenant_id, id) ON DELETE SET NULL
+    FOREIGN KEY (tenant_id, contact_id) REFERENCES public.contacts (tenant_id, id) ON DELETE SET NULL (contact_id)
 );
+
+DO $$
+BEGIN
+    IF to_regclass('public.recipient_suggestions') IS NOT NULL THEN
+        ALTER TABLE public.recipient_suggestions
+            DROP CONSTRAINT IF EXISTS recipient_suggestions_tenant_id_contact_id_fkey;
+        ALTER TABLE public.recipient_suggestions
+            DROP CONSTRAINT IF EXISTS recipient_suggestions_contact_fk;
+        ALTER TABLE public.recipient_suggestions
+            ADD CONSTRAINT recipient_suggestions_contact_fk
+            FOREIGN KEY (tenant_id, contact_id)
+            REFERENCES public.contacts (tenant_id, id)
+            ON DELETE SET NULL (contact_id);
+    END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS recipient_suggestions_active_email_idx
     ON public.recipient_suggestions (tenant_id, account_id, normalized_email)

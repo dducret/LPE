@@ -1112,6 +1112,12 @@ pub(crate) async fn patch_client_contact(
         .into_iter()
         .next()
         .ok_or_else(|| (StatusCode::NOT_FOUND, "contact not found".to_string()))?;
+    let raw_vcard_is_explicit = request.raw_vcard.is_present();
+    let raw_vcard = match request.raw_vcard {
+        crate::types::PatchField::Missing => existing.raw_vcard.clone(),
+        crate::types::PatchField::Null => None,
+        crate::types::PatchField::Value(value) => Some(value),
+    };
     let input = UpsertClientContactInput {
         id: Some(contact_id),
         account_id: account.account_id,
@@ -1130,7 +1136,9 @@ pub(crate) async fn patch_client_contact(
             .organization_name
             .unwrap_or(existing.organization_name),
         job_title: request.job_title.unwrap_or(existing.job_title),
-        raw_vcard: request.raw_vcard.or(existing.raw_vcard),
+        raw_vcard_is_explicit,
+        raw_vcard,
+        source_is_explicit: request.source.is_some(),
         source: request.source.unwrap_or(existing.source),
     };
     let contact = storage
@@ -1207,8 +1215,10 @@ fn contact_input_from_request(
         urls_json: request.urls_json,
         organization_name: request.organization_name,
         job_title: request.job_title,
+        raw_vcard_is_explicit: request.raw_vcard.is_some(),
         raw_vcard: request.raw_vcard,
-        source: request.source,
+        source_is_explicit: request.source.is_some(),
+        source: request.source.unwrap_or_default(),
     }
 }
 

@@ -1776,7 +1776,7 @@ fn recipient_suggestions_are_owner_scoped_private_ranked_signals() {
         "CHECK (jsonb_typeof(source_metadata_json) = 'object')",
         "CHECK (last_used_at >= first_seen_at)",
         "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
-        "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL",
+        "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL (contact_id)",
     ] {
         assert!(
             suggestions.contains(required),
@@ -1794,6 +1794,28 @@ fn recipient_suggestions_are_owner_scoped_private_ranked_signals() {
             "CREATE INDEX recipient_suggestions_rank_idx\n    ON recipient_suggestions (tenant_id, account_id, dismissed_at, use_count DESC, last_used_at DESC)"
         ),
         "recipient suggestions need an owner-scoped ranking index"
+    );
+}
+
+#[test]
+fn recipient_suggestions_contact_delete_clears_only_contact_id() {
+    let suggestions = table_definition("recipient_suggestions");
+    assert!(
+        suggestions.contains(
+            "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL (contact_id)"
+        ),
+        "recipient_suggestions contact FK must clear contact_id only so tenant/account scope survives contact deletion"
+    );
+    assert!(
+        !suggestions.contains(
+            "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL\n"
+        ),
+        "recipient_suggestions contact FK must not use composite-column SET NULL"
+    );
+    assert!(
+        UPDATE_LPE_SCRIPT.contains("ADD CONSTRAINT recipient_suggestions_contact_fk")
+            && UPDATE_LPE_SCRIPT.contains("ON DELETE SET NULL (contact_id)"),
+        "update-lpe.sh must replace existing recipient_suggestions contact FKs with the column-specific SET NULL action"
     );
 }
 

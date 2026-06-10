@@ -138,6 +138,9 @@
     `HomePhoneNumber`, `CompanyName`, `JobTitle`, `Title`, and
     `AirSyncBase:Body` notes onto canonical display name, email, phone,
     organization, role, and notes
+  - contact updates preserve canonical rich fields, vCard/source metadata, and
+    unsupported structured arrays when ActiveSync omits them from
+    `ApplicationData`
   - calendar `ApplicationData` maps `UID`, `Subject`, `StartTime`, `EndTime`,
     `TimeZone`, `Location`, `AirSyncBase:Body`, `Attendees`, and simple
     `Recurrence` patterns onto canonical event UID, title, local start,

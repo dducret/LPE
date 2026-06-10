@@ -2544,7 +2544,7 @@ CREATE TABLE recipient_suggestions (
     CHECK (last_used_at >= first_seen_at),
     CHECK (dismissed_at IS NULL OR dismissed_at >= first_seen_at),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL
+    FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL (contact_id)
 );
 
 CREATE UNIQUE INDEX recipient_suggestions_active_email_idx

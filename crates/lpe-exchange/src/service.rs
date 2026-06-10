@@ -6969,6 +6969,48 @@ fn parse_update_contact_input(
     }
 }
 
+#[cfg(test)]
+mod contact_update_tests {
+    use super::*;
+
+    #[test]
+    fn ews_contact_narrow_update_omits_unowned_rich_fields() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::from_u128(1),
+            account_id: Uuid::from_u128(2),
+            email: "ada@example.test".to_string(),
+            display_name: "Ada".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let existing = AccessibleContact {
+            id: Uuid::from_u128(3),
+            name: "Ada Example".to_string(),
+            email: "ada@example.test".to_string(),
+            phone: "+1 555 0100".to_string(),
+            addresses_json: serde_json::json!([{"full": "1 Example Way"}]),
+            urls_json: serde_json::json!([{"url": "https://example.test"}]),
+            raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
+            source: lpe_storage::ContactSourceFields {
+                import_source: "carddav".to_string(),
+                source_uid: Some("uid-1".to_string()),
+                source_etag: Some("etag-1".to_string()),
+                source_payload_json: serde_json::json!({"href": "/contacts/1.vcf"}),
+            },
+            ..AccessibleContact::default()
+        };
+        let request = "<m:UpdateItem><t:Contact><t:DisplayName>Ada Updated</t:DisplayName></t:Contact></m:UpdateItem>";
+
+        let input = parse_update_contact_input(&principal, &existing, request);
+
+        assert_eq!(input.name, "Ada Updated");
+        assert_eq!(input.addresses_json, None);
+        assert_eq!(input.raw_vcard, None);
+        assert!(!input.raw_vcard_is_explicit);
+        assert!(!input.source_is_explicit);
+    }
+}
+
 fn ews_contact_emails_json(contact: &str, primary: &str) -> serde_json::Value {
     let mut rows = Vec::new();
     push_json_contact_value(&mut rows, "email", "work", Some(primary));

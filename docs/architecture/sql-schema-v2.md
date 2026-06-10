@@ -611,6 +611,9 @@ or made visible through contact-book grants. The bounded
 `source_metadata_json` column is for suggestion provenance/ranking metadata
 only and must not contain message bodies, protected `Bcc`, shared-contact
 grant-derived data, or protocol cursor state.
+Deleting a durable contact clears only `recipient_suggestions.contact_id` for
+suggestions that referenced it; the suggestion row remains tenant/account scoped
+and keeps its ranking metadata.
 
 Exchange and Outlook compatibility state is stored as canonical LPE state when
 LPE owns the product behavior. `account_client_configurations` stores bounded

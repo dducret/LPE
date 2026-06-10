@@ -842,6 +842,7 @@ fn parse_contact_input(
                 .get("rawVCard")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
+            raw_vcard_is_explicit: object.contains_key("rawVCard"),
             source: ContactSourceFields {
                 import_source: "jmap".to_string(),
                 source_uid: object
@@ -854,6 +855,7 @@ fn parse_contact_input(
                     .cloned()
                     .unwrap_or_else(|| Value::Object(Map::new())),
             },
+            source_is_explicit: object.contains_key("source") || object.contains_key("uid"),
         },
     ))
 }

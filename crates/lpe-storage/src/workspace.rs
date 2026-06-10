@@ -156,7 +156,11 @@ pub struct UpsertClientContactInput {
     #[serde(default)]
     pub raw_vcard: Option<String>,
     #[serde(default)]
+    pub raw_vcard_is_explicit: bool,
+    #[serde(default)]
     pub source: ContactSourceFields,
+    #[serde(default)]
+    pub source_is_explicit: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -374,9 +378,19 @@ impl Storage {
 
     pub(crate) async fn upsert_client_contact_in_book_role(
         &self,
-        input: UpsertClientContactInput,
+        mut input: UpsertClientContactInput,
         contact_book_role: &str,
     ) -> Result<ClientContact> {
+        if let Some(contact_id) = input.id {
+            if let Some(existing) = self
+                .fetch_client_contacts_by_ids(input.account_id, &[contact_id])
+                .await?
+                .into_iter()
+                .next()
+            {
+                input = merge_contact_update_input(&existing, input);
+            }
+        }
         let name = input.name.trim();
         let emails_json = contact_emails_json(&input)?;
         let email = contact_primary_email(&emails_json);
@@ -1052,6 +1066,63 @@ fn contact_primary_email(value: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn merge_contact_update_input(
+    existing: &ClientContact,
+    mut input: UpsertClientContactInput,
+) -> UpsertClientContactInput {
+    if input.emails_json.is_none() {
+        input.emails_json = Some(if normalize_email(&input.email) == existing.email {
+            existing.emails_json.clone()
+        } else {
+            contact_json_with_primary_value(&existing.emails_json, "email", "work", &input.email)
+        });
+    }
+    if input.phones_json.is_none() {
+        input.phones_json = Some(if input.phone.trim() == existing.phone {
+            existing.phones_json.clone()
+        } else {
+            contact_json_with_primary_value(&existing.phones_json, "phone", "work", &input.phone)
+        });
+    }
+    if input.addresses_json.is_none() {
+        input.addresses_json = Some(existing.addresses_json.clone());
+    }
+    if input.urls_json.is_none() {
+        input.urls_json = Some(existing.urls_json.clone());
+    }
+    if !input.raw_vcard_is_explicit {
+        input.raw_vcard = existing.raw_vcard.clone();
+    }
+    if !input.source_is_explicit {
+        input.source = existing.source.clone();
+    }
+    input
+}
+
+fn contact_json_with_primary_value(existing: &Value, key: &str, label: &str, value: &str) -> Value {
+    let value = value.trim();
+    if value.is_empty() {
+        return Value::Array(Vec::new());
+    }
+
+    let mut items = existing.as_array().cloned().unwrap_or_default();
+    if let Some(item) = items.iter_mut().find(|item| item.get(key).is_some()) {
+        if let Some(object) = item.as_object_mut() {
+            object.insert(key.to_string(), Value::String(value.to_string()));
+            object.insert("label".to_string(), Value::String(label.to_string()));
+            object.insert("isDefault".to_string(), Value::Bool(true));
+            return Value::Array(items);
+        }
+    }
+
+    let mut primary = serde_json::Map::new();
+    primary.insert(key.to_string(), Value::String(value.to_string()));
+    primary.insert("label".to_string(), Value::String(label.to_string()));
+    primary.insert("isDefault".to_string(), Value::Bool(true));
+    items.insert(0, Value::Object(primary));
+    Value::Array(items)
+}
+
 fn body_paragraphs(body_text: &str) -> Vec<String> {
     let paragraphs = body_text
         .lines()
@@ -1178,11 +1249,90 @@ fn client_address_book_id_for_role(role: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::client_folder;
+    use super::{
+        client_folder, merge_contact_update_input, ClientContact, ContactSourceFields,
+        UpsertClientContactInput, Value,
+    };
+    use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn client_folder_preserves_trash_role() {
         assert_eq!(client_folder("trash"), "trash");
         assert_eq!(client_folder("unknown"), "inbox");
+    }
+
+    #[test]
+    fn contact_update_merges_missing_rich_fields() {
+        let existing = ClientContact {
+            id: Uuid::from_u128(1),
+            name: "Ada Example".to_string(),
+            email: "ada@example.test".to_string(),
+            phone: "+1 555 0100".to_string(),
+            addresses_json: json!([{"full": "1 Example Way"}]),
+            urls_json: json!([{"url": "https://example.test"}]),
+            raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
+            source: ContactSourceFields {
+                import_source: "carddav".to_string(),
+                source_uid: Some("uid-1".to_string()),
+                source_etag: Some("etag-1".to_string()),
+                source_payload_json: json!({"href": "/contacts/1.vcf"}),
+            },
+            ..ClientContact::default()
+        };
+
+        let merged = merge_contact_update_input(
+            &existing,
+            UpsertClientContactInput {
+                id: Some(existing.id),
+                account_id: Uuid::from_u128(2),
+                name: "Ada Updated".to_string(),
+                email: existing.email.clone(),
+                phone: existing.phone.clone(),
+                ..UpsertClientContactInput::default()
+            },
+        );
+
+        assert_eq!(merged.addresses_json, Some(existing.addresses_json.clone()));
+        assert_eq!(merged.urls_json, Some(existing.urls_json.clone()));
+        assert_eq!(merged.raw_vcard, existing.raw_vcard);
+        assert_eq!(merged.source.import_source, "carddav");
+        assert_eq!(
+            merged.source.source_payload_json,
+            json!({"href": "/contacts/1.vcf"})
+        );
+    }
+
+    #[test]
+    fn contact_update_can_clear_explicit_rich_fields() {
+        let existing = ClientContact {
+            id: Uuid::from_u128(1),
+            email: "ada@example.test".to_string(),
+            phone: "+1 555 0100".to_string(),
+            addresses_json: json!([{"full": "1 Example Way"}]),
+            urls_json: json!([{"url": "https://example.test"}]),
+            raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
+            ..ClientContact::default()
+        };
+
+        let merged = merge_contact_update_input(
+            &existing,
+            UpsertClientContactInput {
+                id: Some(existing.id),
+                account_id: Uuid::from_u128(2),
+                name: "Ada Example".to_string(),
+                email: existing.email.clone(),
+                phone: existing.phone.clone(),
+                addresses_json: Some(Value::Array(Vec::new())),
+                urls_json: Some(Value::Array(Vec::new())),
+                raw_vcard: None,
+                raw_vcard_is_explicit: true,
+                ..UpsertClientContactInput::default()
+            },
+        );
+
+        assert_eq!(merged.addresses_json, Some(Value::Array(Vec::new())));
+        assert_eq!(merged.urls_json, Some(Value::Array(Vec::new())));
+        assert_eq!(merged.raw_vcard, None);
     }
 }

@@ -1632,7 +1632,9 @@ impl Storage {
                     organization_name: input.organization_name,
                     job_title: input.job_title,
                     raw_vcard: input.raw_vcard,
+                    raw_vcard_is_explicit: input.raw_vcard_is_explicit,
                     source: input.source,
+                    source_is_explicit: input.source_is_explicit,
                 },
                 contact_book_role,
             )
@@ -1680,7 +1682,9 @@ impl Storage {
                 organization_name: input.organization_name,
                 job_title: input.job_title,
                 raw_vcard: input.raw_vcard,
+                raw_vcard_is_explicit: input.raw_vcard_is_explicit,
                 source: input.source,
+                source_is_explicit: input.source_is_explicit,
             },
             contact_book_role,
         )

@@ -4050,8 +4050,11 @@ fn policy_required_response(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_mime_attachments_with_validator;
+    use super::{parse_contact_input, validate_mime_attachments_with_validator};
+    use crate::wbxml::WbxmlNode;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
+    use lpe_storage::{ClientContact, ContactSourceFields};
+    use serde_json::json;
 
     #[derive(Debug, Clone)]
     struct FakeDetector {
@@ -4097,5 +4100,42 @@ mod tests {
         let error =
             validate_mime_attachments_with_validator(&validator, mime.as_bytes()).unwrap_err();
         assert!(error.to_string().contains("ActiveSync SendMail blocked"));
+    }
+
+    #[test]
+    fn activesync_contact_narrow_update_omits_unowned_rich_fields() {
+        let existing = ClientContact {
+            id: uuid::Uuid::from_u128(1),
+            name: "Ada Example".to_string(),
+            email: "ada@example.test".to_string(),
+            phone: "+1 555 0100".to_string(),
+            addresses_json: json!([{"full": "1 Example Way"}]),
+            urls_json: json!([{"url": "https://example.test"}]),
+            raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
+            source: ContactSourceFields {
+                import_source: "carddav".to_string(),
+                source_uid: Some("uid-1".to_string()),
+                source_etag: Some("etag-1".to_string()),
+                source_payload_json: json!({"href": "/contacts/1.vcf"}),
+            },
+            ..ClientContact::default()
+        };
+        let mut application_data = WbxmlNode::new(1, "ApplicationData");
+        application_data.push(WbxmlNode::with_text(1, "FileAs", "Ada Updated"));
+
+        let input = parse_contact_input(
+            uuid::Uuid::from_u128(2),
+            Some(existing.id),
+            Some(&existing),
+            &application_data,
+        )
+        .unwrap();
+
+        assert_eq!(input.name, "Ada Updated");
+        assert_eq!(input.addresses_json, None);
+        assert_eq!(input.urls_json, None);
+        assert_eq!(input.raw_vcard, None);
+        assert!(!input.raw_vcard_is_explicit);
+        assert!(!input.source_is_explicit);
     }
 }

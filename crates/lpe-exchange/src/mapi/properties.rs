@@ -7209,7 +7209,8 @@ mod tests {
         MapiCollaborationFolder, MapiCollaborationFolderKind, MapiPublicFolder,
     };
     use lpe_storage::{
-        CollaborationCollection, CollaborationRights, PublicFolder, PublicFolderRights,
+        CollaborationCollection, CollaborationRights, ContactSourceFields, PublicFolder,
+        PublicFolderRights,
     };
 
     fn mailbox(id: &str, parent_id: Option<Uuid>, role: &str, name: &str) -> JmapMailbox {
@@ -8074,6 +8075,44 @@ mod tests {
         assert_eq!(journal.message_class, "IPM.Activity");
         assert_eq!(journal.companies_json, "[\"Contoso\"]");
         assert_eq!(journal.contacts_json, "[\"Adam Barr\"]");
+    }
+
+    #[test]
+    fn mapi_contact_narrow_update_omits_unowned_rich_fields() {
+        let existing = AccessibleContact {
+            id: Uuid::from_u128(0xabc1),
+            name: "Ada Example".to_string(),
+            email: "ada@example.test".to_string(),
+            phone: "+1 555 0100".to_string(),
+            addresses_json: serde_json::json!([{"full": "1 Example Way"}]),
+            urls_json: serde_json::json!([{"url": "https://example.test"}]),
+            raw_vcard: Some("BEGIN:VCARD\nEND:VCARD".to_string()),
+            source: ContactSourceFields {
+                import_source: "carddav".to_string(),
+                source_uid: Some("uid-1".to_string()),
+                source_etag: Some("etag-1".to_string()),
+                source_payload_json: serde_json::json!({"href": "/contacts/1.vcf"}),
+            },
+            ..AccessibleContact::default()
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_DISPLAY_NAME_W,
+            MapiValue::String("Ada Updated".to_string()),
+        );
+
+        let input = contact_input_from_mapi(
+            Uuid::from_u128(0xabc2),
+            Some(existing.id),
+            &existing,
+            &properties,
+        );
+
+        assert_eq!(input.name, "Ada Updated");
+        assert_eq!(input.addresses_json, None);
+        assert_eq!(input.raw_vcard, None);
+        assert!(!input.raw_vcard_is_explicit);
+        assert!(!input.source_is_explicit);
     }
 
     #[test]
