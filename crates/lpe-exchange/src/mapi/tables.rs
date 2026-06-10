@@ -119,6 +119,63 @@ pub(in crate::mapi) fn associated_folder_message_count(
     }
 }
 
+fn restricted_associated_folder_message_count(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> usize {
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        snapshot
+            .common_views_table_messages()
+            .filter(|message| {
+                restriction_matches_common_views_message(restriction, message, mailbox_guid)
+            })
+            .count()
+    } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+        snapshot
+            .conversation_action_table_messages()
+            .iter()
+            .filter(|message| {
+                restriction_matches(restriction, |property_tag| {
+                    conversation_action_property_value(message, property_tag)
+                })
+            })
+            .count()
+    } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
+        snapshot
+            .delegate_freebusy_messages()
+            .iter()
+            .filter(|message| {
+                restriction_matches(restriction, |property_tag| {
+                    delegate_freebusy_property_value(message, property_tag)
+                })
+            })
+            .count()
+    } else {
+        snapshot
+            .associated_config_messages_for_folder(folder_id)
+            .iter()
+            .filter(|message| restriction_matches_associated_config(restriction, message))
+            .count()
+    }
+}
+
+fn restriction_matches_common_views_message(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiCommonViewsMessage,
+    mailbox_guid: Uuid,
+) -> bool {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+            restriction_matches_navigation_shortcut(restriction, shortcut, mailbox_guid)
+        }
+        MapiCommonViewsMessage::NamedView(view) => {
+            restriction_matches_common_view_named_view(restriction, view, mailbox_guid)
+        }
+    }
+}
+
 pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
     vec![
         PID_TAG_DISPLAY_NAME_W,
@@ -1406,6 +1463,13 @@ pub(in crate::mapi) fn rop_query_rows_response(
             if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+                    rows.retain(|message| {
+                        restriction_matches_common_views_message(
+                            restriction.as_ref(),
+                            message,
+                            mailbox_guid,
+                        )
+                    });
                     sort_common_views_messages(&mut rows, sort_orders);
                     rows.iter()
                         .map(|message| {
@@ -1420,12 +1484,22 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     snapshot
                         .conversation_action_table_messages()
                         .iter()
+                        .filter(|message| {
+                            restriction_matches(restriction.as_ref(), |property_tag| {
+                                conversation_action_property_value(message, property_tag)
+                            })
+                        })
                         .map(|message| serialize_conversation_action_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
                     snapshot
                         .delegate_freebusy_messages()
                         .iter()
+                        .filter(|message| {
+                            restriction_matches(restriction.as_ref(), |property_tag| {
+                                delegate_freebusy_property_value(message, property_tag)
+                            })
+                        })
                         .map(|message| serialize_delegate_freebusy_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else if !snapshot
@@ -1433,6 +1507,9 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .is_empty()
                 {
                     let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                    rows.retain(|message| {
+                        restriction_matches_associated_config(restriction.as_ref(), message)
+                    });
                     sort_associated_config_messages(&mut rows, sort_orders);
                     rows.iter()
                         .map(|message| {
@@ -4193,7 +4270,12 @@ pub(in crate::mapi) fn table_position_and_count(
             ..
         }) => {
             let total = if *associated {
-                associated_folder_message_count(*folder_id, snapshot) as usize
+                restricted_associated_folder_message_count(
+                    *folder_id,
+                    snapshot,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                )
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 snapshot
                     .events_for_folder(*folder_id)
@@ -6357,6 +6439,67 @@ mod tests {
             u32::from_le_bytes(response[10..14].try_into().unwrap()),
             expected_count
         );
+    }
+
+    #[test]
+    fn restricted_associated_query_position_reports_filtered_row_count() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let restriction = MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String("IPM.Configuration.ExtensionMasterTable".to_string()),
+        };
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(restriction),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let query_position = RopRequest {
+            rop_id: RopId::QueryPosition.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let response = rop_query_position_response(
+            &query_position,
+            Some(&table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(u32::from_le_bytes(response[6..10].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(response[10..14].try_into().unwrap()), 0);
+
+        let query_rows = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 36, 0],
+        };
+        let response = rop_query_rows_response(
+            &query_rows,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(response[6], 0x00);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
     }
 
     #[test]
