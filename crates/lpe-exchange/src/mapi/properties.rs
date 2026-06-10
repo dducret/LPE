@@ -7,7 +7,6 @@ use super::*;
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
     MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
-    OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
 };
 use anyhow::bail;
 use lpe_storage::{
@@ -1365,11 +1364,14 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(mailbox_has_subfolders(mailbox, mailboxes))),
-        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(if mailbox.role == "__mapi_search" {
-            FOLDER_SEARCH
-        } else {
-            FOLDER_GENERIC
-        })),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(
+            if mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_")
+            {
+                FOLDER_SEARCH
+            } else {
+                FOLDER_GENERIC
+            },
+        )),
         PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
         PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
@@ -1490,15 +1492,8 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
     mailbox_guid: Uuid,
     folder_id: u64,
 ) -> Option<MapiValue> {
-    if folder_id != INBOX_FOLDER_ID {
-        return None;
-    }
-    crate::mapi::identity::message_entry_id_from_object_ids(
-        mailbox_guid,
-        folder_id,
-        OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-    )
-    .map(MapiValue::Binary)
+    let _ = (mailbox_guid, folder_id);
+    None
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -7272,7 +7267,30 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_properties_project_default_mail_view_entry_id() {
+    fn mailbox_properties_report_persisted_search_folder_type() {
+        let mailbox = mailbox(
+            "57575757-5757-4757-9757-575757575757",
+            None,
+            "__mapi_search_folder_message",
+            "Categories Rename Search Folder",
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox.id,
+            crate::mapi::identity::mapi_store_id(0x195),
+        );
+
+        assert_eq!(
+            mailbox_property_value_with_context(
+                &mailbox,
+                std::slice::from_ref(&mailbox),
+                PID_TAG_FOLDER_TYPE
+            ),
+            Some(MapiValue::U32(FOLDER_SEARCH))
+        );
+    }
+
+    #[test]
+    fn mailbox_properties_do_not_advertise_incomplete_default_mail_view() {
         let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
         let mailbox = mailbox(
             "56565656-5656-4656-9656-565656565656",
@@ -7289,12 +7307,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id,
             ),
-            crate::mapi::identity::message_entry_id_from_object_ids(
-                account_id,
-                INBOX_FOLDER_ID,
-                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
-            )
-            .map(MapiValue::Binary)
+            None
         );
     }
 

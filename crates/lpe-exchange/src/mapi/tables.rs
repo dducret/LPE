@@ -367,6 +367,7 @@ pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
         PID_TAG_WLINK_GROUP_CLSID,
         PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
+        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
     ]
 }
 
@@ -6314,6 +6315,9 @@ mod tests {
     #[test]
     fn query_position_clamps_stale_cursor_to_current_row_count() {
         let snapshot = MapiMailStoreSnapshot::empty();
+        let expected_count = snapshot
+            .associated_config_messages_for_folder(INBOX_FOLDER_ID)
+            .len() as u32;
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
             associated: true,
@@ -6344,13 +6348,22 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::QueryPosition.as_u8());
-        assert_eq!(u32::from_le_bytes(response[6..10].try_into().unwrap()), 4);
-        assert_eq!(u32::from_le_bytes(response[10..14].try_into().unwrap()), 4);
+        assert_eq!(
+            u32::from_le_bytes(response[6..10].try_into().unwrap()),
+            expected_count
+        );
+        assert_eq!(
+            u32::from_le_bytes(response[10..14].try_into().unwrap()),
+            expected_count
+        );
     }
 
     #[test]
     fn query_rows_clamps_stale_cursor_to_current_row_count() {
         let snapshot = MapiMailStoreSnapshot::empty();
+        let expected_count = snapshot
+            .associated_config_messages_for_folder(INBOX_FOLDER_ID)
+            .len();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
             associated: true,
@@ -6377,12 +6390,15 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(response[6], 0x02);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
-        assert_eq!(table_position(&table), Some(4));
+        assert_eq!(table_position(&table), Some(expected_count));
     }
 
     #[test]
     fn seek_row_clamps_stale_current_position_to_row_count() {
         let snapshot = MapiMailStoreSnapshot::empty();
+        let expected_count = snapshot
+            .associated_config_messages_for_folder(INBOX_FOLDER_ID)
+            .len();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
             associated: true,
@@ -6414,7 +6430,7 @@ mod tests {
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[6], 0);
         assert_eq!(i32::from_le_bytes(response[7..11].try_into().unwrap()), 0);
-        assert_eq!(table_position(&table), Some(4));
+        assert_eq!(table_position(&table), Some(expected_count));
     }
 
     #[test]
@@ -7231,6 +7247,9 @@ mod tests {
 
         assert!(columns.contains(&PID_TAG_WLINK_ENTRY_ID));
         assert!(columns.contains(&PID_TAG_WLINK_FOLDER_TYPE));
+        assert!(
+            columns.contains(&PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG)
+        );
         assert!(!columns.contains(&0x6842_0003));
         assert!(!columns.contains(&0x6845_0102));
     }
@@ -8748,12 +8767,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            crate::mapi::identity::message_entry_id_from_object_ids(
-                account_id,
-                INBOX_FOLDER_ID,
-                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
-            )
-            .map(MapiValue::Binary)
+            None
         );
         assert_eq!(
             special_folder_property_value(

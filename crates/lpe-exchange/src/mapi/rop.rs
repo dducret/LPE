@@ -1761,7 +1761,9 @@ fn expected_folder_type_for_debug(
     if search_folder_found
         || advertised_special_search_folder_for_debug(folder_id)
         || mailbox
-            .map(|mailbox| mailbox.role == "__mapi_search")
+            .map(|mailbox| {
+                mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_")
+            })
             .unwrap_or(false)
     {
         return ("search", Some(FOLDER_SEARCH));
@@ -1775,7 +1777,8 @@ fn expected_folder_type_for_debug(
 fn advertised_special_search_folder_for_debug(folder_id: u64) -> bool {
     matches!(
         folder_id,
-        CONTACTS_SEARCH_FOLDER_ID
+        SEARCH_FOLDER_ID
+            | CONTACTS_SEARCH_FOLDER_ID
             | REMINDERS_FOLDER_ID
             | TRACKED_MAIL_PROCESSING_FOLDER_ID
             | TODO_SEARCH_FOLDER_ID
@@ -8101,7 +8104,7 @@ mod tests {
 
     #[test]
     fn property_row_kind_reports_fallback_defaults_as_flagged() {
-        const UNKNOWN_ASSOCIATED_CONFIG_INTEGER: u32 = 0x801D_0003;
+        const UNKNOWN_FOLDER_INTEGER: u32 = 0x801D_0003;
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -8110,18 +8113,9 @@ mod tests {
             quota_mb: None,
             quota_used_octets: None,
         };
-        let config_id = crate::mapi::identity::mapi_store_id(0x4322);
-        let object = MapiObject::AssociatedConfig {
+        let object = MapiObject::Folder {
             folder_id: INBOX_FOLDER_ID,
-            config_id,
-            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
-                id: config_id,
-                folder_id: INBOX_FOLDER_ID,
-                canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555556").unwrap(),
-                message_class: "IPM.Configuration.MessageListSettings".to_string(),
-                subject: "Message list settings".to_string(),
-                properties_json: serde_json::json!({}),
-            }),
+            properties: HashMap::new(),
         };
 
         assert_eq!(
@@ -8131,7 +8125,7 @@ mod tests {
                 &[],
                 &[],
                 &MapiMailStoreSnapshot::empty(),
-                &[UNKNOWN_ASSOCIATED_CONFIG_INTEGER],
+                &[UNKNOWN_FOLDER_INTEGER],
             ),
             "flagged"
         );
@@ -8139,7 +8133,7 @@ mod tests {
         let mut payload = Vec::new();
         payload.extend_from_slice(&4096u16.to_le_bytes());
         payload.extend_from_slice(&1u16.to_le_bytes());
-        payload.extend_from_slice(&UNKNOWN_ASSOCIATED_CONFIG_INTEGER.to_le_bytes());
+        payload.extend_from_slice(&UNKNOWN_FOLDER_INTEGER.to_le_bytes());
         let request = RopRequest {
             rop_id: RopId::GetPropertiesSpecific as u8,
             input_handle_index: Some(3),
@@ -8530,6 +8524,23 @@ mod tests {
         assert!(contract.contains("returned_kind=search"));
         assert!(contract.contains("expected_kind=search"));
         assert!(contract.ends_with("issues="));
+
+        let finder_root = MapiObject::Folder {
+            folder_id: SEARCH_FOLDER_ID,
+            properties: HashMap::from([(PID_TAG_FOLDER_TYPE, MapiValue::U32(FOLDER_SEARCH))]),
+        };
+        let contract = format_folder_type_getprops_contract(
+            Some(&finder_root),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(contract.contains("folder_id=0x00000000000b0001"));
+        assert!(contract.contains("returned_kind=search"));
+        assert!(contract.contains("expected_kind=search"));
+        assert!(contract.ends_with("issues="));
     }
 
     #[test]
@@ -8587,6 +8598,49 @@ mod tests {
         assert!(contract.contains("search_folder_definition_found=true"));
         assert!(contract.contains("property_source=search_folder_definition"));
         assert!(contract.contains("returned_value=2"));
+        assert!(contract.contains("returned_kind=search"));
+        assert!(contract.contains("expected_kind=search"));
+        assert!(contract.ends_with("issues="));
+    }
+
+    #[test]
+    fn folder_type_getprops_contract_accepts_projected_search_folder_role() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb);
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder_id = crate::mapi::identity::mapi_store_id(0x195);
+        let mailbox_id = Uuid::from_u128(0x195);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "__mapi_search_folder_message".to_string(),
+            name: "Categories Rename Search Folder".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let object = MapiObject::Folder {
+            folder_id,
+            properties: HashMap::from([(PID_TAG_FOLDER_TYPE, MapiValue::U32(FOLDER_SEARCH))]),
+        };
+
+        let contract = format_folder_type_getprops_contract(
+            Some(&object),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[mailbox],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
         assert!(contract.contains("returned_kind=search"));
         assert!(contract.contains("expected_kind=search"));
         assert!(contract.ends_with("issues="));

@@ -4892,6 +4892,24 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
     }
 }
 
+fn debug_open_folder_metadata(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> (String, String, String) {
+    if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
+        return (
+            mapi_mailbox_display_name(mailbox),
+            mailbox.role.clone(),
+            folder_message_class(mailbox).to_string(),
+        );
+    }
+    (
+        post_hierarchy_probe_folder_name(folder_id).to_string(),
+        debug_role_for_folder_id(folder_id).to_string(),
+        debug_container_class_for_folder_id(folder_id).to_string(),
+    )
+}
+
 fn delegate_freebusy_message_for_open<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     folder_id: u64,
@@ -5035,6 +5053,13 @@ fn normalize_table_property_tag_for_session(session: &MapiSession, property_tag:
     let tag = MapiPropertyTag::new(property_tag);
     if tag.property_id() < FIRST_NAMED_PROPERTY_ID {
         return property_tag;
+    }
+    if tag.property_id()
+        == MapiPropertyTag::new(OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG).property_id()
+    {
+        return (PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
+            & 0xffff_0000)
+            | u32::from(tag.property_type_code());
     }
     let Some(property) = session.named_property_ids.get(&tag.property_id()) else {
         return property_tag;
@@ -9215,11 +9240,14 @@ where
                     format_handle_lineage_context(input_object(session, &handle_slots, &request));
                 let requested_folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
                 let folder_id = session.resolve_special_folder_alias(requested_folder_id);
-                let mailbox_folder_found = folder_row_for_id(folder_id, mailboxes).is_some();
+                let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
+                let mailbox_folder_found = mailbox_folder.is_some();
                 let collaboration_folder_found =
                     snapshot.collaboration_folder_for_id(folder_id).is_some();
                 let public_folder_found = snapshot.public_folder_for_id(folder_id).is_some();
                 let advertised_special_folder = is_advertised_special_folder(folder_id);
+                let (folder_name, folder_role, folder_container_class) =
+                    debug_open_folder_metadata(folder_id, mailboxes);
                 let open_folder_result = if mailbox_folder_found
                     || collaboration_folder_found
                     || public_folder_found
@@ -9246,9 +9274,9 @@ where
                     requested_folder_id = format!("0x{requested_folder_id:016x}"),
                     folder_id = format!("0x{folder_id:016x}"),
                     folder_alias_resolved = requested_folder_id != folder_id,
-                    folder_name = post_hierarchy_probe_folder_name(folder_id),
-                    role = debug_role_for_folder_id(folder_id),
-                    container_class = debug_container_class_for_folder_id(folder_id),
+                    folder_name,
+                    role = folder_role,
+                    container_class = folder_container_class,
                     mailbox_folder_found = mailbox_folder_found,
                     collaboration_folder_found = collaboration_folder_found,
                     public_folder_found = public_folder_found,
@@ -19825,6 +19853,24 @@ mod tests {
     }
 
     #[test]
+    fn table_columns_normalize_stale_sharing_alias_without_cached_mapping() {
+        let session = test_mapi_session();
+
+        let columns = normalize_table_property_tags_for_session(
+            &session,
+            vec![0x8fff_0102, PID_TAG_SUBJECT_W],
+        );
+
+        assert_eq!(
+            columns,
+            vec![
+                PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+                PID_TAG_SUBJECT_W
+            ]
+        );
+    }
+
+    #[test]
     fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
         let mut session = test_mapi_session();
         let property = MapiNamedProperty {
@@ -19955,16 +20001,7 @@ mod tests {
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
         );
-        assert_eq!(
-            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            crate::mapi::identity::message_entry_id_from_object_ids(
-                principal.account_id,
-                INBOX_FOLDER_ID,
-                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
-            )
-            .map(MapiValue::Binary)
-            .as_ref()
-        );
+        assert_eq!(properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID), None);
         assert_eq!(
             properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
             Some(&MapiValue::U32(0))
@@ -20349,6 +20386,30 @@ mod tests {
             expected_special_folder_item_message_class(SEARCH_FOLDER_ID),
             "IPM.Note"
         );
+    }
+
+    #[test]
+    fn open_folder_debug_metadata_uses_real_dynamic_mailbox_values() {
+        let mailbox_id = Uuid::from_u128(0x195);
+        let folder_id = crate::mapi::identity::mapi_store_id(0x195);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "other".to_string(),
+            name: "Categories Rename Search Folder".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        let (name, role, container_class) = debug_open_folder_metadata(folder_id, &[mailbox]);
+
+        assert_eq!(name, "Categories Rename Search Folder");
+        assert_eq!(role, "other");
+        assert_eq!(container_class, "IPF.Note");
     }
 
     #[test]
