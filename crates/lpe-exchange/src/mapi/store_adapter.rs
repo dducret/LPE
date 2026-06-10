@@ -986,6 +986,12 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
         return "virtual_common_view_named_view";
     }
+    if mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id) {
+        return "virtual_common_view_navigation_shortcut";
+    }
+    if mapi_store::is_outlook_default_conversation_action_id(object_id) {
+        return "virtual_conversation_action";
+    }
     if crate::mapi::identity::global_counter_from_store_id(object_id).is_some() {
         "unallocated_store_object"
     } else {
@@ -998,6 +1004,8 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
         || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
+        || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
+        || mapi_store::is_outlook_default_conversation_action_id(object_id)
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
@@ -1518,18 +1526,24 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             conversation_action_id,
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            push_unique(&mut plan.object_ids, *conversation_action_id);
+            if !mapi_store::is_outlook_default_conversation_action_id(*conversation_action_id) {
+                push_unique(&mut plan.object_ids, *conversation_action_id);
+            }
         }
         MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            push_unique(&mut plan.object_ids, *shortcut_id);
+            if !mapi_store::is_outlook_common_views_default_navigation_shortcut_id(*shortcut_id) {
+                push_unique(&mut plan.object_ids, *shortcut_id);
+            }
         }
         MapiObject::CommonViewNamedView { folder_id, view_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            push_unique(&mut plan.object_ids, *view_id);
+            if !mapi_store::is_outlook_common_views_default_named_view_id(*view_id) {
+                push_unique(&mut plan.object_ids, *view_id);
+            }
         }
         MapiObject::AssociatedConfig {
             folder_id,
@@ -1537,7 +1551,11 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             ..
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            push_unique(&mut plan.object_ids, *config_id);
+            if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id)
+                && !mapi_store::is_outlook_quick_step_default_associated_config_id(*config_id)
+            {
+                push_unique(&mut plan.object_ids, *config_id);
+            }
         }
         MapiObject::DelegateFreeBusyMessage {
             folder_id,
@@ -1793,6 +1811,103 @@ mod tests {
     }
 
     #[test]
+    fn access_plan_does_not_fetch_virtual_default_conversation_action_identity() {
+        let default_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+        let folder_id = crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID;
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ConversationAction {
+                folder_id,
+                conversation_action_id: default_action_id,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_does_not_fetch_virtual_common_views_shortcut_identity() {
+        let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::NavigationShortcut {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                shortcut_id,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(
+            plan.object_ids,
+            vec![COMMON_VIEWS_FOLDER_ID],
+            "plan={plan:?}"
+        );
+    }
+
+    #[test]
+    fn access_plan_does_not_fetch_virtual_common_views_named_view_identity() {
+        let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::CommonViewNamedView {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                view_id,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(
+            plan.object_ids,
+            vec![COMMON_VIEWS_FOLDER_ID],
+            "plan={plan:?}"
+        );
+    }
+
+    #[test]
+    fn access_plan_does_not_fetch_virtual_inbox_associated_config_identity() {
+        let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::AssociatedConfig {
+                folder_id: INBOX_FOLDER_ID,
+                config_id,
+                saved_message: None,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(plan.object_ids, vec![INBOX_FOLDER_ID], "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_does_not_fetch_virtual_quick_step_associated_config_identity() {
+        let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+        let folder_id = crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::AssociatedConfig {
+                folder_id,
+                config_id,
+                saved_message: None,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
+    }
+
+    #[test]
     fn access_plan_does_not_decode_set_properties_payload_as_import_source_key() {
         let mut rop = vec![0x0A, 0x00, 0x00];
         rop.extend_from_slice(&[0x01, 0x00]);
@@ -1911,18 +2026,22 @@ mod tests {
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
         );
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let common_view_shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+        let conversation_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 
         assert_eq!(
             format_unresolved_mapi_object_scopes(&[
                 ROOT_FOLDER_ID,
                 common_view_named_view_id,
+                common_view_shortcut_id,
                 quick_step_config_id,
+                conversation_action_id,
                 dynamic_id,
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
     }
@@ -1935,11 +2054,15 @@ mod tests {
         let inbox_default_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
         let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let common_view_shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+        let conversation_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 
         assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
         assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
         assert!(is_expected_unbacked_mapi_object(quick_step_config_id));
         assert!(is_expected_unbacked_mapi_object(common_view_named_view_id));
+        assert!(is_expected_unbacked_mapi_object(common_view_shortcut_id));
+        assert!(is_expected_unbacked_mapi_object(conversation_action_id));
         assert!(!is_expected_unbacked_mapi_object(dynamic_id));
     }
 }

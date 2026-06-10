@@ -2117,7 +2117,13 @@ pub(in crate::mapi) fn conversation_action_property_value(
     let action = &message.action;
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(message.id)),
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            Uuid::nil(),
+            message.folder_id,
+            message.id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
@@ -7128,6 +7134,24 @@ mod tests {
         let change_key = conversation_action_property_value(&action, PID_TAG_CHANGE_KEY);
         let predecessor =
             conversation_action_property_value(&action, PID_TAG_PREDECESSOR_CHANGE_LIST);
+        let entry_id = conversation_action_property_value(&action, PID_TAG_ENTRY_ID);
+        let instance_key = conversation_action_property_value(&action, PID_TAG_INSTANCE_KEY);
+        assert_eq!(
+            entry_id,
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                Uuid::nil(),
+                CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                action_id,
+            )
+            .map(MapiValue::Binary)
+        );
+        assert_eq!(
+            instance_key,
+            Some(MapiValue::Binary(
+                crate::mapi::identity::instance_key_for_object_id(action_id)
+            ))
+        );
+        assert_ne!(entry_id, instance_key);
         assert_eq!(
             change_key,
             Some(MapiValue::Binary(

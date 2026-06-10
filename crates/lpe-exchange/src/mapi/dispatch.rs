@@ -4003,11 +4003,12 @@ where
                 .await?;
             }
             MapiObject::ConversationAction {
-                folder_id: _,
+                folder_id,
                 conversation_action_id,
             } => {
-                let Some(existing) =
-                    snapshot.conversation_action_message_for_id(*conversation_action_id)
+                let Some(existing) = snapshot
+                    .conversation_action_message_for_id(*conversation_action_id)
+                    .filter(|message| message.folder_id == *folder_id)
                 else {
                     return Err(anyhow!("canonical MAPI conversation action was not found"));
                 };
@@ -4036,10 +4037,12 @@ where
                 .await?;
             }
             MapiObject::NavigationShortcut {
-                folder_id: _,
+                folder_id,
                 shortcut_id,
             } => {
-                let Some(existing) = snapshot.navigation_shortcut_message_for_id(*shortcut_id)
+                let Some(existing) = snapshot
+                    .navigation_shortcut_message_for_id(*shortcut_id)
+                    .filter(|message| message.folder_id == *folder_id)
                 else {
                     return Err(anyhow!("canonical MAPI navigation shortcut was not found"));
                 };
@@ -4085,7 +4088,10 @@ where
                 config_id,
                 ..
             } => {
-                let Some(existing) = snapshot.associated_config_message_for_id(*config_id) else {
+                let Some(existing) = snapshot
+                    .associated_config_message_for_id(*config_id)
+                    .filter(|message| message.folder_id == *folder_id)
+                else {
                     return Err(anyhow!("MAPI associated config message was not found"));
                 };
                 let mut properties = mapi_properties_from_json(&existing.properties_json);
@@ -4423,6 +4429,7 @@ fn conversation_action_target_mailbox_id(
 async fn delete_conversation_action_properties<S>(
     store: &S,
     principal: &AccountPrincipal,
+    folder_id: u64,
     conversation_action_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     property_tags: &[u32],
@@ -4434,6 +4441,7 @@ where
 {
     let existing = snapshot
         .conversation_action_message_for_id(conversation_action_id)
+        .filter(|message| message.folder_id == folder_id)
         .ok_or_else(|| anyhow!("canonical MAPI conversation action was not found"))?;
     let mut properties = conversation_action_properties(&existing.action);
     for tag in property_tags {
@@ -4459,6 +4467,81 @@ where
         .await?;
     apply_conversation_action_to_existing_messages(store, principal, &saved, mailboxes, emails)
         .await
+}
+
+fn stage_virtual_conversation_action_property_values(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    values: Vec<(u32, MapiValue)>,
+) -> Option<Result<()>> {
+    let object = input_object_mut(session, handle_slots, request)?;
+    let MapiObject::ConversationAction {
+        folder_id,
+        conversation_action_id,
+    } = object
+    else {
+        return None;
+    };
+    if !crate::mapi_store::is_outlook_default_conversation_action_id(*conversation_action_id) {
+        return None;
+    }
+    let Some(message) = snapshot
+        .conversation_action_table_message_for_id(*conversation_action_id)
+        .filter(|message| message.folder_id == *folder_id)
+    else {
+        return Some(Err(anyhow!(
+            "virtual MAPI conversation action was not found"
+        )));
+    };
+    let folder_id = *folder_id;
+    let mut properties = conversation_action_properties(&message.action);
+    apply_mapi_property_values_to_map(&mut properties, values);
+    *object = MapiObject::PendingConversationAction {
+        folder_id,
+        properties,
+    };
+    Some(Ok(()))
+}
+
+fn stage_virtual_conversation_action_property_delete(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Option<Result<()>> {
+    let object = input_object_mut(session, handle_slots, request)?;
+    let MapiObject::ConversationAction {
+        folder_id,
+        conversation_action_id,
+    } = object
+    else {
+        return None;
+    };
+    if !crate::mapi_store::is_outlook_default_conversation_action_id(*conversation_action_id) {
+        return None;
+    }
+    let Some(message) = snapshot
+        .conversation_action_table_message_for_id(*conversation_action_id)
+        .filter(|message| message.folder_id == *folder_id)
+    else {
+        return Some(Err(anyhow!(
+            "virtual MAPI conversation action was not found"
+        )));
+    };
+    let folder_id = *folder_id;
+    let mut properties = conversation_action_properties(&message.action);
+    for tag in property_tags {
+        properties.remove(tag);
+        properties.remove(&canonical_property_storage_tag(*tag));
+    }
+    *object = MapiObject::PendingConversationAction {
+        folder_id,
+        properties,
+    };
+    Some(Ok(()))
 }
 
 async fn upsert_custom_property_values<S>(
@@ -4594,6 +4677,9 @@ where
     let Some(existing) = snapshot.associated_config_message_for_id(config_id) else {
         return Err(anyhow!("MAPI associated config message was not found"));
     };
+    if existing.folder_id != folder_id {
+        return Err(anyhow!("MAPI associated config message was not found"));
+    }
     let mut properties = mapi_properties_from_json(&existing.properties_json);
     let mut deleted = 0usize;
     for tag in property_tags
@@ -4815,16 +4901,40 @@ fn delegate_freebusy_message_for_open<'a>(
     (folder_id == FREEBUSY_DATA_FOLDER_ID)
         .then(|| snapshot.delegate_freebusy_message_for_id(message_id))
         .flatten()
+        .filter(|message| message.folder_id == folder_id)
 }
 
-fn conversation_action_message_for_open<'a>(
-    snapshot: &'a MapiMailStoreSnapshot,
+fn conversation_action_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
     folder_id: u64,
     message_id: u64,
-) -> Option<&'a crate::mapi_store::MapiConversationActionMessage> {
+) -> Option<crate::mapi_store::MapiConversationActionMessage> {
     (folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
-        .then(|| snapshot.conversation_action_message_for_id(message_id))
+        .then(|| snapshot.conversation_action_table_message_for_id(message_id))
         .flatten()
+        .filter(|message| message.folder_id == folder_id)
+}
+
+fn navigation_shortcut_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<crate::mapi_store::MapiNavigationShortcutMessage> {
+    (folder_id == COMMON_VIEWS_FOLDER_ID)
+        .then(|| snapshot.navigation_shortcut_table_message_for_id(message_id))
+        .flatten()
+        .filter(|message| message.folder_id == folder_id)
+}
+
+fn common_view_named_view_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
+    (folder_id == COMMON_VIEWS_FOLDER_ID)
+        .then(|| snapshot.common_view_named_view_message_for_id(message_id))
+        .flatten()
+        .filter(|message| message.folder_id == folder_id)
 }
 
 fn format_debug_property_tags(tags: &[u32]) -> String {
@@ -8057,7 +8167,7 @@ fn format_inbox_associated_config_summary(
     }
     let messages = snapshot.associated_config_messages_for_folder(folder_id);
     let mut parts = Vec::new();
-    for message in messages.iter().take(16) {
+    for message in &messages {
         let source_key = mapi_mailstore::source_key_for_store_id(message.id);
         let decoded_source_key = crate::mapi::identity::object_id_from_source_key(&source_key);
         parts.push(format!(
@@ -8067,9 +8177,6 @@ fn format_inbox_associated_config_summary(
             message.message_class,
             message.subject
         ));
-    }
-    if messages.len() > 16 {
-        parts.push(format!("truncated={}", messages.len() - 16));
     }
     format!("count={};{}", messages.len(), parts.join("|"))
 }
@@ -9607,7 +9714,9 @@ where
                     ));
                     output_handles.push(handle);
                 } else if folder_id == COMMON_VIEWS_FOLDER_ID {
-                    if let Some(message) = snapshot.navigation_shortcut_message_for_id(message_id) {
+                    if let Some(message) =
+                        navigation_shortcut_message_for_open(snapshot, folder_id, message_id)
+                    {
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::NavigationShortcut {
@@ -9623,7 +9732,7 @@ where
                         ));
                         output_handles.push(handle);
                     } else if let Some(message) =
-                        snapshot.common_view_named_view_message_for_id(message_id)
+                        common_view_named_view_message_for_open(snapshot, folder_id, message_id)
                     {
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
@@ -9731,7 +9840,8 @@ where
                         0,
                     ));
                     output_handles.push(handle);
-                } else if snapshot.has_associated_config_identity_id(message_id) {
+                } else if snapshot.associated_config_identity_matches_folder(folder_id, message_id)
+                {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::PendingAssociatedMessage {
@@ -10349,72 +10459,87 @@ where
                         break;
                     }
                 };
-                let set_result = match set_properties_object {
-                    Some(
-                        object @ (MapiObject::Message { .. }
-                        | MapiObject::Contact { .. }
-                        | MapiObject::Event { .. }
-                        | MapiObject::Task { .. }
-                        | MapiObject::Note { .. }
-                        | MapiObject::JournalEntry { .. }
-                        | MapiObject::ConversationAction { .. }
-                        | MapiObject::NavigationShortcut { .. }
-                        | MapiObject::AssociatedConfig { .. }
-                        | MapiObject::DelegateFreeBusyMessage { .. }
-                        | MapiObject::PublicFolderItem { .. }
-                        | MapiObject::Attachment { .. }),
-                    ) => {
-                        apply_supported_object_property_values(
-                            store, principal, &object, values, mailboxes, emails, snapshot,
-                        )
-                        .await
-                    }
-                    object @ Some(MapiObject::Folder { .. }) => {
-                        let problems =
-                            folder_set_property_problems(object.as_ref(), mailboxes, &values);
-                        if !problems.is_empty() {
-                            responses.extend_from_slice(&rop_set_properties_problem_response(
-                                &request, &problems,
-                            ));
-                            continue;
+                let set_result = if let Some(result) =
+                    stage_virtual_conversation_action_property_values(
+                        session,
+                        &handle_slots,
+                        &request,
+                        snapshot,
+                        values.clone(),
+                    ) {
+                    result
+                } else {
+                    match set_properties_object {
+                        Some(
+                            object @ (MapiObject::Message { .. }
+                            | MapiObject::Contact { .. }
+                            | MapiObject::Event { .. }
+                            | MapiObject::Task { .. }
+                            | MapiObject::Note { .. }
+                            | MapiObject::JournalEntry { .. }
+                            | MapiObject::ConversationAction { .. }
+                            | MapiObject::NavigationShortcut { .. }
+                            | MapiObject::AssociatedConfig { .. }
+                            | MapiObject::DelegateFreeBusyMessage { .. }
+                            | MapiObject::PublicFolderItem { .. }
+                            | MapiObject::Attachment { .. }),
+                        ) => {
+                            apply_supported_object_property_values(
+                                store, principal, &object, values, mailboxes, emails, snapshot,
+                            )
+                            .await
                         }
-                        record_default_folder_entry_id_aliases(session, object.as_ref(), &values);
-                        let values = default_folder_identification_safe_property_values(
-                            principal,
-                            object.as_ref(),
-                            values,
-                        );
-                        let result = apply_mapi_property_values(
-                            input_object_mut(session, &handle_slots, &request),
-                            values.clone(),
-                        );
-                        if result.is_ok() {
-                            if let Some(MapiObject::Folder { folder_id, .. }) = object {
-                                if persist_profile_folder_property_values(
-                                    store, principal, folder_id, &values,
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    tracing::warn!(
-                                        adapter = "mapi",
-                                        endpoint = "emsmdb",
-                                        mailbox = %principal.email,
-                                        folder_id = format_args!("0x{folder_id:016x}"),
-                                        property_tags = %format_debug_property_tags(
-                                            &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
-                                        ),
-                                        "accepted MAPI folder property write but failed to persist profile state"
-                                    );
+                        object @ Some(MapiObject::Folder { .. }) => {
+                            let problems =
+                                folder_set_property_problems(object.as_ref(), mailboxes, &values);
+                            if !problems.is_empty() {
+                                responses.extend_from_slice(&rop_set_properties_problem_response(
+                                    &request, &problems,
+                                ));
+                                continue;
+                            }
+                            record_default_folder_entry_id_aliases(
+                                session,
+                                object.as_ref(),
+                                &values,
+                            );
+                            let values = default_folder_identification_safe_property_values(
+                                principal,
+                                object.as_ref(),
+                                values,
+                            );
+                            let result = apply_mapi_property_values(
+                                input_object_mut(session, &handle_slots, &request),
+                                values.clone(),
+                            );
+                            if result.is_ok() {
+                                if let Some(MapiObject::Folder { folder_id, .. }) = object {
+                                    if persist_profile_folder_property_values(
+                                        store, principal, folder_id, &values,
+                                    )
+                                    .await
+                                    .is_err()
+                                    {
+                                        tracing::warn!(
+                                            adapter = "mapi",
+                                            endpoint = "emsmdb",
+                                            mailbox = %principal.email,
+                                            folder_id = format_args!("0x{folder_id:016x}"),
+                                            property_tags = %format_debug_property_tags(
+                                                &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
+                                            ),
+                                            "accepted MAPI folder property write but failed to persist profile state"
+                                        );
+                                    }
                                 }
                             }
+                            result
                         }
-                        result
+                        _object => apply_mapi_property_values(
+                            input_object_mut(session, &handle_slots, &request),
+                            values,
+                        ),
                     }
-                    _object => apply_mapi_property_values(
-                        input_object_mut(session, &handle_slots, &request),
-                        values,
-                    ),
                 };
                 match set_result {
                     Ok(()) => responses.extend_from_slice(&rop_set_properties_response(&request)),
@@ -10428,7 +10553,17 @@ where
             Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
                 let property_tags = request.property_tags();
                 let object = input_object(session, &handle_slots, &request).cloned();
-                let delete_result = if let Some(MapiObject::ConversationAction {
+                let delete_result = if let Some(result) =
+                    stage_virtual_conversation_action_property_delete(
+                        session,
+                        &handle_slots,
+                        &request,
+                        snapshot,
+                        &property_tags,
+                    ) {
+                    result
+                } else if let Some(MapiObject::ConversationAction {
+                    folder_id,
                     conversation_action_id,
                     ..
                 }) = object
@@ -10436,6 +10571,7 @@ where
                     delete_conversation_action_properties(
                         store,
                         principal,
+                        folder_id,
                         conversation_action_id,
                         snapshot,
                         &property_tags,
@@ -13188,7 +13324,10 @@ where
                         }
                         continue;
                     }
-                    if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
+                    if let Some(message) = snapshot
+                        .conversation_action_message_for_id(message_id)
+                        .filter(|message| message.folder_id == folder_id)
+                    {
                         if store
                             .delete_conversation_action(principal.account_id, message.canonical_id)
                             .await
@@ -13199,8 +13338,9 @@ where
                         continue;
                     }
                     if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
-                        if let Some(message) =
-                            snapshot.navigation_shortcut_message_for_id(message_id)
+                        if let Some(message) = snapshot
+                            .navigation_shortcut_message_for_id(message_id)
+                            .filter(|message| message.folder_id == folder_id)
                         {
                             if store
                                 .delete_mapi_navigation_shortcut(
@@ -15838,9 +15978,13 @@ where
                     ));
                     continue;
                 };
-                let Some((folder_id, transfer_buffer)) =
-                    fast_transfer_manifest_for_object(&object, mailboxes, emails, snapshot)
-                else {
+                let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
+                    &object,
+                    principal.account_id,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ) else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
                         request.response_handle_index(),
@@ -20257,9 +20401,172 @@ mod tests {
         );
 
         assert_eq!(
-            selected.map(|message| message.action.subject.as_str()),
-            Some("Conversation Action")
+            selected.map(|message| message.action.subject),
+            Some("Conversation Action".to_string())
         );
+    }
+
+    #[test]
+    fn common_views_open_finds_default_navigation_shortcut() {
+        let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+        let selected = navigation_shortcut_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            COMMON_VIEWS_FOLDER_ID,
+            shortcut_id,
+        );
+
+        assert_eq!(
+            selected.map(|message| message.subject),
+            Some("Inbox".to_string())
+        );
+    }
+
+    #[test]
+    fn common_views_open_rejects_default_navigation_shortcut_from_wrong_folder() {
+        let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+        let selected = navigation_shortcut_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            INBOX_FOLDER_ID,
+            shortcut_id,
+        );
+
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn common_views_open_rejects_default_named_view_from_wrong_folder() {
+        let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let selected = common_view_named_view_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            INBOX_FOLDER_ID,
+            view_id,
+        );
+
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn conversation_action_open_rejects_default_action_from_wrong_folder() {
+        let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+        let selected = conversation_action_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            COMMON_VIEWS_FOLDER_ID,
+            action_id,
+        );
+
+        assert!(selected.is_none());
+    }
+
+    #[test]
+    fn virtual_default_conversation_action_set_properties_stages_pending_row() {
+        let mut session = test_mapi_session();
+        let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+        session.handles.insert(
+            1,
+            MapiObject::ConversationAction {
+                folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                conversation_action_id: action_id,
+            },
+        );
+        let handle_slots = vec![1];
+        let request = RopRequest {
+            rop_id: RopId::SetProperties.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let result = stage_virtual_conversation_action_property_values(
+            &mut session,
+            &handle_slots,
+            &request,
+            &MapiMailStoreSnapshot::empty(),
+            vec![(
+                PID_TAG_SUBJECT_W,
+                MapiValue::String("Conversation Action Update".to_string()),
+            )],
+        );
+
+        assert!(matches!(result, Some(Ok(()))));
+        match session.handles.get(&1) {
+            Some(MapiObject::PendingConversationAction { properties, .. }) => {
+                assert_eq!(
+                    properties.get(&PID_TAG_SUBJECT_W),
+                    Some(&MapiValue::String("Conversation Action Update".to_string()))
+                );
+            }
+            other => panic!("expected pending conversation action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn virtual_default_conversation_action_set_rejects_wrong_folder() {
+        let mut session = test_mapi_session();
+        let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+        session.handles.insert(
+            1,
+            MapiObject::ConversationAction {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                conversation_action_id: action_id,
+            },
+        );
+        let handle_slots = vec![1];
+        let request = RopRequest {
+            rop_id: RopId::SetProperties.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let result = stage_virtual_conversation_action_property_values(
+            &mut session,
+            &handle_slots,
+            &request,
+            &MapiMailStoreSnapshot::empty(),
+            vec![(
+                PID_TAG_SUBJECT_W,
+                MapiValue::String("Conversation Action Update".to_string()),
+            )],
+        );
+
+        assert!(matches!(result, Some(Err(_))));
+        assert!(matches!(
+            session.handles.get(&1),
+            Some(MapiObject::ConversationAction { .. })
+        ));
+    }
+
+    #[test]
+    fn virtual_default_conversation_action_delete_properties_stages_pending_row() {
+        let mut session = test_mapi_session();
+        let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+        session.handles.insert(
+            1,
+            MapiObject::ConversationAction {
+                folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                conversation_action_id: action_id,
+            },
+        );
+        let handle_slots = vec![1];
+        let request = RopRequest {
+            rop_id: RopId::DeleteProperties.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let result = stage_virtual_conversation_action_property_delete(
+            &mut session,
+            &handle_slots,
+            &request,
+            &MapiMailStoreSnapshot::empty(),
+            &[PID_TAG_SUBJECT_W],
+        );
+
+        assert!(matches!(result, Some(Ok(()))));
+        match session.handles.get(&1) {
+            Some(MapiObject::PendingConversationAction { properties, .. }) => {
+                assert!(!properties.contains_key(&PID_TAG_SUBJECT_W));
+            }
+            other => panic!("expected pending conversation action, got {other:?}"),
+        }
     }
 
     #[test]
@@ -20391,6 +20698,20 @@ mod tests {
         assert!(required_tags.contains("0x7c080102"));
         assert!(!required_tags.contains("0x00600040"));
         assert!(!required_tags.contains("0x820d0102"));
+    }
+
+    #[test]
+    fn inbox_associated_config_summary_includes_tail_default_rows() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
+
+        assert!(
+            summary.contains("class=IPM.Sharing.Configuration"),
+            "{summary}"
+        );
+        assert!(summary.contains("class=IPM.Sharing.Index"), "{summary}");
+        assert!(!summary.contains("truncated="), "{summary}");
     }
 
     #[test]

@@ -1087,8 +1087,14 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 custom_values,
             )
         }
-        Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => {
-            let Some(message) = snapshot.navigation_shortcut_message_for_id(*shortcut_id) else {
+        Some(MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+        }) => {
+            let Some(message) = snapshot
+                .navigation_shortcut_table_message_for_id(*shortcut_id)
+                .filter(|message| message.folder_id == *folder_id)
+            else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
@@ -1097,8 +1103,11 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             };
             serialize_navigation_shortcut_row(&message, Some(principal), &columns)
         }
-        Some(MapiObject::CommonViewNamedView { view_id, .. }) => {
-            let Some(message) = snapshot.common_view_named_view_message_for_id(*view_id) else {
+        Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => {
+            let Some(message) = snapshot
+                .common_view_named_view_message_for_id(*view_id)
+                .filter(|message| message.folder_id == *folder_id)
+            else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
@@ -1112,6 +1121,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             )
         }
         Some(MapiObject::AssociatedConfig {
+            folder_id,
             config_id,
             saved_message,
             ..
@@ -1119,6 +1129,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             let Some(message) = snapshot
                 .associated_config_message_for_id(*config_id)
                 .or_else(|| saved_message.clone())
+                .filter(|message| message.folder_id == *folder_id)
             else {
                 return rop_error_response(
                     0x07,
@@ -1133,11 +1144,13 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             )
         }
         Some(MapiObject::ConversationAction {
+            folder_id,
             conversation_action_id,
             ..
         }) => {
-            let Some(message) =
-                snapshot.conversation_action_message_for_id(*conversation_action_id)
+            let Some(message) = snapshot
+                .conversation_action_table_message_for_id(*conversation_action_id)
+                .filter(|message| message.folder_id == *folder_id)
             else {
                 return rop_error_response(
                     0x07,
@@ -1145,10 +1158,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
-            serialize_conversation_action_row(message, &columns)
+            serialize_conversation_action_row(&message, &columns)
         }
-        Some(MapiObject::DelegateFreeBusyMessage { message_id, .. }) => {
-            let Some(message) = snapshot.delegate_freebusy_message_for_id(*message_id) else {
+        Some(MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+        }) => {
+            let Some(message) = snapshot
+                .delegate_freebusy_message_for_id(*message_id)
+                .filter(|message| message.folder_id == *folder_id)
+            else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
@@ -3213,16 +3232,21 @@ pub(in crate::mapi) fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => snapshot
-            .navigation_shortcut_message_for_id(*shortcut_id)
+        Some(MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+        }) => snapshot
+            .navigation_shortcut_table_message_for_id(*shortcut_id)
+            .filter(|message| message.folder_id == *folder_id)
             .map(|message| serialize_navigation_shortcut_row(&message, Some(principal), &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::CommonViewNamedView { view_id, .. }) => snapshot
+        Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => snapshot
             .common_view_named_view_message_for_id(*view_id)
+            .filter(|message| message.folder_id == *folder_id)
             .map(|message| {
                 serialize_common_view_named_view_row_with_mailbox_guid(
                     &message,
@@ -3236,12 +3260,14 @@ pub(in crate::mapi) fn serialize_object_property(
                 value
             }),
         Some(MapiObject::AssociatedConfig {
+            folder_id,
             config_id,
             saved_message,
             ..
         }) => snapshot
             .associated_config_message_for_id(*config_id)
             .or_else(|| saved_message.clone())
+            .filter(|message| message.folder_id == *folder_id)
             .map(|message| {
                 serialize_associated_config_row_with_mailbox_guid(
                     &message,
@@ -3255,18 +3281,24 @@ pub(in crate::mapi) fn serialize_object_property(
                 value
             }),
         Some(MapiObject::ConversationAction {
+            folder_id,
             conversation_action_id,
             ..
         }) => snapshot
-            .conversation_action_message_for_id(*conversation_action_id)
-            .map(|message| serialize_conversation_action_row(message, &[tag]))
+            .conversation_action_table_message_for_id(*conversation_action_id)
+            .filter(|message| message.folder_id == *folder_id)
+            .map(|message| serialize_conversation_action_row(&message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::DelegateFreeBusyMessage { message_id, .. }) => snapshot
+        Some(MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+        }) => snapshot
             .delegate_freebusy_message_for_id(*message_id)
+            .filter(|message| message.folder_id == *folder_id)
             .map(|message| serialize_delegate_freebusy_row(message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
@@ -7539,6 +7571,151 @@ mod tests {
             Some(&object),
             0x801D_0000
         ));
+    }
+
+    #[test]
+    fn associated_config_getprops_rejects_default_from_wrong_folder() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let object = MapiObject::AssociatedConfig {
+            folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+            config_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC),
+            saved_message: None,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn conversation_action_getprops_rejects_default_from_wrong_folder() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let object = MapiObject::ConversationAction {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            conversation_action_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn delegate_freebusy_getprops_rejects_message_from_wrong_folder() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let message_id = Uuid::parse_str("56565656-5656-4656-8656-565656565656").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(610),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(vec![
+            lpe_storage::DelegateFreeBusyMessageObject {
+                id: message_id,
+                account_id: Uuid::nil(),
+                owner_account_id: Uuid::nil(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "owner@example.test: busy".to_string(),
+                body_text: "busy".to_string(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: "{}".to_string(),
+                updated_at: "2026-05-26T08:00:00Z".to_string(),
+            },
+        ]);
+        let object = MapiObject::DelegateFreeBusyMessage {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: snapshot.delegate_freebusy_messages()[0].id,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
     }
 
     #[test]

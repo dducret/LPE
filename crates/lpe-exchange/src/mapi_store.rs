@@ -223,6 +223,8 @@ const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID: Uuid =
     Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
 
@@ -245,6 +247,17 @@ pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -
 
 pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
     item_id == OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID
+}
+
+pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u64) -> bool {
+    matches!(
+        item_id,
+        OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID | OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID
+    )
+}
+
+pub(crate) fn is_outlook_default_conversation_action_id(item_id: u64) -> bool {
+    item_id == OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID
 }
 
 fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
@@ -361,6 +374,29 @@ fn outlook_common_views_named_view_defaults() -> Vec<MapiCommonViewNamedViewMess
         view_flags: 1,
         view_type: 8,
     }]
+}
+
+fn outlook_default_conversation_action() -> MapiConversationActionMessage {
+    MapiConversationActionMessage {
+        id: OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID,
+        folder_id: crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x6d617069_6361_4466_8000_000000000001),
+        action: ConversationAction {
+            id: Uuid::from_u128(0x6d617069_6361_4466_8000_000000000001),
+            conversation_id: Uuid::nil(),
+            subject: "IPM.ConversationAction".to_string(),
+            categories_json: "[]".to_string(),
+            move_folder_entry_id: None,
+            move_store_entry_id: None,
+            move_target_mailbox_id: None,
+            max_delivery_time: None,
+            last_applied_time: None,
+            version: lpe_storage::CONVERSATION_ACTION_VERSION,
+            processed: 0,
+            created_at: "1970-01-01T00:00:00Z".to_string(),
+            updated_at: "1970-01-01T00:00:00Z".to_string(),
+        },
+    }
 }
 
 pub(crate) enum MapiCommonViewsMessage {
@@ -1379,6 +1415,20 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn navigation_shortcut_table_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<MapiNavigationShortcutMessage> {
+        self.navigation_shortcut_message_for_id(item_id)
+            .or_else(|| {
+                self.navigation_shortcuts
+                    .is_empty()
+                    .then(outlook_common_views_navigation_shortcut_defaults)?
+                    .into_iter()
+                    .find(|message| message.id == item_id)
+            })
+    }
+
     pub(crate) fn common_view_named_view_message_for_id(
         &self,
         item_id: u64,
@@ -1459,13 +1509,27 @@ impl MapiMailStoreSnapshot {
             })
     }
 
-    pub(crate) fn has_associated_config_identity_id(&self, item_id: u64) -> bool {
-        self.associated_config_message_for_id(item_id).is_some()
-            || self.associated_config_identity_ids.contains(&item_id)
+    pub(crate) fn associated_config_identity_matches_folder(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> bool {
+        match self.associated_config_message_for_id(item_id) {
+            Some(message) => message.folder_id == folder_id,
+            None => self.associated_config_identity_ids.contains(&item_id),
+        }
     }
 
     pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {
         &self.conversation_actions
+    }
+
+    pub(crate) fn conversation_action_table_messages(&self) -> Vec<MapiConversationActionMessage> {
+        if self.conversation_actions.is_empty() {
+            vec![outlook_default_conversation_action()]
+        } else {
+            self.conversation_actions.clone()
+        }
     }
 
     pub(crate) fn conversation_action_message_for_id(
@@ -1475,6 +1539,19 @@ impl MapiMailStoreSnapshot {
         self.conversation_actions
             .iter()
             .find(|message| message.id == item_id)
+    }
+
+    pub(crate) fn conversation_action_table_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<MapiConversationActionMessage> {
+        self.conversation_action_message_for_id(item_id)
+            .cloned()
+            .or_else(|| {
+                (self.conversation_actions.is_empty()
+                    && item_id == OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
+                    .then(outlook_default_conversation_action)
+            })
     }
 
     pub(crate) fn delegate_freebusy_messages(&self) -> &[MapiDelegateFreeBusyMessage] {
@@ -2375,7 +2452,14 @@ mod tests {
                     .map(|message| message.message_class),
                 Some(message_class.to_string())
             );
-            assert!(snapshot.has_associated_config_identity_id(message_id));
+            assert!(snapshot.associated_config_identity_matches_folder(
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                message_id
+            ));
+            assert!(!snapshot.associated_config_identity_matches_folder(
+                crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                message_id
+            ));
         }
         assert_eq!(
             messages
@@ -2451,7 +2535,14 @@ mod tests {
                 .map(|message| message.message_class),
             Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
         );
-        assert!(snapshot.has_associated_config_identity_id(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID));
+        assert!(snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+            OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
+        ));
+        assert!(!snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
+        ));
         assert!(is_outlook_quick_step_default_associated_config_id(
             OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
         ));
@@ -2492,6 +2583,49 @@ mod tests {
                 .map(|message| message.subject.as_str()),
             Some("Client custom action")
         );
+    }
+
+    #[test]
+    fn associated_config_identity_only_placeholder_remains_folder_agnostic() {
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 901,
+        );
+        let snapshot =
+            MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![object_id]);
+
+        assert!(snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            object_id
+        ));
+        assert!(snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            object_id
+        ));
+    }
+
+    #[test]
+    fn empty_conversation_action_settings_exposes_default_table_row_only() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        assert!(snapshot.conversation_action_messages().is_empty());
+
+        let messages = snapshot.conversation_action_table_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID);
+        assert_eq!(
+            messages[0].folder_id,
+            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+        );
+        assert_eq!(messages[0].action.subject, "IPM.ConversationAction");
+        assert_eq!(
+            snapshot
+                .conversation_action_table_message_for_id(OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
+                .map(|message| message.action.subject),
+            Some("IPM.ConversationAction".to_string())
+        );
+        assert!(snapshot
+            .conversation_action_message_for_id(OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
+            .is_none());
     }
 
     #[test]
@@ -2548,6 +2682,12 @@ mod tests {
         assert!(snapshot
             .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
             .is_none());
+        assert_eq!(
+            snapshot
+                .navigation_shortcut_table_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
+                .map(|shortcut| shortcut.subject),
+            Some("Inbox".to_string())
+        );
     }
 
     #[test]
@@ -2596,6 +2736,9 @@ mod tests {
         )));
         assert!(snapshot
             .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
+            .is_none());
+        assert!(snapshot
+            .navigation_shortcut_table_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
             .is_none());
     }
 

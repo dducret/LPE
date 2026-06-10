@@ -644,7 +644,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .map(|message| common_views_sync_object(message, account_id))
                 .collect(),
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
-                .conversation_action_messages()
+                .conversation_action_table_messages()
                 .iter()
                 .map(conversation_action_sync_object)
                 .collect(),
@@ -1288,6 +1288,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
 
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     object: &MapiObject,
+    account_id: Uuid,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -1344,7 +1345,8 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
         } => {
             let message = snapshot
                 .associated_config_message_for_id(*config_id)
-                .or_else(|| saved_message.clone())?;
+                .or_else(|| saved_message.clone())
+                .filter(|message| message.folder_id == *folder_id)?;
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
@@ -1357,7 +1359,11 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             folder_id,
             conversation_action_id,
         } => {
-            let message = snapshot.conversation_action_message_for_id(*conversation_action_id)?;
+            let message =
+                snapshot.conversation_action_table_message_for_id(*conversation_action_id)?;
+            if message.folder_id != *folder_id {
+                return None;
+            }
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
@@ -1366,11 +1372,43 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 ),
             ))
         }
+        MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+        } => {
+            let message = snapshot.navigation_shortcut_table_message_for_id(*shortcut_id)?;
+            if message.folder_id != *folder_id {
+                return None;
+            }
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[navigation_shortcut_sync_object(&message, account_id)],
+                ),
+            ))
+        }
+        MapiObject::CommonViewNamedView { folder_id, view_id } => {
+            let message = snapshot.common_view_named_view_message_for_id(*view_id)?;
+            if message.folder_id != *folder_id {
+                return None;
+            }
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[common_view_named_view_sync_object(&message, account_id)],
+                ),
+            ))
+        }
         MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
         } => {
             let message = snapshot.delegate_freebusy_message_for_id(*message_id)?;
+            if message.folder_id != *folder_id {
+                return None;
+            }
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
@@ -1766,5 +1804,160 @@ mod tests {
                 0x00, 0x46,
             ])
         );
+    }
+
+    #[test]
+    fn fast_transfer_manifest_exports_virtual_common_views_shortcut() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+        let object = MapiObject::NavigationShortcut {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            shortcut_id,
+        };
+
+        let (folder_id, manifest) = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        )
+        .expect("virtual shortcut manifest");
+
+        assert_eq!(folder_id, COMMON_VIEWS_FOLDER_ID);
+        assert!(!manifest.is_empty());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_exports_virtual_common_views_named_view() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+        let object = MapiObject::CommonViewNamedView {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            view_id,
+        };
+
+        let (folder_id, manifest) = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        )
+        .expect("virtual named view manifest");
+
+        assert_eq!(folder_id, COMMON_VIEWS_FOLDER_ID);
+        assert!(!manifest.is_empty());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_rejects_associated_config_default_from_wrong_folder() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let object = MapiObject::AssociatedConfig {
+            folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+            config_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC),
+            saved_message: None,
+        };
+
+        let manifest = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_rejects_common_views_shortcut_from_wrong_folder() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let object = MapiObject::NavigationShortcut {
+            folder_id: INBOX_FOLDER_ID,
+            shortcut_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9),
+        };
+
+        let manifest = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_rejects_common_views_named_view_from_wrong_folder() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let object = MapiObject::CommonViewNamedView {
+            folder_id: INBOX_FOLDER_ID,
+            view_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7),
+        };
+
+        let manifest = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_rejects_conversation_action_default_from_wrong_folder() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let object = MapiObject::ConversationAction {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            conversation_action_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2),
+        };
+
+        let manifest = fast_transfer_manifest_for_object(
+            &object,
+            account_id,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(manifest.is_none());
+    }
+
+    #[test]
+    fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let message_id = Uuid::parse_str("56565656-5656-4656-8656-565656565656").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(610),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(vec![
+            lpe_storage::DelegateFreeBusyMessageObject {
+                id: message_id,
+                account_id,
+                owner_account_id: Uuid::nil(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "owner@example.test: busy".to_string(),
+                body_text: "busy".to_string(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: "{}".to_string(),
+                updated_at: "2026-05-26T08:00:00Z".to_string(),
+            },
+        ]);
+        let object = MapiObject::DelegateFreeBusyMessage {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: snapshot.delegate_freebusy_messages()[0].id,
+        };
+
+        let manifest = fast_transfer_manifest_for_object(&object, account_id, &[], &[], &snapshot);
+
+        assert!(manifest.is_none());
     }
 }

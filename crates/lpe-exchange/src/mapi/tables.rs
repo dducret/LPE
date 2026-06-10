@@ -93,7 +93,7 @@ pub(in crate::mapi) fn associated_folder_message_count(
             .min(u32::MAX as usize) as u32
     } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         snapshot
-            .conversation_action_messages()
+            .conversation_action_table_messages()
             .len()
             .min(u32::MAX as usize) as u32
     } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
@@ -1416,7 +1416,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .collect::<Vec<_>>()
                 } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     snapshot
-                        .conversation_action_messages()
+                        .conversation_action_table_messages()
                         .iter()
                         .map(|message| serialize_conversation_action_row(message, &columns))
                         .collect::<Vec<_>>()
@@ -3647,12 +3647,14 @@ pub(in crate::mapi) fn rop_find_row_response(
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
                 }
             } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
-                let rows = snapshot
-                    .conversation_action_messages()
-                    .iter()
-                    .collect::<Vec<_>>();
+                let rows = snapshot.conversation_action_table_messages();
+                let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
-                    find_row(rows.as_slice(), *position, request, |_message| true)
+                    find_row(rows.as_slice(), *position, request, |message| {
+                        restriction_matches(Some(&restriction), |property_tag| {
+                            conversation_action_property_value(message, property_tag)
+                        })
+                    })
                 {
                     *position = index;
                     response.push(1);
@@ -7198,7 +7200,7 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            4
+            3
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
@@ -7894,6 +7896,88 @@ mod tests {
         assert!(response
             .windows(b"<?xml version=\"1.0\" encoding=\"utf-8\"?>".len())
             .any(|window| window == b"<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
+    }
+
+    #[test]
+    fn empty_conversation_action_settings_find_row_returns_default_action() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.ConversationAction");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        let mut encoded_message_class = Vec::new();
+        write_utf16z(&mut encoded_message_class, "IPM.ConversationAction");
+        assert!(response
+            .windows(encoded_message_class.len())
+            .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    #[test]
+    fn conversation_action_settings_find_row_honors_restriction() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.NotConversationAction");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response, rop_error_response(0x4F, 0, 0x8004_010F));
     }
 
     #[test]
