@@ -876,13 +876,53 @@ impl MapiMailStoreSnapshot {
                     .map(|message| &message.email)
             })
             .collect::<Vec<_>>();
+        if emails.len() != window.message_ids.len() {
+            return None;
+        }
         Some((window.total, emails))
+    }
+
+    pub(crate) fn content_table_window_emails_containing(
+        &self,
+        folder_id: u64,
+        view_signature: u64,
+        position: usize,
+    ) -> Option<(usize, usize, Vec<&JmapEmail>)> {
+        let window = self.content_windows.iter().find(|window| {
+            window.folder_id == folder_id
+                && window.view_signature == view_signature
+                && position >= window.offset
+                && position <= window.offset.saturating_add(window.message_ids.len())
+        })?;
+        let emails = window
+            .message_ids
+            .iter()
+            .filter_map(|id| {
+                self.messages
+                    .iter()
+                    .find(|message| message.canonical_id == *id)
+                    .map(|message| &message.email)
+            })
+            .collect::<Vec<_>>();
+        if emails.len() != window.message_ids.len() {
+            return None;
+        }
+        Some((window.offset, window.total, emails))
     }
 
     pub(crate) fn content_table_total(&self, folder_id: u64, view_signature: u64) -> Option<usize> {
         self.content_windows
             .iter()
-            .find(|window| window.folder_id == folder_id && window.view_signature == view_signature)
+            .filter(|window| {
+                window.folder_id == folder_id && window.view_signature == view_signature
+            })
+            .find(|window| {
+                window.message_ids.iter().all(|id| {
+                    self.messages
+                        .iter()
+                        .any(|message| message.canonical_id == *id)
+                })
+            })
             .map(|window| window.total)
     }
 

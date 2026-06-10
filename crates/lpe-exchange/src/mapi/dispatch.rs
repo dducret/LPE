@@ -6690,6 +6690,11 @@ fn log_outlook_contents_table_query_rows_response(
         .and_then(|bytes| bytes.try_into().ok())
         .map(u16::from_le_bytes)
         .unwrap_or(0);
+    let response_origin_position = if request.query_forward_read() {
+        queried_position
+    } else {
+        queried_position.saturating_sub(row_count as usize)
+    };
     let associated_wire_row_summary = if *associated {
         format_inbox_associated_wire_row_summary(
             principal.account_id,
@@ -6724,6 +6729,7 @@ fn log_outlook_contents_table_query_rows_response(
         requested_forward_read = request.query_forward_read(),
         requested_row_count = request.query_row_count().unwrap_or(0),
         queried_position,
+        response_origin_position,
         current_position_after = *position,
         response_origin = %format!("0x{response_origin:02x}"),
         response_origin_name = match response_origin {
@@ -6741,6 +6747,83 @@ fn log_outlook_contents_table_query_rows_response(
         response_row_payload_preview = %response_row_payload_preview,
         associated_wire_row_summary = %associated_wire_row_summary,
         "rca debug outlook contents table query rows response"
+    );
+}
+
+fn log_mapi_query_position_debug(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    response: &[u8],
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    if !object.is_some_and(is_table_object) {
+        return;
+    }
+    let position = response
+        .get(6..10)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0);
+    let row_count = response
+        .get(10..14)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0);
+    let (associated, selected_columns, sort_order_count, restriction_present) = match object {
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            columns,
+            sort_orders,
+            restriction,
+            ..
+        }) => (
+            Some(*associated),
+            format_debug_property_tags(&effective_contents_table_columns(
+                *folder_id,
+                *associated,
+                columns,
+            )),
+            sort_orders.len(),
+            restriction.is_some(),
+        ),
+        _ => (None, String::new(), 0, false),
+    };
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x17",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        folder_role = object
+            .and_then(MapiObject::folder_id)
+            .map(debug_role_for_folder_id)
+            .unwrap_or("none"),
+        associated = associated
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string()),
+        position,
+        row_count,
+        selected_property_tags = %selected_columns,
+        sort_order_count,
+        restriction_present,
+        inbox_associated_config_summary = object
+            .and_then(MapiObject::folder_id)
+            .map(|folder_id| {
+                format_inbox_associated_config_summary(
+                    folder_id,
+                    associated.unwrap_or(false),
+                    snapshot,
+                )
+            })
+            .unwrap_or_default(),
+        "rca debug mapi query position"
     );
 }
 
@@ -12160,14 +12243,22 @@ where
                 input_object(session, &handle_slots, &request),
             )),
             Some(RopId::QueryPosition) => {
-                responses.extend_from_slice(&rop_query_position_response(
+                let response = rop_query_position_response(
                     &request,
                     input_object(session, &handle_slots, &request),
                     mailboxes,
                     emails,
                     snapshot,
                     principal.account_id,
-                ))
+                );
+                log_mapi_query_position_debug(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    &response,
+                    snapshot,
+                );
+                responses.extend_from_slice(&response);
             }
             Some(RopId::SeekRow) => {
                 let before_position =

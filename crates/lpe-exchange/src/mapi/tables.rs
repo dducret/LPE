@@ -1716,6 +1716,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
         }
         _ => Vec::new(),
     };
+    start_position = start_position.min(total_row_count.saturating_sub(position_base));
     let row_count = request.query_row_count().unwrap_or(rows.len());
     let forward_read = request.query_forward_read();
     let (selected, next_position) = if forward_read {
@@ -1737,6 +1738,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
             .collect::<Vec<_>>();
         (selected, position_base.saturating_add(selected_start))
     };
+    let response_origin_position = if forward_read {
+        position_base.saturating_add(start_position)
+    } else {
+        next_position
+    };
     if !request.query_no_advance() {
         if let Some(
             MapiObject::HierarchyTable { position, .. }
@@ -1749,14 +1755,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
             *position = next_position;
         }
     }
-    let response_origin = if forward_read {
-        if next_position >= total_row_count {
-            0x02
-        } else {
-            0x01
-        }
-    } else if next_position == 0 {
+    let response_origin = if response_origin_position == 0 {
         0x00
+    } else if response_origin_position >= total_row_count {
+        0x02
     } else {
         0x01
     };
@@ -3353,8 +3355,8 @@ pub(in crate::mapi) fn rop_seek_row_response(
     let Some(object) = object else {
         return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
     };
-    let total_rows =
-        table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid).1;
+    let (current_position, total_rows) =
+        table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid);
     let Some(position) = table_position_mut(object) else {
         return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
     };
@@ -3363,7 +3365,7 @@ pub(in crate::mapi) fn rop_seek_row_response(
     let base_position = match request.seek_origin().unwrap_or(1) {
         0 => 0isize,
         2 => total_rows as isize,
-        _ => *position as isize,
+        _ => current_position as isize,
     };
     let requested_position = base_position.saturating_add(requested_rows as isize);
     let new_position = requested_position.clamp(0, total_rows as isize);
@@ -3391,7 +3393,8 @@ pub(in crate::mapi) fn rop_create_bookmark_response(
     };
     let row_key = table_row_keys(object, mailboxes, emails, snapshot, mailbox_guid)
         .get(table_position(object).unwrap_or(0))
-        .copied();
+        .copied()
+        .filter(|row_key| *row_key != 0);
     let Some((position, bookmarks, next_bookmark)) = table_bookmark_state_mut(object) else {
         return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
     };
@@ -3967,22 +3970,78 @@ pub(in crate::mapi) fn rop_find_row_response(
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
                 }
             } else {
-                let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                rows.retain(|email| restriction_matches_email(table_restriction.as_ref(), email));
-                sort_emails(&mut rows, sort_orders);
-                if let Some((index, email)) =
-                    find_row(rows.as_slice(), *position, request, |email| {
-                        restriction_matches_email(Some(&restriction), email)
-                    })
-                {
-                    *position = index;
-                    response.push(1);
-                    write_standard_property_row(
-                        &mut response,
-                        &serialize_message_row(email, &columns),
-                    );
+                let view_signature = table_view_signature(sort_orders, table_restriction.as_ref());
+                let window_emails = snapshot.content_table_window_emails_containing(
+                    *folder_id,
+                    view_signature,
+                    *position,
+                );
+                if let Some((offset, _total, window_emails)) = window_emails {
+                    let local_position = position.saturating_sub(offset);
+                    if let Some((index, email)) =
+                        find_row(window_emails.as_slice(), local_position, request, |email| {
+                            restriction_matches_email(Some(&restriction), email)
+                        })
+                    {
+                        *position = offset.saturating_add(index);
+                        response.push(1);
+                        write_standard_property_row(
+                            &mut response,
+                            &serialize_message_row(email, &columns),
+                        );
+                    } else {
+                        let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                        rows.retain(|email| {
+                            restriction_matches_email(table_restriction.as_ref(), email)
+                        });
+                        sort_emails(&mut rows, sort_orders);
+                        let complete_rows_available = snapshot
+                            .content_table_total(*folder_id, view_signature)
+                            .is_some_and(|total| total == rows.len());
+                        let found = complete_rows_available.then(|| {
+                            find_row(rows.as_slice(), *position, request, |email| {
+                                restriction_matches_email(Some(&restriction), email)
+                            })
+                        });
+                        if let Some(Some((index, email))) = found {
+                            *position = index;
+                            response.push(1);
+                            write_standard_property_row(
+                                &mut response,
+                                &serialize_message_row(email, &columns),
+                            );
+                        } else {
+                            return rop_error_response(
+                                0x4F,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            );
+                        }
+                    }
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                    rows.retain(|email| {
+                        restriction_matches_email(table_restriction.as_ref(), email)
+                    });
+                    sort_emails(&mut rows, sort_orders);
+                    if let Some((index, email)) =
+                        find_row(rows.as_slice(), *position, request, |email| {
+                            restriction_matches_email(Some(&restriction), email)
+                        })
+                    {
+                        *position = index;
+                        response.push(1);
+                        write_standard_property_row(
+                            &mut response,
+                            &serialize_message_row(email, &columns),
+                        );
+                    } else {
+                        return rop_error_response(
+                            0x4F,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        );
+                    }
                 }
             }
         }
@@ -4097,7 +4156,7 @@ pub(in crate::mapi) fn table_position_and_count(
     snapshot: &MapiMailStoreSnapshot,
     mailbox_guid: Uuid,
 ) -> (usize, usize) {
-    match object {
+    let (position, total) = match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
             position,
@@ -4124,6 +4183,9 @@ pub(in crate::mapi) fn table_position_and_count(
             position,
             restriction,
             sort_orders,
+            category_count,
+            expanded_count,
+            collapsed_categories,
             ..
         }) => {
             let total = if *associated {
@@ -4219,6 +4281,19 @@ pub(in crate::mapi) fn table_position_and_count(
                     .count()
             } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
                 snapshot.recoverable_items_for_folder(*folder_id).len()
+            } else if *category_count > 0 {
+                let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+                sort_emails(&mut rows, sort_orders);
+                categorized_email_rows(
+                    *folder_id,
+                    rows,
+                    &default_contents_columns(),
+                    sort_orders,
+                    *expanded_count,
+                    collapsed_categories,
+                )
+                .len()
             } else {
                 snapshot
                     .content_table_total(
@@ -4269,7 +4344,8 @@ pub(in crate::mapi) fn table_position_and_count(
             },
         ),
         _ => (0, 0),
-    }
+    };
+    (position.min(total), total)
 }
 
 pub(in crate::mapi) fn table_position_mut(object: &mut MapiObject) -> Option<&mut usize> {
@@ -4344,6 +4420,7 @@ pub(in crate::mapi) fn table_row_keys(
             folder_id,
             sort_orders,
             restriction,
+            position,
             ..
         } => {
             if *folder_id == CALENDAR_FOLDER_ID {
@@ -4430,6 +4507,22 @@ pub(in crate::mapi) fn table_row_keys(
                 let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
                 sort_recoverable_items(&mut rows, sort_orders);
                 return rows.into_iter().map(|item| item.id).collect();
+            }
+            if let Some((offset, total, window_emails)) = snapshot
+                .content_table_window_emails_containing(
+                    *folder_id,
+                    table_view_signature(sort_orders, restriction.as_ref()),
+                    *position,
+                )
+            {
+                let mut row_keys = vec![0; total];
+                for (index, email) in window_emails.into_iter().enumerate() {
+                    let row_index = offset.saturating_add(index);
+                    if row_index < row_keys.len() {
+                        row_keys[row_index] = mapi_message_id(email);
+                    }
+                }
+                return row_keys;
             }
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
             rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
@@ -5603,7 +5696,7 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(response[6], 0x01);
+        assert_eq!(response[6], 0x00);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
         assert_eq!(table_position(&table), Some(1));
 
@@ -5619,9 +5712,775 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert_eq!(response[6], 0x02);
+        assert_eq!(response[6], 0x01);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
         assert_eq!(table_position(&table), Some(3));
+
+        let response = rop_query_rows_response(
+            &RopRequest {
+                payload: vec![0, 1, 10, 0],
+                ..request
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[6], 0x02);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+        assert_eq!(table_position(&table), Some(3));
+    }
+
+    #[test]
+    fn query_rows_origin_uses_global_position_for_windowed_content_tables() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 4,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let second_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 501,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 502,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![
+                test_table_email(first_id, mailbox_id, "Window A"),
+                test_table_email(second_id, mailbox_id, "Window B"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 2,
+            total: 4,
+            message_ids: vec![first_id, second_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 2,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 2, 0],
+        };
+
+        let response = rop_query_rows_response(
+            &request,
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(response[6], 0x01);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
+        assert_eq!(table_position(&table), Some(4));
+    }
+
+    #[test]
+    fn query_rows_ignores_incomplete_windowed_content_table_rows() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 2,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let missing_id = Uuid::parse_str("55555555-5555-4555-8555-555555555555").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 801,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![test_table_email(first_id, mailbox_id, "Only stored row")],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 0,
+            total: 2,
+            message_ids: vec![first_id, missing_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let response = rop_query_rows_response(
+            &RopRequest {
+                rop_id: RopId::QueryRows.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![0, 1, 2, 0],
+            },
+            Some(&mut table),
+            &mailboxes,
+            &snapshot.emails(),
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        assert_eq!(table_position(&table), Some(1));
+        assert_response_contains_utf16(&response, "Only stored row");
+
+        let position_response = rop_query_position_response(
+            &RopRequest {
+                rop_id: RopId::QueryPosition.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&table),
+            &mailboxes,
+            &snapshot.emails(),
+            &snapshot,
+            Uuid::nil(),
+        );
+        assert_eq!(position_response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(position_response[6..10].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
+            1
+        );
+    }
+
+    #[test]
+    fn bookmark_seek_preserves_global_position_for_windowed_content_tables() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 4,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let second_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 601,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 602,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![
+                test_table_email(first_id, mailbox_id, "Window A"),
+                test_table_email(second_id, mailbox_id, "Window B"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 2,
+            total: 4,
+            message_ids: vec![first_id, second_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 2,
+        };
+        let create_response = rop_create_bookmark_response(
+            &RopRequest {
+                rop_id: RopId::CreateBookmark.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+        let bookmark_size = u16::from_le_bytes(create_response[6..8].try_into().unwrap()) as usize;
+        let bookmark = create_response[8..8 + bookmark_size].to_vec();
+        let mut seek_payload = Vec::new();
+        seek_payload.extend_from_slice(&(bookmark.len() as u16).to_le_bytes());
+        seek_payload.extend_from_slice(&bookmark);
+        seek_payload.extend_from_slice(&1i32.to_le_bytes());
+        seek_payload.push(1);
+
+        let seek_response = rop_seek_row_bookmark_response(
+            &RopRequest {
+                rop_id: RopId::SeekRowBookmark.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: seek_payload,
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(seek_response[0], RopId::SeekRowBookmark.as_u8());
+        assert_eq!(seek_response[6], 0);
+        assert_eq!(
+            i32::from_le_bytes(seek_response[8..12].try_into().unwrap()),
+            1
+        );
+        assert_eq!(table_position(&table), Some(3));
+    }
+
+    #[test]
+    fn find_row_uses_windowed_content_table_rows_with_global_position() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 4,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let second_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 701,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 702,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![
+                test_table_email(first_id, mailbox_id, "Window A"),
+                test_table_email(second_id, mailbox_id, "Window B"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 2,
+            total: 4,
+            message_ids: vec![first_id, second_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 2,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Window B");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+
+        let response = rop_find_row_response(
+            &RopRequest {
+                rop_id: RopId::FindRow.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload,
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        assert_eq!(table_position(&table), Some(3));
+        assert_response_contains_utf16(&response, "Window B");
+    }
+
+    #[test]
+    fn find_row_beginning_origin_keeps_windowed_global_position() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 4,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let second_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 711,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 712,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![
+                test_table_email(first_id, mailbox_id, "Window A"),
+                test_table_email(second_id, mailbox_id, "Window B"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 2,
+            total: 4,
+            message_ids: vec![first_id, second_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 2,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Window A");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(0);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+
+        let response = rop_find_row_response(
+            &RopRequest {
+                rop_id: RopId::FindRow.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload,
+            },
+            Some(&mut table),
+            &mailboxes,
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        assert_eq!(table_position(&table), Some(2));
+        assert_response_contains_utf16(&response, "Window A");
+    }
+
+    #[test]
+    fn find_row_beginning_origin_falls_back_when_complete_rows_are_loaded() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 4,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let first_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let second_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let third_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let fourth_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        for (index, id) in [first_id, second_id, third_id, fourth_id]
+            .into_iter()
+            .enumerate()
+        {
+            crate::mapi::identity::remember_mapi_identity(
+                id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 820 + index as u64,
+                ),
+            );
+        }
+        let snapshot = MapiMailStoreSnapshot::new(
+            mailboxes.clone(),
+            vec![
+                test_table_email(first_id, mailbox_id, "Earlier A"),
+                test_table_email(second_id, mailbox_id, "Earlier B"),
+                test_table_email(third_id, mailbox_id, "Window A"),
+                test_table_email(fourth_id, mailbox_id, "Window B"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![crate::mapi_store::MapiContentTableWindow {
+            folder_id: INBOX_FOLDER_ID,
+            view_signature: table_view_signature(&[], None),
+            offset: 2,
+            total: 4,
+            message_ids: vec![third_id, fourth_id],
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 2,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Earlier B");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(0);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+
+        let response = rop_find_row_response(
+            &RopRequest {
+                rop_id: RopId::FindRow.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload,
+            },
+            Some(&mut table),
+            &mailboxes,
+            &snapshot.emails(),
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        assert_eq!(table_position(&table), Some(1));
+        assert_response_contains_utf16(&response, "Earlier B");
+    }
+
+    #[test]
+    fn query_position_clamps_stale_cursor_to_current_row_count() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 50,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryPosition.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let response = rop_query_position_response(
+            &request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(u32::from_le_bytes(response[6..10].try_into().unwrap()), 4);
+        assert_eq!(u32::from_le_bytes(response[10..14].try_into().unwrap()), 4);
+    }
+
+    #[test]
+    fn query_rows_clamps_stale_cursor_to_current_row_count() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 50,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(response[6], 0x02);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+        assert_eq!(table_position(&table), Some(4));
+    }
+
+    #[test]
+    fn seek_row_clamps_stale_current_position_to_row_count() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 50,
+        };
+        let response = rop_seek_row_response(
+            &RopRequest {
+                rop_id: RopId::SeekRow.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![1, 0, 0, 0, 0, 1],
+            },
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::SeekRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(i32::from_le_bytes(response[7..11].try_into().unwrap()), 0);
+        assert_eq!(table_position(&table), Some(4));
+    }
+
+    #[test]
+    fn query_position_counts_categorized_content_rows() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let first_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let second_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 901,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 902,
+            ),
+        );
+        let mut first = test_table_email(first_id, mailbox_id, "Alpha");
+        first.categories = vec!["Blue".to_string()];
+        let mut second = test_table_email(second_id, mailbox_id, "Beta");
+        second.categories = vec!["Green".to_string()];
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 2,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let emails = vec![first, second];
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_NAME_KEYWORDS_TAG,
+                order: 0,
+            }],
+            category_count: 1,
+            expanded_count: 1,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        let response = rop_query_position_response(
+            &RopRequest {
+                rop_id: RopId::QueryPosition.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&table),
+            &mailboxes,
+            &emails,
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(u32::from_le_bytes(response[6..10].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(response[10..14].try_into().unwrap()), 4);
     }
 
     #[test]
@@ -7615,6 +8474,75 @@ mod tests {
                 group_name: "Mail".to_string(),
             },
         ])
+    }
+
+    fn test_table_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
+        JmapEmail {
+            id,
+            thread_id: Uuid::from_u128(0x5555),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 1,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![lpe_storage::JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 1,
+                unread: false,
+                flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                categories: Vec::new(),
+                draft: false,
+            }],
+            received_at: "2026-06-09T20:00:00Z".to_string(),
+            sent_at: Some("2026-06-09T20:00:00Z".to_string()),
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: subject.to_string(),
+            preview: String::new(),
+            body_text: String::new(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: Some(format!("<{}@example.test>", id)),
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        }
     }
 
     fn assert_response_contains_utf16(response: &[u8], value: &str) {
