@@ -27740,6 +27740,79 @@ async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeh
 }
 
 #[tokio::test]
+async fn mapi_over_http_virtual_associated_config_write_preserves_default_class() {
+    let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        associated_configs: associated_configs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let config_object_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
+    let xml_stream = br#"<view-state />"#;
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x7C08_0102, xml_stream);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        config_object_id,
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let mut headers = mapi_headers("Execute");
+    headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
+    assert!(response_rops.contains(&0x0A), "{response_rops:02x?}");
+
+    let configs = associated_configs.lock().unwrap();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].account_id, account.account_id);
+    assert_eq!(configs[0].folder_id, crate::mapi::identity::INBOX_FOLDER_ID);
+    assert_eq!(
+        configs[0].message_class,
+        "IPM.Configuration.MessageListSettings"
+    );
+    assert_eq!(configs[0].subject, "IPM.Configuration.MessageListSettings");
+    assert_eq!(
+        configs[0].properties_json["0x7c080102"]["value"],
+        serde_json::Value::String(
+            xml_stream
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 44,

@@ -3908,7 +3908,7 @@ async fn apply_supported_object_property_values<S>(
 where
     S: ExchangeStore,
 {
-    let (canonical_values, custom_values) = split_custom_property_values(values);
+    let (canonical_values, custom_values) = split_object_property_values(object, values);
     if let Some(folder_id) = object.folder_id() {
         if !snapshot
             .folder_access_for_principal(folder_id, principal.account_id)
@@ -4094,7 +4094,7 @@ where
                 else {
                     return Err(anyhow!("MAPI associated config message was not found"));
                 };
-                let mut properties = mapi_properties_from_json(&existing.properties_json);
+                let mut properties = associated_config_mutation_base_properties(&existing);
                 apply_mapi_property_values_to_map(&mut properties, canonical_values);
                 let (message_class, subject) = associated_config_class_and_subject(&properties);
                 store
@@ -4233,6 +4233,28 @@ fn split_custom_property_values(
     values
         .into_iter()
         .partition(|(tag, _)| !is_custom_property_tag(*tag))
+}
+
+fn split_object_property_values(
+    object: &MapiObject,
+    values: Vec<(u32, MapiValue)>,
+) -> (Vec<(u32, MapiValue)>, Vec<(u32, MapiValue)>) {
+    if !matches!(object, MapiObject::AssociatedConfig { .. }) {
+        return split_custom_property_values(values);
+    }
+    values.into_iter().partition(|(tag, _)| {
+        !is_custom_property_tag(*tag) || is_associated_config_durable_property_tag(*tag)
+    })
+}
+
+fn is_associated_config_durable_property_tag(property_tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(property_tag),
+        PID_TAG_ROAMING_DATATYPES
+            | PID_TAG_ROAMING_DICTIONARY
+            | PID_TAG_ROAMING_XML_STREAM
+            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+    )
 }
 
 fn apply_mapi_property_values_to_map(
@@ -4680,7 +4702,7 @@ where
     if existing.folder_id != folder_id {
         return Err(anyhow!("MAPI associated config message was not found"));
     }
-    let mut properties = mapi_properties_from_json(&existing.properties_json);
+    let mut properties = associated_config_mutation_base_properties(&existing);
     let mut deleted = 0usize;
     for tag in property_tags
         .iter()
@@ -4702,6 +4724,24 @@ where
         })
         .await?;
     Ok(deleted)
+}
+
+fn associated_config_mutation_base_properties(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> HashMap<u32, MapiValue> {
+    let mut properties = mapi_properties_from_json(&message.properties_json);
+    for tag in [
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+    ] {
+        properties.entry(tag).or_insert_with(|| {
+            associated_config_property_value(message, tag)
+                .expect("associated config identity property should be available")
+        });
+    }
+    properties
 }
 
 fn custom_property_object_identity(
