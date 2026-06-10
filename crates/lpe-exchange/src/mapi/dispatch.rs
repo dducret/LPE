@@ -4870,11 +4870,10 @@ pub(in crate::mapi) fn debug_role_for_folder_id(folder_id: u64) -> &'static str 
 
 pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'static str {
     match folder_id {
-        COMMON_VIEWS_FOLDER_ID
-        | SCHEDULE_FOLDER_ID
-        | SEARCH_FOLDER_ID
-        | VIEWS_FOLDER_ID
-        | FREEBUSY_DATA_FOLDER_ID => "",
+        COMMON_VIEWS_FOLDER_ID | SCHEDULE_FOLDER_ID | VIEWS_FOLDER_ID | FREEBUSY_DATA_FOLDER_ID => {
+            ""
+        }
+        SEARCH_FOLDER_ID => "IPF.Note",
         CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
         TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
@@ -8716,6 +8715,7 @@ fn is_rca_special_contract_folder(folder_id: u64) -> bool {
             | SUGGESTED_CONTACTS_FOLDER_ID
             | QUICK_CONTACTS_FOLDER_ID
             | IM_CONTACT_LIST_FOLDER_ID
+            | SEARCH_FOLDER_ID
             | CONTACTS_SEARCH_FOLDER_ID
             | TODO_SEARCH_FOLDER_ID
             | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
@@ -8733,6 +8733,7 @@ fn expected_special_folder_container_class(folder_id: u64) -> &'static str {
         CALENDAR_FOLDER_ID => "IPF.Appointment",
         JOURNAL_FOLDER_ID => "IPF.Journal",
         NOTES_FOLDER_ID => "IPF.StickyNote",
+        SEARCH_FOLDER_ID => "IPF.Note",
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
         RSS_FEEDS_FOLDER_ID => "IPF.Note.OutlookHomepage",
@@ -8787,6 +8788,7 @@ fn expected_special_folder_item_message_class(folder_id: u64) -> &'static str {
         | CONTACTS_SEARCH_FOLDER_ID => "IPM.Contact",
         JOURNAL_FOLDER_ID => "IPM.Activity",
         NOTES_FOLDER_ID => "IPM.StickyNote",
+        SEARCH_FOLDER_ID => "IPM.Note",
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPM.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPM.Configuration",
@@ -20032,6 +20034,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn folder_properties_for_open_projects_search_folder_mail_class() {
+        let principal = test_principal();
+
+        let properties = folder_properties_for_open_from_mailboxes(
+            &principal,
+            SEARCH_FOLDER_ID,
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_TYPE),
+            Some(&MapiValue::U32(FOLDER_SEARCH))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTAINER_CLASS_W),
+            Some(&MapiValue::String("IPF.Note".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(&MapiValue::String("IPM.Note".to_string()))
+        );
+    }
+
     fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
         lpe_storage::JmapEmailMailboxState {
             mailbox_id,
@@ -20309,6 +20336,18 @@ mod tests {
         assert_eq!(
             debug_container_class_for_folder_id(RSS_FEEDS_FOLDER_ID),
             "IPF.Note.OutlookHomepage"
+        );
+        assert_eq!(
+            debug_container_class_for_folder_id(SEARCH_FOLDER_ID),
+            "IPF.Note"
+        );
+        assert_eq!(
+            expected_special_folder_container_class(SEARCH_FOLDER_ID),
+            "IPF.Note"
+        );
+        assert_eq!(
+            expected_special_folder_item_message_class(SEARCH_FOLDER_ID),
+            "IPM.Note"
         );
     }
 

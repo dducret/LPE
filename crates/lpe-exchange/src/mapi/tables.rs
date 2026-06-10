@@ -4815,7 +4815,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         TRASH_FOLDER_ID => ("Deleted Items", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         COMMON_VIEWS_FOLDER_ID => ("Common Views", ROOT_FOLDER_ID, "", false),
         SCHEDULE_FOLDER_ID => ("Schedule", ROOT_FOLDER_ID, "", false),
-        SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "", false),
+        SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "IPF.Note", false),
         VIEWS_FOLDER_ID => ("Personal Views", ROOT_FOLDER_ID, "", false),
         SHORTCUTS_FOLDER_ID => ("Shortcuts", ROOT_FOLDER_ID, "IPF.ShortcutFolder", false),
         DRAFTS_FOLDER_ID => ("Drafts", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
@@ -4917,7 +4917,8 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
 fn special_folder_type(folder_id: u64) -> u32 {
     match folder_id {
         ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID => FOLDER_ROOT,
-        CONTACTS_SEARCH_FOLDER_ID
+        SEARCH_FOLDER_ID
+        | CONTACTS_SEARCH_FOLDER_ID
         | REMINDERS_FOLDER_ID
         | TRACKED_MAIL_PROCESSING_FOLDER_ID
         | TODO_SEARCH_FOLDER_ID => FOLDER_SEARCH,
@@ -6634,7 +6635,7 @@ mod tests {
             serialize_special_folder_row(SEARCH_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
         assert_eq!(
             u32::from_le_bytes(finder_root_row.try_into().unwrap()),
-            FOLDER_GENERIC
+            FOLDER_SEARCH
         );
 
         for folder_id in [
