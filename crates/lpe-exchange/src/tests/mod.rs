@@ -296,6 +296,61 @@ async fn mapi_associated_config_storage_is_account_scoped() {
 }
 
 #[tokio::test]
+async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+
+    let first = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 127,
+            group_header_id: None,
+            group_name: "Mail".to_string(),
+        })
+        .await
+        .unwrap();
+    let second = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 8,
+            section: 1,
+            ordinal: 191,
+            group_header_id: None,
+            group_name: "Mail".to_string(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.flags, 8);
+    assert_eq!(second.ordinal, 191);
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_navigation_shortcuts(fixture.account_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_default_calendar_folder_identity_is_persisted() {
     let account = FakeStore::account();
     let store = FakeStore {

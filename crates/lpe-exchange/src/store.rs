@@ -5608,7 +5608,36 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
-            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let id = match input.id {
+                Some(id) => id,
+                None => sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    SELECT id
+                    FROM mapi_navigation_shortcuts
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND subject = $3
+                      AND target_folder_id IS NOT DISTINCT FROM $4
+                      AND shortcut_type = $5
+                      AND section = $6
+                      AND group_header_id IS NOT DISTINCT FROM $7
+                      AND group_name = $8
+                    ORDER BY updated_at DESC, id
+                    LIMIT 1
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(input.account_id)
+                .bind(&input.subject)
+                .bind(input.target_folder_id.map(|value| value as i64))
+                .bind(input.shortcut_type as i64)
+                .bind(input.section as i64)
+                .bind(input.group_header_id)
+                .bind(&input.group_name)
+                .fetch_optional(self.pool())
+                .await?
+                .unwrap_or_else(Uuid::new_v4),
+            };
             let row = sqlx::query(
                 r#"
                 INSERT INTO mapi_navigation_shortcuts (
