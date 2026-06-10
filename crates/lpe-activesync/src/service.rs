@@ -9,7 +9,7 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     calendar_attendee_labels, serialize_calendar_participants_metadata, ActiveSyncItemState,
     AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    CanonicalChangeCategory, CanonicalChangeListener, JmapEmailFollowupUpdate,
+    CanonicalChangeCategory, CanonicalChangeListener, ContactNameFields, JmapEmailFollowupUpdate,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, SubmitMessageInput, SubmittedRecipientInput,
     UpsertClientContactInput, UpsertClientEventInput,
 };
@@ -3536,6 +3536,15 @@ fn parse_contact_input(
     let file_as = field_text(application_data, "FileAs");
     let first_name = field_text(application_data, "FirstName").unwrap_or_default();
     let last_name = field_text(application_data, "LastName").unwrap_or_default();
+    let mut structured_name = existing
+        .map(|contact| contact.structured_name.clone())
+        .unwrap_or_else(ContactNameFields::default);
+    if !first_name.is_empty() {
+        structured_name.given = first_name.clone();
+    }
+    if !last_name.is_empty() {
+        structured_name.family = last_name.clone();
+    }
     let derived_name = format!("{first_name} {last_name}").trim().to_string();
     let name = file_as
         .or_else(|| (!derived_name.is_empty()).then_some(derived_name))
@@ -3552,21 +3561,32 @@ fn parse_contact_input(
     let notes = body_text(application_data)
         .or_else(|| existing.map(|contact| contact.notes.clone()))
         .unwrap_or_default();
+    let company_name = field_text(application_data, "CompanyName");
+    let job_title =
+        field_text(application_data, "JobTitle").or_else(|| field_text(application_data, "Title"));
 
     Ok(UpsertClientContactInput {
         id,
         account_id,
         name,
-        role: field_text(application_data, "JobTitle")
-            .or_else(|| field_text(application_data, "Title"))
+        role: job_title
+            .clone()
             .or_else(|| existing.map(|contact| contact.role.clone()))
             .unwrap_or_default(),
         email,
         phone,
-        team: field_text(application_data, "CompanyName")
+        team: company_name
+            .clone()
             .or_else(|| existing.map(|contact| contact.team.clone()))
             .unwrap_or_default(),
         notes,
+        structured_name,
+        organization_name: company_name
+            .or_else(|| existing.map(|contact| contact.organization_name.clone()))
+            .unwrap_or_default(),
+        job_title: job_title
+            .or_else(|| existing.map(|contact| contact.job_title.clone()))
+            .unwrap_or_default(),
         ..Default::default()
     })
 }

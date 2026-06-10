@@ -15737,7 +15737,8 @@ where
                     .filter(|object| object.associated && !fai_scope_requested)
                     .count();
                 let checkpoint_store_allowed = suppressed_normal_sync_object_count == 0
-                    && suppressed_fai_sync_object_count == 0;
+                    && (suppressed_fai_sync_object_count == 0
+                        || (normal_scope_requested && !fai_scope_requested));
                 let checkpoint_skip_reason = if checkpoint_store_allowed {
                     ""
                 } else {

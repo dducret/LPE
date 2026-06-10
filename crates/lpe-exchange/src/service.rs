@@ -26,8 +26,8 @@ use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
     ClientReminder, ClientTask, CollaborationCollection, CollaborationGrant,
-    CollaborationResourceKind, CollaborationRights, CreatePublicFolderInput, JmapEmail,
-    JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
+    CollaborationResourceKind, CollaborationRights, ContactNameFields, CreatePublicFolderInput,
+    JmapEmail, JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxRule, ManagedRetentionFolderCreateInput,
     PublicFolder, PublicFolderItem, ReminderQuery, Storage, SubmitMessageInput,
     SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
@@ -6784,8 +6784,9 @@ fn parse_create_contact_input(
         .or_else(|| element_text(contact, "EmailAddress"))
         .unwrap_or_else(|| principal.email.clone());
     let given_name = element_text(contact, "GivenName").unwrap_or_default();
+    let middle_name = element_text(contact, "MiddleName").unwrap_or_default();
     let surname = element_text(contact, "Surname").unwrap_or_default();
-    let fallback_name = [given_name.as_str(), surname.as_str()]
+    let fallback_name = [given_name.as_str(), middle_name.as_str(), surname.as_str()]
         .into_iter()
         .filter(|value| !value.trim().is_empty())
         .collect::<Vec<_>>()
@@ -6808,13 +6809,28 @@ fn parse_create_contact_input(
         account_id: principal.account_id,
         name,
         role: element_text(contact, "JobTitle").unwrap_or_default(),
-        email,
+        email: email.clone(),
         phone: contact_entry_value(contact, "PhoneNumbers", "MobilePhone")
             .or_else(|| contact_entry_value(contact, "PhoneNumbers", "BusinessPhone"))
             .or_else(|| contact_entry_value(contact, "PhoneNumbers", "HomePhone"))
             .unwrap_or_default(),
-        team: element_text(contact, "CompanyName").unwrap_or_default(),
+        team: element_text(contact, "Department").unwrap_or_default(),
         notes,
+        structured_name: ContactNameFields {
+            prefix: element_text(contact, "Title").unwrap_or_default(),
+            given: given_name,
+            middle: middle_name,
+            family: surname,
+            suffix: element_text(contact, "Generation").unwrap_or_default(),
+            nickname: element_text(contact, "Nickname").unwrap_or_default(),
+            phonetic_given: String::new(),
+            phonetic_family: String::new(),
+        },
+        emails_json: Some(ews_contact_emails_json(contact, &email)),
+        phones_json: Some(ews_contact_phones_json(contact)),
+        urls_json: Some(ews_contact_urls_json(contact)),
+        organization_name: element_text(contact, "CompanyName").unwrap_or_default(),
+        job_title: element_text(contact, "JobTitle").unwrap_or_default(),
         ..Default::default()
     })
 }
@@ -6826,24 +6842,59 @@ fn parse_update_contact_input(
 ) -> UpsertClientContactInput {
     let contact = element_content(request, "Contact").unwrap_or(request);
     let given_name = element_text(contact, "GivenName");
+    let middle_name = element_text(contact, "MiddleName");
     let surname = element_text(contact, "Surname");
-    let existing_given = first_name(&existing.name);
-    let existing_surname = last_name(&existing.name);
-    let name_from_parts = (given_name.is_some() || surname.is_some()).then(|| {
-        [
-            given_name.as_deref().unwrap_or(&existing_given),
-            surname.as_deref().unwrap_or(&existing_surname),
-        ]
-        .into_iter()
-        .filter(|value| !value.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-    });
+    let existing_given = contact_given_name(existing);
+    let existing_middle = existing.structured_name.middle.clone();
+    let existing_surname = contact_family_name(existing);
+    let name_from_parts = (given_name.is_some() || middle_name.is_some() || surname.is_some())
+        .then(|| {
+            [
+                given_name.as_deref().unwrap_or(&existing_given),
+                middle_name.as_deref().unwrap_or(&existing_middle),
+                surname.as_deref().unwrap_or(&existing_surname),
+            ]
+            .into_iter()
+            .filter(|value| !value.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+        });
     let name = element_text(contact, "DisplayName")
         .or_else(|| element_text(contact, "FileAs"))
         .or(name_from_parts)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| existing.name.clone());
+    let mut structured_name = existing.structured_name.clone();
+    if let Some(value) = given_name {
+        structured_name.given = value;
+    }
+    if let Some(value) = middle_name {
+        structured_name.middle = value;
+    }
+    if let Some(value) = surname {
+        structured_name.family = value;
+    }
+    structured_name.prefix = deleted_or_updated_text(
+        request,
+        contact,
+        "contacts:Title",
+        "Title",
+        &structured_name.prefix,
+    );
+    structured_name.suffix = deleted_or_updated_text(
+        request,
+        contact,
+        "contacts:Generation",
+        "Generation",
+        &structured_name.suffix,
+    );
+    structured_name.nickname = deleted_or_updated_text(
+        request,
+        contact,
+        "contacts:Nickname",
+        "Nickname",
+        &structured_name.nickname,
+    );
     let email = contact_entry_value(contact, "EmailAddresses", "EmailAddress1")
         .or_else(|| element_text(contact, "EmailAddress"))
         .filter(|value| !value.trim().is_empty())
@@ -6871,9 +6922,9 @@ fn parse_update_contact_input(
             contact,
             "contacts:JobTitle",
             "JobTitle",
-            &existing.role,
+            &contact_job_title(existing),
         ),
-        email,
+        email: email.clone(),
         phone: deleted_or_updated_contact_entry(
             request,
             contact,
@@ -6889,12 +6940,192 @@ fn parse_update_contact_input(
         team: deleted_or_updated_text(
             request,
             contact,
-            "contacts:CompanyName",
-            "CompanyName",
+            "contacts:Department",
+            "Department",
             &existing.team,
         ),
         notes,
+        structured_name,
+        emails_json: Some(ews_updated_contact_emails_json(
+            request, contact, existing, &email,
+        )),
+        phones_json: Some(ews_updated_contact_phones_json(request, contact, existing)),
+        urls_json: Some(ews_updated_contact_urls_json(request, contact, existing)),
+        organization_name: deleted_or_updated_text(
+            request,
+            contact,
+            "contacts:CompanyName",
+            "CompanyName",
+            &contact_organization_name(existing),
+        ),
+        job_title: deleted_or_updated_text(
+            request,
+            contact,
+            "contacts:JobTitle",
+            "JobTitle",
+            &contact_job_title(existing),
+        ),
         ..Default::default()
+    }
+}
+
+fn ews_contact_emails_json(contact: &str, primary: &str) -> serde_json::Value {
+    let mut rows = Vec::new();
+    push_json_contact_value(&mut rows, "email", "work", Some(primary));
+    push_json_contact_value(
+        &mut rows,
+        "email",
+        "email2",
+        contact_entry_value(contact, "EmailAddresses", "EmailAddress2").as_deref(),
+    );
+    push_json_contact_value(
+        &mut rows,
+        "email",
+        "email3",
+        contact_entry_value(contact, "EmailAddresses", "EmailAddress3").as_deref(),
+    );
+    serde_json::Value::Array(rows)
+}
+
+fn ews_contact_phones_json(contact: &str) -> serde_json::Value {
+    let mut rows = Vec::new();
+    for (key, label) in [
+        ("MobilePhone", "mobile"),
+        ("BusinessPhone", "work"),
+        ("BusinessPhone2", "work2"),
+        ("HomePhone", "home"),
+        ("HomePhone2", "home2"),
+    ] {
+        push_json_contact_value(
+            &mut rows,
+            "phone",
+            label,
+            contact_entry_value(contact, "PhoneNumbers", key).as_deref(),
+        );
+    }
+    serde_json::Value::Array(rows)
+}
+
+fn ews_contact_urls_json(contact: &str) -> serde_json::Value {
+    let mut rows = Vec::new();
+    push_json_contact_value(
+        &mut rows,
+        "url",
+        "work",
+        element_text(contact, "BusinessHomePage").as_deref(),
+    );
+    push_json_contact_value(
+        &mut rows,
+        "url",
+        "home",
+        element_text(contact, "PersonalHomePage").as_deref(),
+    );
+    serde_json::Value::Array(rows)
+}
+
+fn ews_updated_contact_emails_json(
+    request: &str,
+    contact: &str,
+    existing: &AccessibleContact,
+    primary: &str,
+) -> serde_json::Value {
+    if field_deleted(request, "contacts:EmailAddress:EmailAddress2")
+        || field_deleted(request, "contacts:EmailAddress:EmailAddress3")
+        || contact.contains("EmailAddresses")
+    {
+        ews_contact_emails_json(contact, primary)
+    } else {
+        update_first_json_contact_value(&existing.emails_json, "email", primary)
+    }
+}
+
+fn ews_updated_contact_phones_json(
+    request: &str,
+    contact: &str,
+    existing: &AccessibleContact,
+) -> serde_json::Value {
+    if request.contains("contacts:PhoneNumber:") || contact.contains("PhoneNumbers") {
+        ews_contact_phones_json(contact)
+    } else {
+        existing.phones_json.clone()
+    }
+}
+
+fn ews_updated_contact_urls_json(
+    request: &str,
+    contact: &str,
+    existing: &AccessibleContact,
+) -> serde_json::Value {
+    if field_deleted(request, "contacts:BusinessHomePage")
+        || field_deleted(request, "contacts:PersonalHomePage")
+        || element_text(contact, "BusinessHomePage").is_some()
+        || element_text(contact, "PersonalHomePage").is_some()
+    {
+        ews_contact_urls_json(contact)
+    } else {
+        existing.urls_json.clone()
+    }
+}
+
+fn push_json_contact_value(
+    rows: &mut Vec<serde_json::Value>,
+    key: &str,
+    label: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        rows.push(serde_json::json!({ key: value, "label": label }));
+    }
+}
+
+fn update_first_json_contact_value(
+    existing: &serde_json::Value,
+    key: &str,
+    value: &str,
+) -> serde_json::Value {
+    let mut rows = existing.as_array().cloned().unwrap_or_default();
+    if let Some(row) = rows.first_mut() {
+        if let Some(object) = row.as_object_mut() {
+            object.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+    } else {
+        push_json_contact_value(&mut rows, key, "work", Some(value));
+    }
+    serde_json::Value::Array(rows)
+}
+
+fn contact_given_name(contact: &AccessibleContact) -> String {
+    if contact.structured_name.given.trim().is_empty() {
+        first_name(&contact.name)
+    } else {
+        contact.structured_name.given.clone()
+    }
+}
+
+fn contact_family_name(contact: &AccessibleContact) -> String {
+    if contact.structured_name.family.trim().is_empty() {
+        last_name(&contact.name)
+    } else {
+        contact.structured_name.family.clone()
+    }
+}
+
+fn contact_organization_name(contact: &AccessibleContact) -> String {
+    if contact.organization_name.trim().is_empty() {
+        contact.team.clone()
+    } else {
+        contact.organization_name.clone()
+    }
+}
+
+fn contact_job_title(contact: &AccessibleContact) -> String {
+    if contact.job_title.trim().is_empty() {
+        contact.role.clone()
+    } else {
+        contact.job_title.clone()
     }
 }
 
@@ -12373,6 +12604,24 @@ fn contact_item_xml(contact: &AccessibleContact) -> String {
 }
 
 fn contact_item_xml_with_change_key(contact: &AccessibleContact, change_key: &str) -> String {
+    let email_entries = ews_contact_email_entries_xml(contact);
+    let phone_entries = ews_contact_phone_entries_xml(contact);
+    let business_home_page = ews_contact_url_by_label(contact, &["work", "business"])
+        .map(|value| {
+            format!(
+                "<t:BusinessHomePage>{}</t:BusinessHomePage>",
+                escape_xml(&value)
+            )
+        })
+        .unwrap_or_default();
+    let personal_home_page = ews_contact_url_by_label(contact, &["home", "personal"])
+        .map(|value| {
+            format!(
+                "<t:PersonalHomePage>{}</t:PersonalHomePage>",
+                escape_xml(&value)
+            )
+        })
+        .unwrap_or_default();
     format!(
         concat!(
             "<t:Contact>",
@@ -12380,12 +12629,20 @@ fn contact_item_xml_with_change_key(contact: &AccessibleContact, change_key: &st
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{name}</t:Subject>",
             "<t:DisplayName>{name}</t:DisplayName>",
+            "<t:FileAs>{name}</t:FileAs>",
+            "<t:Title>{prefix}</t:Title>",
             "<t:GivenName>{given}</t:GivenName>",
+            "<t:MiddleName>{middle}</t:MiddleName>",
             "<t:Surname>{surname}</t:Surname>",
+            "<t:Generation>{suffix}</t:Generation>",
+            "<t:Nickname>{nickname}</t:Nickname>",
             "<t:JobTitle>{role}</t:JobTitle>",
-            "<t:CompanyName>{team}</t:CompanyName>",
-            "<t:EmailAddresses><t:Entry Key=\"EmailAddress1\">{email}</t:Entry></t:EmailAddresses>",
-            "<t:PhoneNumbers><t:Entry Key=\"MobilePhone\">{phone}</t:Entry></t:PhoneNumbers>",
+            "<t:Department>{team}</t:Department>",
+            "<t:CompanyName>{company}</t:CompanyName>",
+            "<t:EmailAddresses>{email_entries}</t:EmailAddresses>",
+            "<t:PhoneNumbers>{phone_entries}</t:PhoneNumbers>",
+            "{business_home_page}",
+            "{personal_home_page}",
             "<t:Body BodyType=\"Text\">{notes}</t:Body>",
             "</t:Contact>"
         ),
@@ -12393,14 +12650,111 @@ fn contact_item_xml_with_change_key(contact: &AccessibleContact, change_key: &st
         change_key = escape_xml(change_key),
         folder_id = escape_xml(&contact.collection_id),
         name = escape_xml(&contact.name),
-        given = escape_xml(&first_name(&contact.name)),
-        surname = escape_xml(&last_name(&contact.name)),
-        role = escape_xml(&contact.role),
+        prefix = escape_xml(&contact.structured_name.prefix),
+        given = escape_xml(&contact_given_name(contact)),
+        middle = escape_xml(&contact.structured_name.middle),
+        surname = escape_xml(&contact_family_name(contact)),
+        suffix = escape_xml(&contact.structured_name.suffix),
+        nickname = escape_xml(&contact.structured_name.nickname),
+        role = escape_xml(&contact_job_title(contact)),
         team = escape_xml(&contact.team),
-        email = escape_xml(&contact.email),
-        phone = escape_xml(&contact.phone),
+        company = escape_xml(&contact_organization_name(contact)),
+        email_entries = email_entries,
+        phone_entries = phone_entries,
+        business_home_page = business_home_page,
+        personal_home_page = personal_home_page,
         notes = escape_xml(&contact.notes),
     )
+}
+
+fn ews_contact_email_entries_xml(contact: &AccessibleContact) -> String {
+    let mut entries = contact
+        .emails_json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            row.get("email")
+                .or_else(|| row.get("address"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .take(3)
+        .enumerate()
+        .map(|(index, value)| {
+            format!(
+                "<t:Entry Key=\"EmailAddress{}\">{}</t:Entry>",
+                index + 1,
+                escape_xml(value)
+            )
+        })
+        .collect::<Vec<_>>();
+    if entries.is_empty() && !contact.email.trim().is_empty() {
+        entries.push(format!(
+            "<t:Entry Key=\"EmailAddress1\">{}</t:Entry>",
+            escape_xml(&contact.email)
+        ));
+    }
+    entries.join("")
+}
+
+fn ews_contact_phone_entries_xml(contact: &AccessibleContact) -> String {
+    let labels = [
+        ("mobile", "MobilePhone"),
+        ("cell", "MobilePhone"),
+        ("work", "BusinessPhone"),
+        ("business", "BusinessPhone"),
+        ("work2", "BusinessPhone2"),
+        ("business2", "BusinessPhone2"),
+        ("home", "HomePhone"),
+        ("home2", "HomePhone2"),
+    ];
+    let mut entries = Vec::new();
+    for (label, key) in labels {
+        if let Some(value) = ews_contact_phone_by_label(contact, &[label]) {
+            entries.push(format!(
+                "<t:Entry Key=\"{key}\">{}</t:Entry>",
+                escape_xml(&value)
+            ));
+        }
+    }
+    if entries.is_empty() && !contact.phone.trim().is_empty() {
+        entries.push(format!(
+            "<t:Entry Key=\"MobilePhone\">{}</t:Entry>",
+            escape_xml(&contact.phone)
+        ));
+    }
+    entries.join("")
+}
+
+fn ews_contact_phone_by_label(contact: &AccessibleContact, labels: &[&str]) -> Option<String> {
+    contact_labeled_string(&contact.phones_json, "phone", labels)
+}
+
+fn ews_contact_url_by_label(contact: &AccessibleContact, labels: &[&str]) -> Option<String> {
+    contact_labeled_string(&contact.urls_json, "url", labels)
+        .or_else(|| contact_labeled_string(&contact.urls_json, "href", labels))
+}
+
+fn contact_labeled_string(value: &serde_json::Value, key: &str, labels: &[&str]) -> Option<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|row| {
+            let label = row
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            labels
+                .iter()
+                .any(|expected| label.eq_ignore_ascii_case(expected))
+        })
+        .and_then(|row| row.get(key).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {

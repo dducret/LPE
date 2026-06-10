@@ -1025,6 +1025,23 @@ impl ActiveSyncStore for FakeStore {
             phone: input.phone,
             team: input.team,
             notes: input.notes,
+            structured_name: input.structured_name,
+            emails_json: input
+                .emails_json
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            phones_json: input
+                .phones_json
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            addresses_json: input
+                .addresses_json
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            urls_json: input
+                .urls_json
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            organization_name: input.organization_name,
+            job_title: input.job_title,
+            raw_vcard: input.raw_vcard,
+            source: input.source,
         };
         let mut contacts = self.contacts.lock().unwrap();
         if let Some(existing) = contacts.iter_mut().find(|entry| entry.id == contact.id) {
@@ -5940,6 +5957,7 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
             phone: "+49 30 1234".to_string(),
             team: "LPE".to_string(),
             notes: "Prefers mobile mail".to_string(),
+            ..Default::default()
         }])),
         events: Arc::new(Mutex::new(vec![ClientEvent {
             id: event_id,

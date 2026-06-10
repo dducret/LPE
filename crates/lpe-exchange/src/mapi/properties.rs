@@ -466,13 +466,22 @@ pub(in crate::mapi) const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
 pub(in crate::mapi) const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 pub(in crate::mapi) const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
+pub(in crate::mapi) const PID_TAG_GENERATION_W: u32 = 0x3A05_001F;
 pub(in crate::mapi) const PID_TAG_GIVEN_NAME_W: u32 = 0x3A06_001F;
 pub(in crate::mapi) const PID_TAG_BUSINESS_TELEPHONE_NUMBER_W: u32 = 0x3A08_001F;
 pub(in crate::mapi) const PID_TAG_HOME_TELEPHONE_NUMBER_W: u32 = 0x3A09_001F;
 pub(in crate::mapi) const PID_TAG_SURNAME_W: u32 = 0x3A11_001F;
 pub(in crate::mapi) const PID_TAG_COMPANY_NAME_W: u32 = 0x3A16_001F;
 pub(in crate::mapi) const PID_TAG_TITLE_W: u32 = 0x3A17_001F;
+pub(in crate::mapi) const PID_TAG_DEPARTMENT_NAME_W: u32 = 0x3A18_001F;
+pub(in crate::mapi) const PID_TAG_PRIMARY_TELEPHONE_NUMBER_W: u32 = 0x3A1A_001F;
+pub(in crate::mapi) const PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W: u32 = 0x3A1B_101F;
 pub(in crate::mapi) const PID_TAG_MOBILE_TELEPHONE_NUMBER_W: u32 = 0x3A1C_001F;
+pub(in crate::mapi) const PID_TAG_MIDDLE_NAME_W: u32 = 0x3A44_001F;
+pub(in crate::mapi) const PID_TAG_DISPLAY_NAME_PREFIX_W: u32 = 0x3A45_001F;
+pub(in crate::mapi) const PID_TAG_NICKNAME_W: u32 = 0x3A4F_001F;
+pub(in crate::mapi) const PID_TAG_PERSONAL_HOME_PAGE_W: u32 = 0x3A50_001F;
+pub(in crate::mapi) const PID_TAG_BUSINESS_HOME_PAGE_W: u32 = 0x3A51_001F;
 pub(in crate::mapi) const PID_TAG_START_DATE: u32 = 0x0060_0040;
 pub(in crate::mapi) const PID_TAG_END_DATE: u32 = 0x0061_0040;
 pub(in crate::mapi) const PID_TAG_LOCATION_W: u32 = 0x3FFB_001F;
@@ -2371,25 +2380,44 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(contact.name.clone()))
         }
-        PID_TAG_GIVEN_NAME_W => contact
-            .name
-            .split_whitespace()
-            .next()
-            .map(|value| MapiValue::String(value.to_string())),
-        PID_TAG_SURNAME_W => contact
-            .name
-            .split_whitespace()
-            .last()
-            .filter(|value| *value != contact.name)
-            .map(|value| MapiValue::String(value.to_string())),
+        PID_TAG_DISPLAY_NAME_PREFIX_W => {
+            Some(MapiValue::String(contact.structured_name.prefix.clone()))
+        }
+        PID_TAG_GIVEN_NAME_W => Some(MapiValue::String(contact_given_name(contact))),
+        PID_TAG_MIDDLE_NAME_W => Some(MapiValue::String(contact.structured_name.middle.clone())),
+        PID_TAG_SURNAME_W => Some(MapiValue::String(contact_family_name(contact))),
+        PID_TAG_GENERATION_W => Some(MapiValue::String(contact.structured_name.suffix.clone())),
+        PID_TAG_NICKNAME_W => Some(MapiValue::String(contact.structured_name.nickname.clone())),
         PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
             Some(MapiValue::String(contact.email.clone()))
         }
-        PID_TAG_MOBILE_TELEPHONE_NUMBER_W
-        | PID_TAG_BUSINESS_TELEPHONE_NUMBER_W
-        | PID_TAG_HOME_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact.phone.clone())),
-        PID_TAG_COMPANY_NAME_W => Some(MapiValue::String(contact.team.clone())),
-        PID_TAG_TITLE_W => Some(MapiValue::String(contact.role.clone())),
+        PID_TAG_MOBILE_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact_phone_by_label(
+            contact,
+            &["mobile", "cell"],
+        ))),
+        PID_TAG_BUSINESS_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact_phone_by_label(
+            contact,
+            &["work", "business"],
+        ))),
+        PID_TAG_HOME_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact_phone_by_label(
+            contact,
+            &["home"],
+        ))),
+        PID_TAG_PRIMARY_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact.phone.clone())),
+        PID_TAG_BUSINESS2_TELEPHONE_NUMBERS_W => Some(MapiValue::MultiString(
+            contact_phone_values_by_label(contact, &["work2", "business2"]),
+        )),
+        PID_TAG_COMPANY_NAME_W => Some(MapiValue::String(contact_organization_name(contact))),
+        PID_TAG_DEPARTMENT_NAME_W => Some(MapiValue::String(contact.team.clone())),
+        PID_TAG_TITLE_W => Some(MapiValue::String(contact_job_title(contact))),
+        PID_TAG_PERSONAL_HOME_PAGE_W => Some(MapiValue::String(contact_url_by_label(
+            contact,
+            &["home", "personal"],
+        ))),
+        PID_TAG_BUSINESS_HOME_PAGE_W => Some(MapiValue::String(contact_url_by_label(
+            contact,
+            &["work", "business"],
+        ))),
         PID_TAG_BODY_W => Some(MapiValue::String(contact.notes.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Contact".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
@@ -2414,6 +2442,95 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+pub(in crate::mapi) fn contact_given_name(contact: &AccessibleContact) -> String {
+    if !contact.structured_name.given.trim().is_empty() {
+        return contact.structured_name.given.clone();
+    }
+    contact
+        .name
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+pub(in crate::mapi) fn contact_family_name(contact: &AccessibleContact) -> String {
+    if !contact.structured_name.family.trim().is_empty() {
+        return contact.structured_name.family.clone();
+    }
+    contact
+        .name
+        .split_whitespace()
+        .last()
+        .filter(|value| *value != contact.name)
+        .unwrap_or_default()
+        .to_string()
+}
+
+pub(in crate::mapi) fn contact_organization_name(contact: &AccessibleContact) -> String {
+    if contact.organization_name.trim().is_empty() {
+        contact.team.clone()
+    } else {
+        contact.organization_name.clone()
+    }
+}
+
+pub(in crate::mapi) fn contact_job_title(contact: &AccessibleContact) -> String {
+    if contact.job_title.trim().is_empty() {
+        contact.role.clone()
+    } else {
+        contact.job_title.clone()
+    }
+}
+
+fn contact_phone_by_label(contact: &AccessibleContact, labels: &[&str]) -> String {
+    contact_phone_values_by_label(contact, labels)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| contact.phone.clone())
+}
+
+fn contact_phone_values_by_label(contact: &AccessibleContact, labels: &[&str]) -> Vec<String> {
+    contact_labeled_json_values(&contact.phones_json, "phone", labels)
+}
+
+fn contact_url_by_label(contact: &AccessibleContact, labels: &[&str]) -> String {
+    contact_labeled_json_values(&contact.urls_json, "url", labels)
+        .into_iter()
+        .next()
+        .or_else(|| {
+            contact_labeled_json_values(&contact.urls_json, "href", labels)
+                .into_iter()
+                .next()
+        })
+        .unwrap_or_default()
+}
+
+fn contact_labeled_json_values(
+    value: &serde_json::Value,
+    key: &str,
+    labels: &[&str],
+) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            let label = item
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            labels
+                .iter()
+                .any(|expected| label.eq_ignore_ascii_case(expected))
+        })
+        .filter_map(|item| item.get(key).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 pub(in crate::mapi) fn event_property_value(
@@ -4085,6 +4202,27 @@ pub(in crate::mapi) fn contact_input_from_mapi(
     existing: &AccessibleContact,
     properties: &HashMap<u32, MapiValue>,
 ) -> UpsertClientContactInput {
+    let mut structured_name = existing.structured_name.clone();
+    if let Some(value) =
+        optional_pending_text_property(properties, &[PID_TAG_DISPLAY_NAME_PREFIX_W])
+    {
+        structured_name.prefix = value;
+    }
+    if let Some(value) = optional_pending_text_property(properties, &[PID_TAG_GIVEN_NAME_W]) {
+        structured_name.given = value;
+    }
+    if let Some(value) = optional_pending_text_property(properties, &[PID_TAG_MIDDLE_NAME_W]) {
+        structured_name.middle = value;
+    }
+    if let Some(value) = optional_pending_text_property(properties, &[PID_TAG_SURNAME_W]) {
+        structured_name.family = value;
+    }
+    if let Some(value) = optional_pending_text_property(properties, &[PID_TAG_GENERATION_W]) {
+        structured_name.suffix = value;
+    }
+    if let Some(value) = optional_pending_text_property(properties, &[PID_TAG_NICKNAME_W]) {
+        structured_name.nickname = value;
+    }
     let name = optional_pending_text_property(
         properties,
         &[
@@ -4094,41 +4232,179 @@ pub(in crate::mapi) fn contact_input_from_mapi(
         ],
     )
     .or_else(|| {
-        let given = optional_pending_text_property(properties, &[PID_TAG_GIVEN_NAME_W]);
-        let surname = optional_pending_text_property(properties, &[PID_TAG_SURNAME_W]);
-        match (given, surname) {
-            (Some(given), Some(surname)) => Some(format!("{given} {surname}")),
-            (Some(given), None) => Some(given),
-            (None, Some(surname)) => Some(surname),
-            (None, None) => None,
-        }
+        (!structured_name.given.trim().is_empty() || !structured_name.family.trim().is_empty())
+            .then(|| contact_display_name_from_structured(&structured_name))
+            .filter(|value| !value.trim().is_empty())
     })
     .unwrap_or_else(|| existing.name.clone());
+    let email = optional_pending_text_property(
+        properties,
+        &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W],
+    )
+    .unwrap_or_else(|| existing.email.clone());
+    let mobile_phone =
+        optional_pending_text_property(properties, &[PID_TAG_MOBILE_TELEPHONE_NUMBER_W]);
+    let business_phone =
+        optional_pending_text_property(properties, &[PID_TAG_BUSINESS_TELEPHONE_NUMBER_W]);
+    let home_phone = optional_pending_text_property(properties, &[PID_TAG_HOME_TELEPHONE_NUMBER_W]);
+    let primary_phone =
+        optional_pending_text_property(properties, &[PID_TAG_PRIMARY_TELEPHONE_NUMBER_W]);
+    let phone = mobile_phone
+        .clone()
+        .or_else(|| business_phone.clone())
+        .or_else(|| home_phone.clone())
+        .or(primary_phone.clone())
+        .unwrap_or_else(|| existing.phone.clone());
+    let company = optional_pending_text_property(properties, &[PID_TAG_COMPANY_NAME_W])
+        .unwrap_or_else(|| contact_organization_name(existing));
+    let department = optional_pending_text_property(properties, &[PID_TAG_DEPARTMENT_NAME_W])
+        .or_else(|| optional_pending_text_property(properties, &[PID_TAG_COMPANY_NAME_W]))
+        .unwrap_or_else(|| existing.team.clone());
+    let title = optional_pending_text_property(properties, &[PID_TAG_TITLE_W])
+        .unwrap_or_else(|| contact_job_title(existing));
+    let personal_url = optional_pending_text_property(properties, &[PID_TAG_PERSONAL_HOME_PAGE_W]);
+    let business_url = optional_pending_text_property(properties, &[PID_TAG_BUSINESS_HOME_PAGE_W]);
     UpsertClientContactInput {
         id,
         account_id,
         name,
-        role: optional_pending_text_property(properties, &[PID_TAG_TITLE_W])
-            .unwrap_or_else(|| existing.role.clone()),
-        email: optional_pending_text_property(
-            properties,
-            &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W],
-        )
-        .unwrap_or_else(|| existing.email.clone()),
-        phone: optional_pending_text_property(
-            properties,
-            &[
-                PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
-                PID_TAG_BUSINESS_TELEPHONE_NUMBER_W,
-                PID_TAG_HOME_TELEPHONE_NUMBER_W,
-            ],
-        )
-        .unwrap_or_else(|| existing.phone.clone()),
-        team: optional_pending_text_property(properties, &[PID_TAG_COMPANY_NAME_W])
-            .unwrap_or_else(|| existing.team.clone()),
+        role: title.clone(),
+        email: email.clone(),
+        phone: phone.clone(),
+        team: department,
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
+        structured_name,
+        emails_json: Some(update_primary_labeled_json(
+            &existing.emails_json,
+            "email",
+            "work",
+            &email,
+        )),
+        phones_json: Some(contact_phones_json_from_mapi(
+            existing,
+            &phone,
+            mobile_phone.as_deref(),
+            business_phone.as_deref().or(primary_phone.as_deref()),
+            home_phone.as_deref(),
+        )),
+        urls_json: Some(contact_urls_json_from_mapi(
+            &existing.urls_json,
+            personal_url.as_deref(),
+            business_url.as_deref(),
+        )),
+        organization_name: company,
+        job_title: title,
         ..Default::default()
+    }
+}
+
+fn contact_display_name_from_structured(name: &lpe_storage::ContactNameFields) -> String {
+    [
+        name.prefix.as_str(),
+        name.given.as_str(),
+        name.middle.as_str(),
+        name.family.as_str(),
+        name.suffix.as_str(),
+    ]
+    .into_iter()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+fn update_primary_labeled_json(
+    existing: &serde_json::Value,
+    key: &str,
+    label: &str,
+    value: &str,
+) -> serde_json::Value {
+    let mut rows = existing.as_array().cloned().unwrap_or_default();
+    if let Some(row) = rows.first_mut() {
+        if let Some(object) = row.as_object_mut() {
+            object.insert(
+                key.to_string(),
+                serde_json::Value::String(value.trim().to_string()),
+            );
+            object.insert(
+                "label".to_string(),
+                serde_json::Value::String(label.to_string()),
+            );
+            object.insert("isDefault".to_string(), serde_json::Value::Bool(true));
+        }
+    } else if !value.trim().is_empty() {
+        rows.push(serde_json::json!({
+            key: value.trim(),
+            "label": label,
+            "isDefault": true
+        }));
+    }
+    serde_json::Value::Array(rows)
+}
+
+fn contact_phones_json_from_mapi(
+    existing: &AccessibleContact,
+    primary: &str,
+    mobile: Option<&str>,
+    business: Option<&str>,
+    home: Option<&str>,
+) -> serde_json::Value {
+    let mut rows = Vec::new();
+    push_labeled_value(&mut rows, "phone", "mobile", mobile);
+    push_labeled_value(&mut rows, "phone", "work", business.or(Some(primary)));
+    push_labeled_value(&mut rows, "phone", "home", home);
+    if rows.is_empty() {
+        existing.phones_json.clone()
+    } else {
+        serde_json::Value::Array(rows)
+    }
+}
+
+fn contact_urls_json_from_mapi(
+    existing: &serde_json::Value,
+    personal: Option<&str>,
+    business: Option<&str>,
+) -> serde_json::Value {
+    let mut rows = existing.as_array().cloned().unwrap_or_default();
+    upsert_labeled_value(&mut rows, "url", "home", personal);
+    upsert_labeled_value(&mut rows, "url", "work", business);
+    serde_json::Value::Array(rows)
+}
+
+fn push_labeled_value(
+    rows: &mut Vec<serde_json::Value>,
+    key: &str,
+    label: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+        rows.push(serde_json::json!({ key: value, "label": label }));
+    }
+}
+
+fn upsert_labeled_value(
+    rows: &mut Vec<serde_json::Value>,
+    key: &str,
+    label: &str,
+    value: Option<&str>,
+) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    if let Some(row) = rows.iter_mut().find(|row| {
+        row.get("label")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|current| current.eq_ignore_ascii_case(label))
+    }) {
+        if let Some(object) = row.as_object_mut() {
+            object.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+    } else {
+        rows.push(serde_json::json!({ key: value, "label": label }));
     }
 }
 
@@ -4139,15 +4415,23 @@ fn reject_unsupported_mapi_contact_properties(properties: &HashMap<u32, MapiValu
             PID_TAG_DISPLAY_NAME_W
                 | PID_TAG_SUBJECT_W
                 | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_PREFIX_W
                 | PID_TAG_GIVEN_NAME_W
+                | PID_TAG_MIDDLE_NAME_W
                 | PID_TAG_SURNAME_W
+                | PID_TAG_GENERATION_W
+                | PID_TAG_NICKNAME_W
                 | PID_TAG_TITLE_W
                 | PID_TAG_SMTP_ADDRESS_W
                 | PID_TAG_EMAIL_ADDRESS_W
                 | PID_TAG_MOBILE_TELEPHONE_NUMBER_W
                 | PID_TAG_BUSINESS_TELEPHONE_NUMBER_W
                 | PID_TAG_HOME_TELEPHONE_NUMBER_W
+                | PID_TAG_PRIMARY_TELEPHONE_NUMBER_W
                 | PID_TAG_COMPANY_NAME_W
+                | PID_TAG_DEPARTMENT_NAME_W
+                | PID_TAG_PERSONAL_HOME_PAGE_W
+                | PID_TAG_BUSINESS_HOME_PAGE_W
                 | PID_TAG_BODY_W
         );
         if !supported {

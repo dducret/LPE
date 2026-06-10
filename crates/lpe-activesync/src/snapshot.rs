@@ -185,7 +185,27 @@ fn truncate_body_bytes(bytes: &[u8], truncation_size: Option<usize>) -> (Vec<u8>
 }
 
 pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
-    let (first_name, last_name) = split_name(&contact.name);
+    let (fallback_first_name, fallback_last_name) = split_name(&contact.name);
+    let first_name = if contact.structured_name.given.trim().is_empty() {
+        fallback_first_name
+    } else {
+        contact.structured_name.given.clone()
+    };
+    let last_name = if contact.structured_name.family.trim().is_empty() {
+        fallback_last_name
+    } else {
+        contact.structured_name.family.clone()
+    };
+    let company_name = if contact.organization_name.trim().is_empty() {
+        &contact.team
+    } else {
+        &contact.organization_name
+    };
+    let job_title = if contact.job_title.trim().is_empty() {
+        &contact.role
+    } else {
+        &contact.job_title
+    };
     let mut children = Vec::new();
     push_text(&mut children, 1, "FileAs", &contact.name);
     push_text(&mut children, 1, "FirstName", &first_name);
@@ -193,8 +213,8 @@ pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
     push_text(&mut children, 1, "Email1Address", &contact.email);
     push_text(&mut children, 1, "MobilePhoneNumber", &contact.phone);
     push_text(&mut children, 1, "BusinessPhoneNumber", &contact.phone);
-    push_text(&mut children, 1, "CompanyName", &contact.team);
-    push_text(&mut children, 1, "JobTitle", &contact.role);
+    push_text(&mut children, 1, "CompanyName", company_name);
+    push_text(&mut children, 1, "JobTitle", job_title);
     push_body(&mut children, &contact.notes);
 
     json!({
