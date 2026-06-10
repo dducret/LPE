@@ -304,6 +304,7 @@ impl FakeStore {
             phone: contact.phone,
             team: contact.team,
             notes: contact.notes,
+            ..Default::default()
         }
     }
 
@@ -526,6 +527,7 @@ impl FakeStore {
             phone: "+33123456789".to_string(),
             team: "North".to_string(),
             notes: "VIP".to_string(),
+            ..Default::default()
         }
     }
 
@@ -1560,6 +1562,7 @@ impl JmapStore for FakeStore {
             phone: input.phone,
             team: input.team,
             notes: input.notes,
+            ..Default::default()
         };
         let mut contacts = self.contacts.lock().unwrap();
         contacts.retain(|entry| entry.id != contact.id);
@@ -5103,6 +5106,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         phone: "".to_string(),
         team: "".to_string(),
         notes: "".to_string(),
+        ..Default::default()
     };
     let second_contact = ClientContact {
         id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
@@ -5113,6 +5117,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         phone: "".to_string(),
         team: "".to_string(),
         notes: "".to_string(),
+        ..Default::default()
     };
     let first_event = ClientEvent {
         id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
@@ -12352,6 +12357,7 @@ async fn object_changes_with_cursor_do_not_diff_unlogged_current_state() {
         phone: String::new(),
         team: String::new(),
         notes: String::new(),
+        ..Default::default()
     };
     let prior_state = encode_state_with_cursor(
         account_id,
@@ -12427,6 +12433,7 @@ async fn contact_and_calendar_query_changes_report_reorders() {
                 phone: String::new(),
                 team: String::new(),
                 notes: String::new(),
+                ..Default::default()
             },
         ])),
         events: Arc::new(Mutex::new(vec![FakeStore::event(), later_event])),

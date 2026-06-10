@@ -78,6 +78,7 @@ fn collaboration_objects_have_canonical_projection_fields() {
     assert_schema_contains_all(&[
         "CREATE TABLE contact_books",
         "CREATE TABLE contacts",
+        "CREATE TABLE recipient_suggestions",
         "name_prefix TEXT NOT NULL DEFAULT ''",
         "given_name TEXT NOT NULL DEFAULT ''",
         "middle_name TEXT NOT NULL DEFAULT ''",
@@ -900,6 +901,15 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "MAPI custom property object-kind constraint includes public_folder_item",
         ],
     );
+    assert_source_contains_all(
+        "check-lpe.sh recipient suggestions compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "to_regclass('public.recipient_suggestions')",
+            "recipient_suggestions_active_email_idx",
+            "recipient_suggestions_rank_idx",
+        ],
+    );
 
     assert_source_contains_all(
         "update-lpe.sh public-folder compatibility patch",
@@ -944,6 +954,10 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "CREATE TABLE IF NOT EXISTS public.mail_app_consents",
             "CREATE TABLE IF NOT EXISTS public.mail_app_token_events",
             "CREATE TABLE IF NOT EXISTS public.unified_messaging_calls",
+            "CREATE TABLE IF NOT EXISTS public.recipient_suggestions",
+            "recipient_suggestions_active_email_idx",
+            "recipient_suggestions_rank_idx",
+            "recipient_suggestions_table",
             "CREATE TABLE IF NOT EXISTS public.contact_groups",
             "CREATE TABLE IF NOT EXISTS public.contact_group_members",
         ],
@@ -1740,6 +1754,46 @@ fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
             "search_queries_canonical_mail_projection",
             "sync_contact_and_calendar_mutations_update_canonical_models",
         ],
+    );
+}
+
+#[test]
+fn recipient_suggestions_are_owner_scoped_private_ranked_signals() {
+    let suggestions = table_definition("recipient_suggestions");
+    for required in [
+        "id UUID PRIMARY KEY",
+        "tenant_id UUID NOT NULL",
+        "account_id UUID NOT NULL",
+        "normalized_email TEXT NOT NULL CHECK (btrim(normalized_email) <> '')",
+        "display_name TEXT NOT NULL DEFAULT ''",
+        "source_kind TEXT NOT NULL CHECK (source_kind IN ('sent_to', 'sent_cc', 'manual', 'contact'))",
+        "first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "use_count INTEGER NOT NULL DEFAULT 1 CHECK (use_count > 0)",
+        "dismissed_at TIMESTAMPTZ",
+        "contact_id UUID",
+        "source_metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "CHECK (jsonb_typeof(source_metadata_json) = 'object')",
+        "CHECK (last_used_at >= first_seen_at)",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL",
+    ] {
+        assert!(
+            suggestions.contains(required),
+            "recipient_suggestions is missing expected contract fragment: {required}"
+        );
+    }
+    assert!(
+        SCHEMA.contains(
+            "CREATE UNIQUE INDEX recipient_suggestions_active_email_idx\n    ON recipient_suggestions (tenant_id, account_id, normalized_email)\n    WHERE dismissed_at IS NULL"
+        ),
+        "recipient suggestions must prevent duplicate active suggestions per account/email"
+    );
+    assert!(
+        SCHEMA.contains(
+            "CREATE INDEX recipient_suggestions_rank_idx\n    ON recipient_suggestions (tenant_id, account_id, dismissed_at, use_count DESC, last_used_at DESC)"
+        ),
+        "recipient suggestions need an owner-scoped ranking index"
     );
 }
 

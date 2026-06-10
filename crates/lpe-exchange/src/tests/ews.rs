@@ -6321,6 +6321,7 @@ async fn sync_folder_items_returns_contacts_from_canonical_store() {
             phone: "+491234".to_string(),
             team: "Ops".to_string(),
             notes: "VIP".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };
@@ -6552,6 +6553,7 @@ async fn sync_folder_items_returns_contact_update_for_legacy_id_only_sync_state(
             phone: "+41000000000".to_string(),
             team: "LPE".to_string(),
             notes: "Changed after legacy sync state".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };
@@ -6594,6 +6596,7 @@ async fn sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state() 
             phone: "+41000000000".to_string(),
             team: "LPE".to_string(),
             notes: "RCA sync verification".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };
@@ -6635,6 +6638,7 @@ async fn sync_folder_items_returns_no_contact_change_for_current_keyed_sync_stat
             phone: "+41000000000".to_string(),
             team: "LPE".to_string(),
             notes: "No change".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };
@@ -6690,6 +6694,7 @@ async fn update_contact_round_trips_through_sync_folder_items() {
             phone: "+41000000000".to_string(),
             team: "LPE".to_string(),
             notes: "Created by RCA".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };
@@ -6778,6 +6783,7 @@ async fn update_contact_unmapped_field_still_advances_sync_folder_items() {
             phone: "+41000000000".to_string(),
             team: "LPE".to_string(),
             notes: "Created by RCA".to_string(),
+            ..Default::default()
         }])),
         ..Default::default()
     };

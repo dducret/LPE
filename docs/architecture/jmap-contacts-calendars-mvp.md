@@ -83,8 +83,10 @@
   - `Reminder/copy`
 - Mapping:
   - one canonical `default` address book per account
+  - Outlook-compatible contact folders such as `suggested_contacts` are canonical `contact_books` roles and contain durable `contacts`; they are not the same thing as private recipient suggestions
   - one canonical `default` calendar per account plus owned custom calendars in `calendars`
   - contacts map to canonical `contacts`
+  - recipient suggestions map to the private owner-scoped `recipient_suggestions` table only when a compose-assistance surface is explicitly implemented; they are not returned by `ContactCard/*`, `AddressBook/*`, search, AI projections, or shared contact grants
   - events map to canonical `calendar_events`
   - private `Note` maps to canonical `notes`
   - private `JournalEntry` maps to canonical `journal_entries`
@@ -103,6 +105,7 @@
     categories, not protocol-local sync state
 - Rules:
   - rights are bounded by authenticated account and canonical grants
+  - `Bcc` recipients must not be learned into recipient suggestions and must not appear in contact, suggestion, search, AI, or shared-contact projections
   - no JMAP-only collection store
   - no protocol-local sharing model
   - `Share` and `DurableChange` are canonical private JMAP projections, not MAPI session or subsystem objects

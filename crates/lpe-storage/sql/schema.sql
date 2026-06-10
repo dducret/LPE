@@ -2524,6 +2524,36 @@ CREATE TABLE contacts (
 CREATE INDEX contacts_owner_name_idx
     ON contacts (tenant_id, owner_account_id, display_name);
 
+CREATE TABLE recipient_suggestions (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    normalized_email TEXT NOT NULL CHECK (btrim(normalized_email) <> ''),
+    display_name TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('sent_to', 'sent_cc', 'manual', 'contact')),
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    use_count INTEGER NOT NULL DEFAULT 1 CHECK (use_count > 0),
+    dismissed_at TIMESTAMPTZ,
+    contact_id UUID,
+    source_metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (jsonb_typeof(source_metadata_json) = 'object'),
+    CHECK (last_used_at >= first_seen_at),
+    CHECK (dismissed_at IS NULL OR dismissed_at >= first_seen_at),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX recipient_suggestions_active_email_idx
+    ON recipient_suggestions (tenant_id, account_id, normalized_email)
+    WHERE dismissed_at IS NULL;
+
+CREATE INDEX recipient_suggestions_rank_idx
+    ON recipient_suggestions (tenant_id, account_id, dismissed_at, use_count DESC, last_used_at DESC);
+
 CREATE TABLE contact_groups (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

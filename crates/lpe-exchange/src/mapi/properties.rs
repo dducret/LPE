@@ -3954,6 +3954,7 @@ pub(in crate::mapi) fn default_contact_for_mapping(
         phone: String::new(),
         team: String::new(),
         notes: String::new(),
+        ..Default::default()
     }
 }
 

@@ -137,6 +137,18 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_
   || fail "User-saved Search Folder uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "User-saved Search Folder uniqueness index is present"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions');" | grep -qx 'recipient_suggestions' \
+  || fail "Table public.recipient_suggestions is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Found table public.recipient_suggestions"
+
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_active_email_idx');" | grep -qx 'recipient_suggestions_active_email_idx' \
+  || fail "Recipient suggestions active-email uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recipient suggestions active-email uniqueness index is present"
+
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_rank_idx');" | grep -qx 'recipient_suggestions_rank_idx' \
+  || fail "Recipient suggestions ranking index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recipient suggestions ranking index is present"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
   || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.recoverable_items"

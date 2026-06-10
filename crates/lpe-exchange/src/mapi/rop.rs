@@ -8823,6 +8823,7 @@ mod tests {
             phone: String::new(),
             team: String::new(),
             notes: String::new(),
+            ..Default::default()
         };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),

@@ -811,6 +811,36 @@ BEGIN
     END IF;
 END $$;
 
+CREATE TABLE IF NOT EXISTS public.recipient_suggestions (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    normalized_email TEXT NOT NULL CHECK (btrim(normalized_email) <> ''),
+    display_name TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('sent_to', 'sent_cc', 'manual', 'contact')),
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    use_count INTEGER NOT NULL DEFAULT 1 CHECK (use_count > 0),
+    dismissed_at TIMESTAMPTZ,
+    contact_id UUID,
+    source_metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (jsonb_typeof(source_metadata_json) = 'object'),
+    CHECK (last_used_at >= first_seen_at),
+    CHECK (dismissed_at IS NULL OR dismissed_at >= first_seen_at),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, contact_id) REFERENCES public.contacts (tenant_id, id) ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS recipient_suggestions_active_email_idx
+    ON public.recipient_suggestions (tenant_id, account_id, normalized_email)
+    WHERE dismissed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS recipient_suggestions_rank_idx
+    ON public.recipient_suggestions (tenant_id, account_id, dismissed_at, use_count DESC, last_used_at DESC);
+
 CREATE TABLE IF NOT EXISTS public.contact_groups (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -1468,6 +1498,13 @@ fi
 search_folder_user_saved_name_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');")"
 if [[ "${search_folder_user_saved_name_idx}" != "search_folders_user_saved_name_idx" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce search_folders_user_saved_name_idx." >&2
+  exit 1
+fi
+recipient_suggestions_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions');")"
+recipient_suggestions_active_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_active_email_idx');")"
+recipient_suggestions_rank_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_rank_idx');")"
+if [[ "${recipient_suggestions_table}" != "recipient_suggestions" || "${recipient_suggestions_active_idx}" != "recipient_suggestions_active_email_idx" || "${recipient_suggestions_rank_idx}" != "recipient_suggestions_rank_idx" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected recipient_suggestions shape." >&2
   exit 1
 fi
 recoverable_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');")"

@@ -588,6 +588,30 @@ They are computed from canonical `calendar_grants`, `sender_rights`, account
 directory rows, and `calendar_events` using the same same-tenant free/busy
 visibility rules as `/api/mail/delegation/free-busy`.
 
+Durable contacts and recipient suggestions are separate concepts. Durable
+contacts live only in `contact_books` and `contacts`, including Outlook-visible
+contact-book roles such as `contacts`, `suggested_contacts`, `quick_contacts`,
+and `im_contact_list`. The `suggested_contacts` role is a real contact folder
+for contacts that Outlook-compatible clients can browse and synchronize; rows in
+that folder remain durable contact items and follow the same contact grants,
+change logs, tombstones, import/export behavior, and protocol projections as
+other contact-book rows.
+
+`recipient_suggestions` stores private compose-assistance signals for one
+account. Rows are tenant/account scoped, ranked by use count and recency, and
+deduplicated by active normalized email address per account. They may reference
+a durable `contacts` row when the suggestion is backed by a contact, but they do
+not grant contact visibility and are not themselves contacts, directory rows,
+search documents, AI projections, or shared collaboration objects. Recipient
+suggestions may be learned only from visible `To` and `Cc` recipients or from
+explicit user/contact actions in the documented suggestion pipeline. `Bcc`
+recipients must never be learned into `recipient_suggestions`, exposed through
+recipient suggestion APIs, indexed into search, included in AI-facing pipelines,
+or made visible through contact-book grants. The bounded
+`source_metadata_json` column is for suggestion provenance/ranking metadata
+only and must not contain message bodies, protected `Bcc`, shared-contact
+grant-derived data, or protocol cursor state.
+
 Exchange and Outlook compatibility state is stored as canonical LPE state when
 LPE owns the product behavior. `account_client_configurations` stores bounded
 account, mailbox, and public-folder client configuration payloads for Outlook
@@ -751,6 +775,7 @@ collaboration, rights, or user-visible state.
 
 - `contact_books`
 - `contacts`
+- `recipient_suggestions`
 - `contact_groups`
 - `contact_group_members`
 - `calendars`

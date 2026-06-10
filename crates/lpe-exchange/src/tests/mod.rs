@@ -776,6 +776,7 @@ impl FakeStore {
             phone: String::new(),
             team: String::new(),
             notes: String::new(),
+            ..Default::default()
         }
     }
 
@@ -3696,6 +3697,7 @@ impl ExchangeStore for FakeStore {
             phone: input.phone,
             team: input.team,
             notes: input.notes,
+            ..Default::default()
         };
         self.contact_versions.lock().unwrap().insert(contact.id, 1);
         self.contacts.lock().unwrap().push(contact.clone());

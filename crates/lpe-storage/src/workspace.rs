@@ -1,10 +1,12 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
+use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
     attachments, normalize_email, CanonicalChangeCategory, ClientAttachment, ClientAttachmentRow,
-    ClientContactRow, ClientEventRow, ClientMessageRow, ClientTask, Storage,
+    ClientContactRow, ClientEventRow, ClientMessageRow, ClientTask, ContactNameFields,
+    ContactSourceFields, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +78,53 @@ pub struct ClientContact {
     pub phone: String,
     pub team: String,
     pub notes: String,
+    pub structured_name: ContactNameFields,
+    pub emails_json: Value,
+    pub phones_json: Value,
+    pub addresses_json: Value,
+    pub urls_json: Value,
+    pub organization_name: String,
+    pub job_title: String,
+    pub raw_vcard: Option<String>,
+    pub source: ContactSourceFields,
+}
+
+impl Default for ClientContact {
+    fn default() -> Self {
+        Self {
+            id: Uuid::nil(),
+            address_book_id: String::new(),
+            name: String::new(),
+            role: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+            structured_name: ContactNameFields::default(),
+            emails_json: Value::Array(Vec::new()),
+            phones_json: Value::Array(Vec::new()),
+            addresses_json: Value::Array(Vec::new()),
+            urls_json: Value::Array(Vec::new()),
+            organization_name: String::new(),
+            job_title: String::new(),
+            raw_vcard: None,
+            source: ContactSourceFields::default(),
+        }
+    }
+}
+
+impl ClientContact {
+    pub fn primary_email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn primary_phone(&self) -> &str {
+        &self.phone
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.name
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -349,7 +398,26 @@ impl Storage {
                 COALESCE(emails_json->0->>'email', '') AS email,
                 COALESCE(phones_json->0->>'phone', '') AS phone,
                 organization_unit AS team,
-                notes
+                notes,
+                name_prefix,
+                given_name,
+                middle_name,
+                family_name,
+                name_suffix,
+                nickname,
+                phonetic_given_name,
+                phonetic_family_name,
+                emails_json,
+                phones_json,
+                addresses_json,
+                urls_json,
+                organization_name,
+                job_title,
+                raw_vcard,
+                import_source,
+                source_uid,
+                source_etag,
+                source_payload_json
             "#,
         )
         .bind(contact_id)
@@ -670,7 +738,26 @@ impl Storage {
                 COALESCE(contacts.emails_json->0->>'email', '') AS email,
                 COALESCE(contacts.phones_json->0->>'phone', '') AS phone,
                 contacts.organization_unit AS team,
-                contacts.notes
+                contacts.notes,
+                contacts.name_prefix,
+                contacts.given_name,
+                contacts.middle_name,
+                contacts.family_name,
+                contacts.name_suffix,
+                contacts.nickname,
+                contacts.phonetic_given_name,
+                contacts.phonetic_family_name,
+                contacts.emails_json,
+                contacts.phones_json,
+                contacts.addresses_json,
+                contacts.urls_json,
+                contacts.organization_name,
+                contacts.job_title,
+                contacts.raw_vcard,
+                contacts.import_source,
+                contacts.source_uid,
+                contacts.source_etag,
+                contacts.source_payload_json
             FROM contacts
             JOIN contact_books b
               ON b.tenant_id = contacts.tenant_id
@@ -713,7 +800,26 @@ impl Storage {
                 COALESCE(contacts.emails_json->0->>'email', '') AS email,
                 COALESCE(contacts.phones_json->0->>'phone', '') AS phone,
                 contacts.organization_unit AS team,
-                contacts.notes
+                contacts.notes,
+                contacts.name_prefix,
+                contacts.given_name,
+                contacts.middle_name,
+                contacts.family_name,
+                contacts.name_suffix,
+                contacts.nickname,
+                contacts.phonetic_given_name,
+                contacts.phonetic_family_name,
+                contacts.emails_json,
+                contacts.phones_json,
+                contacts.addresses_json,
+                contacts.urls_json,
+                contacts.organization_name,
+                contacts.job_title,
+                contacts.raw_vcard,
+                contacts.import_source,
+                contacts.source_uid,
+                contacts.source_etag,
+                contacts.source_payload_json
             FROM contacts
             JOIN contact_books b
               ON b.tenant_id = contacts.tenant_id
@@ -824,6 +930,29 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
         phone: row.phone,
         team: row.team,
         notes: row.notes,
+        structured_name: ContactNameFields {
+            prefix: row.name_prefix,
+            given: row.given_name,
+            middle: row.middle_name,
+            family: row.family_name,
+            suffix: row.name_suffix,
+            nickname: row.nickname,
+            phonetic_given: row.phonetic_given_name,
+            phonetic_family: row.phonetic_family_name,
+        },
+        emails_json: row.emails_json,
+        phones_json: row.phones_json,
+        addresses_json: row.addresses_json,
+        urls_json: row.urls_json,
+        organization_name: row.organization_name,
+        job_title: row.job_title,
+        raw_vcard: row.raw_vcard,
+        source: ContactSourceFields {
+            import_source: row.import_source,
+            source_uid: row.source_uid,
+            source_etag: row.source_etag,
+            source_payload_json: row.source_payload_json,
+        },
     }
 }
 

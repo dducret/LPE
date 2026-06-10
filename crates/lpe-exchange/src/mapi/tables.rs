@@ -5418,6 +5418,7 @@ mod tests {
             phone: String::new(),
             team: String::new(),
             notes: String::new(),
+            ..Default::default()
         };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
@@ -7478,6 +7479,7 @@ mod tests {
             phone: String::new(),
             team: String::new(),
             notes: String::new(),
+            ..Default::default()
         };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
@@ -10320,6 +10322,7 @@ pub(in crate::mapi) fn serialize_pending_contact_row(
         phone: contact.phone,
         team: contact.team,
         notes: contact.notes,
+        ..Default::default()
     };
     serialize_contact_row(&contact, 0, CONTACTS_FOLDER_ID, columns)
 }

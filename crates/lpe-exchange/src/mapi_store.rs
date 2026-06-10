@@ -3108,6 +3108,7 @@ mod tests {
                     phone: String::new(),
                     team: String::new(),
                     notes: String::new(),
+                    ..Default::default()
                 }
             })
             .collect::<Vec<_>>();

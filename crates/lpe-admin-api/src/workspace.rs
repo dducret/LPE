@@ -1065,6 +1065,15 @@ pub(crate) async fn upsert_client_contact(
         phone: contact.phone,
         team: contact.team,
         notes: contact.notes,
+        structured_name: contact.structured_name,
+        emails_json: contact.emails_json,
+        phones_json: contact.phones_json,
+        addresses_json: contact.addresses_json,
+        urls_json: contact.urls_json,
+        organization_name: contact.organization_name,
+        job_title: contact.job_title,
+        raw_vcard: contact.raw_vcard,
+        source: contact.source,
     }))
 }
 

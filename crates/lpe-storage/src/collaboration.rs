@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -39,7 +40,7 @@ impl CollaborationResourceKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollaborationRights {
     pub may_read: bool,
@@ -63,6 +64,54 @@ pub struct CollaborationCollection {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ContactNameFields {
+    pub prefix: String,
+    pub given: String,
+    pub middle: String,
+    pub family: String,
+    pub suffix: String,
+    pub nickname: String,
+    pub phonetic_given: String,
+    pub phonetic_family: String,
+}
+
+impl Default for ContactNameFields {
+    fn default() -> Self {
+        Self {
+            prefix: String::new(),
+            given: String::new(),
+            middle: String::new(),
+            family: String::new(),
+            suffix: String::new(),
+            nickname: String::new(),
+            phonetic_given: String::new(),
+            phonetic_family: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactSourceFields {
+    pub import_source: String,
+    pub source_uid: Option<String>,
+    pub source_etag: Option<String>,
+    pub source_payload_json: Value,
+}
+
+impl Default for ContactSourceFields {
+    fn default() -> Self {
+        Self {
+            import_source: "local".to_string(),
+            source_uid: None,
+            source_etag: None,
+            source_payload_json: Value::Object(Default::default()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccessibleContact {
     pub id: Uuid,
     pub collection_id: String,
@@ -76,6 +125,57 @@ pub struct AccessibleContact {
     pub phone: String,
     pub team: String,
     pub notes: String,
+    pub structured_name: ContactNameFields,
+    pub emails_json: Value,
+    pub phones_json: Value,
+    pub addresses_json: Value,
+    pub urls_json: Value,
+    pub organization_name: String,
+    pub job_title: String,
+    pub raw_vcard: Option<String>,
+    pub source: ContactSourceFields,
+}
+
+impl Default for AccessibleContact {
+    fn default() -> Self {
+        Self {
+            id: Uuid::nil(),
+            collection_id: String::new(),
+            owner_account_id: Uuid::nil(),
+            owner_email: String::new(),
+            owner_display_name: String::new(),
+            rights: CollaborationRights::default(),
+            name: String::new(),
+            role: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+            structured_name: ContactNameFields::default(),
+            emails_json: Value::Array(Vec::new()),
+            phones_json: Value::Array(Vec::new()),
+            addresses_json: Value::Array(Vec::new()),
+            urls_json: Value::Array(Vec::new()),
+            organization_name: String::new(),
+            job_title: String::new(),
+            raw_vcard: None,
+            source: ContactSourceFields::default(),
+        }
+    }
+}
+
+impl AccessibleContact {
+    pub fn primary_email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn primary_phone(&self) -> &str {
+        &self.phone
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.name
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2112,7 +2212,26 @@ impl Storage {
                 COALESCE(c.emails_json->0->>'email', '') AS email,
                 COALESCE(c.phones_json->0->>'phone', '') AS phone,
                 c.organization_unit AS team,
-                c.notes
+                c.notes,
+                c.name_prefix,
+                c.given_name,
+                c.middle_name,
+                c.family_name,
+                c.name_suffix,
+                c.nickname,
+                c.phonetic_given_name,
+                c.phonetic_family_name,
+                c.emails_json,
+                c.phones_json,
+                c.addresses_json,
+                c.urls_json,
+                c.organization_name,
+                c.job_title,
+                c.raw_vcard,
+                c.import_source,
+                c.source_uid,
+                c.source_etag,
+                c.source_payload_json
             FROM contacts c
             JOIN accounts owner ON owner.id = c.owner_account_id
             JOIN contact_books b
@@ -2165,6 +2284,29 @@ impl Storage {
                 phone: row.phone,
                 team: row.team,
                 notes: row.notes,
+                structured_name: ContactNameFields {
+                    prefix: row.name_prefix,
+                    given: row.given_name,
+                    middle: row.middle_name,
+                    family: row.family_name,
+                    suffix: row.name_suffix,
+                    nickname: row.nickname,
+                    phonetic_given: row.phonetic_given_name,
+                    phonetic_family: row.phonetic_family_name,
+                },
+                emails_json: row.emails_json,
+                phones_json: row.phones_json,
+                addresses_json: row.addresses_json,
+                urls_json: row.urls_json,
+                organization_name: row.organization_name,
+                job_title: row.job_title,
+                raw_vcard: row.raw_vcard,
+                source: ContactSourceFields {
+                    import_source: row.import_source,
+                    source_uid: row.source_uid,
+                    source_etag: row.source_etag,
+                    source_payload_json: row.source_payload_json,
+                },
             })
             .collect())
     }
