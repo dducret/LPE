@@ -7618,11 +7618,18 @@ mod tests {
         restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
         restriction.extend_from_slice(&8u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Or as u8);
+        restriction.extend_from_slice(&2u16.to_le_bytes());
         restriction.push(MapiRestrictionType::Content as u8);
         restriction.extend_from_slice(&0u32.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
         write_utf16z(&mut restriction, "Compact");
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&14_745_605u32.to_le_bytes());
         restriction.push(MapiRestrictionType::Property as u8);
         restriction.push(0x04);
         restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE.to_le_bytes());
