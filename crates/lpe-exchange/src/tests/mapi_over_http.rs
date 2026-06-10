@@ -27774,7 +27774,7 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
         crate::mapi::identity::INBOX_FOLDER_ID,
         config_object_id,
     );
-    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
 
     let mut headers = mapi_headers("Execute");
     headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -27793,7 +27793,7 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
     assert!(response_rops.contains(&0x0A), "{response_rops:02x?}");
 
     let configs = associated_configs.lock().unwrap();
-    assert_eq!(configs.len(), 1);
+    assert_eq!(configs.len(), 1, "{response_rops:02x?}");
     assert_eq!(configs[0].account_id, account.account_id);
     assert_eq!(configs[0].folder_id, crate::mapi::identity::INBOX_FOLDER_ID);
     assert_eq!(
