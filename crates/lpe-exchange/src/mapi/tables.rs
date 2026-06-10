@@ -7837,6 +7837,16 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
+    }
+
+    #[test]
+    fn inbox_associated_find_row_returns_outlook_sharing_index() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
+    }
+
+    #[test]
     fn quick_step_associated_find_row_returns_custom_action_config() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
