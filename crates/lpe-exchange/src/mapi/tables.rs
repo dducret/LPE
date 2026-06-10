@@ -7219,13 +7219,13 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            3
+            0
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -7234,7 +7234,7 @@ mod tests {
         for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
             search_class.extend_from_slice(&code_unit.to_le_bytes());
         }
-        assert!(response
+        assert!(!response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
         assert!(!response
@@ -7605,7 +7605,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_find_row_matches_default_named_view() {
+    fn common_views_find_row_does_not_fabricate_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -7680,16 +7680,10 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[7], 1);
-        assert!(response
-            .windows("Compact".encode_utf16().count() * 2)
-            .any(|window| window
-                == "Compact"
-                    .encode_utf16()
-                    .flat_map(u16::to_le_bytes)
-                    .collect::<Vec<_>>()
-                    .as_slice()));
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
     }
 
     #[test]
@@ -7855,9 +7849,15 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_named_view_config() {
-        assert_inbox_associated_find_row_returns_message_class(
+    fn inbox_associated_find_row_does_not_fabricate_named_view_config() {
+        let response = inbox_associated_find_row_response_for_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
+        );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
         );
     }
 
@@ -8505,6 +8505,18 @@ mod tests {
     }
 
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
+        let response = inbox_associated_find_row_response_for_message_class(message_class);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        let mut encoded_message_class = Vec::new();
+        write_utf16z(&mut encoded_message_class, message_class);
+        assert!(response
+            .windows(encoded_message_class.len())
+            .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    fn inbox_associated_find_row_response_for_message_class(message_class: &str) -> Vec<u8> {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -8535,16 +8547,7 @@ mod tests {
             payload,
         };
 
-        let response =
-            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
-
-        assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(response[7], 1);
-        let mut encoded_message_class = Vec::new();
-        write_utf16z(&mut encoded_message_class, message_class);
-        assert!(response
-            .windows(encoded_message_class.len())
-            .any(|window| window == encoded_message_class.as_slice()));
+        rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil())
     }
 
     fn assert_contact_folder_associated_find_row_returns_osc_contact_sync(folder_id: u64) {

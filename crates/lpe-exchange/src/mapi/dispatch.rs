@@ -20517,7 +20517,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_open_finds_default_navigation_shortcut() {
+    fn common_views_open_does_not_fabricate_navigation_shortcut() {
         let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let selected = navigation_shortcut_message_for_open(
             &MapiMailStoreSnapshot::empty(),
@@ -20525,10 +20525,7 @@ mod tests {
             shortcut_id,
         );
 
-        assert_eq!(
-            selected.map(|message| message.subject),
-            Some("Inbox".to_string())
-        );
+        assert!(selected.is_none());
     }
 
     #[test]
@@ -20812,7 +20809,47 @@ mod tests {
 
     #[test]
     fn inbox_associated_config_summary_includes_tail_default_rows() {
-        let snapshot = MapiMailStoreSnapshot::empty();
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000099999);
+        let header_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 999,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            header_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 998,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: header_id,
+                account_id,
+                subject: "Mail".to_string(),
+                target_folder_id: None,
+                shortcut_type: 4,
+                flags: 0,
+                section: 1,
+                ordinal: 0,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+        ]);
 
         let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
@@ -21060,7 +21097,47 @@ mod tests {
 
     #[test]
     fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
-        let snapshot = MapiMailStoreSnapshot::empty();
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000088888);
+        let header_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 888,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            header_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 887,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: header_id,
+                account_id,
+                subject: "Mail".to_string(),
+                target_folder_id: None,
+                shortcut_type: 4,
+                flags: 0,
+                section: 1,
+                ordinal: 0,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+        ]);
         let columns = [
             PID_TAG_SUBJECT_W,
             PID_TAG_WLINK_ENTRY_ID,

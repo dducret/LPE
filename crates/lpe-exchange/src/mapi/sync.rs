@@ -1807,7 +1807,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_transfer_manifest_exports_virtual_common_views_shortcut() {
+    fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let object = MapiObject::NavigationShortcut {
@@ -1815,21 +1815,18 @@ mod tests {
             shortcut_id,
         };
 
-        let (folder_id, manifest) = fast_transfer_manifest_for_object(
+        assert!(fast_transfer_manifest_for_object(
             &object,
             account_id,
             &[],
             &[],
             &MapiMailStoreSnapshot::empty(),
         )
-        .expect("virtual shortcut manifest");
-
-        assert_eq!(folder_id, COMMON_VIEWS_FOLDER_ID);
-        assert!(!manifest.is_empty());
+        .is_none());
     }
 
     #[test]
-    fn fast_transfer_manifest_exports_virtual_common_views_named_view() {
+    fn fast_transfer_manifest_rejects_unbacked_common_views_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
         let object = MapiObject::CommonViewNamedView {
@@ -1837,17 +1834,14 @@ mod tests {
             view_id,
         };
 
-        let (folder_id, manifest) = fast_transfer_manifest_for_object(
+        assert!(fast_transfer_manifest_for_object(
             &object,
             account_id,
             &[],
             &[],
             &MapiMailStoreSnapshot::empty(),
         )
-        .expect("virtual named view manifest");
-
-        assert_eq!(folder_id, COMMON_VIEWS_FOLDER_ID);
-        assert!(!manifest.is_empty());
+        .is_none());
     }
 
     #[test]
