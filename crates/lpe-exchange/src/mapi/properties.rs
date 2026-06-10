@@ -7,6 +7,7 @@ use super::*;
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
     MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
+    OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
 };
 use anyhow::bail;
 use lpe_storage::{
@@ -1378,6 +1379,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
         }
@@ -1485,10 +1487,18 @@ pub(in crate::mapi) fn default_view_supported_container_class(container_class: &
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
-    _mailbox_guid: Uuid,
-    _folder_id: u64,
+    mailbox_guid: Uuid,
+    folder_id: u64,
 ) -> Option<MapiValue> {
-    None
+    if folder_id != INBOX_FOLDER_ID {
+        return None;
+    }
+    crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_guid,
+        folder_id,
+        OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
+    )
+    .map(MapiValue::Binary)
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -7279,7 +7289,12 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id,
             ),
-            None
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                account_id,
+                INBOX_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
+            )
+            .map(MapiValue::Binary)
         );
     }
 

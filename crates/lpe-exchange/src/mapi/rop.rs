@@ -2185,6 +2185,9 @@ fn property_is_unsupported_for_object(
     principal: &AccountPrincipal,
     tag: u32,
 ) -> bool {
+    if canonical_property_storage_tag(tag) == OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C {
+        return false;
+    }
     if MapiPropertyTag::new(tag).property_type().is_none() {
         return true;
     }
@@ -2241,6 +2244,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
+                        | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE
@@ -2267,6 +2271,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
+                        | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE
@@ -8160,7 +8165,7 @@ mod tests {
     }
 
     #[test]
-    fn undocumented_folder_binary_120c_returns_not_found() {
+    fn undocumented_folder_binary_120c_returns_empty_binary() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -8188,7 +8193,7 @@ mod tests {
             property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
             "OutlookUndocumentedFolderBinary120C"
         );
-        assert!(fallback_default_specific_property(
+        assert!(!fallback_default_specific_property(
             Some(&folder),
             &principal,
             &[],
@@ -8214,12 +8219,8 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
-        assert_eq!(response[7], 0x0A);
-        assert_eq!(
-            u32::from_le_bytes(response[8..12].try_into().unwrap()),
-            0x8004_010F
-        );
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+        assert_eq!(&response[7..], &[0x00, 0x00]);
     }
 
     #[test]
@@ -8236,7 +8237,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             properties: HashMap::new(),
         };
-        let folder_errors = format_property_errors_for_debug(
+        let folder_error_tags = unsupported_specific_property_tags(
             Some(&folder),
             &principal,
             &[],
@@ -8244,7 +8245,15 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
             &[OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C],
         );
-        assert!(folder_errors.contains("0x120c0102:OutlookUndocumentedFolderBinary120C:0x8004010f"));
+        let folder_errors = format_property_errors_for_debug(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            &folder_error_tags,
+        );
+        assert!(folder_errors.is_empty());
 
         let config = MapiObject::AssociatedConfig {
             folder_id: INBOX_FOLDER_ID,

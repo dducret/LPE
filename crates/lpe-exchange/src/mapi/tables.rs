@@ -1012,6 +1012,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
         }
@@ -8746,7 +8747,12 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id
             ),
-            None
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                account_id,
+                INBOX_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
+            )
+            .map(MapiValue::Binary)
         );
         assert_eq!(
             special_folder_property_value(
