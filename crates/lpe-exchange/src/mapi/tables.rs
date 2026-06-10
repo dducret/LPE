@@ -7920,6 +7920,18 @@ mod tests {
     }
 
     #[test]
+    fn contacts_associated_find_row_returns_osc_contact_sync_config() {
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync(CONTACTS_FOLDER_ID);
+    }
+
+    #[test]
+    fn suggested_contacts_associated_find_row_returns_osc_contact_sync_config() {
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync(
+            SUGGESTED_CONTACTS_FOLDER_ID,
+        );
+    }
+
+    #[test]
     fn empty_conversation_action_settings_find_row_returns_default_action() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -8528,6 +8540,59 @@ mod tests {
         assert_eq!(response[7], 1);
         let mut encoded_message_class = Vec::new();
         write_utf16z(&mut encoded_message_class, message_class);
+        assert!(response
+            .windows(encoded_message_class.len())
+            .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    fn assert_contact_folder_associated_find_row_returns_osc_contact_sync(folder_id: u64) {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id,
+            associated: true,
+            columns: vec![
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_MESSAGE_CLASS_W,
+            ],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Microsoft.OSC.ContactSync");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        let mut encoded_message_class = Vec::new();
+        write_utf16z(&mut encoded_message_class, "IPM.Microsoft.OSC.ContactSync");
         assert!(response
             .windows(encoded_message_class.len())
             .any(|window| window == encoded_message_class.as_slice()));

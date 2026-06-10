@@ -223,6 +223,11 @@ const OUTLOOK_COMMON_VIEWS_COMPACT_VIEW_ID: u64 =
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+const OUTLOOK_CONTACT_SYNC_CONFIG_CLASS: &str = "IPM.Microsoft.OSC.ContactSync";
+const OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF1);
+const OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF0);
 const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID: Uuid =
@@ -330,6 +335,30 @@ fn outlook_quick_step_associated_config_defaults(
         canonical_id: Uuid::from_u128(0x6d617069_7173_4361_8000_000000000001),
         message_class: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
         subject: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
+        properties_json: serde_json::json!({}),
+    }]
+}
+
+fn outlook_contact_sync_associated_config_defaults(
+    folder_id: u64,
+) -> Vec<MapiAssociatedConfigMessage> {
+    let (id, canonical_id) = match folder_id {
+        crate::mapi::identity::CONTACTS_FOLDER_ID => (
+            OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
+            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000001),
+        ),
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => (
+            OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID,
+            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000002),
+        ),
+        _ => return Vec::new(),
+    };
+    vec![MapiAssociatedConfigMessage {
+        id,
+        folder_id,
+        canonical_id,
+        message_class: OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string(),
+        subject: OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string(),
         properties_json: serde_json::json!({}),
     }]
 }
@@ -1466,6 +1495,19 @@ impl MapiMailStoreSnapshot {
                     messages.push(default_message);
                 }
             }
+        } else if matches!(
+            folder_id,
+            crate::mapi::identity::CONTACTS_FOLDER_ID
+                | crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID
+        ) {
+            for default_message in outlook_contact_sync_associated_config_defaults(folder_id) {
+                if !messages
+                    .iter()
+                    .any(|message| message.message_class == default_message.message_class)
+                {
+                    messages.push(default_message);
+                }
+            }
         }
         messages
     }
@@ -1488,6 +1530,15 @@ impl MapiMailStoreSnapshot {
                     crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
                 )
                 .into_iter()
+                .find(|message| message.id == item_id)
+            })
+            .or_else(|| {
+                [
+                    crate::mapi::identity::CONTACTS_FOLDER_ID,
+                    crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+                ]
+                .into_iter()
+                .flat_map(outlook_contact_sync_associated_config_defaults)
                 .find(|message| message.id == item_id)
             })
     }
@@ -2583,6 +2634,48 @@ mod tests {
                 .map(|message| message.subject.as_str()),
             Some("Client custom action")
         );
+    }
+
+    #[test]
+    fn contacts_include_default_osc_contact_sync_without_duplicate() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        for (folder_id, message_id) in [
+            (
+                crate::mapi::identity::CONTACTS_FOLDER_ID,
+                OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
+            ),
+            (
+                crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+                OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID,
+            ),
+        ] {
+            let messages = snapshot.associated_config_messages_for_folder(folder_id);
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                snapshot
+                    .associated_config_message_for_id(message_id)
+                    .map(|message| message.message_class),
+                Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
+            );
+            assert_eq!(
+                snapshot
+                    .associated_config_message_for_folder_and_source_key_id(folder_id, message_id)
+                    .map(|message| message.message_class),
+                Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
+            );
+            assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
+            assert!(!snapshot.associated_config_identity_matches_folder(
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                message_id
+            ));
+        }
     }
 
     #[test]
