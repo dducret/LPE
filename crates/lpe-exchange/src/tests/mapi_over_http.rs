@@ -6505,6 +6505,152 @@ async fn mapi_over_http_create_search_folder_without_criteria_is_not_persisted()
 }
 
 #[tokio::test]
+async fn mapi_over_http_delete_staged_search_folder_succeeds_without_persistence() {
+    let search_folders = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        search_folders: search_folders.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut create_rops = Vec::new();
+    append_rop_open_folder(
+        &mut create_rops,
+        0,
+        1,
+        crate::mapi::identity::SEARCH_FOLDER_ID,
+    );
+    create_rops.extend_from_slice(&[
+        0x1C, 0x00, 0x01, 0x02, // RopCreateFolder
+        0x02, // search folder
+        0x01, // Unicode names
+        0x00, // do not open existing
+        0x00, // reserved
+    ]);
+    create_rops.extend_from_slice(&utf16z("Categories Rename Search Folder"));
+    create_rops.extend_from_slice(&utf16z(""));
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&create_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let create = &response_rops[8..];
+    assert_eq!(create[0], 0x1C);
+    assert_eq!(u32::from_le_bytes(create[2..6].try_into().unwrap()), 0);
+    let folder_id = crate::mapi::identity::object_id_from_wire_id(&create[6..14]).unwrap();
+    assert!(search_folders.lock().unwrap().is_empty());
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(
+        &mut delete_rops,
+        0,
+        1,
+        crate::mapi::identity::SEARCH_FOLDER_ID,
+    );
+    delete_rops.extend_from_slice(&[
+        0x1D, 0x00, 0x01, // RopDeleteFolder
+        0x00, // deletion flags
+    ]);
+    append_mapi_wire_id(&mut delete_rops, folder_id);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let delete = &response_rops[8..];
+
+    assert_eq!(delete[0], 0x1D);
+    assert_eq!(delete[1], 0x01);
+    assert_eq!(u32::from_le_bytes(delete[2..6].try_into().unwrap()), 0);
+    assert_eq!(delete[6], 0);
+    assert!(search_folders.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_delete_persisted_search_folder_removes_definition() {
+    let account = FakeStore::account();
+    let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-3434343434d1").unwrap();
+    let search_folder_mapi_id =
+        crate::mapi::identity::legacy_migration_object_id(&search_folder_id);
+    let search_folders = Arc::new(Mutex::new(vec![SearchFolderDefinition {
+        id: search_folder_id,
+        account_id: account.account_id,
+        role: "custom".to_string(),
+        display_name: "Categories Rename Search Folder".to_string(),
+        definition_kind: "user_saved".to_string(),
+        result_object_kind: "message".to_string(),
+        scope_json: serde_json::json!({"kind": "manual"}),
+        restriction_json: serde_json::json!({"kind": "mapi_bounded", "all": []}),
+        excluded_folder_roles: Vec::new(),
+        is_builtin: false,
+    }]));
+    let deleted_search_folders = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(account),
+        search_folders: search_folders.clone(),
+        deleted_search_folders: deleted_search_folders.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::SEARCH_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x1D, 0x00, 0x01, // RopDeleteFolder
+        0x00, // deletion flags
+    ]);
+    append_mapi_wire_id(&mut rops, search_folder_mapi_id);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let delete = &response_rops[8..];
+
+    assert_eq!(delete[0], 0x1D);
+    assert_eq!(delete[1], 0x01);
+    assert_eq!(u32::from_le_bytes(delete[2..6].try_into().unwrap()), 0);
+    assert_eq!(delete[6], 0);
+    assert!(search_folders.lock().unwrap().is_empty());
+    assert_eq!(
+        deleted_search_folders.lock().unwrap().as_slice(),
+        &[search_folder_id]
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_even_without_flag() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
@@ -31557,6 +31703,70 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
 }
 
 #[tokio::test]
+async fn mapi_over_http_set_search_criteria_accepts_builtin_reminders_refresh() {
+    let account = FakeStore::account();
+    let search_folders = Arc::new(Mutex::new(vec![SearchFolderDefinition {
+        id: Uuid::parse_str("34343434-3434-4434-8434-343434343490").unwrap(),
+        account_id: account.account_id,
+        role: "reminders".to_string(),
+        display_name: "Reminders".to_string(),
+        definition_kind: "exchange_builtin".to_string(),
+        result_object_kind: "mixed".to_string(),
+        scope_json: serde_json::json!({"kind": "builtin"}),
+        restriction_json: serde_json::json!({"kind": "builtin"}),
+        excluded_folder_roles: Vec::new(),
+        is_builtin: true,
+    }]));
+    let store = FakeStore {
+        session: Some(account),
+        search_folders: search_folders.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut restriction = vec![0x01];
+    restriction.extend_from_slice(&2u16.to_le_bytes());
+    append_search_property_bool(&mut restriction, 0x0E69_000B, 0x04, false);
+    append_search_property_bool(&mut restriction, 0x0E1B_000B, 0x04, true);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::REMINDERS_FOLDER_ID);
+    append_rop_set_search_criteria(
+        &mut rops,
+        1,
+        &restriction,
+        &[crate::mapi::identity::IPM_SUBTREE_FOLDER_ID],
+        0x0000_0026,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x30, 0x01, 0, 0, 0, 0]));
+    let stored = search_folders.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].is_builtin);
+    assert_eq!(
+        stored[0].restriction_json,
+        serde_json::json!({"kind": "builtin"})
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_get_search_criteria_round_trips_received_date_bounds() {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555502").unwrap();
@@ -32863,7 +33073,7 @@ async fn mapi_over_http_public_folder_rules_table_is_empty_without_protocol_loca
     assert!(contains_bytes(&response_rops, &[0x3F, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0, 0]
+        &[0x15, 0x02, 0, 0, 0, 0, 0x00, 0, 0]
     ));
     assert!(!contains_bytes(&response_rops, &utf16z("Private Reports")));
 }

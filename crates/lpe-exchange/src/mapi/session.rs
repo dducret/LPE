@@ -958,6 +958,15 @@ impl MapiSession {
             .map(|saved| &saved.definition)
     }
 
+    pub(in crate::mapi) fn forget_search_folder_definition(
+        &mut self,
+        folder_id: u64,
+    ) -> Option<SearchFolderDefinition> {
+        self.saved_search_folder_definitions
+            .remove(&folder_id)
+            .map(|saved| saved.definition)
+    }
+
     pub(in crate::mapi) fn resolve_special_folder_alias(&self, folder_id: u64) -> u64 {
         self.special_folder_aliases
             .get(&folder_id)

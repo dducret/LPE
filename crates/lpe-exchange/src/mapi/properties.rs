@@ -12,7 +12,7 @@ use anyhow::bail;
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, parse_calendar_participants_metadata,
     serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
-    CalendarParticipantMetadata,
+    CalendarParticipantMetadata, SearchFolderDefinition,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1442,6 +1442,94 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
     }
 }
 
+pub(in crate::mapi) fn search_folder_definition_property_value(
+    definition: &SearchFolderDefinition,
+    folder_id: u64,
+    property_tag: u32,
+    mailbox_guid: Uuid,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let parent_folder_id = SEARCH_FOLDER_ID;
+    let message_class =
+        search_folder_container_class_for_result_kind(&definition.result_object_kind);
+    let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
+    match property_tag {
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(definition.display_name.clone())),
+        PID_TAG_ENTRY_ID => {
+            crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
+                .map(MapiValue::Binary)
+        }
+        PID_TAG_RECORD_KEY | PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(folder_id),
+        )),
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_SEARCH)),
+        PID_TAG_CONTENT_COUNT
+        | PID_TAG_CONTENT_UNREAD_COUNT
+        | PID_TAG_DELETED_COUNT_TOTAL
+        | PID_TAG_ASSOCIATED_CONTENT_COUNT => Some(MapiValue::U32(0)),
+        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
+        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID => default_folder_view_entry_id(mailbox_guid, folder_id),
+        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
+        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(false)),
+        PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+            Some(MapiValue::String(message_class.to_string()))
+        }
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            default_post_message_class_for_container_class(message_class)
+                .map(|default_class| MapiValue::String(default_class.to_string()))
+        }
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME_MAX
+        | PID_TAG_HIER_REV => Some(MapiValue::I64(mapi_mailstore::filetime_from_change_number(
+            change_number,
+        ) as i64)),
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+            Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
+        }
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(parent_folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+fn search_folder_container_class_for_result_kind(result_object_kind: &str) -> &'static str {
+    match result_object_kind {
+        "contact" => "IPF.Contact",
+        "task" => "IPF.Task",
+        "mixed" | "message" => "IPF.Note",
+        _ => "IPF.Note",
+    }
+}
+
 pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
     if mailbox.role.eq_ignore_ascii_case("inbox") {
         "Inbox".to_string()
@@ -1464,6 +1552,7 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
         "IPF.StickyNote" => Some("IPM.StickyNote"),
         "IPF.Journal" => Some("IPM.Activity"),
         "IPF.Configuration" => Some("IPM.Configuration"),
+        "Outlook.Reminder" => Some("IPM.Note"),
         _ => None,
     }
 }

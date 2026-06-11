@@ -610,6 +610,7 @@ struct FakeStore {
     mapi_ipm_subtree_ost_id: Arc<Mutex<Option<Vec<u8>>>>,
     fail_mapi_ipm_subtree_ost_id_store: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
+    deleted_search_folders: Arc<Mutex<Vec<Uuid>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
     associated_configs: Arc<Mutex<Vec<crate::store::MapiAssociatedConfigRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
@@ -1179,6 +1180,13 @@ impl FakeStore {
             .iter()
             .find(|shortcut| identities.get(&shortcut.id).copied() == Some(object_id))
             .map(|shortcut| (MapiIdentityObjectKind::NavigationShortcut, shortcut.id));
+        let search_folder_match = self
+            .search_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|folder| identities.get(&folder.id).copied() == Some(object_id))
+            .map(|folder| (MapiIdentityObjectKind::SearchFolderDefinition, folder.id));
 
         let fallback_identity_match = identities
             .iter()
@@ -1195,6 +1203,7 @@ impl FakeStore {
             .or(public_folder_match)
             .or(associated_config_match)
             .or(navigation_shortcut_match)
+            .or(search_folder_match)
             .or(fallback_identity_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
@@ -4314,6 +4323,33 @@ impl ExchangeStore for FakeStore {
                 search_folders.push(definition.clone());
             }
             Ok(definition)
+        })
+    }
+
+    fn delete_search_folder<'a>(
+        &'a self,
+        _account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        let search_folders = self.search_folders.clone();
+        let deleted_search_folders = self.deleted_search_folders.clone();
+        Box::pin(async move {
+            let mut search_folders = search_folders.lock().unwrap();
+            let Some(index) = search_folders
+                .iter()
+                .position(|folder| folder.id == search_folder_id)
+            else {
+                return Err(anyhow::anyhow!("search folder not found"));
+            };
+            if search_folders[index].is_builtin {
+                return Err(anyhow::anyhow!("builtin search folders cannot be deleted"));
+            }
+            search_folders.remove(index);
+            deleted_search_folders
+                .lock()
+                .unwrap()
+                .push(search_folder_id);
+            Ok(())
         })
     }
 

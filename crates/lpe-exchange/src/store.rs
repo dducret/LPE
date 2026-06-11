@@ -1367,6 +1367,12 @@ pub trait ExchangeStore: AccountAuthStore {
         input: UpsertSearchFolderInput,
     ) -> StoreFuture<'a, SearchFolderDefinition>;
 
+    fn delete_search_folder<'a>(
+        &'a self,
+        account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_conversation_actions<'a>(
         &'a self,
         account_id: Uuid,
@@ -5567,6 +5573,17 @@ impl ExchangeStore for Storage {
         input: UpsertSearchFolderInput,
     ) -> StoreFuture<'a, SearchFolderDefinition> {
         Box::pin(async move { self.upsert_search_folder(input).await })
+    }
+
+    fn delete_search_folder<'a>(
+        &'a self,
+        account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_search_folder(account_id, search_folder_id)
+                .await
+        })
     }
 
     fn fetch_conversation_actions<'a>(

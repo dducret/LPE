@@ -80,6 +80,53 @@ fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
     )
 }
 
+fn search_folder_handle_properties(
+    definition: &SearchFolderDefinition,
+    folder_id: u64,
+    mailbox_guid: Uuid,
+) -> HashMap<u32, MapiValue> {
+    [
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_ASSOCIATED_CONTENT_COUNT,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_ACCESS,
+        PID_TAG_RIGHTS,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        PID_TAG_DEFAULT_FORM_NAME_W,
+        PID_TAG_EXTENDED_FOLDER_FLAGS,
+        PID_TAG_FOLDER_FORM_FLAGS,
+        PID_TAG_FOLDER_WEBVIEWINFO,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        PID_TAG_FOLDER_VIEWS_ONLY,
+        PID_TAG_FOLDER_VIEWLIST_FLAGS,
+        PID_TAG_ARCHIVE_TAG,
+        PID_TAG_POLICY_TAG,
+        PID_TAG_RETENTION_PERIOD,
+        PID_TAG_RETENTION_FLAGS,
+        PID_TAG_ARCHIVE_PERIOD,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_RECORD_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_HIERARCHY_CHANGE_NUMBER,
+    ]
+    .into_iter()
+    .filter_map(|tag| {
+        search_folder_definition_property_value(definition, folder_id, tag, mailbox_guid)
+            .map(|value| (tag, value))
+    })
+    .collect()
+}
+
 fn canonical_message_folder_id(email: &JmapEmail, mailboxes: &[JmapMailbox]) -> u64 {
     email
         .mailbox_states
@@ -12770,7 +12817,11 @@ where
                             request.output_handle_index,
                             MapiObject::Folder {
                                 folder_id,
-                                properties: HashMap::new(),
+                                properties: search_folder_handle_properties(
+                                    definition,
+                                    folder_id,
+                                    principal.account_id,
+                                ),
                             },
                         );
                         set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -12846,7 +12897,11 @@ where
                         request.output_handle_index,
                         MapiObject::Folder {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: search_folder_handle_properties(
+                                &definition,
+                                folder_id,
+                                principal.account_id,
+                            ),
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -13067,6 +13122,63 @@ where
                         0x1D,
                         request.response_handle_index(),
                         false,
+                    ));
+                    continue;
+                }
+                let persisted_search_definition = snapshot
+                    .search_folder_definition_for_folder_id(folder_id)
+                    .cloned();
+                let staged_search_definition = if persisted_search_definition.is_none() {
+                    session.forget_search_folder_definition(folder_id)
+                } else {
+                    None
+                };
+                if let Some(definition) = persisted_search_definition
+                    .as_ref()
+                    .or(staged_search_definition.as_ref())
+                {
+                    if definition.is_builtin {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1D,
+                            request.response_handle_index(),
+                            0x8007_0005,
+                        ));
+                        continue;
+                    }
+                    let partial_completion = if persisted_search_definition.is_some() {
+                        store
+                            .delete_search_folder(principal.account_id, definition.id)
+                            .await
+                            .is_err()
+                    } else {
+                        false
+                    };
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1d",
+                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                        folder_id = %format!("{folder_id:#018x}"),
+                        search_folder_id = %definition.id,
+                        display_name = %definition.display_name,
+                        partial_completion = partial_completion,
+                        message = "rca debug mapi delete search folder",
+                    );
+                    if !partial_completion {
+                        session.record_notification(MapiNotificationEvent::hierarchy(
+                            _parent_folder_id,
+                            Some(folder_id),
+                        ));
+                    }
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        partial_completion,
                     ));
                     continue;
                 }
@@ -15211,11 +15323,7 @@ where
                     continue;
                 };
                 if definition.is_builtin {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x30,
-                        request.response_handle_index(),
-                        EC_SEARCH_ACCESS_DENIED,
-                    ));
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
                     continue;
                 }
                 let criteria = match bounded_search_criteria_from_rop(&request, mailboxes) {
@@ -16685,6 +16793,8 @@ where
                         folder_id,
                         mailbox_id,
                         checkpoint_kind,
+                        checkpoint_store_allowed,
+                        checkpoint_skip_reason,
                         sync_type,
                         initial_state,
                         state,
@@ -16723,9 +16833,18 @@ where
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
                             (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
-                        let mut selected_checkpoint_delta = false;
                         let has_delta_anchor =
                             uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask);
+                        if *client_state_uploaded_bytes > 0 && !has_delta_anchor {
+                            *checkpoint_store_allowed = false;
+                            *checkpoint_skip_reason = "uploaded_client_state_transfer";
+                        } else if has_delta_anchor
+                            && *checkpoint_skip_reason == "uploaded_client_state_transfer"
+                        {
+                            *checkpoint_store_allowed = true;
+                            *checkpoint_skip_reason = "";
+                        }
+                        let mut selected_checkpoint_delta = false;
                         if has_delta_anchor {
                             if let Some(buffer) = incremental_transfer_buffer.take() {
                                 *transfer_buffer = buffer;
@@ -16871,6 +16990,7 @@ where
                 output_handles.push(handle);
             }
             Some(RopId::SynchronizationGetTransferState) => {
+                let source_object = input_object(session, &handle_slots, &request);
                 let Some((
                     folder_id,
                     mailbox_id,
@@ -16881,7 +17001,7 @@ where
                     checkpoint_skip_reason,
                     sync_type,
                     state,
-                )) = synchronization_context_state(input_object(session, &handle_slots, &request))
+                )) = synchronization_context_state(source_object)
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x82,
@@ -16910,6 +17030,38 @@ where
                 } else {
                     state
                 };
+                let (
+                    checkpoint_store_allowed,
+                    checkpoint_skip_reason,
+                    client_state_uploaded_bytes,
+                    client_state_uploaded_marker_mask,
+                ) = match source_object {
+                    Some(MapiObject::SynchronizationCollector {
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
+                        ..
+                    }) if *client_state_uploaded_bytes > 0
+                        && !uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask) =>
+                    {
+                        (
+                            false,
+                            "uploaded_client_state_transfer",
+                            *client_state_uploaded_bytes,
+                            *client_state_uploaded_marker_mask,
+                        )
+                    }
+                    Some(MapiObject::SynchronizationCollector {
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
+                        ..
+                    }) => (
+                        checkpoint_store_allowed,
+                        checkpoint_skip_reason,
+                        *client_state_uploaded_bytes,
+                        *client_state_uploaded_marker_mask,
+                    ),
+                    _ => (checkpoint_store_allowed, checkpoint_skip_reason, 0, 0),
+                };
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
@@ -16925,8 +17077,8 @@ where
                         state: transfer_buffer.clone(),
                         state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
-                        client_state_uploaded_bytes: 0,
-                        client_state_uploaded_marker_mask: 0,
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
                         incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,

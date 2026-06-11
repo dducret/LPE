@@ -8018,15 +8018,9 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_does_not_fabricate_named_view_config() {
-        let response = inbox_associated_find_row_response_for_message_class(
+    fn inbox_associated_find_row_returns_outlook_named_view_config() {
+        assert_inbox_associated_find_row_returns_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
-        );
-
-        assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(
-            u32::from_le_bytes(response[2..6].try_into().unwrap()),
-            0x8004_010F
         );
     }
 
@@ -8099,6 +8093,20 @@ mod tests {
     fn suggested_contacts_associated_find_row_returns_osc_contact_sync_config() {
         assert_contact_folder_associated_find_row_returns_osc_contact_sync(
             SUGGESTED_CONTACTS_FOLDER_ID,
+        );
+    }
+
+    #[test]
+    fn quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync(
+            QUICK_CONTACTS_FOLDER_ID,
+        );
+    }
+
+    #[test]
+    fn im_contact_list_associated_find_row_returns_osc_contact_sync_config() {
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync(
+            IM_CONTACT_LIST_FOLDER_ID,
         );
     }
 
@@ -8965,6 +8973,27 @@ mod tests {
 
         assert_eq!(&row[..expected.len()], expected.as_slice());
         assert_eq!(&row[expected.len()..], expected.as_slice());
+    }
+
+    #[test]
+    fn reminders_folder_projects_default_post_message_class() {
+        assert_eq!(
+            special_folder_property_value(
+                REMINDERS_FOLDER_ID,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+                Uuid::nil()
+            ),
+            Some(MapiValue::String("IPM.Note".to_string()))
+        );
+
+        let row = serialize_special_folder_row(
+            REMINDERS_FOLDER_ID,
+            &[],
+            &[PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W],
+            None,
+        );
+
+        assert_eq!(row, utf16z_test_bytes("IPM.Note"));
     }
 
     #[test]

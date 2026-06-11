@@ -3459,6 +3459,18 @@ fn serialize_session_folder_row(
             continue;
         }
 
+        if let Some(definition) = snapshot.search_folder_definition_for_folder_id(folder_id) {
+            if let Some(value) = search_folder_definition_property_value(
+                definition,
+                folder_id,
+                *column,
+                principal.account_id,
+            ) {
+                write_mapi_value(&mut row, *column, &value);
+                continue;
+            }
+        }
+
         if folder_id == IPM_SUBTREE_FOLDER_ID && storage_tag == PID_TAG_OST_OSTID {
             write_mapi_value(
                 &mut row,
@@ -8849,6 +8861,103 @@ mod tests {
         );
 
         assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), FOLDER_SEARCH);
+    }
+
+    #[test]
+    fn folder_getprops_projects_saved_search_definition_metadata() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb);
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let folder_id = crate::mapi::identity::mapi_store_id(0x1db);
+        let definition_id = Uuid::from_u128(0x1db);
+        crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            lpe_storage::SearchFolderDefinition {
+                id: definition_id,
+                account_id,
+                role: "custom".to_string(),
+                display_name: "Categories Rename Search Folder".to_string(),
+                definition_kind: "user_saved".to_string(),
+                result_object_kind: "message".to_string(),
+                scope_json: serde_json::json!({"scope": "mail"}),
+                restriction_json: serde_json::json!({"kind": "mapi_bounded", "all": []}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: false,
+            },
+        ]);
+        let object = MapiObject::Folder {
+            folder_id,
+            properties: HashMap::new(),
+        };
+
+        assert_eq!(
+            serialize_object_property(
+                Some(&object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_DISPLAY_NAME_W,
+            ),
+            utf16z_bytes("Categories Rename Search Folder")
+        );
+        assert_eq!(
+            serialize_object_property(
+                Some(&object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_CONTAINER_CLASS_W,
+            ),
+            utf16z_bytes("IPF.Note")
+        );
+        assert_eq!(
+            serialize_object_property(
+                Some(&object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            ),
+            utf16z_bytes("IPM.Note")
+        );
+        let rights = serialize_object_property(
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+            PID_TAG_RIGHTS,
+        );
+        assert_eq!(
+            u32::from_le_bytes(rights.try_into().unwrap()),
+            MAPI_FOLDER_ACCESS
+        );
+        let mut expected_extended_flags = Vec::new();
+        write_mapi_value(
+            &mut expected_extended_flags,
+            PID_TAG_EXTENDED_FOLDER_FLAGS,
+            &MapiValue::Binary(extended_folder_flags()),
+        );
+        assert_eq!(
+            serialize_object_property(
+                Some(&object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_EXTENDED_FOLDER_FLAGS,
+            ),
+            expected_extended_flags
+        );
     }
 
     #[test]
