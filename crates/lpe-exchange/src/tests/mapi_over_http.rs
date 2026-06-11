@@ -20524,6 +20524,12 @@ async fn mapi_over_http_logon_advertises_openable_additional_ren_entryids_ex() {
             "IPF.Configuration",
         ),
         (
+            0x8007,
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+            "Quick Step Settings",
+            "IPF.Configuration",
+        ),
+        (
             0x8008,
             crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
             "Suggested Contacts",

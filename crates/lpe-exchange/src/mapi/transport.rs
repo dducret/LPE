@@ -2,13 +2,13 @@ use super::dispatch::*;
 use super::identity::{
     ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID,
     CONTACTS_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID, CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
-    CONVERSATION_HISTORY_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DRAFTS_FOLDER_ID,
-    FREEBUSY_DATA_FOLDER_ID, INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, JOURNAL_FOLDER_ID,
-    JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
-    REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID,
-    SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
-    STORE_REPLICA_GUID, SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID,
-    TODO_SEARCH_FOLDER_ID, TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    DEFERRED_ACTION_FOLDER_ID, DRAFTS_FOLDER_ID, FREEBUSY_DATA_FOLDER_ID, INBOX_FOLDER_ID,
+    IPM_SUBTREE_FOLDER_ID, JOURNAL_FOLDER_ID, JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID,
+    NOTES_FOLDER_ID, OUTBOX_FOLDER_ID, REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID,
+    SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID, SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID,
+    SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_GUID, SUGGESTED_CONTACTS_FOLDER_ID,
+    SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 use super::notifications::*;
 use super::nspi::*;
@@ -1136,11 +1136,6 @@ fn special_folder_contract_summary(session: &MapiSession) -> String {
         ),
         ("archive", ARCHIVE_FOLDER_ID, "additional_ren"),
         ("freebusy_data", FREEBUSY_DATA_FOLDER_ID, "freebusy"),
-        (
-            "conversation_history",
-            CONVERSATION_HISTORY_FOLDER_ID,
-            "additional_ren",
-        ),
     ];
 
     SPECIAL_FOLDERS
@@ -2651,6 +2646,15 @@ mod tests {
             partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions),
             1
         );
+    }
+
+    #[test]
+    fn special_folder_contract_summary_does_not_advertise_conversation_history() {
+        let session = test_session(HashMap::new());
+        let summary = special_folder_contract_summary(&session);
+
+        assert!(!summary.contains("conversation_history"));
+        assert!(summary.contains("archive=0x0000000000230001;source=additional_ren"));
     }
 
     #[test]

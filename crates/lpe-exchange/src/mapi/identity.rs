@@ -328,7 +328,6 @@ fn is_advertised_special_folder_id(object_id: u64) -> bool {
             | CONFLICTS_FOLDER_ID
             | LOCAL_FAILURES_FOLDER_ID
             | SERVER_FAILURES_FOLDER_ID
-            | CONVERSATION_HISTORY_FOLDER_ID
             | RECOVERABLE_ITEMS_ROOT_FOLDER_ID
             | RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
             | RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
@@ -481,6 +480,19 @@ mod tests {
             object_id_from_folder_identifier_bytes(&long_term_id),
             Some(CALENDAR_FOLDER_ID)
         );
+    }
+
+    #[test]
+    fn stale_cached_conversation_history_identifier_is_not_advertised() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let mut entry_id =
+            folder_entry_id_from_object_id(mailbox_guid, CONVERSATION_HISTORY_FOLDER_ID).unwrap();
+        entry_id[22..38].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(object_id_from_folder_identifier_bytes(&entry_id), None);
+
+        let mut long_term_id = long_term_id_from_object_id(CONVERSATION_HISTORY_FOLDER_ID).unwrap();
+        long_term_id[..16].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(object_id_from_folder_identifier_bytes(&long_term_id), None);
     }
 
     #[test]
