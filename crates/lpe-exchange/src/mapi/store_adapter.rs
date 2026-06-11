@@ -56,9 +56,6 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         object_ids: Vec::new(),
         content_queries: Vec::new(),
     };
-    for object in session.handles.values() {
-        add_object_ids_for_handle(&mut plan, object);
-    }
     let mut simulated_handles = session.handles.clone();
     let mut simulated_next_handle = session.next_handle;
 
@@ -1158,8 +1155,7 @@ fn format_search_folder_roles(definitions: &[lpe_storage::SearchFolderDefinition
 fn rop_requires_full_snapshot(rop_id: u8) -> bool {
     matches!(
         rop_id,
-        0x18 | 0x19
-            | 0x1A
+        0x19 | 0x1A
             | 0x1B
             | 0x4B
             | 0x4C
@@ -1405,6 +1401,14 @@ fn simulate_table_access(
                 0,
                 sql_sort_orders,
             );
+        }
+        0x18 => {
+            if input_handle(handle_slots, request)
+                .and_then(|handle| handles.get(&handle))
+                .is_some_and(|object| matches!(object, MapiObject::ContentsTable { .. }))
+            {
+                plan.requires_full_snapshot = true;
+            }
         }
         _ => {}
     }
@@ -1715,6 +1719,20 @@ mod tests {
         buffer
     }
 
+    fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&(rops.len() as u16).to_le_bytes());
+        buffer.extend_from_slice(rops);
+        for handle in handles {
+            buffer.extend_from_slice(&handle.to_le_bytes());
+        }
+        buffer
+    }
+
+    fn release_handle_zero_rop_buffer() -> Vec<u8> {
+        single_rop_buffer(&[0x01, 0x00, 0x00])
+    }
+
     fn mailbox(id: &str, role: &str, name: &str) -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str(id).unwrap(),
@@ -1852,6 +1870,126 @@ mod tests {
     }
 
     #[test]
+    fn access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::HierarchyTable {
+                folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                columns: vec![
+                    PID_TAG_MID,
+                    PID_TAG_CONTAINER_CLASS_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                    PID_TAG_CONTENT_UNREAD_COUNT,
+                ],
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                deleted_advertised_special_folders: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 22,
+            },
+        );
+        session.handles.insert(
+            2,
+            MapiObject::Folder {
+                folder_id: CALENDAR_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        session.next_handle = 3;
+        let query_rows = [0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&query_rows));
+
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert!(!plan.requires_associated_contents, "plan={plan:?}");
+        assert_eq!(
+            plan.object_ids,
+            vec![crate::mapi::identity::IPM_SUBTREE_FOLDER_ID],
+            "plan={plan:?}"
+        );
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::HierarchyTable {
+                folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                columns: default_hierarchy_columns(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                deleted_advertised_special_folders: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.handles.insert(
+            2,
+            MapiObject::Folder {
+                folder_id: CALENDAR_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        session.next_handle = 3;
+        let mut rops = vec![0x12, 0x00, 0x00, 0x00, 0x00, 0x00];
+        rops.extend_from_slice(&[0x18, 0x00, 0x00, 0x00]);
+        rops.extend_from_slice(&0i32.to_le_bytes());
+        rops.push(0x01);
+        rops.extend_from_slice(&[0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00]);
+
+        let plan = plan_mapi_store_access(&session, &rop_buffer(&rops, &[1]));
+
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert!(!plan.requires_associated_contents, "plan={plan:?}");
+        assert_eq!(
+            plan.object_ids,
+            vec![crate::mapi::identity::IPM_SUBTREE_FOLDER_ID],
+            "plan={plan:?}"
+        );
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_contents_seek_still_requires_full_snapshot() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: INBOX_FOLDER_ID,
+                associated: false,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.next_handle = 2;
+        let mut seek_row = vec![0x18, 0x00, 0x00, 0x00];
+        seek_row.extend_from_slice(&0i32.to_le_bytes());
+        seek_row.push(0x01);
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&seek_row));
+
+        assert!(plan.requires_full_snapshot, "plan={plan:?}");
+    }
+
+    #[test]
     fn access_plan_does_not_fetch_virtual_default_conversation_action_identity() {
         let default_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
         let folder_id = crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID;
@@ -1864,7 +2002,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
     }
@@ -1881,7 +2019,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(
             plan.object_ids,
@@ -1902,7 +2040,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(
             plan.object_ids,
@@ -1924,7 +2062,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(plan.object_ids, vec![INBOX_FOLDER_ID], "plan={plan:?}");
     }
@@ -1943,7 +2081,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
     }
@@ -1962,7 +2100,7 @@ mod tests {
             },
         );
 
-        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
         assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
     }
