@@ -1823,8 +1823,14 @@ pub(in crate::mapi) fn write_address_book_property_value(
             body.push(0xFF);
             write_utf16z(body, value);
         }
-        (0x101E, NspiValue::MultiString(values)) => write_multi_string8(body, values),
-        (0x101F, NspiValue::MultiString(values)) => write_multi_string(body, values),
+        (0x101E, NspiValue::MultiString(values)) => {
+            body.push(0xFF);
+            write_multi_string8(body, values);
+        }
+        (0x101F, NspiValue::MultiString(values)) => {
+            body.push(0xFF);
+            write_multi_string(body, values);
+        }
         (0x000D, NspiValue::EmbeddedTable(account_id, entries)) => {
             write_embedded_address_book_table(body, *account_id, entries)
         }
@@ -1837,7 +1843,10 @@ pub(in crate::mapi) fn write_address_book_property_value(
         (_, NspiValue::U32(value)) => write_u32(body, *value),
         (_, NspiValue::Bool(value)) => body.push(u8::from(*value)),
         (_, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
-        (_, NspiValue::MultiString(values)) => write_multi_string(body, values),
+        (_, NspiValue::MultiString(values)) => {
+            body.push(0xFF);
+            write_multi_string(body, values);
+        }
         (_, NspiValue::EmbeddedTable(account_id, entries)) => {
             write_embedded_address_book_table(body, *account_id, entries)
         }

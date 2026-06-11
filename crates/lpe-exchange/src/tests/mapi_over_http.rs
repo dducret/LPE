@@ -38206,7 +38206,44 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         0x800F_101F
     );
     assert_eq!(u32::from_le_bytes(body[25..29].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[29..33].try_into().unwrap()), 1);
+    assert_eq!(body[29], 0xFF);
+    assert_eq!(u32::from_le_bytes(body[30..34].try_into().unwrap()), 1);
+    assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
+
+    let mut outlook_account_row_request = Vec::new();
+    outlook_account_row_request.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x3002_001Fu32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x300B_0102u32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x3E04_0003u32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x8888_0003u32.to_le_bytes());
+    outlook_account_row_request.extend_from_slice(&0x800F_101Fu32.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &props_headers,
+            &outlook_account_row_request,
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &0x800F_101Fu32.to_le_bytes()));
+    let proxy_tag_offset = body
+        .windows(4)
+        .position(|bytes| bytes == 0x800F_101Fu32.to_le_bytes())
+        .unwrap();
+    let proxy_value_offset = proxy_tag_offset + 8;
+    assert_eq!(body[proxy_value_offset], 0xFF);
+    assert_eq!(
+        u32::from_le_bytes(
+            body[proxy_value_offset + 1..proxy_value_offset + 5]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
     assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
 }
 
