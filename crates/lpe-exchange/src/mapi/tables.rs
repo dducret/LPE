@@ -763,7 +763,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     RSS_FEEDS_FOLDER_ID,
     QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
-    CONVERSATION_HISTORY_FOLDER_ID,
 ];
 
 const SYNC_ISSUES_HIERARCHY_FOLDER_IDS: &[u64] = &[
@@ -803,6 +802,9 @@ fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrd
 
 fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
     match row {
+        HierarchyRow::Mailbox(mailbox) if mailbox.role == "conversation_history" => {
+            "Conversation History"
+        }
         HierarchyRow::Mailbox(mailbox) => &mailbox.name,
         HierarchyRow::PublicFolder(folder) => &folder.folder.display_name,
         HierarchyRow::Collaboration(folder) => &folder.collection.display_name,
@@ -826,7 +828,6 @@ pub(in crate::mapi) fn mailbox_shadowed_by_active_outlook_special_folder(
             | "contacts"
             | "contacts search"
             | "conversation action settings"
-            | "conversation history"
             | "drafts"
             | "im contact list"
             | "journal"
@@ -4199,10 +4200,10 @@ pub(in crate::mapi) fn table_position_and_count(
                     .count()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 snapshot
-                        .reminder_tasks()
-                        .into_iter()
-                        .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
-                        .count()
+                    .reminder_tasks()
+                    .into_iter()
+                    .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
+                    .count()
                     + snapshot
                         .reminder_messages()
                         .into_iter()
@@ -4511,6 +4512,9 @@ fn is_queryable_hierarchy_folder(folder_id: u64) -> bool {
 }
 
 pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
+    if folder_id == CONVERSATION_HISTORY_FOLDER_ID {
+        return false;
+    }
     matches!(
         folder_id,
         ROOT_FOLDER_ID
@@ -4598,7 +4602,6 @@ pub(in crate::mapi) fn advertised_special_folder_id_for_create(
         QUICK_STEP_SETTINGS_FOLDER_ID,
         ARCHIVE_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
-        CONVERSATION_HISTORY_FOLDER_ID,
     ]
     .into_iter()
     .find(|folder_id| {

@@ -1445,6 +1445,8 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
 pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
     if mailbox.role.eq_ignore_ascii_case("inbox") {
         "Inbox".to_string()
+    } else if mailbox.role == "conversation_history" {
+        "Conversation History".to_string()
     } else {
         mailbox.name.clone()
     }

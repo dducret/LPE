@@ -2685,6 +2685,9 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
 }
 
 fn mapi_folder_display_name(mailbox: &JmapMailbox) -> &str {
+    if mailbox.role == "conversation_history" {
+        return "Conversation History";
+    }
     virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
         .map(|(_, name, _, _, _)| name)
         .unwrap_or(&mailbox.name)
@@ -3104,13 +3107,6 @@ fn virtual_special_folder_metadata(
             190,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "",
-        )),
-        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID => Some((
-            "conversation_history",
-            "Conversation History",
-            200,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-            "IPF.Note",
         )),
         crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID => Some((
             "recoverable_items_root",
@@ -4630,13 +4626,29 @@ mod tests {
             crate::mapi::identity::JUNK_FOLDER_ID,
             crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
             crate::mapi::identity::ARCHIVE_FOLDER_ID,
-            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         ];
         let expected_folder_count = folder_ids.len();
-        let mailboxes = folder_ids
+        let mut mailboxes = folder_ids
             .into_iter()
             .map(|folder_id| virtual_special_mailbox(folder_id).expect("virtual folder"))
             .collect::<Vec<_>>();
+        let conversation_history_id =
+            Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            conversation_history_id,
+            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+        );
+        mailboxes.push(JmapMailbox {
+            id: conversation_history_id,
+            parent_id: None,
+            role: "conversation_history".to_string(),
+            name: "Conversation History".to_string(),
+            sort_order: 0,
+            modseq: 37,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        });
         let buffer = sync_manifest_buffer_with_attachments(
             SYNC_TYPE_HIERARCHY,
             0,
@@ -4652,7 +4664,7 @@ mod tests {
 
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
 
-        assert_eq!(summary.folder_change_count, expected_folder_count);
+        assert_eq!(summary.folder_change_count, expected_folder_count + 1);
         assert_eq!(summary.zero_length_parent_source_key_count, 16);
         assert_eq!(summary.nonzero_parent_source_key_count, 3);
         assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);

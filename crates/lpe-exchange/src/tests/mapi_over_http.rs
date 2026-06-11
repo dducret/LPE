@@ -19348,6 +19348,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Notes")));
     assert!(contains_bytes(&response_rops, &utf16z("Tasks")));
     assert!(!contains_bytes(&response_rops, &utf16z("Reminders")));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Conversation History")
+    ));
     let mut folder_offsets = Vec::new();
     for name in [
         "Inbox",
@@ -19683,11 +19687,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             crate::mapi::identity::ARCHIVE_FOLDER_ID,
         ),
         (
-            "Conversation History",
-            "IPF.Note",
-            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
-        ),
-        (
             "Quick Step Settings",
             "IPF.Configuration",
             crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -19700,6 +19699,308 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             &mapi_mailstore::source_key_for_store_id(folder_id)
         ));
     }
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Conversation History")
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(
+            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID
+        )
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_open_conversation_history_requires_real_mailbox() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_table_once() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox"),
+            FakeStore::mailbox(
+                "73737373-7373-4373-8373-737373737373",
+                "conversation_history",
+                "Conversation History",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x6748_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x6749_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(
+        u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
+        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT + 1
+    );
+    let query_offset = 8 + 10 + 7;
+    assert_eq!(
+        u16::from_le_bytes(
+            response_rops[query_offset + 7..query_offset + 9]
+                .try_into()
+                .unwrap()
+        ),
+        (OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT + 1) as u16
+    );
+    let source_key = mapi_mailstore::source_key_for_store_id(
+        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+    );
+    assert_eq!(
+        response_rops
+            .windows(source_key.len())
+            .filter(|window| *window == source_key.as_slice())
+            .count(),
+        1
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Conversation History")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_sync_once() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox"),
+            FakeStore::mailbox(
+                "73737373-7373-4373-8373-737373737373",
+                "conversation_history",
+                "Conversation History",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT + 1, 0))
+    );
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    let conversation_history = decoded
+        .folder_changes
+        .iter()
+        .filter(|folder| folder.display_name == "Conversation History")
+        .collect::<Vec<_>>();
+
+    assert_eq!(conversation_history.len(), 1);
+    assert_eq!(
+        conversation_history[0].source_key,
+        mapi_mailstore::source_key_for_store_id(
+            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID
+        )
+    );
+    assert_eq!(conversation_history[0].parent_source_key, Vec::<u8>::new());
+    assert_eq!(
+        conversation_history[0].container_class.as_deref(),
+        Some("IPF.Note")
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_real_conversation_history_open_props_contents_and_notifications_succeed() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "73737373-7373-4373-8373-737373737373",
+            "conversation_history",
+            "Conversation History",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+    );
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[
+            0x3601_0003, // PidTagFolderType
+            0x6749_0014, // PidTagParentFolderId
+            0x0FF4_0003, // PidTagAccess
+            0x6639_0003, // PidTagRights
+            0x3001_001F, // PidTagDisplayName
+            0x3602_0003, // PidTagContentCount
+            0x3603_0003, // PidTagContentUnreadCount
+            0x360A_000B, // PidTagSubfolders
+            0x3613_001F, // PidTagContainerClass
+            0x36E5_001F, // PidTagDefaultPostMessageClass
+            0x36DA_0102, // PidTagExtendedFolderFlags
+        ],
+    );
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x03]); // RopRegisterNotification
+    rops.extend_from_slice(&0x0401u16.to_le_bytes());
+    rops.push(0);
+    rops.push(0);
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+    );
+    rops.extend_from_slice(&0u64.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
+    mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("Conversation History GetProps should return a standard row");
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Conversation History")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Note")));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    ));
+    assert!(contains_bytes(&response_rops, &[0x05, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x05, 0x02, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x29, 0x03, 0, 0, 0, 0]));
 }
 
 #[tokio::test]
