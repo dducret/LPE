@@ -7090,6 +7090,86 @@ fn log_outlook_contents_table_query_rows_response(
     );
 }
 
+fn log_outlook_hierarchy_table_query_rows_response(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    response: &[u8],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    queried_position: usize,
+) {
+    let Some(MapiObject::HierarchyTable {
+        folder_id,
+        columns,
+        position,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
+        return;
+    }
+
+    let response_origin = response.get(6).copied().unwrap_or(0xff);
+    let row_count = response
+        .get(7..9)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(0);
+    let response_origin_position = if request.query_forward_read() {
+        queried_position
+    } else {
+        queried_position.saturating_sub(row_count as usize)
+    };
+    let selected_columns = if columns.is_empty() {
+        default_hierarchy_columns()
+    } else {
+        columns.clone()
+    };
+    let table_total_row_count =
+        table_position_and_count(object, mailboxes, emails, snapshot, principal.account_id).1;
+    let response_row_payload_preview = response
+        .get(9..)
+        .map(|bytes| hex_preview(bytes, 160))
+        .unwrap_or_default();
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        requested_forward_read = request.query_forward_read(),
+        requested_row_count = request.query_row_count().unwrap_or(0),
+        queried_position,
+        response_origin_position,
+        current_position_after = *position,
+        response_origin = %format!("0x{response_origin:02x}"),
+        response_origin_name = match response_origin {
+            0x00 => "BOOKMARK_BEGINNING",
+            0x01 => "BOOKMARK_CURRENT",
+            0x02 => "BOOKMARK_END",
+            _ => "unknown",
+        },
+        response_row_count = row_count,
+        table_total_row_count,
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        response_payload_bytes = response.len(),
+        response_row_payload_preview = %response_row_payload_preview,
+        "rca debug outlook hierarchy table query rows response"
+    );
+}
+
 fn log_mapi_query_position_debug(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -12587,10 +12667,9 @@ where
                         message = "rca debug mapi inbox hierarchy query rows"
                     );
                 }
-                let queried_position = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::ContentsTable { position, .. }) => *position,
-                    _ => 0,
-                };
+                let queried_position = input_object(session, &handle_slots, &request)
+                    .and_then(table_position)
+                    .unwrap_or(0);
                 let response = rop_query_rows_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -12606,6 +12685,16 @@ where
                     &response,
                     snapshot,
                     &selected_named_property_context,
+                    queried_position,
+                );
+                log_outlook_hierarchy_table_query_rows_response(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    &response,
+                    mailboxes,
+                    emails,
+                    snapshot,
                     queried_position,
                 );
                 responses.extend_from_slice(&response);
