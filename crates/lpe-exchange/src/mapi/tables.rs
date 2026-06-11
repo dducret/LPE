@@ -12,7 +12,7 @@ use crate::mapi::identity::{
 };
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiCommonViewsMessage,
-    MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage,
+    MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiMessage,
     MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
 
@@ -47,14 +47,11 @@ pub(in crate::mapi) fn folder_message_count(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
+    if mapi_calendar_contents_suppressed(folder_id, snapshot) {
+        return 0;
+    }
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return folder.item_count;
-    }
-    if folder_id == CALENDAR_FOLDER_ID {
-        return snapshot
-            .events_for_folder(folder_id)
-            .len()
-            .min(u32::MAX as usize) as u32;
     }
     if folder_id == CONTACTS_SEARCH_FOLDER_ID {
         return snapshot
@@ -66,9 +63,7 @@ pub(in crate::mapi) fn folder_message_count(
         return folder.item_count;
     }
     if folder_id == REMINDERS_FOLDER_ID {
-        let count = snapshot.reminder_events().len()
-            + snapshot.reminder_tasks().len()
-            + snapshot.reminder_messages().len();
+        let count = snapshot.reminder_tasks().len() + snapshot.reminder_messages().len();
         return count.min(u32::MAX as usize) as u32;
     }
     if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
@@ -117,6 +112,13 @@ pub(in crate::mapi) fn associated_folder_message_count(
     } else {
         0
     }
+}
+
+fn mapi_calendar_contents_suppressed(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
+    folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
 }
 
 fn restricted_associated_folder_message_count(
@@ -600,7 +602,6 @@ enum HierarchyRow<'a> {
 
 #[derive(Clone, Copy)]
 enum SearchContentRow<'a> {
-    Event(&'a MapiEvent),
     Message(&'a MapiMessage),
     Task(&'a MapiTask),
 }
@@ -1535,21 +1536,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .into_iter()
                     .map(|item| serialize_public_folder_item_row(item, &columns))
                     .collect::<Vec<_>>()
-            } else if *folder_id == CALENDAR_FOLDER_ID {
-                let mut rows = snapshot.events_for_folder(*folder_id);
-                rows.retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
-                sort_events(&mut rows, sort_orders);
-                rows.into_iter()
-                    .map(|event| {
-                        serialize_event_row_with_attachments(
-                            &event.event,
-                            event.id,
-                            event.folder_id,
-                            !event.attachments.is_empty(),
-                            &columns,
-                        )
-                    })
-                    .collect::<Vec<_>>()
+            } else if mapi_calendar_contents_suppressed(*folder_id, snapshot) {
+                Vec::new()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => {
@@ -1569,24 +1557,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             })
                             .collect::<Vec<_>>()
                     }
-                    MapiCollaborationFolderKind::Calendar => {
-                        let mut rows = snapshot.events_for_folder(*folder_id);
-                        rows.retain(|event| {
-                            restriction_matches_event(restriction.as_ref(), &event.event)
-                        });
-                        sort_events(&mut rows, sort_orders);
-                        rows.into_iter()
-                            .map(|event| {
-                                serialize_event_row_with_attachments(
-                                    &event.event,
-                                    event.id,
-                                    event.folder_id,
-                                    !event.attachments.is_empty(),
-                                    &columns,
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                    }
+                    MapiCollaborationFolderKind::Calendar => Vec::new(),
                     MapiCollaborationFolderKind::Task => {
                         let mut rows = snapshot.tasks_for_folder(*folder_id);
                         rows.retain(|task| {
@@ -2935,39 +2906,6 @@ pub(in crate::mapi) fn sort_contacts(
     });
 }
 
-pub(in crate::mapi) fn sort_events(
-    rows: &mut [&crate::mapi_store::MapiEvent],
-    sort_orders: &[MapiSortOrder],
-) {
-    if sort_orders.is_empty() {
-        return;
-    }
-    rows.sort_by(|left, right| {
-        for sort_order in sort_orders {
-            let ordering = match sort_order.property_tag {
-                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
-                    compare_case_insensitive(&left.event.title, &right.event.title)
-                }
-                PID_TAG_START_DATE
-                | PID_TAG_MESSAGE_DELIVERY_TIME
-                | PID_TAG_LAST_MODIFICATION_TIME => {
-                    event_start_sort_key(&left.event).cmp(&event_start_sort_key(&right.event))
-                }
-                PID_TAG_LOCATION_W => {
-                    compare_case_insensitive(&left.event.location, &right.event.location)
-                }
-                PID_TAG_MID => left.id.cmp(&right.id),
-                _ => Ordering::Equal,
-            };
-            let ordering = apply_sort_direction(ordering, sort_order.order);
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        Ordering::Equal
-    });
-}
-
 pub(in crate::mapi) fn sort_tasks(
     rows: &mut [&crate::mapi_store::MapiTask],
     sort_orders: &[MapiSortOrder],
@@ -3080,12 +3018,7 @@ fn reminder_search_content_rows<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
 ) -> Vec<SearchContentRow<'a>> {
-    let mut rows = snapshot
-        .reminder_events()
-        .into_iter()
-        .filter(|event| restriction_matches_event(restriction, &event.event))
-        .map(SearchContentRow::Event)
-        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
     rows.extend(
         snapshot
             .reminder_tasks()
@@ -3108,7 +3041,6 @@ fn search_content_row_matches(
     restriction: Option<&MapiRestriction>,
 ) -> bool {
     match row {
-        SearchContentRow::Event(event) => restriction_matches_event(restriction, &event.event),
         SearchContentRow::Message(message) => {
             restriction_matches_email(restriction, &message.email)
         }
@@ -3151,7 +3083,6 @@ fn sort_search_content_rows(rows: &mut [SearchContentRow<'_>], sort_orders: &[Ma
 
 fn search_content_row_id(row: &SearchContentRow<'_>) -> u64 {
     match row {
-        SearchContentRow::Event(event) => event.id,
         SearchContentRow::Message(message) => message.id,
         SearchContentRow::Task(task) => task.id,
     }
@@ -3159,7 +3090,6 @@ fn search_content_row_id(row: &SearchContentRow<'_>) -> u64 {
 
 fn search_content_row_subject<'a>(row: &'a SearchContentRow<'a>) -> &'a str {
     match row {
-        SearchContentRow::Event(event) => &event.event.title,
         SearchContentRow::Message(message) => &message.email.subject,
         SearchContentRow::Task(task) => &task.task.title,
     }
@@ -3167,7 +3097,6 @@ fn search_content_row_subject<'a>(row: &'a SearchContentRow<'a>) -> &'a str {
 
 fn search_content_row_class(row: &SearchContentRow<'_>) -> &'static str {
     match row {
-        SearchContentRow::Event(_) => "IPM.Appointment",
         SearchContentRow::Message(_) => "IPM.Note",
         SearchContentRow::Task(_) => "IPM.Task",
     }
@@ -3175,7 +3104,6 @@ fn search_content_row_class(row: &SearchContentRow<'_>) -> &'static str {
 
 fn search_content_row_time(row: &SearchContentRow<'_>) -> String {
     match row {
-        SearchContentRow::Event(event) => event_start_sort_key(&event.event),
         SearchContentRow::Message(message) => message.email.received_at.clone(),
         SearchContentRow::Task(task) => task.task.updated_at.clone(),
     }
@@ -3188,18 +3116,6 @@ fn serialize_search_content_row(
     reminder_projection: bool,
 ) -> Vec<u8> {
     match row {
-        SearchContentRow::Event(event) if reminder_projection => serialize_reminder_event_row(
-            event,
-            snapshot.reminder_for_source("calendar", event.canonical_id),
-            columns,
-        ),
-        SearchContentRow::Event(event) => serialize_event_row_with_attachments(
-            &event.event,
-            event.id,
-            event.folder_id,
-            !event.attachments.is_empty(),
-            columns,
-        ),
         SearchContentRow::Message(message) => serialize_message_row(&message.email, columns),
         SearchContentRow::Task(task) if reminder_projection => serialize_reminder_task_row(
             task,
@@ -3791,32 +3707,8 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
                 }
-            } else if *folder_id == CALENDAR_FOLDER_ID {
-                let mut rows = snapshot.events_for_folder(*folder_id);
-                rows.retain(|event| {
-                    restriction_matches_event(table_restriction.as_ref(), &event.event)
-                });
-                sort_events(&mut rows, sort_orders);
-                if let Some((index, event)) =
-                    find_row(rows.as_slice(), *position, request, |event| {
-                        restriction_matches_event(Some(&restriction), &event.event)
-                    })
-                {
-                    *position = index;
-                    response.push(1);
-                    write_standard_property_row(
-                        &mut response,
-                        &serialize_event_row_with_attachments(
-                            &event.event,
-                            event.id,
-                            event.folder_id,
-                            !event.attachments.is_empty(),
-                            &columns,
-                        ),
-                    );
-                } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
-                }
+            } else if mapi_calendar_contents_suppressed(*folder_id, snapshot) {
+                return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => {
@@ -3853,35 +3745,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                         }
                     }
                     MapiCollaborationFolderKind::Calendar => {
-                        let mut rows = snapshot.events_for_folder(*folder_id);
-                        rows.retain(|event| {
-                            restriction_matches_event(table_restriction.as_ref(), &event.event)
-                        });
-                        sort_events(&mut rows, sort_orders);
-                        if let Some((index, event)) =
-                            find_row(rows.as_slice(), *position, request, |event| {
-                                restriction_matches_event(Some(&restriction), &event.event)
-                            })
-                        {
-                            *position = index;
-                            response.push(1);
-                            write_standard_property_row(
-                                &mut response,
-                                &serialize_event_row_with_attachments(
-                                    &event.event,
-                                    event.id,
-                                    event.folder_id,
-                                    !event.attachments.is_empty(),
-                                    &columns,
-                                ),
-                            );
-                        } else {
-                            return rop_error_response(
-                                0x4F,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            );
-                        }
+                        return rop_error_response(
+                            0x4F,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        );
                     }
                     MapiCollaborationFolderKind::Task => {
                         let mut rows = snapshot.tasks_for_folder(*folder_id);
@@ -4276,12 +4144,8 @@ pub(in crate::mapi) fn table_position_and_count(
                     restriction.as_ref(),
                     mailbox_guid,
                 )
-            } else if *folder_id == CALENDAR_FOLDER_ID {
-                snapshot
-                    .events_for_folder(*folder_id)
-                    .into_iter()
-                    .filter(|event| restriction_matches_event(restriction.as_ref(), &event.event))
-                    .count()
+            } else if mapi_calendar_contents_suppressed(*folder_id, snapshot) {
+                0
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => snapshot
@@ -4291,13 +4155,7 @@ pub(in crate::mapi) fn table_position_and_count(
                             restriction_matches_contact(restriction.as_ref(), &contact.contact)
                         })
                         .count(),
-                    MapiCollaborationFolderKind::Calendar => snapshot
-                        .events_for_folder(*folder_id)
-                        .into_iter()
-                        .filter(|event| {
-                            restriction_matches_event(restriction.as_ref(), &event.event)
-                        })
-                        .count(),
+                    MapiCollaborationFolderKind::Calendar => 0,
                     MapiCollaborationFolderKind::Task => snapshot
                         .tasks_for_folder(*folder_id)
                         .into_iter()
@@ -4341,11 +4199,6 @@ pub(in crate::mapi) fn table_position_and_count(
                     .count()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 snapshot
-                    .reminder_events()
-                    .into_iter()
-                    .filter(|event| restriction_matches_event(restriction.as_ref(), &event.event))
-                    .count()
-                    + snapshot
                         .reminder_tasks()
                         .into_iter()
                         .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
@@ -4509,11 +4362,8 @@ pub(in crate::mapi) fn table_row_keys(
             position,
             ..
         } => {
-            if *folder_id == CALENDAR_FOLDER_ID {
-                let mut rows = snapshot.events_for_folder(*folder_id);
-                rows.retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
-                sort_events(&mut rows, sort_orders);
-                return rows.into_iter().map(|event| event.id).collect();
+            if mapi_calendar_contents_suppressed(*folder_id, snapshot) {
+                return Vec::new();
             }
             if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 return match folder.kind {
@@ -4525,14 +4375,7 @@ pub(in crate::mapi) fn table_row_keys(
                         sort_contacts(&mut rows, sort_orders);
                         rows.into_iter().map(|contact| contact.id).collect()
                     }
-                    MapiCollaborationFolderKind::Calendar => {
-                        let mut rows = snapshot.events_for_folder(*folder_id);
-                        rows.retain(|event| {
-                            restriction_matches_event(restriction.as_ref(), &event.event)
-                        });
-                        sort_events(&mut rows, sort_orders);
-                        rows.into_iter().map(|event| event.id).collect()
-                    }
+                    MapiCollaborationFolderKind::Calendar => Vec::new(),
                     MapiCollaborationFolderKind::Task => {
                         let mut rows = snapshot.tasks_for_folder(*folder_id);
                         rows.retain(|task| {
@@ -5192,8 +5035,8 @@ mod tests {
     use crate::mapi::wire::MapiRestrictionType;
     use crate::mapi::wire::RopId;
     use lpe_storage::{
-        AccessibleContact, CollaborationCollection, CollaborationRights, MailboxRule,
-        SearchFolderDefinition,
+        AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationRights,
+        MailboxRule, SearchFolderDefinition,
     };
 
     fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
@@ -6503,6 +6346,115 @@ mod tests {
     }
 
     #[test]
+    fn calendar_contents_table_is_hidden_from_guarded_mapi_bootstrap() {
+        let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
+        let event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(0x42),
+        );
+        let event = AccessibleEvent {
+            id: event_id,
+            uid: "zero-duration".to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@l-p-e.ch".to_string(),
+            owner_display_name: "test".to_string(),
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: false,
+            },
+            date: "2026-06-01".to_string(),
+            time: "10:00".to_string(),
+            time_zone: String::new(),
+            duration_minutes: 0,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Test".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![event],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CALENDAR_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        assert_eq!(
+            folder_message_count(CALENDAR_FOLDER_ID, &[], &[], &snapshot),
+            0
+        );
+
+        let position_response = rop_query_position_response(
+            &RopRequest {
+                rop_id: RopId::QueryPosition.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&table),
+            &[],
+            &[],
+            &snapshot,
+            account_id,
+        );
+        assert_eq!(position_response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
+            0
+        );
+
+        let rows_response = rop_query_rows_response(
+            &RopRequest {
+                rop_id: RopId::QueryRows.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![0, 1, 10, 0],
+            },
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            account_id,
+        );
+        assert_eq!(rows_response[0], RopId::QueryRows.as_u8());
+        assert_eq!(
+            u16::from_le_bytes(rows_response[7..9].try_into().unwrap()),
+            0
+        );
+    }
+
+    #[test]
     fn query_rows_clamps_stale_cursor_to_current_row_count() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let expected_count = snapshot
@@ -6815,8 +6767,8 @@ mod tests {
 
     #[test]
     fn hierarchy_table_projects_user_saved_search_folder() {
-        let definition_id = Uuid::parse_str("aaaaaaaa-3333-4111-8111-aaaaaaaaaaaa").unwrap();
-        let folder_id = crate::mapi::identity::mapi_store_id(124);
+        let definition_id = Uuid::parse_str("aaaaaaaa-5555-4111-8111-aaaaaaaaaaaa").unwrap();
+        let folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_1124);
         crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
@@ -7681,7 +7633,7 @@ mod tests {
     }
 
     #[test]
-    fn calendar_contents_find_row_matches_subject() {
+    fn calendar_contents_find_row_returns_not_found_for_guarded_mapi_bootstrap() {
         let account_id = Uuid::from_u128(0x8181);
         let event_id = Uuid::from_u128(0x8182);
         crate::mapi::identity::remember_mapi_identity(
@@ -7736,15 +7688,10 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[7], 1);
-        let title = "Project review"
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes)
-            .collect::<Vec<_>>();
-        assert!(response
-            .windows(title.len())
-            .any(|window| window == title.as_slice()));
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
     }
 
     #[test]
@@ -10147,27 +10094,6 @@ pub(in crate::mapi) fn serialize_task_row(
     row
 }
 
-pub(in crate::mapi) fn serialize_reminder_event_row(
-    event: &crate::mapi_store::MapiEvent,
-    reminder: Option<&lpe_storage::ClientReminder>,
-    columns: &[u32],
-) -> Vec<u8> {
-    let mut row = Vec::new();
-    for column in columns {
-        match event_property_value_with_reminder(
-            &event.event,
-            event.id,
-            REMINDERS_FOLDER_ID,
-            *column,
-            reminder,
-        ) {
-            Some(value) => write_mapi_value(&mut row, *column, &value),
-            None => write_property_default(&mut row, *column),
-        }
-    }
-    row
-}
-
 pub(in crate::mapi) fn serialize_reminder_task_row(
     task: &crate::mapi_store::MapiTask,
     reminder: Option<&lpe_storage::ClientReminder>,
@@ -10684,10 +10610,6 @@ pub(in crate::mapi) fn journal_entry_start_sort_key(entry: &JournalEntry) -> &st
         .as_deref()
         .or(entry.occurred_at.as_deref())
         .unwrap_or(&entry.updated_at)
-}
-
-pub(in crate::mapi) fn event_start_sort_key(event: &AccessibleEvent) -> String {
-    format!("{}T{}", event.date, event.time)
 }
 
 pub(in crate::mapi) fn event_start_filetime(event: &AccessibleEvent) -> u64 {

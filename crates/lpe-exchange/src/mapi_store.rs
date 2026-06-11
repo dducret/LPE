@@ -3347,8 +3347,8 @@ mod tests {
     fn snapshot_deduplicates_user_saved_search_folder_projection_by_name() {
         let first_id = Uuid::parse_str("aaaaaaaa-3333-4111-8111-aaaaaaaaaaaa").unwrap();
         let second_id = Uuid::parse_str("aaaaaaaa-4444-4111-8111-aaaaaaaaaaaa").unwrap();
-        let first_folder_id = crate::mapi::identity::mapi_store_id(123);
-        let second_folder_id = crate::mapi::identity::mapi_store_id(124);
+        let first_folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_0123);
+        let second_folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_0124);
         crate::mapi::identity::remember_mapi_identity(first_id, first_folder_id);
         crate::mapi::identity::remember_mapi_identity(second_id, second_folder_id);
 

@@ -283,14 +283,15 @@ impl Storage {
             &tenant_id,
             Some(account_id),
             None,
-            "attachment",
-            attachment_id,
-            "created",
+            "calendar_event",
+            event_id,
+            "updated",
             modseq,
             &[account_id],
             serde_json::json!({
+                "objectUid": event_id,
                 "collectionId": calendar_id,
-                "eventId": event_id,
+                "attachmentChanged": true,
                 "attachmentId": attachment_id
             }),
         )

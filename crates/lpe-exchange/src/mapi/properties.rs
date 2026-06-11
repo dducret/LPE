@@ -1212,20 +1212,6 @@ pub(in crate::mapi) fn restriction_matches_contact(
     })
 }
 
-pub(in crate::mapi) fn restriction_matches_event(
-    restriction: Option<&MapiRestriction>,
-    event: &AccessibleEvent,
-) -> bool {
-    restriction_matches(restriction, |property_tag| {
-        event_property_value(
-            event,
-            mapi_item_id(&event.id),
-            CALENDAR_FOLDER_ID,
-            property_tag,
-        )
-    })
-}
-
 pub(in crate::mapi) fn restriction_matches_task(
     restriction: Option<&MapiRestriction>,
     task: &ClientTask,
@@ -6620,6 +6606,10 @@ pub(in crate::mapi) async fn apply_canonical_event_property_values<S>(
 where
     S: ExchangeStore,
 {
+    if mapi_calendar_event_mutation_suppressed(folder_id, snapshot) {
+        bail!("guarded MAPI calendar event mutation is hidden");
+    }
+
     enum EventPropertyMutation {
         None,
         Delete,
@@ -6672,6 +6662,16 @@ where
             .await?;
     }
     Ok(())
+}
+
+fn mapi_calendar_event_mutation_suppressed(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> bool {
+    folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
 }
 
 pub(in crate::mapi) async fn apply_canonical_task_property_values<S>(

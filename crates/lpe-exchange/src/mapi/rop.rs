@@ -814,6 +814,15 @@ pub(in crate::mapi) fn rop_save_changes_message_response(
     response
 }
 
+fn calendar_event_object_hidden(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
+    folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| {
+                folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
+            })
+}
+
 pub(in crate::mapi) fn rop_get_properties_list_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -995,6 +1004,13 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             folder_id,
             event_id,
         }) => {
+            if calendar_event_object_hidden(*folder_id, snapshot) {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            }
             let Some(_event) = snapshot.event_for_id(*folder_id, *event_id) else {
                 return rop_error_response(
                     0x07,
@@ -2996,6 +3012,15 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
+    if let Some(MapiObject::Event { folder_id, .. }) = object {
+        if calendar_event_object_hidden(*folder_id, snapshot) {
+            return rop_error_response(
+                0x08,
+                request.input_handle_index().unwrap_or(0),
+                0x8004_010F,
+            );
+        }
+    }
     let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let tags = match object {
@@ -3065,6 +3090,11 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
         }) => (*folder_id, *message_id),
         _ => return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9),
     };
+    if matches!(object, Some(MapiObject::Event { .. }))
+        && calendar_event_object_hidden(folder_id, snapshot)
+    {
+        return rop_error_response(0x52, request.response_handle_index(), 0x8004_010F);
+    }
     let attachments = snapshot
         .attachments_for_message(folder_id, message_id)
         .unwrap_or_default();
@@ -3177,8 +3207,9 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::Event {
             folder_id,
             event_id,
-        }) => snapshot
-            .event_for_id(*folder_id, *event_id)
+        }) => (!calendar_event_object_hidden(*folder_id, snapshot))
+            .then(|| snapshot.event_for_id(*folder_id, *event_id))
+            .flatten()
             .map(|event| {
                 serialize_event_row_with_attachments(
                     &event.event,
@@ -7617,6 +7648,110 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn calendar_event_getprops_specific_rejects_stale_hidden_handle() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let object = MapiObject::Event {
+            folder_id: CALENDAR_FOLDER_ID,
+            event_id: crate::mapi::identity::mapi_store_id(0x43),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn calendar_event_getprops_all_rejects_stale_hidden_handle() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let object = MapiObject::Event {
+            folder_id: CALENDAR_FOLDER_ID,
+            event_id: crate::mapi::identity::mapi_store_id(0x43),
+        };
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesAll.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let response = rop_get_properties_all_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesAll.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+
+    #[test]
+    fn calendar_event_get_valid_attachments_rejects_stale_hidden_handle() {
+        let object = MapiObject::Event {
+            folder_id: CALENDAR_FOLDER_ID,
+            event_id: crate::mapi::identity::mapi_store_id(0x43),
+        };
+        let request = RopRequest {
+            rop_id: RopId::GetValidAttachments.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let response = rop_get_valid_attachments_response(
+            &request,
+            Some(&object),
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetValidAttachments.as_u8());
         assert_eq!(
             u32::from_le_bytes(response[2..6].try_into().unwrap()),
             0x8004_010F

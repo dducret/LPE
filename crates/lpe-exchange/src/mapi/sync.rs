@@ -502,17 +502,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
             })
     {
-        objects.extend(
-            snapshot
-                .events_for_folder(folder_id)
-                .into_iter()
-                .map(|event| {
-                    calendar_sync_object(
-                        event,
-                        snapshot.reminder_for_source("calendar", event.canonical_id),
-                    )
-                }),
-        );
+        return Vec::new();
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| {
@@ -1178,6 +1168,7 @@ fn special_message_property_value(
     }
 }
 
+#[cfg(test)]
 fn calendar_sync_object(
     event: &crate::mapi_store::MapiEvent,
     reminder: Option<&lpe_storage::ClientReminder>,
@@ -1662,6 +1653,62 @@ mod tests {
                     mapi_mailstore::SpecialMessagePropertyValue::Bool(true)
                 )
         }));
+    }
+
+    #[test]
+    fn calendar_special_content_sync_does_not_advertise_appointment_objects() {
+        let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
+        let event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(0x43),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![lpe_storage::AccessibleEvent {
+                id: event_id,
+                uid: event_id.to_string(),
+                collection_id: "default".to_string(),
+                owner_account_id: account_id,
+                owner_email: "test@l-p-e.ch".to_string(),
+                owner_display_name: "test".to_string(),
+                rights: lpe_storage::CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: false,
+                },
+                date: "2026-06-01".to_string(),
+                time: "10:00".to_string(),
+                time_zone: String::new(),
+                duration_minutes: 0,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
+                recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
+                title: "Test".to_string(),
+                location: String::new(),
+                organizer_json: "{}".to_string(),
+                attendees: String::new(),
+                attendees_json: "[]".to_string(),
+                notes: String::new(),
+                body_html: String::new(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let objects = special_sync_objects_for(CALENDAR_FOLDER_ID, 0x01, &snapshot, account_id);
+
+        assert!(objects.is_empty());
     }
 
     #[test]

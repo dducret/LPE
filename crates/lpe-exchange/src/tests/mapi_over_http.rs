@@ -457,12 +457,6 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
             "message opaque value",
         ),
         (
-            test_mapi_folder_id(16),
-            test_mapi_uuid_id(&event_id),
-            0x8001_001F,
-            "event opaque value",
-        ),
-        (
             test_mapi_folder_id(19),
             test_mapi_uuid_id(&task_id),
             0x8001_001F,
@@ -586,7 +580,7 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session() {
+async fn mapi_over_http_calendar_custom_properties_are_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececece1234").unwrap();
     let store = FakeStore {
@@ -622,6 +616,7 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         }])),
         ..Default::default()
     };
+    let stored_custom_values = store.mapi_custom_property_values.clone();
     let custom_tag = 0x8001_001F;
     let service = ExchangeService::new(store.clone());
     let connect = service
@@ -659,9 +654,11 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert!(stored_custom_values.lock().unwrap().is_empty());
 
     let restarted = ExchangeService::new(store);
     let connect = restarted
@@ -693,10 +690,15 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert!(contains_bytes(
+    assert!(
+        contains_bytes(&response_rops, &0x8004_0102u32.to_le_bytes())
+            || contains_bytes(&response_rops, &0x8004_010Fu32.to_le_bytes())
+    );
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("calendar restart opaque value")
     ));
+    assert!(stored_custom_values.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -844,7 +846,7 @@ async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_pro
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_crud_uses_canonical_events() {
+async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
@@ -853,7 +855,6 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         ..Default::default()
     };
     let events = store.events.clone();
-    let deleted_events = store.deleted_events.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -905,6 +906,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
     append_rop_set_properties(&mut rops, 1, 12, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
+    append_rop_save_changes_message(&mut rops, 1, 1);
     append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x0061_0040]);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie.clone());
@@ -916,7 +918,16 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         )
         .await
         .unwrap();
-    let _response_rops = response_rops_from_execute_response(response).await;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0C, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x07, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
     {
         let stored = events.lock().unwrap();
         assert_eq!(stored.len(), 1);
@@ -940,124 +951,6 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
             r#"{"frequency":"daily","count":3}"#
         );
     }
-
-    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
-    let mut update_values = Vec::new();
-    append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated RCA Calendar");
-    append_mapi_utf16_property(&mut update_values, 0x3FFB_001F, "Room 2");
-    append_mapi_utf16_property(&mut update_values, 0x1013_001F, "<p>Updated</p>");
-    append_mapi_i32_property(&mut update_values, 0x8205_0003, 2);
-    append_mapi_bool_property(&mut update_values, 0x8215_000B, false);
-    append_mapi_utf16_property(&mut update_values, 0x0C1A_001F, "Updated Organizer");
-    append_mapi_utf16_property(
-        &mut update_values,
-        0x0C1F_001F,
-        "Updated.Organizer@Example.Test",
-    );
-    append_mapi_utf16_property(&mut update_values, 0x0E04_001F, "Carol Attendee");
-    let mut update_rops = Vec::new();
-    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_open_message(
-        &mut update_rops,
-        1,
-        2,
-        test_mapi_folder_id(16),
-        test_mapi_uuid_id(&event_id),
-    );
-    append_rop_set_properties(&mut update_rops, 2, 8, &update_values);
-    renew_mapi_request_id(&mut execute_headers);
-    let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &execute_headers,
-            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
-    {
-        let stored = events.lock().unwrap();
-        assert_eq!(stored[0].title, "Updated RCA Calendar");
-        assert_eq!(stored[0].location, "Room 2");
-        assert_eq!(stored[0].body_html, "<p>Updated</p>");
-        assert!(!stored[0].all_day);
-        assert_eq!(stored[0].status, "confirmed");
-        assert_eq!(stored[0].attendees, "Carol Attendee");
-        assert!(stored[0]
-            .organizer_json
-            .contains("updated.organizer@example.test"));
-        assert!(stored[0].attendees_json.contains("Carol Attendee"));
-        assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
-    }
-
-    let mut read_rops = Vec::new();
-    append_rop_open_folder(&mut read_rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_open_message(
-        &mut read_rops,
-        1,
-        2,
-        test_mapi_folder_id(16),
-        test_mapi_uuid_id(&event_id),
-    );
-    append_rop_get_properties_specific(
-        &mut read_rops,
-        2,
-        &[
-            0x0037_001F,
-            0x3FFB_001F,
-            0x1013_001F,
-            0x0C1A_001F,
-            0x0C1F_001F,
-            0x0E04_001F,
-            0x8238_001F,
-            0x823B_001F,
-            0x823C_001F,
-        ],
-    );
-    renew_mapi_request_id(&mut execute_headers);
-    let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &execute_headers,
-            &execute_body(&rop_buffer(&read_rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("Updated RCA Calendar")
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("Room 2")));
-    assert!(contains_bytes(&response_rops, &utf16z("<p>Updated</p>")));
-    assert!(contains_bytes(&response_rops, &utf16z("Updated Organizer")));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("updated.organizer@example.test")
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("Carol Attendee")));
-
-    let mut delete_rops = Vec::new();
-    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&event_id)]);
-    renew_mapi_request_id(&mut execute_headers);
-    let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &execute_headers,
-            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
-    assert!(events.lock().unwrap().is_empty());
-    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
 }
 
 #[tokio::test]
@@ -1133,7 +1026,7 @@ async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event() {
+async fn mapi_over_http_advertised_calendar_update_delete_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccc0001").unwrap();
     let store = FakeStore {
@@ -1201,16 +1094,14 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        !response_rops
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
-        "calendar update returned an error: {response_rops:02x?}"
-    );
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_010Fu32.to_le_bytes()
+    ));
     {
         let stored = events.lock().unwrap();
-        assert_eq!(stored[0].title, "Updated implicit calendar");
-        assert_eq!(stored[0].location, "Room 2");
+        assert_eq!(stored[0].title, "Implicit default calendar");
+        assert_eq!(stored[0].location, "Room 1");
     }
 
     let mut delete_rops = Vec::new();
@@ -1225,15 +1116,9 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
         )
         .await
         .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        !response_rops
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
-        "calendar delete returned an error: {response_rops:02x?}"
-    );
-    assert!(events.lock().unwrap().is_empty());
-    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+    let _response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(events.lock().unwrap().len(), 1);
+    assert!(deleted_events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1467,7 +1352,7 @@ async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() 
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_meeting_cancel_deletes_existing_canonical_event() {
+async fn mapi_over_http_calendar_meeting_cancel_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececececece").unwrap();
     let store = FakeStore {
@@ -1546,12 +1431,12 @@ async fn mapi_over_http_calendar_meeting_cancel_deletes_existing_canonical_event
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
-    assert!(events.lock().unwrap().is_empty());
-    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+    assert_eq!(events.lock().unwrap().len(), 1);
+    assert!(deleted_events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -1643,7 +1528,7 @@ async fn mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_s
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status() {
+async fn mapi_over_http_calendar_meeting_response_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cfcfcfcf-cfcf-cfcf-cfcf-cfcfcfcfcfcf").unwrap();
     let store = FakeStore {
@@ -1722,7 +1607,7 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
@@ -1730,7 +1615,7 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
     assert_eq!(stored[0].attendees, "Bob");
     assert!(stored[0]
         .attendees_json
-        .contains(r#""partstat":"accepted""#));
+        .contains(r#""partstat":"needs-action""#));
 }
 
 #[tokio::test]
@@ -1825,7 +1710,7 @@ async fn mapi_over_http_calendar_meeting_response_rejects_binary_payload_without
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_attendee_named_properties_update_canonical_event() {
+async fn mapi_over_http_calendar_attendee_named_properties_are_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d1d1d1d1-d1d1-d1d1-d1d1-d1d1d1d1d1d1").unwrap();
     let store = FakeStore {
@@ -1899,18 +1784,17 @@ async fn mapi_over_http_calendar_attendee_named_properties_update_canonical_even
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].attendees, "Bob Required, Cara Optional");
-    assert!(stored[0].attendees_json.contains("REQ-PARTICIPANT"));
-    assert!(stored[0].attendees_json.contains("OPT-PARTICIPANT"));
+    assert!(stored[0].attendees.is_empty());
+    assert!(stored[0].attendees_json.is_empty());
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_display_cc_updates_optional_attendees() {
+async fn mapi_over_http_calendar_display_cc_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d8d8d8d8-d8d8-d8d8-d8d8-d8d8d8d8d8d8").unwrap();
     let store = FakeStore {
@@ -1984,14 +1868,13 @@ async fn mapi_over_http_calendar_display_cc_updates_optional_attendees() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].attendees, "Bob Required, Cara Optional");
-    assert!(stored[0].attendees_json.contains("REQ-PARTICIPANT"));
-    assert!(stored[0].attendees_json.contains("OPT-PARTICIPANT"));
+    assert!(stored[0].attendees.is_empty());
+    assert!(stored[0].attendees_json.is_empty());
 }
 
 #[tokio::test]
@@ -2077,7 +1960,7 @@ async fn mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_time_zone_description_updates_canonical_event() {
+async fn mapi_over_http_calendar_time_zone_description_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d3d3d3d3-d3d3-d3d3-d3d3-d3d3d3d3d3d3").unwrap();
     let store = FakeStore {
@@ -2150,16 +2033,16 @@ async fn mapi_over_http_calendar_time_zone_description_updates_canonical_event()
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].time_zone, "W. Europe Standard Time");
+    assert_eq!(stored[0].time_zone, "UTC");
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
+async fn mapi_over_http_calendar_whole_start_end_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5").unwrap();
     let store = FakeStore {
@@ -2241,18 +2124,18 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].date, "2026-06-01");
-    assert_eq!(stored[0].time, "13:15");
-    assert_eq!(stored[0].duration_minutes, 90);
+    assert_eq!(stored[0].date, "2026-05-04");
+    assert_eq!(stored[0].time, "09:30");
+    assert_eq!(stored[0].duration_minutes, 30);
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_common_start_end_update_canonical_event() {
+async fn mapi_over_http_calendar_common_start_end_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d7d7d7d7-d7d7-d7d7-d7d7-d7d7d7d7d7d7").unwrap();
     let store = FakeStore {
@@ -2334,18 +2217,18 @@ async fn mapi_over_http_calendar_common_start_end_update_canonical_event() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].date, "2026-06-02");
-    assert_eq!(stored[0].time, "08:00");
-    assert_eq!(stored[0].duration_minutes, 90);
+    assert_eq!(stored[0].date, "2026-05-04");
+    assert_eq!(stored[0].time, "09:30");
+    assert_eq!(stored[0].duration_minutes, 30);
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_status() {
+async fn mapi_over_http_calendar_state_flags_cancel_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4").unwrap();
     let store = FakeStore {
@@ -2418,12 +2301,12 @@ async fn mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_stat
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].status, "cancelled");
+    assert_eq!(stored[0].status, "confirmed");
 }
 
 #[tokio::test]
@@ -2509,7 +2392,7 @@ async fn mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_sid
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_attachment_save_uses_canonical_event_attachments() {
+async fn mapi_over_http_calendar_attachment_save_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
     let store = FakeStore {
@@ -2604,21 +2487,15 @@ async fn mapi_over_http_calendar_attachment_save_uses_canonical_event_attachment
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x23, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
+    assert!(!contains_bytes(&response_rops, &[0x23, 0x03, 0, 0, 0, 0]));
+    assert!(!contains_bytes(&response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
 
     let stored = calendar_attachments.lock().unwrap();
-    let event_attachments = stored.get(&event_id).unwrap();
-    assert_eq!(event_attachments.len(), 1);
-    assert_eq!(event_attachments[0].file_name, "agenda.pdf");
-    assert_eq!(event_attachments[0].media_type, "application/pdf");
-    assert!(event_attachments[0]
-        .file_reference
-        .starts_with("calendar-attachment:"));
+    assert!(stored.get(&event_id).map_or(true, Vec::is_empty));
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_get_valid_attachments_lists_canonical_attachment_numbers() {
+async fn mapi_over_http_calendar_get_valid_attachments_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
     let first_attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadadadad").unwrap();
@@ -2723,14 +2600,14 @@ async fn mapi_over_http_calendar_get_valid_attachments_lists_canonical_attachmen
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &[0x52, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_open_attachment_reads_default_collection_attachment() {
+async fn mapi_over_http_advertised_calendar_open_attachment_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcd0001").unwrap();
     let attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadad0001").unwrap();
@@ -2816,17 +2693,16 @@ async fn mapi_over_http_advertised_calendar_open_attachment_reads_default_collec
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x22, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, &[0x22, 0x03, 0, 0, 0, 0]));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("default-agenda.pdf")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("application/pdf")));
-    assert!(contains_bytes(&response_rops, &33u32.to_le_bytes()));
+    assert!(!contains_bytes(&response_rops, &utf16z("application/pdf")));
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_delete_attachment_removes_canonical_event_attachment() {
+async fn mapi_over_http_calendar_delete_attachment_is_hidden_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
     let attachment_id = Uuid::parse_str("afafafaf-afaf-afaf-afaf-afafafafafaf").unwrap();
@@ -2909,8 +2785,8 @@ async fn mapi_over_http_calendar_delete_attachment_removes_canonical_event_attac
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x24, 0x02, 0, 0, 0, 0]));
-    assert!(calendar_attachments.lock().unwrap()[&event_id].is_empty());
+    assert!(!contains_bytes(&response_rops, &[0x24, 0x02, 0, 0, 0, 0]));
+    assert_eq!(calendar_attachments.lock().unwrap()[&event_id].len(), 1);
 }
 
 #[tokio::test]
@@ -4912,7 +4788,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     );
     assert_eq!(
         u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
-        2
+        3
     );
     assert_eq!(&response_rop[8..10], &0x8003u16.to_le_bytes());
     assert_eq!(&response_rop[10..12], &0x8004u16.to_le_bytes());
@@ -5445,7 +5321,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
                 .try_into()
                 .unwrap()
         ),
-        3
+        2
     );
 }
 
@@ -14775,7 +14651,7 @@ async fn mapi_over_http_set_properties_validates_swapped_todo_data() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminders() {
+async fn mapi_over_http_set_properties_hides_calendar_event_but_updates_task_reminders() {
     let account = FakeStore::account();
     let calendar = FakeStore::collection("default", "calendar", "Calendar");
     let task_list = FakeStore::collection("default", "task", "Tasks");
@@ -14919,18 +14795,16 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+        &0x8004_0102u32.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,
         &[0x0A, 0x04, 0, 0, 0, 0, 0, 0]
     ));
     let reminders = reminders.lock().unwrap();
-    assert!(reminders.iter().any(|reminder| {
-        reminder.source_type == "calendar"
-            && reminder.source_id == event_id
-            && reminder.reminder_at == calendar_reminder_at
-    }));
+    assert!(!reminders
+        .iter()
+        .any(|reminder| { reminder.source_type == "calendar" && reminder.source_id == event_id }));
     assert!(reminders.iter().any(|reminder| {
         reminder.source_type == "task"
             && reminder.source_id == task_id
@@ -16768,46 +16642,9 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    assert_eq!(
-        stream.message_changes[0].subject,
-        "Calendar sync appointment"
-    );
-    assert!(
-        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
-        "response rops: {response_rops:02x?}"
-    );
-    assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x0060_0040u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x0061_0040u32.to_le_bytes()
-    ));
-    for property_tag in [
-        0x8001_0102u32,
-        0x8002_0102,
-        0x820D_0040,
-        0x820E_0040,
-        0x8215_000B,
-        0x8217_0003,
-        0x8233_0102,
-        0x8234_001F,
-        0x825E_0102,
-        0x825F_0102,
-    ] {
-        assert!(contains_bytes(&response_rops, &property_tag.to_le_bytes()));
-    }
-    assert!(contains_bytes(&response_rops, &utf16z("UTC")));
-    assert!(contains_bytes(
-        &response_rops,
-        &[
-            0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82,
-            0xE0, 0x08,
-        ]
-    ));
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Conference room")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -16833,7 +16670,7 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_sync_projects_default_collection_event_without_collection_row(
+async fn mapi_over_http_advertised_calendar_sync_hides_default_collection_event_without_collection_row(
 ) {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710001").unwrap();
@@ -16877,16 +16714,9 @@ async fn mapi_over_http_advertised_calendar_sync_projects_default_collection_eve
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    assert_eq!(
-        stream.message_changes[0].subject,
-        "Advertised Calendar appointment"
-    );
-    assert!(
-        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
-        "response rops: {response_rops:02x?}"
-    );
-    assert!(contains_bytes(&response_rops, &utf16z("Room 16")));
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Room 16")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             account.account_id,
@@ -16905,7 +16735,7 @@ async fn mapi_over_http_advertised_calendar_sync_projects_default_collection_eve
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_open_message_reads_default_collection_event_without_collection_row(
+async fn mapi_over_http_advertised_calendar_open_message_hides_default_collection_event_without_collection_row(
 ) {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710003").unwrap();
@@ -16985,27 +16815,27 @@ async fn mapi_over_http_advertised_calendar_open_message_reads_default_collectio
     let response_rops = response_rops_from_execute_response(response).await;
 
     assert!(
-        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
+        !contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
         "response rops: {response_rops:02x?}"
     );
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Advertised Calendar open appointment")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Room 18")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, &utf16z("Room 18")));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Open without collection row")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("<p>Open without collection row</p>")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Bob")));
 }
 
 #[tokio::test]
@@ -17368,7 +17198,7 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties(
+async fn mapi_over_http_calendar_sync_hides_postgresql_canonical_event_properties(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -17426,103 +17256,20 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     )
     .await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    assert_eq!(
-        stream.message_changes[0].subject,
-        "PostgreSQL calendar appointment"
-    );
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&0x8216_0102u32));
-    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(contains_bytes(&response_rops, &utf16z("Room 420")));
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Room 420")));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Canonical body text")
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("<p>Canonical body text</p>")
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("alice@example.test")
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8238_001Fu32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x823B_001Fu32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x823C_001Fu32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x0E03_001Fu32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8205_0003u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(&response_rops, &1i32.to_le_bytes()));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8215_000Bu32.to_le_bytes()
-    ));
-    assert!(contains_bytes(&response_rops, &[1]));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8217_0003u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(&response_rops, &1i32.to_le_bytes()));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8001_0102u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8002_0102u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8216_0102u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8516_0040u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8517_0040u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:30:00Z").to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:31:00Z").to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x0E1B_000Bu32.to_le_bytes()
-    ));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&0x0E1B_000Bu32));
 
     fixture.cleanup().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_event_properties(
+async fn mapi_over_http_calendar_contents_table_hides_postgresql_canonical_event_properties(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -17610,35 +17357,33 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Contents table appointment")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Contents table body")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("<p>Contents table body</p>")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, &utf16z("Alice Calendar")));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
-    assert!(contains_bytes(&response_rops, &utf16z("Room 421")));
-    assert!(contains_bytes(&response_rops, &2i32.to_le_bytes()));
-    assert!(contains_bytes(&response_rops, &[0]));
+    assert!(!contains_bytes(&response_rops, &utf16z("Bob")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Room 421")));
 
     fixture.cleanup().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection(
+async fn mapi_over_http_calendar_sync_hides_postgresql_custom_calendar_collection(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -17694,14 +17439,10 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collec
 
     let response_rops = content_sync_response_rops_for_store(storage, folder.id, &[]).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    assert_eq!(
-        stream.message_changes[0].subject,
-        "Custom calendar appointment"
-    );
-    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(contains_bytes(&response_rops, &utf16z("Room 422")));
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Room 422")));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Custom calendar body")
     ));
@@ -17802,7 +17543,7 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection(
+async fn mapi_over_http_calendar_reopen_update_is_hidden_for_postgresql_custom_calendar_collection(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -17898,13 +17639,13 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        !response_rops
+        response_rops
             .windows(4)
             .any(|window| window == 0x8004_0102u32.to_le_bytes())
-            && !response_rops
+            || response_rops
                 .windows(4)
                 .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
-        "custom calendar update returned an error: {response_rops:02x?}"
+        "custom calendar update should be hidden: {response_rops:02x?}"
     );
 
     let custom_events = storage
@@ -17913,12 +17654,12 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
     assert_eq!(custom_events.len(), 1);
     assert_eq!(custom_events[0].id, event.id);
     assert_eq!(custom_events[0].collection_id, collection.id);
-    assert_eq!(custom_events[0].title, "Custom calendar after update");
+    assert_eq!(custom_events[0].title, "Custom calendar before update");
     assert_eq!(custom_events[0].date, "2026-06-07");
-    assert_eq!(custom_events[0].time, "10:15");
-    assert_eq!(custom_events[0].duration_minutes, 45);
-    assert_eq!(custom_events[0].location, "Room 702");
-    assert_eq!(custom_events[0].notes, "After update");
+    assert_eq!(custom_events[0].time, "09:00");
+    assert_eq!(custom_events[0].duration_minutes, 30);
+    assert_eq!(custom_events[0].location, "Room 701");
+    assert_eq!(custom_events[0].notes, "Before update");
     let default_events = storage
         .fetch_accessible_events_in_collection(fixture.account_id, "default")
         .await?;
@@ -17929,7 +17670,7 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_custom_collection_attachment_round_trips_postgresql(
+async fn mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -18025,22 +17766,13 @@ async fn mapi_over_http_calendar_custom_collection_attachment_round_trips_postgr
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x23, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
+    assert!(!contains_bytes(&response_rops, &[0x23, 0x03, 0, 0, 0, 0]));
+    assert!(!contains_bytes(&response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
 
     let attachments = storage
         .fetch_calendar_event_attachments(fixture.account_id, event.id)
         .await?;
-    assert_eq!(attachments.len(), 1);
-    assert_eq!(attachments[0].file_name, "custom-agenda.pdf");
-    assert_eq!(attachments[0].media_type, "application/pdf");
-    assert_eq!(
-        attachments[0].size_octets,
-        b"%PDF-custom-calendar".len() as u64
-    );
-    assert!(attachments[0]
-        .file_reference
-        .starts_with("calendar-attachment:"));
+    assert!(attachments.is_empty());
     let default_events = storage
         .fetch_accessible_events_in_collection(fixture.account_id, "default")
         .await?;
@@ -18093,14 +17825,17 @@ async fn mapi_over_http_calendar_custom_collection_attachment_round_trips_postgr
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &[0x21, 0x03, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
-    assert!(contains_bytes(&response_rops, &[0x22, 0x04, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &utf16z("custom-agenda.pdf")));
-    assert!(contains_bytes(&response_rops, &utf16z("application/pdf")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, &[0x22, 0x04, 0, 0, 0, 0]));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("custom-agenda.pdf")
+    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("application/pdf")));
+    assert!(!contains_bytes(
         &response_rops,
         &(b"%PDF-custom-calendar".len() as u32).to_le_bytes()
     ));
@@ -27547,7 +27282,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     let table_response_rops = response_rops_from_execute_response(table_response).await;
     assert!(contains_bytes(
         &table_response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 2, 0, 0]
+        &[0x15, 0x02, 0, 0, 0, 0, 0, 0, 0]
     ));
     assert!(!contains_bytes(
         &table_response_rops,
@@ -30343,7 +30078,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
                 .try_into()
                 .unwrap()
         ),
-        3
+        2
     );
     assert!(contains_bytes(
         &response_rops,
@@ -30361,16 +30096,14 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         &response_rops,
         &0x0C1A_001Fu32.to_le_bytes()
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Calendar reminder")));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Calendar reminder")
+    ));
     assert!(contains_bytes(&response_rops, &utf16z("Task reminder")));
     assert!(contains_bytes(&response_rops, &utf16z("Mail reminder")));
-    let calendar_name = utf16z("Calendar reminder");
     let mail_name = utf16z("Mail reminder");
     let task_name = utf16z("Task reminder");
-    let calendar_offset = response_rops
-        .windows(calendar_name.len())
-        .position(|window| window == calendar_name.as_slice())
-        .unwrap();
     let mail_offset = response_rops
         .windows(mail_name.len())
         .position(|window| window == mail_name.as_slice())
@@ -30379,9 +30112,8 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         .windows(task_name.len())
         .position(|window| window == task_name.as_slice())
         .unwrap();
-    assert!(calendar_offset < mail_offset);
     assert!(mail_offset < task_offset);
-    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Task")));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Note")));
     assert!(contains_bytes(&response_rops, &[0x03, 0x03, 0, 0, 0, 0]));
@@ -36481,24 +36213,15 @@ async fn mapi_over_http_shared_calendar_read_only_rights_reject_mutations() {
     append_rop_create_message(&mut rops, 0, 1, shared_folder_id);
     append_rop_open_folder(&mut rops, 0, 2, shared_folder_id);
     append_rop_open_message(&mut rops, 2, 3, shared_folder_id, mapi_event.id);
-    let mut property_values = Vec::new();
-    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Forbidden update");
-    append_rop_set_properties(&mut rops, 3, 1, &property_values);
     rops.extend_from_slice(&[0x1E, 0x00, 0x02, 0x00, 0x00]); // RopDeleteMessages.
     rops.extend_from_slice(&1u16.to_le_bytes());
     append_mapi_wire_id(&mut rops, mapi_event.id);
-    rops.extend_from_slice(&[0x23, 0x00, 0x03, 0x04]); // RopCreateAttachment.
-    rops.extend_from_slice(&[0x24, 0x00, 0x03]); // RopDeleteAttachment.
-    rops.extend_from_slice(&0u32.to_le_bytes());
 
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(
-                &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
-            )),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -36511,19 +36234,11 @@ async fn mapi_over_http_shared_calendar_read_only_rights_reject_mutations() {
     ));
     assert!(contains_bytes(
         &response_rops,
-        &[0x0A, 0x03, 0x02, 0x01, 0x04, 0x80]
+        &[0x03, 0x03, 0x0F, 0x01, 0x04, 0x80]
     ));
     assert!(contains_bytes(
         &response_rops,
         &[0x1E, 0x02, 0x05, 0x00, 0x07, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x23, 0x04, 0x05, 0x00, 0x07, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x24, 0x03, 0x05, 0x00, 0x07, 0x80]
     ));
     let events = store.events.lock().unwrap();
     assert_eq!(events.len(), 1);
