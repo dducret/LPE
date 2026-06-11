@@ -1547,7 +1547,9 @@ pub(in crate::mapi) fn default_post_message_class_for_container_class(
         "IPF.Note" => Some("IPM.Note"),
         class if class.starts_with("IPF.Note.") => Some("IPM.Note"),
         "IPF.Appointment" => Some("IPM.Appointment"),
-        "IPF.Contact" | "IPF.Contact.MOC.QuickContacts" => Some("IPM.Contact"),
+        "IPF.Contact" | "IPF.Contact.MOC.QuickContacts" | "IPF.Contact.MOC.ImContactList" => {
+            Some("IPM.Contact")
+        }
         "IPF.Task" => Some("IPM.Task"),
         "IPF.StickyNote" => Some("IPM.StickyNote"),
         "IPF.Journal" => Some("IPM.Activity"),
@@ -7773,6 +7775,18 @@ mod tests {
         assert_eq!(
             default_post_message_class_for_container_class("IPF.Note.OutlookHomepage"),
             Some("IPM.Note")
+        );
+    }
+
+    #[test]
+    fn moc_contact_folder_classes_project_contact_default_post_message_class() {
+        assert_eq!(
+            default_post_message_class_for_container_class("IPF.Contact.MOC.QuickContacts"),
+            Some("IPM.Contact")
+        );
+        assert_eq!(
+            default_post_message_class_for_container_class("IPF.Contact.MOC.ImContactList"),
+            Some("IPM.Contact")
         );
     }
 

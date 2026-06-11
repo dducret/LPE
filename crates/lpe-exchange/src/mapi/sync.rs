@@ -507,7 +507,17 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
             })
     {
-        return Vec::new();
+        objects.extend(
+            snapshot
+                .events_for_folder(folder_id)
+                .into_iter()
+                .map(|event| {
+                    calendar_sync_object(
+                        event,
+                        snapshot.reminder_for_source("event", event.canonical_id),
+                    )
+                }),
+        );
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| {
@@ -1173,7 +1183,6 @@ fn special_message_property_value(
     }
 }
 
-#[cfg(test)]
 fn calendar_sync_object(
     event: &crate::mapi_store::MapiEvent,
     reminder: Option<&lpe_storage::ClientReminder>,
@@ -1661,7 +1670,7 @@ mod tests {
     }
 
     #[test]
-    fn calendar_special_content_sync_does_not_advertise_appointment_objects() {
+    fn calendar_special_content_sync_advertises_appointment_objects() {
         let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
         let event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
         crate::mapi::identity::remember_mapi_identity(
@@ -1713,7 +1722,9 @@ mod tests {
 
         let objects = special_sync_objects_for(CALENDAR_FOLDER_ID, 0x01, &snapshot, account_id);
 
-        assert!(objects.is_empty());
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].message_class, "IPM.Appointment");
+        assert_eq!(objects[0].subject, "Test");
     }
 
     #[test]

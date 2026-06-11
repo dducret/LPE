@@ -580,7 +580,7 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_custom_properties_are_hidden_for_existing_guarded_event() {
+async fn mapi_over_http_calendar_custom_properties_do_not_persist_for_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececece1234").unwrap();
     let store = FakeStore {
@@ -653,11 +653,7 @@ async fn mapi_over_http_calendar_custom_properties_are_hidden_for_existing_guard
         )
         .await
         .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8004_0102u32.to_le_bytes()
-    ));
+    let _response_rops = response_rops_from_execute_response(response).await;
     assert!(stored_custom_values.lock().unwrap().is_empty());
 
     let restarted = ExchangeService::new(store);
@@ -690,10 +686,6 @@ async fn mapi_over_http_calendar_custom_properties_are_hidden_for_existing_guard
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert!(
-        contains_bytes(&response_rops, &0x8004_0102u32.to_le_bytes())
-            || contains_bytes(&response_rops, &0x8004_010Fu32.to_le_bytes())
-    );
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("calendar restart opaque value")
@@ -1026,7 +1018,7 @@ async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_update_delete_is_hidden_for_existing_guarded_event() {
+async fn mapi_over_http_advertised_calendar_update_delete_do_not_mutate_existing_guarded_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccc0001").unwrap();
     let store = FakeStore {
@@ -1093,11 +1085,7 @@ async fn mapi_over_http_advertised_calendar_update_delete_is_hidden_for_existing
         )
         .await
         .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &0x8004_010Fu32.to_le_bytes()
-    ));
+    let _response_rops = response_rops_from_execute_response(response).await;
     {
         let stored = events.lock().unwrap();
         assert_eq!(stored[0].title, "Implicit default calendar");
@@ -2495,7 +2483,7 @@ async fn mapi_over_http_calendar_attachment_save_is_hidden_for_existing_guarded_
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_get_valid_attachments_is_hidden_for_existing_guarded_event() {
+async fn mapi_over_http_calendar_get_valid_attachments_projects_existing_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
     let first_attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadadadad").unwrap();
@@ -2600,14 +2588,14 @@ async fn mapi_over_http_calendar_get_valid_attachments_is_hidden_for_existing_gu
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &[0x52, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_open_attachment_is_hidden_for_existing_guarded_event() {
+async fn mapi_over_http_advertised_calendar_open_attachment_projects_existing_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcd0001").unwrap();
     let attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadad0001").unwrap();
@@ -2693,12 +2681,12 @@ async fn mapi_over_http_advertised_calendar_open_attachment_is_hidden_for_existi
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(&response_rops, &[0x22, 0x03, 0, 0, 0, 0]));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &[0x22, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("default-agenda.pdf")
     ));
-    assert!(!contains_bytes(&response_rops, &utf16z("application/pdf")));
+    assert!(contains_bytes(&response_rops, &utf16z("application/pdf")));
 }
 
 #[tokio::test]
@@ -16906,9 +16894,9 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert!(stream.message_changes.is_empty());
-    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Conference room")));
+    assert_eq!(stream.message_changes.len(), 1);
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -16934,8 +16922,7 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_sync_hides_default_collection_event_without_collection_row(
-) {
+async fn mapi_over_http_advertised_calendar_sync_projects_default_collection_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710001").unwrap();
     let store = FakeStore {
@@ -16978,9 +16965,9 @@ async fn mapi_over_http_advertised_calendar_sync_hides_default_collection_event_
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert!(stream.message_changes.is_empty());
-    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Room 16")));
+    assert_eq!(stream.message_changes.len(), 1);
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 16")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             account.account_id,
@@ -16999,8 +16986,7 @@ async fn mapi_over_http_advertised_calendar_sync_hides_default_collection_event_
 }
 
 #[tokio::test]
-async fn mapi_over_http_advertised_calendar_open_message_hides_default_collection_event_without_collection_row(
-) {
+async fn mapi_over_http_advertised_calendar_open_message_projects_default_collection_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710003").unwrap();
     let store = FakeStore {
@@ -17079,27 +17065,27 @@ async fn mapi_over_http_advertised_calendar_open_message_hides_default_collectio
     let response_rops = response_rops_from_execute_response(response).await;
 
     assert!(
-        !contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
+        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
         "response rops: {response_rops:02x?}"
     );
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("Advertised Calendar open appointment")
     ));
-    assert!(!contains_bytes(&response_rops, &utf16z("Room 18")));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &utf16z("Room 18")));
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("Open without collection row")
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("<p>Open without collection row</p>")
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")
     ));
-    assert!(!contains_bytes(&response_rops, &utf16z("Bob")));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
 }
 
 #[tokio::test]
@@ -17533,7 +17519,7 @@ async fn mapi_over_http_calendar_sync_hides_postgresql_canonical_event_propertie
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_contents_table_hides_postgresql_canonical_event_properties(
+async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_event_properties(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -17621,26 +17607,26 @@ async fn mapi_over_http_calendar_contents_table_hides_postgresql_canonical_event
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("Contents table appointment")
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("Contents table body")
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("<p>Contents table body</p>")
     ));
-    assert!(!contains_bytes(&response_rops, &utf16z("Alice Calendar")));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")
     ));
-    assert!(!contains_bytes(&response_rops, &utf16z("Bob")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Room 421")));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 421")));
 
     fixture.cleanup().await?;
     Ok(())
@@ -36926,10 +36912,6 @@ async fn mapi_over_http_shared_calendar_read_only_rights_reject_mutations() {
     assert!(contains_bytes(
         &response_rops,
         &[0x06, 0x01, 0x05, 0x00, 0x07, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x03, 0x03, 0x0F, 0x01, 0x04, 0x80]
     ));
     assert!(contains_bytes(
         &response_rops,

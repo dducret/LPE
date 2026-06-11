@@ -814,15 +814,6 @@ pub(in crate::mapi) fn rop_save_changes_message_response(
     response
 }
 
-fn calendar_event_object_hidden(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
-    folder_id == CALENDAR_FOLDER_ID
-        || snapshot
-            .collaboration_folder_for_id(folder_id)
-            .is_some_and(|folder| {
-                folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
-            })
-}
-
 pub(in crate::mapi) fn rop_get_properties_list_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -1004,13 +995,6 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             folder_id,
             event_id,
         }) => {
-            if calendar_event_object_hidden(*folder_id, snapshot) {
-                return rop_error_response(
-                    0x07,
-                    request.input_handle_index().unwrap_or(0),
-                    0x8004_010F,
-                );
-            }
             let Some(_event) = snapshot.event_for_id(*folder_id, *event_id) else {
                 return rop_error_response(
                     0x07,
@@ -3018,8 +3002,12 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    if let Some(MapiObject::Event { folder_id, .. }) = object {
-        if calendar_event_object_hidden(*folder_id, snapshot) {
+    if let Some(MapiObject::Event {
+        folder_id,
+        event_id,
+    }) = object
+    {
+        if snapshot.event_for_id(*folder_id, *event_id).is_none() {
             return rop_error_response(
                 0x08,
                 request.input_handle_index().unwrap_or(0),
@@ -3097,7 +3085,7 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
         _ => return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9),
     };
     if matches!(object, Some(MapiObject::Event { .. }))
-        && calendar_event_object_hidden(folder_id, snapshot)
+        && snapshot.event_for_id(folder_id, message_id).is_none()
     {
         return rop_error_response(0x52, request.response_handle_index(), 0x8004_010F);
     }
@@ -3213,9 +3201,8 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::Event {
             folder_id,
             event_id,
-        }) => (!calendar_event_object_hidden(*folder_id, snapshot))
-            .then(|| snapshot.event_for_id(*folder_id, *event_id))
-            .flatten()
+        }) => snapshot
+            .event_for_id(*folder_id, *event_id)
             .map(|event| {
                 serialize_event_row_with_attachments(
                     &event.event,
@@ -7704,24 +7691,94 @@ mod tests {
         );
     }
 
+    fn test_accessible_calendar_event(
+        id: Uuid,
+        account_id: Uuid,
+        title: &str,
+    ) -> lpe_storage::AccessibleEvent {
+        lpe_storage::AccessibleEvent {
+            id,
+            uid: format!("uid-{id}"),
+            collection_id: "default".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            rights: lpe_storage::CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: false,
+            },
+            date: "2026-06-01".to_string(),
+            time: "10:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 60,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: title.to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }
+    }
+
+    fn contains_utf16(bytes: &[u8], value: &str) -> bool {
+        let needle = value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        bytes
+            .windows(needle.len())
+            .any(|window| window == needle.as_slice())
+    }
+
     #[test]
-    fn calendar_event_getprops_specific_rejects_stale_hidden_handle() {
+    fn calendar_event_getprops_specific_projects_visible_event() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
-            account_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0x8181),
             email: "test@example.test".to_string(),
             display_name: "Test".to_string(),
             quota_mb: None,
             quota_used_octets: None,
         };
+        let event_id = Uuid::from_u128(0x8182);
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(0x8182),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![test_accessible_calendar_event(
+                event_id,
+                principal.account_id,
+                "Projected event",
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
         let object = MapiObject::Event {
             folder_id: CALENDAR_FOLDER_ID,
-            event_id: crate::mapi::identity::mapi_store_id(0x43),
+            event_id: crate::mapi::identity::mapi_store_id(0x8182),
         };
         let mut payload = Vec::new();
         payload.extend_from_slice(&4096u16.to_le_bytes());
-        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&2u16.to_le_bytes());
         payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
         let request = RopRequest {
             rop_id: RopId::GetPropertiesSpecific.as_u8(),
             input_handle_index: Some(0),
@@ -7735,18 +7792,17 @@ mod tests {
             &principal,
             &[],
             &[],
-            &MapiMailStoreSnapshot::empty(),
+            &snapshot,
         );
 
         assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
-        assert_eq!(
-            u32::from_le_bytes(response[2..6].try_into().unwrap()),
-            0x8004_010F
-        );
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert!(contains_utf16(&response, "IPM.Appointment"));
+        assert!(contains_utf16(&response, "Projected event"));
     }
 
     #[test]
-    fn calendar_event_getprops_all_rejects_stale_hidden_handle() {
+    fn calendar_event_getprops_all_rejects_missing_event_handle() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::nil(),
@@ -7783,7 +7839,7 @@ mod tests {
     }
 
     #[test]
-    fn calendar_event_get_valid_attachments_rejects_stale_hidden_handle() {
+    fn calendar_event_get_valid_attachments_rejects_missing_event_handle() {
         let object = MapiObject::Event {
             folder_id: CALENDAR_FOLDER_ID,
             event_id: crate::mapi::identity::mapi_store_id(0x43),
