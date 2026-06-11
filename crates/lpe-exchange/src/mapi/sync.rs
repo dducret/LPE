@@ -80,7 +80,7 @@ const ROOT_VIRTUAL_FOLDER_IDS: [u64; 35] = [
     FREEBUSY_DATA_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 23] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 22] = [
     IPM_SUBTREE_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
@@ -91,7 +91,6 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 23] = [
     SUGGESTED_CONTACTS_FOLDER_ID,
     QUICK_CONTACTS_FOLDER_ID,
     IM_CONTACT_LIST_FOLDER_ID,
-    CONTACTS_SEARCH_FOLDER_ID,
     CALENDAR_FOLDER_ID,
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
@@ -105,6 +104,8 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 23] = [
     QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
+
+const SEARCH_VIRTUAL_FOLDER_IDS: [u64; 2] = [SEARCH_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID];
 
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
@@ -294,6 +295,7 @@ fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {
     match sync_root_folder_id {
         ROOT_FOLDER_ID => ROOT_VIRTUAL_FOLDER_IDS.to_vec(),
         IPM_SUBTREE_FOLDER_ID => IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec(),
+        SEARCH_FOLDER_ID => SEARCH_VIRTUAL_FOLDER_IDS.to_vec(),
         _ => PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec(),
     }
 }
@@ -350,6 +352,7 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | TRACKED_MAIL_PROCESSING_FOLDER_ID
         | TODO_SEARCH_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID => Some(ROOT_FOLDER_ID),
+        CONTACTS_SEARCH_FOLDER_ID => Some(SEARCH_FOLDER_ID),
         INBOX_FOLDER_ID
         | DRAFTS_FOLDER_ID
         | OUTBOX_FOLDER_ID
@@ -359,7 +362,6 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | SUGGESTED_CONTACTS_FOLDER_ID
         | QUICK_CONTACTS_FOLDER_ID
         | IM_CONTACT_LIST_FOLDER_ID
-        | CONTACTS_SEARCH_FOLDER_ID
         | CALENDAR_FOLDER_ID
         | JOURNAL_FOLDER_ID
         | NOTES_FOLDER_ID
@@ -397,7 +399,6 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | SUGGESTED_CONTACTS_FOLDER_ID
                 | QUICK_CONTACTS_FOLDER_ID
                 | IM_CONTACT_LIST_FOLDER_ID
-                | CONTACTS_SEARCH_FOLDER_ID
                 | CALENDAR_FOLDER_ID
                 | JOURNAL_FOLDER_ID
                 | NOTES_FOLDER_ID
@@ -412,6 +413,12 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | ARCHIVE_FOLDER_ID
                 | CONVERSATION_HISTORY_FOLDER_ID
         ),
+        SEARCH_FOLDER_ID => {
+            matches!(
+                special_folder_id,
+                SEARCH_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID
+            )
+        }
         _ => false,
     }
 }
@@ -1767,6 +1774,26 @@ mod tests {
     }
 
     #[test]
+    fn hierarchy_scope_places_contacts_search_under_search_not_ipm_subtree() {
+        let mailboxes = vec![mailbox(
+            0x45454545454545454545454545454545,
+            "contacts_search",
+            "Contacts Search",
+        )];
+
+        assert!(hierarchy_virtual_folder_ids(ROOT_FOLDER_ID).contains(&CONTACTS_SEARCH_FOLDER_ID));
+        assert!(!hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID)
+            .contains(&CONTACTS_SEARCH_FOLDER_ID));
+        assert_eq!(
+            sync_mailboxes_for(SEARCH_FOLDER_ID, 0x02, &mailboxes)
+                .iter()
+                .filter(|mailbox| mapi_folder_id(mailbox) == CONTACTS_SEARCH_FOLDER_ID)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn ipm_hierarchy_runtime_uses_outlook_safe_folder_projection() {
         std::env::set_var("LPE_MAPI_EXPERIMENT_MINIMAL_IPM_HIERARCHY", "1");
         std::env::set_var(
@@ -1871,7 +1898,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_transfer_manifest_rejects_unbacked_common_views_named_view() {
+    fn fast_transfer_manifest_exports_default_common_views_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
         let object = MapiObject::CommonViewNamedView {
@@ -1879,14 +1906,19 @@ mod tests {
             view_id,
         };
 
-        assert!(fast_transfer_manifest_for_object(
+        let manifest = fast_transfer_manifest_for_object(
             &object,
             account_id,
             &[],
             &[],
             &MapiMailStoreSnapshot::empty(),
         )
-        .is_none());
+        .expect("default common views named view manifest");
+
+        assert_eq!(manifest.0, COMMON_VIEWS_FOLDER_ID);
+        let manifest = String::from_utf8_lossy(&manifest.1);
+        assert!(manifest.contains("IPM.Microsoft.FolderDesign.NamedView"));
+        assert!(manifest.contains("Compact"));
     }
 
     #[test]

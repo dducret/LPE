@@ -974,7 +974,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             serialize_pending_message_row(principal, properties, &columns)
         }
         Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
-            serialize_pending_message_row(principal, properties, &columns)
+            serialize_pending_associated_message_row(principal, properties, &columns)
         }
         Some(MapiObject::Contact {
             folder_id,
@@ -2233,13 +2233,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_PST_PATH_W
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
-        Some(MapiObject::AssociatedConfig { config_id, .. })
-            if crate::mapi_store::is_outlook_quick_step_default_associated_config_id(
-                *config_id,
-            ) && storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B =>
-        {
-            false
-        }
         Some(MapiObject::AssociatedConfig { .. }) => {
             MapiPropertyTag::new(storage_tag).property_type().is_some()
         }
@@ -3193,7 +3186,7 @@ pub(in crate::mapi) fn serialize_object_property(
             serialize_pending_message_row(principal, properties, &[tag])
         }
         Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
-            serialize_pending_message_row(principal, properties, &[tag])
+            serialize_pending_associated_message_row(principal, properties, &[tag])
         }
         Some(MapiObject::Contact {
             folder_id,
@@ -7620,14 +7613,14 @@ mod tests {
     }
 
     #[test]
-    fn quick_step_custom_action_does_not_default_undocumented_0e0b() {
+    fn quick_step_custom_action_defaults_undocumented_0e0b_to_empty_binary() {
         let object = MapiObject::AssociatedConfig {
             folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
             config_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4),
             saved_message: None,
         };
 
-        assert!(!modeled_zero_or_default_property(
+        assert!(modeled_zero_or_default_property(
             Some(&object),
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ));

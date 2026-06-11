@@ -1850,7 +1850,7 @@ mod tests {
     }
 
     #[test]
-    fn access_plan_fetches_unbacked_common_views_named_view_identity() {
+    fn access_plan_does_not_fetch_default_common_views_named_view_identity() {
         let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
         let mut session = empty_session();
         session.handles.insert(
@@ -1865,7 +1865,7 @@ mod tests {
 
         assert_eq!(
             plan.object_ids,
-            vec![COMMON_VIEWS_FOLDER_ID, view_id],
+            vec![COMMON_VIEWS_FOLDER_ID],
             "plan={plan:?}"
         );
     }

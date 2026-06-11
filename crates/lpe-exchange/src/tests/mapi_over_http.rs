@@ -5321,7 +5321,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
                 .try_into()
                 .unwrap()
         ),
-        2
+        3
     );
 }
 
@@ -16518,7 +16518,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((35, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((33, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -19540,7 +19540,6 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     for folder_id in [
         crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
         crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
     ] {
         let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
             .expect("stable folder counter");
@@ -19752,11 +19751,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "IM Contact List",
             "IPF.Contact.MOC.ImContactList",
             crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-        ),
-        (
-            "Contacts Search",
-            "IPF.Contact",
-            crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
         ),
         (
             "Journal",
@@ -27900,7 +27894,7 @@ async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeh
 }
 
 #[tokio::test]
-async fn mapi_over_http_quick_step_config_0e0b_is_not_defaulted() {
+async fn mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -27953,11 +27947,12 @@ async fn mapi_over_http_quick_step_config_0e0b_is_not_defaulted() {
         .windows(marker.len())
         .position(|window| window == marker)
         .unwrap_or_else(|| panic!("missing GetPropertiesSpecific: {response_rops:02x?}"));
-    assert_eq!(response_rops[offset + marker.len()], 1);
-    assert!(contains_bytes(
+    assert_eq!(response_rops[offset + marker.len()], 0);
+    assert!(!contains_bytes(
         &response_rops[offset..],
         &[0x0A, 0x0F, 0x01, 0x04, 0x80]
     ));
+    assert!(contains_bytes(&response_rops[offset..], &[0x00, 0x00]));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.CustomAction")
@@ -37848,8 +37843,8 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert!(contains_bytes(&body, b"EX:"));
-    assert!(contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
-    assert!(contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x8CA8_001Eu32.to_le_bytes()));
     let mut search_key = format!(
         "EX:{}",
@@ -38229,6 +38224,9 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 6);
+    assert!(!contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x800F_101Fu32.to_le_bytes()));
     let proxy_tag_offset = body
         .windows(4)

@@ -204,8 +204,6 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x800F_101E, // PidTagAddressBookProxyAddresses string8
     0x800F_101F, // PidTagAddressBookProxyAddresses
     0x8009_000D, // PidTagAddressBookMember
-    0x3E04_0003, // Outlook address book compatibility flags
-    0x8888_0003, // Outlook address book compatibility flags
     0x8CA8_001E, // Outlook address book string8 compatibility column
     0x8CE2_0003, // PidTagAddressBookDistributionListMemberCount
     0x8CE3_0003, // PidTagAddressBookDistributionListExternalMemberCount
@@ -2190,20 +2188,22 @@ pub(in crate::mapi) fn nspi_entry_match_rank(
 
 pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
     let mut ids = Vec::new();
-    let mut offset = 0usize;
-    while offset + 4 <= request.len() {
-        let value = u32::from_le_bytes([
-            request[offset],
-            request[offset + 1],
-            request[offset + 2],
-            request[offset + 3],
-        ]);
-        if nspi_word_looks_like_entry_id(value) && !ids.contains(&value) {
-            ids.push(value);
-        }
-        offset += 4;
+    if let Some(value) = nspi_stat_current_rec(request) {
+        push_unique_nspi_entry_id(&mut ids, value);
+    }
+    if let Some(value) = nspi_direct_entry_id(request) {
+        push_unique_nspi_entry_id(&mut ids, value);
+    }
+    for value in nspi_query_rows_explicit_entry_ids("", request) {
+        push_unique_nspi_entry_id(&mut ids, value);
     }
     ids
+}
+
+fn push_unique_nspi_entry_id(ids: &mut Vec<u32>, value: u32) {
+    if !ids.contains(&value) {
+        ids.push(value);
+    }
 }
 
 fn nspi_stat_current_rec(request: &[u8]) -> Option<u32> {
@@ -2222,11 +2222,17 @@ fn nspi_stat_current_rec(request: &[u8]) -> Option<u32> {
 }
 
 fn nspi_direct_entry_id(request: &[u8]) -> Option<u32> {
-    if request.len() < 4 {
+    if request.len() < 8 {
         return None;
     }
-    let value = u32::from_le_bytes([request[0], request[1], request[2], request[3]]);
-    nspi_word_looks_like_entry_id(value).then_some(value)
+    let value = u32::from_le_bytes(request[0..4].try_into().ok()?);
+    if !nspi_word_looks_like_entry_id(value) {
+        return None;
+    }
+    request[4..]
+        .chunks_exact(4)
+        .any(|chunk| nspi_property_tag_is_supported(u32::from_le_bytes(chunk.try_into().unwrap())))
+        .then_some(value)
 }
 
 fn nspi_word_looks_like_entry_id(value: u32) -> bool {
@@ -2549,6 +2555,18 @@ mod tests {
 
         assert_eq!(nspi_stat_current_rec(&request), None);
         assert!(!nspi_request_has_entry_selector(&request));
+    }
+
+    #[test]
+    fn requested_entry_ids_ignore_misaligned_utf16_lookup_bytes() {
+        let mut request = vec![0, 0, 0];
+        request.extend("test@l-p-e.ch\0".encode_utf16().flat_map(u16::to_le_bytes));
+
+        assert!(nspi_requested_entry_ids(&request).is_empty());
+        assert_eq!(
+            scan_address_book_lookup_values(&request),
+            vec!["test@l-p-e.ch".to_string()]
+        );
     }
 
     #[test]

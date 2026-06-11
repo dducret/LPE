@@ -706,6 +706,15 @@ fn hierarchy_rows_excluding_deleted<'a>(
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
         }
+    } else if folder_id == SEARCH_FOLDER_ID {
+        for special_folder_id in SEARCH_HIERARCHY_FOLDER_IDS {
+            if !deleted_advertised_special_folders.contains(special_folder_id)
+                && folder_ids.insert(*special_folder_id)
+                && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
+            {
+                rows.push(HierarchyRow::Special(*special_folder_id));
+            }
+        }
     } else if snapshot.public_folder_for_id(folder_id).is_some() {
         rows =
             snapshot
@@ -750,7 +759,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SUGGESTED_CONTACTS_FOLDER_ID,
     QUICK_CONTACTS_FOLDER_ID,
     IM_CONTACT_LIST_FOLDER_ID,
-    CONTACTS_SEARCH_FOLDER_ID,
     CALENDAR_FOLDER_ID,
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
@@ -770,6 +778,8 @@ const SYNC_ISSUES_HIERARCHY_FOLDER_IDS: &[u64] = &[
     LOCAL_FAILURES_FOLDER_ID,
     SERVER_FAILURES_FOLDER_ID,
 ];
+
+const SEARCH_HIERARCHY_FOLDER_IDS: &[u64] = &[CONTACTS_SEARCH_FOLDER_ID];
 
 fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrder]) {
     if sort_orders.is_empty() {
@@ -4771,12 +4781,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             "IPF.Contact.MOC.ImContactList",
             false,
         ),
-        CONTACTS_SEARCH_FOLDER_ID => (
-            "Contacts Search",
-            IPM_SUBTREE_FOLDER_ID,
-            "IPF.Contact",
-            false,
-        ),
+        CONTACTS_SEARCH_FOLDER_ID => ("Contacts Search", SEARCH_FOLDER_ID, "IPF.Contact", false),
         DOCUMENT_LIBRARIES_FOLDER_ID => (
             "Document Libraries",
             ROOT_FOLDER_ID,
@@ -5298,6 +5303,46 @@ mod tests {
     }
 
     #[test]
+    fn pending_associated_message_projects_configuration_defaults() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_CHANGE_KEY,
+            MapiValue::Binary(vec![0x11, 0x22, 0x33]),
+        );
+
+        assert_eq!(
+            pending_associated_message_property_value(
+                &principal,
+                &properties,
+                PID_TAG_MESSAGE_CLASS_W
+            ),
+            Some(MapiValue::String("IPM.Configuration".to_string()))
+        );
+        assert!(matches!(
+            pending_associated_message_property_value(
+                &principal,
+                &properties,
+                PID_TAG_ROAMING_DICTIONARY
+            ),
+            Some(MapiValue::Binary(value))
+                if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+                    && value.windows(b"OLPrefsVersion".len()).any(|window| window == b"OLPrefsVersion")
+        ));
+        assert_eq!(
+            pending_associated_message_property_value(&principal, &properties, PID_TAG_CHANGE_KEY),
+            Some(MapiValue::Binary(vec![0x11, 0x22, 0x33]))
+        );
+    }
+
+    #[test]
     fn default_associated_config_columns_cover_required_configuration_contract() {
         let columns = default_associated_config_columns();
         for property_tag in [
@@ -5530,6 +5575,29 @@ mod tests {
         for row in rows {
             assert_eq!(hierarchy_row_parent_id(&row, &[]), SYNC_ISSUES_FOLDER_ID);
         }
+    }
+
+    #[test]
+    fn contacts_search_hierarchy_row_belongs_to_search_folder() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let ipm_rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &[],
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        let search_rows = hierarchy_rows(SEARCH_FOLDER_ID, &[], &snapshot, None, &[], Uuid::nil());
+
+        assert!(!ipm_rows
+            .iter()
+            .any(|row| hierarchy_row_id(row) == CONTACTS_SEARCH_FOLDER_ID));
+        let row = search_rows
+            .iter()
+            .find(|row| hierarchy_row_id(row) == CONTACTS_SEARCH_FOLDER_ID)
+            .expect("contacts search row under Search");
+        assert_eq!(hierarchy_row_parent_id(row, &[]), SEARCH_FOLDER_ID);
     }
 
     #[test]
@@ -6770,7 +6838,7 @@ mod tests {
 
     #[test]
     fn hierarchy_table_projects_user_saved_search_folder() {
-        let definition_id = Uuid::parse_str("aaaaaaaa-5555-4111-8111-aaaaaaaaaaaa").unwrap();
+        let definition_id = Uuid::parse_str("aaaaaaaa-5556-4111-8111-aaaaaaaaaaaa").unwrap();
         let folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_1124);
         crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
         let snapshot = MapiMailStoreSnapshot::new(
@@ -7317,13 +7385,13 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            0
+            1
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -7332,6 +7400,13 @@ mod tests {
         for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
             search_class.extend_from_slice(&code_unit.to_le_bytes());
         }
+        let mut named_view_class = Vec::new();
+        for code_unit in "IPM.Microsoft.FolderDesign.NamedView".encode_utf16() {
+            named_view_class.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        assert!(response
+            .windows(named_view_class.len())
+            .any(|window| window == named_view_class.as_slice()));
         assert!(!response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
@@ -7698,7 +7773,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_find_row_does_not_fabricate_named_view() {
+    fn common_views_find_row_returns_default_compact_named_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -7773,10 +7848,11 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(
-            u32::from_le_bytes(response[2..6].try_into().unwrap()),
-            0x8004_010F
-        );
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_response_contains_utf16(&response, "Compact");
+        assert!(response
+            .windows(4)
+            .any(|window| window == 14_745_605u32.to_le_bytes()));
     }
 
     #[test]
@@ -8465,6 +8541,10 @@ mod tests {
                 if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
                     && value.windows(b"customActions".len()).any(|window| window == b"customActions")
         ));
+        assert_eq!(
+            associated_config_property_value(&quick_step, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+            Some(MapiValue::Binary(Vec::new()))
+        );
 
         let row = serialize_associated_config_row_with_mailbox_guid(
             &message,
@@ -9748,6 +9828,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
             }
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::Binary(Vec::new()))
+            }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
                 Some(MapiValue::Binary(Vec::new()))
@@ -10304,6 +10390,24 @@ pub(in crate::mapi) fn serialize_pending_message_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_pending_associated_message_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) =
+            pending_associated_message_property_value(principal, properties, *column)
+        {
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            write_property_default(&mut row, *column);
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn pending_message_property_value(
     principal: &AccountPrincipal,
     properties: &HashMap<u32, MapiValue>,
@@ -10335,6 +10439,24 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_SENDER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(principal.email.clone())),
             _ => None,
+        })
+}
+
+fn pending_associated_message_property_value(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let lookup_tag = canonical_property_storage_tag(property_tag);
+    properties
+        .get(&lookup_tag)
+        .cloned()
+        .or_else(|| match lookup_tag {
+            PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Configuration".to_string())),
+            PID_TAG_ROAMING_DICTIONARY => {
+                Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
+            }
+            _ => pending_message_property_value(principal, properties, property_tag),
         })
 }
 
