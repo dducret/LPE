@@ -4788,7 +4788,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     );
     assert_eq!(
         u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
-        3
+        2
     );
     assert_eq!(&response_rop[8..10], &0x8003u16.to_le_bytes());
     assert_eq!(&response_rop[10..12], &0x8004u16.to_le_bytes());

@@ -13182,6 +13182,28 @@ where
                     ));
                     continue;
                 }
+                if session.search_folder_definition_was_deleted(folder_id) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1d",
+                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                        folder_id = %format!("{folder_id:#018x}"),
+                        partial_completion = false,
+                        message = "rca debug mapi delete search folder retry acknowledged",
+                    );
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        false,
+                    ));
+                    continue;
+                }
                 let Some(mailbox) = mailbox else {
                     responses.extend_from_slice(&rop_error_response(
                         0x1D,
@@ -22899,6 +22921,7 @@ mod tests {
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
+            deleted_search_folder_definitions: HashSet::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,

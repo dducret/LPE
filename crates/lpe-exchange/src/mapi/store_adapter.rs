@@ -1652,6 +1652,7 @@ mod tests {
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
+            deleted_search_folder_definitions: HashSet::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
@@ -1829,7 +1830,7 @@ mod tests {
     }
 
     #[test]
-    fn access_plan_fetches_unbacked_common_views_shortcut_identity() {
+    fn access_plan_does_not_fetch_default_common_views_shortcut_identity() {
         let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let mut session = empty_session();
         session.handles.insert(
@@ -1844,7 +1845,7 @@ mod tests {
 
         assert_eq!(
             plan.object_ids,
-            vec![COMMON_VIEWS_FOLDER_ID, shortcut_id],
+            vec![COMMON_VIEWS_FOLDER_ID],
             "plan={plan:?}"
         );
     }

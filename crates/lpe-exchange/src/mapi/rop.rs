@@ -1293,7 +1293,13 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
-                        .map(|folder| serialize_collaboration_folder_row(folder, &columns))
+                        .map(|folder| {
+                            serialize_collaboration_folder_row_with_context(
+                                folder,
+                                &columns,
+                                associated_folder_message_count(folder_id, snapshot),
+                            )
+                        })
                 })
                 .unwrap_or_else(|| {
                     serialize_special_folder_row(folder_id, mailboxes, &columns, Some(principal))
@@ -3422,7 +3428,13 @@ pub(in crate::mapi) fn serialize_object_property(
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
-                        .map(|folder| serialize_collaboration_folder_row(folder, &[tag]))
+                        .map(|folder| {
+                            serialize_collaboration_folder_row_with_context(
+                                folder,
+                                &[tag],
+                                associated_folder_message_count(folder_id, snapshot),
+                            )
+                        })
                 })
                 .unwrap_or_else(|| {
                     serialize_special_folder_row(folder_id, mailboxes, &[tag], Some(principal))
@@ -3459,6 +3471,20 @@ fn serialize_session_folder_row(
             continue;
         }
 
+        if (is_advertised_special_folder(folder_id)
+            || snapshot
+                .search_folder_definition_for_folder_id(folder_id)
+                .is_some())
+            && storage_tag == PID_TAG_CONTENT_COUNT
+        {
+            write_mapi_value(
+                &mut row,
+                *column,
+                &MapiValue::U32(folder_message_count(folder_id, mailboxes, &[], snapshot)),
+            );
+            continue;
+        }
+
         if let Some(definition) = snapshot.search_folder_definition_for_folder_id(folder_id) {
             if let Some(value) = search_folder_definition_property_value(
                 definition,
@@ -3489,15 +3515,6 @@ fn serialize_session_folder_row(
             }
         }
 
-        if is_advertised_special_folder(folder_id) && storage_tag == PID_TAG_CONTENT_COUNT {
-            write_mapi_value(
-                &mut row,
-                *column,
-                &MapiValue::U32(folder_message_count(folder_id, mailboxes, &[], snapshot)),
-            );
-            continue;
-        }
-
         let value = folder_row_for_id(folder_id, mailboxes)
             .map(|mailbox| {
                 serialize_folder_row_with_context(
@@ -3510,7 +3527,13 @@ fn serialize_session_folder_row(
             .or_else(|| {
                 snapshot
                     .collaboration_folder_for_id(folder_id)
-                    .map(|folder| serialize_collaboration_folder_row(folder, &[*column]))
+                    .map(|folder| {
+                        serialize_collaboration_folder_row_with_context(
+                            folder,
+                            &[*column],
+                            associated_folder_message_count(folder_id, snapshot),
+                        )
+                    })
             })
             .or_else(|| {
                 snapshot
@@ -7150,6 +7173,7 @@ mod tests {
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
+            deleted_search_folder_definitions: HashSet::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,

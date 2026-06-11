@@ -939,6 +939,17 @@ fn hierarchy_row_property_value(
     }
 }
 
+fn hierarchy_row_expected_container_class<'a>(row: &'a HierarchyRow<'a>) -> Option<&'a str> {
+    match row {
+        HierarchyRow::Collaboration(folder) => {
+            Some(collaboration_folder_message_class(folder.kind))
+        }
+        HierarchyRow::Special(folder_id) => debug_expected_container_class(*folder_id),
+        HierarchyRow::Mailbox(mailbox) => Some(folder_message_class(mailbox)),
+        HierarchyRow::PublicFolder(folder) => Some(folder.folder.folder_class.as_str()),
+    }
+}
+
 fn hierarchy_row_matches(
     row: &HierarchyRow<'_>,
     mailboxes: &[JmapMailbox],
@@ -1137,6 +1148,7 @@ pub(in crate::mapi) fn special_folder_property_value(
 fn serialize_hierarchy_row(
     row: HierarchyRow<'_>,
     mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
     mailbox_guid: Uuid,
 ) -> Vec<u8> {
@@ -1144,7 +1156,11 @@ fn serialize_hierarchy_row(
         HierarchyRow::Mailbox(mailbox) => {
             serialize_folder_row_with_context(mailbox, mailboxes, columns, mailbox_guid)
         }
-        HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
+        HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row_with_context(
+            folder,
+            columns,
+            associated_folder_message_count(folder.id, snapshot),
+        ),
         HierarchyRow::PublicFolder(folder) => serialize_public_folder_row(folder, columns),
         HierarchyRow::Special(folder_id)
             if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
@@ -1428,7 +1444,9 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 mailbox_guid,
             );
             rows.into_iter()
-                .map(|row| serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid))
+                .map(|row| {
+                    serialize_hierarchy_row(row, mailboxes, snapshot, &columns, mailbox_guid)
+                })
                 .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
@@ -1947,7 +1965,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         object_id,
                         Some(object_id),
                         Some(parent_id),
-                        debug_expected_container_class(object_id),
+                        hierarchy_row_expected_container_class(row),
                         |tag| {
                             debug_folder_row_property_value(
                                 || hierarchy_row_property_value(row, mailboxes, tag, mailbox_guid),
@@ -3582,7 +3600,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 response.push(1);
                 write_standard_property_row(
                     &mut response,
-                    &serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid),
+                    &serialize_hierarchy_row(row, mailboxes, snapshot, &columns, mailbox_guid),
                 );
             } else {
                 return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
@@ -6883,6 +6901,7 @@ mod tests {
         let serialized = serialize_hierarchy_row(
             *row,
             &mailboxes,
+            &snapshot,
             &[
                 PID_TAG_FOLDER_TYPE,
                 PID_TAG_PARENT_FOLDER_ID,
@@ -7092,6 +7111,7 @@ mod tests {
         let serialized = serialize_hierarchy_row(
             *calendar_row,
             &mailboxes,
+            &snapshot,
             &[PID_TAG_CONTAINER_CLASS_W],
             Uuid::nil(),
         );
@@ -7115,6 +7135,7 @@ mod tests {
             let serialized = serialize_hierarchy_row(
                 *row,
                 &mailboxes,
+                &snapshot,
                 &[PID_TAG_CONTAINER_CLASS_W],
                 Uuid::nil(),
             );
@@ -8111,6 +8132,100 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_contacts_associated_find_row_returns_osc_contact_sync_config() {
+        let folder_id = crate::mapi::identity::mapi_store_id(0x4e);
+        let collection = CollaborationCollection {
+            id: "outlook-log-dynamic-contacts-table".to_string(),
+            kind: "contacts".to_string(),
+            display_name: "Contacts".to_string(),
+            owner_account_id: Uuid::from_u128(0x4e),
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        };
+        crate::mapi::identity::remember_mapi_identity(
+            crate::mapi_store::collaboration_folder_identity_canonical_id(
+                crate::mapi_store::MapiCollaborationFolderKind::Contacts,
+                &collection,
+            )
+            .unwrap(),
+            folder_id,
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
+            folder_id, &snapshot,
+        );
+
+        let folder = snapshot
+            .collaboration_folder_for_id(folder_id)
+            .expect("dynamic contacts folder");
+        assert_eq!(
+            hierarchy_row_expected_container_class(&HierarchyRow::Collaboration(folder)),
+            Some("IPF.Contact")
+        );
+        let row = serialize_hierarchy_row(
+            HierarchyRow::Collaboration(folder),
+            &[],
+            &snapshot,
+            &[PID_TAG_ASSOCIATED_CONTENT_COUNT],
+            Uuid::nil(),
+        );
+
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 1);
+    }
+
+    #[test]
+    fn mailbox_backed_quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
+        let folder_id = crate::mapi::identity::mapi_store_id(0x55);
+        let mailbox_id = Uuid::parse_str("aaaaaaaa-7777-4111-8111-aaaaaaaaaaaa").unwrap();
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![JmapMailbox {
+                id: mailbox_id,
+                parent_id: None,
+                role: String::new(),
+                name: "Quick Contacts".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
+            folder_id, &snapshot,
+        );
+    }
+
+    #[test]
     fn empty_conversation_action_settings_find_row_returns_default_action() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -8733,6 +8848,15 @@ mod tests {
 
     fn assert_contact_folder_associated_find_row_returns_osc_contact_sync(folder_id: u64) {
         let snapshot = MapiMailStoreSnapshot::empty();
+        assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
+            folder_id, &snapshot,
+        );
+    }
+
+    fn assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
+        folder_id: u64,
+        snapshot: &MapiMailStoreSnapshot,
+    ) {
         let mut table = MapiObject::ContentsTable {
             folder_id,
             associated: true,
@@ -9345,9 +9469,10 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
     row
 }
 
-pub(in crate::mapi) fn serialize_collaboration_folder_row(
+pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context(
     folder: &MapiCollaborationFolder,
     columns: &[u32],
+    associated_count: u32,
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
@@ -9357,6 +9482,7 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_ASSOCIATED_CONTENT_COUNT => write_u32(&mut row, associated_count),
             PID_TAG_SUBFOLDERS => row.push(0),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),

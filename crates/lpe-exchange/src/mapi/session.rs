@@ -32,6 +32,7 @@ pub(in crate::mapi) struct MapiSession {
         HashMap<u64, MapiSavedSearchFolderDefinition>,
     pub(in crate::mapi) special_folder_aliases: HashMap<u64, u64>,
     pub(in crate::mapi) deleted_advertised_special_folders: HashSet<u64>,
+    pub(in crate::mapi) deleted_search_folder_definitions: HashSet<u64>,
     pub(in crate::mapi) named_properties: HashMap<MapiNamedProperty, u16>,
     pub(in crate::mapi) named_property_ids: HashMap<u16, MapiNamedProperty>,
     pub(in crate::mapi) next_named_property_id: u16,
@@ -493,6 +494,7 @@ pub(in crate::mapi) fn create_session(
         saved_search_folder_definitions: HashMap::new(),
         special_folder_aliases: HashMap::new(),
         deleted_advertised_special_folders: HashSet::new(),
+        deleted_search_folder_definitions: HashSet::new(),
         named_properties: HashMap::new(),
         named_property_ids: HashMap::new(),
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
@@ -962,9 +964,18 @@ impl MapiSession {
         &mut self,
         folder_id: u64,
     ) -> Option<SearchFolderDefinition> {
-        self.saved_search_folder_definitions
+        let definition = self
+            .saved_search_folder_definitions
             .remove(&folder_id)
-            .map(|saved| saved.definition)
+            .map(|saved| saved.definition);
+        if definition.is_some() {
+            self.deleted_search_folder_definitions.insert(folder_id);
+        }
+        definition
+    }
+
+    pub(in crate::mapi) fn search_folder_definition_was_deleted(&self, folder_id: u64) -> bool {
+        self.deleted_search_folder_definitions.contains(&folder_id)
     }
 
     pub(in crate::mapi) fn resolve_special_folder_alias(&self, folder_id: u64) -> u64 {
@@ -1589,6 +1600,39 @@ mod tests {
                 .map(|definition| definition.display_name.as_str()),
             Some("Unread Mail")
         );
+    }
+
+    #[test]
+    fn session_remembers_deleted_saved_search_folder_definition() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let folder_id = 0x0000_0000_01db_0001;
+        let definition = SearchFolderDefinition {
+            id: Uuid::from_u128(0x1db),
+            account_id: principal.account_id,
+            role: "custom".to_string(),
+            display_name: "Categories".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "email".to_string(),
+            scope_json: serde_json::json!({"kind": "mapi_bounded"}),
+            restriction_json: serde_json::json!({"kind": "mapi_bounded", "all": []}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        };
+
+        session.remember_search_folder_definition(folder_id, definition);
+        assert!(!session.search_folder_definition_was_deleted(folder_id));
+
+        assert_eq!(
+            session
+                .forget_search_folder_definition(folder_id)
+                .map(|definition| definition.display_name),
+            Some("Categories".to_string())
+        );
+
+        assert!(session.search_folder_definition(folder_id).is_none());
+        assert!(session.search_folder_definition_was_deleted(folder_id));
     }
 
     #[test]

@@ -2347,6 +2347,7 @@ mod tests {
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
+            deleted_search_folder_definitions: HashSet::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: crate::mapi::properties::FIRST_NAMED_PROPERTY_ID,

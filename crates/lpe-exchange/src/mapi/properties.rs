@@ -10188,6 +10188,7 @@ mod tests {
             saved_search_folder_definitions: std::collections::HashMap::new(),
             special_folder_aliases: std::collections::HashMap::new(),
             deleted_advertised_special_folders: std::collections::HashSet::new(),
+            deleted_search_folder_definitions: std::collections::HashSet::new(),
             named_properties: std::collections::HashMap::new(),
             named_property_ids: std::collections::HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
