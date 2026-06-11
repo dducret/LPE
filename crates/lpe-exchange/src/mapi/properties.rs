@@ -1630,7 +1630,22 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
+        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
+        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
@@ -1644,6 +1659,7 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             default_folder_view_entry_id(folder.collection.owner_account_id, folder.id)
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(IPM_SUBTREE_FOLDER_ID)),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
             folder.collection.owner_account_id,
             folder.id,
@@ -1703,7 +1719,22 @@ pub(in crate::mapi) fn public_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(folder.child_count > 0)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
+        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
+        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(folder.folder.folder_class.clone()))
         }
@@ -7646,6 +7677,34 @@ mod tests {
             collaboration_folder_property_value(&collection, PID_TAG_DELETED_COUNT_TOTAL),
             Some(MapiValue::U32(0))
         );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_PARENT_FOLDER_ID),
+            Some(MapiValue::U64(IPM_SUBTREE_FOLDER_ID))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_RIGHTS),
+            Some(MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(MapiValue::Binary(extended_folder_flags()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_FOLDER_WEBVIEWINFO),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_FORM_NAME_W),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_ARCHIVE_TAG),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_RETENTION_PERIOD),
+            Some(MapiValue::U32(0))
+        );
     }
 
     #[test]
@@ -7769,6 +7828,30 @@ mod tests {
         assert_eq!(
             public_folder_property_value(&folder, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8),
             Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_RIGHTS),
+            Some(MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(MapiValue::Binary(extended_folder_flags()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_FOLDER_WEBVIEWINFO),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_DEFAULT_FORM_NAME_W),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_ARCHIVE_TAG),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            public_folder_property_value(&folder, PID_TAG_RETENTION_PERIOD),
+            Some(MapiValue::U32(0))
         );
     }
 

@@ -131,6 +131,53 @@ fn search_folder_handle_properties(
     .collect()
 }
 
+fn collaboration_folder_handle_properties(
+    folder: &crate::mapi_store::MapiCollaborationFolder,
+) -> HashMap<u32, MapiValue> {
+    [
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_RECORD_KEY,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_DELETED_COUNT_TOTAL,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_ACCESS,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        PID_TAG_FOLDER_FORM_FLAGS,
+        PID_TAG_FOLDER_WEBVIEWINFO,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        PID_TAG_FOLDER_VIEWS_ONLY,
+        PID_TAG_DEFAULT_FORM_NAME_W,
+        PID_TAG_FOLDER_FORM_STORAGE,
+        PID_TAG_ACL_MEMBER_NAME_W,
+        PID_TAG_FOLDER_VIEWLIST_FLAGS,
+        PID_TAG_ARCHIVE_TAG,
+        PID_TAG_POLICY_TAG,
+        PID_TAG_RETENTION_PERIOD,
+        PID_TAG_RETENTION_FLAGS,
+        PID_TAG_ARCHIVE_PERIOD,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME_MAX,
+        PID_TAG_HIER_REV,
+        PID_TAG_HIERARCHY_CHANGE_NUMBER,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+    .into_iter()
+    .filter_map(|tag| collaboration_folder_property_value(folder, tag).map(|value| (tag, value)))
+    .collect()
+}
+
 fn canonical_message_folder_id(email: &JmapEmail, mailboxes: &[JmapMailbox]) -> u64 {
     email
         .mailbox_states
@@ -2976,7 +3023,7 @@ fn format_post_hierarchy_release_context(events: &[PostHierarchyReleaseDebugEven
 async fn folder_properties_for_open<S>(
     store: &S,
     principal: &AccountPrincipal,
-    _session: &MapiSession,
+    session: &MapiSession,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
@@ -2986,6 +3033,15 @@ where
 {
     let mut properties =
         folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes, snapshot);
+    if !session.search_folder_definition_was_deleted(folder_id) {
+        if let Some(definition) = session.search_folder_definition(folder_id) {
+            properties.extend(search_folder_handle_properties(
+                definition,
+                folder_id,
+                principal.account_id,
+            ));
+        }
+    }
     if folder_id == IPM_SUBTREE_FOLDER_ID {
         if let Ok(Some(ost_id)) = store
             .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
@@ -3060,6 +3116,23 @@ fn folder_properties_for_open_from_mailboxes(
                 properties.insert(property_tag, value);
             }
         }
+    }
+    if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
+        properties.extend(collaboration_folder_handle_properties(folder));
+    }
+    if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
+        for property_tag in open_folder_property_tags {
+            if let Some(value) = public_folder_property_value(folder, property_tag) {
+                properties.insert(property_tag, value);
+            }
+        }
+    }
+    if let Some(definition) = snapshot.search_folder_definition_for_folder_id(folder_id) {
+        properties.extend(search_folder_handle_properties(
+            definition,
+            folder_id,
+            principal.account_id,
+        ));
     }
     if is_advertised_special_folder(folder_id) {
         for property_tag in open_folder_property_tags {
@@ -7354,7 +7427,7 @@ fn format_ipm_configuration_set_columns_contract(
         columns,
     );
     format!(
-        "ms_oxocfg_required_columns_present={};missing_required_columns={}",
+        "ms_oxocfg_required_columns_selected={};not_selected_required_columns={}",
         missing.is_empty(),
         missing
     )
@@ -7398,7 +7471,7 @@ fn format_ipm_configuration_contract_summary(
         .filter(|message| !ipm_configuration_row_issues(message).is_empty())
         .count();
     format!(
-        "rows={};missing_required_columns={};sort_by_message_class_then_lastmod={};row_issue_count={};{}",
+        "rows={};not_selected_required_columns={};sort_by_message_class_then_lastmod={};row_issue_count={};{}",
         rows.len(),
         missing_columns,
         sort_ok,
@@ -7785,7 +7858,7 @@ fn format_normal_message_query_row_summary(
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "index={};mid=0x{:016x};subject={};class={};unread={};body_text_len={};body_html_len={};row_len={};standard_len={};values={}",
+                "index={};mid=0x{:016x};subject={};class={};unread={};body_text_len={};body_html_len={};value_len={};status_row_len={};values={}",
                 index,
                 mapi_message_id(email),
                 email.subject,
@@ -8175,7 +8248,7 @@ fn format_common_views_wlink_contract_summary(
         .collect::<Vec<_>>();
 
     format!(
-        "link_rows={};header_rows={};missing_required_link_columns={};expected_link_default_columns={};note=header_id_and_calendar_wlink_fields_default_on_non_header_mail_shortcut_rows",
+        "link_rows={};header_rows={};not_selected_required_link_columns={};expected_link_default_columns={};note=header_id_and_calendar_wlink_fields_default_on_non_header_mail_shortcut_rows",
         link_rows,
         header_rows,
         format_debug_property_tags(&missing_required_link_columns),
@@ -9378,12 +9451,19 @@ where
                 let collaboration_folder_found =
                     snapshot.collaboration_folder_for_id(folder_id).is_some();
                 let public_folder_found = snapshot.public_folder_for_id(folder_id).is_some();
+                let search_folder_definition_found = !session
+                    .search_folder_definition_was_deleted(folder_id)
+                    && (snapshot
+                        .search_folder_definition_for_folder_id(folder_id)
+                        .is_some()
+                        || session.search_folder_definition(folder_id).is_some());
                 let advertised_special_folder = is_advertised_special_folder(folder_id);
                 let (folder_name, folder_role, folder_container_class) =
                     debug_open_folder_metadata(folder_id, mailboxes);
                 let open_folder_result = if mailbox_folder_found
                     || collaboration_folder_found
                     || public_folder_found
+                    || search_folder_definition_found
                     || advertised_special_folder
                 {
                     "success"
@@ -9413,6 +9493,7 @@ where
                     mailbox_folder_found = mailbox_folder_found,
                     collaboration_folder_found = collaboration_folder_found,
                     public_folder_found = public_folder_found,
+                    search_folder_definition_found = search_folder_definition_found,
                     advertised_special_folder = advertised_special_folder,
                     result = open_folder_result,
                     message = "rca debug mapi open folder"
@@ -20539,6 +20620,218 @@ mod tests {
     }
 
     #[test]
+    fn folder_properties_for_open_projects_persisted_search_folder_contract() {
+        let principal = test_principal();
+        let definition_id = Uuid::parse_str("aaaaaaaa-3333-4333-8333-aaaaaaaaaaaa").unwrap();
+        let folder_id = crate::mapi::identity::mapi_store_id(333);
+        crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            SearchFolderDefinition {
+                id: definition_id,
+                account_id: principal.account_id,
+                role: "category_red".to_string(),
+                display_name: "Categorized Mail".to_string(),
+                definition_kind: "user_saved".to_string(),
+                result_object_kind: "message".to_string(),
+                scope_json: json!({"kind": "mapi_bounded"}),
+                restriction_json: json!({"kind": "mapi_bounded"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: false,
+            },
+        ]);
+
+        let properties =
+            folder_properties_for_open_from_mailboxes(&principal, folder_id, &[], &snapshot);
+
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_TYPE),
+            Some(&MapiValue::U32(FOLDER_SEARCH))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DISPLAY_NAME_W),
+            Some(&MapiValue::String("Categorized Mail".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_PARENT_FOLDER_ID),
+            Some(&MapiValue::U64(SEARCH_FOLDER_ID))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RIGHTS),
+            Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(&MapiValue::Binary(extended_folder_flags()))
+        );
+    }
+
+    #[test]
+    fn folder_properties_for_open_projects_collaboration_folder_contract() {
+        let principal = test_principal();
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![lpe_storage::CollaborationCollection {
+                id: "default".to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: principal.account_id,
+                owner_email: principal.email.clone(),
+                owner_display_name: principal.display_name.clone(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: lpe_storage::CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let properties = folder_properties_for_open_from_mailboxes(
+            &principal,
+            CALENDAR_FOLDER_ID,
+            &[],
+            &snapshot,
+        );
+
+        assert_eq!(
+            properties.get(&PID_TAG_DISPLAY_NAME_W),
+            Some(&MapiValue::String("Calendar".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTAINER_CLASS_W),
+            Some(&MapiValue::String("IPF.Appointment".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(&MapiValue::String("IPM.Appointment".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTENT_COUNT),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_PARENT_FOLDER_ID),
+            Some(&MapiValue::U64(IPM_SUBTREE_FOLDER_ID))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RIGHTS),
+            Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(&MapiValue::Binary(extended_folder_flags()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ASSOCIATED_CONTENT_COUNT),
+            Some(&MapiValue::U32(associated_folder_message_count(
+                CALENDAR_FOLDER_ID,
+                &snapshot
+            )))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
+            Some(&MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ARCHIVE_TAG),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RETENTION_PERIOD),
+            Some(&MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn folder_properties_for_open_projects_public_folder_contract() {
+        let principal = test_principal();
+        let folder_id = PUBLIC_FOLDERS_ROOT_FOLDER_ID + 0x10000;
+        let canonical_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777777);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::empty().with_public_folders(
+            vec![lpe_storage::PublicFolder {
+                id: canonical_id,
+                tree_id: Uuid::from_u128(0x88888888_8888_4888_8888_888888888888),
+                parent_folder_id: None,
+                canonical_id,
+                display_name: "Public Contacts".to_string(),
+                folder_class: "IPF.Contact".to_string(),
+                path: "/Public Contacts".to_string(),
+                sort_order: 0,
+                lifecycle_state: "active".to_string(),
+                change_counter: 1,
+                rights: lpe_storage::PublicFolderRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let properties =
+            folder_properties_for_open_from_mailboxes(&principal, folder_id, &[], &snapshot);
+
+        assert_eq!(
+            properties.get(&PID_TAG_DISPLAY_NAME_W),
+            Some(&MapiValue::String("Public Contacts".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_PARENT_FOLDER_ID),
+            Some(&MapiValue::U64(PUBLIC_FOLDERS_ROOT_FOLDER_ID))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTAINER_CLASS_W),
+            Some(&MapiValue::String("IPF.Contact".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(&MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RIGHTS),
+            Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
+            Some(&MapiValue::Binary(extended_folder_flags()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ARCHIVE_TAG),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RETENTION_PERIOD),
+            Some(&MapiValue::U32(0))
+        );
+    }
+
+    #[test]
     fn folder_properties_for_open_projects_im_contact_list_default_post_class() {
         let principal = test_principal();
 
@@ -21468,7 +21761,7 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("missing_required_columns="));
+        assert!(summary.contains("not_selected_required_columns="));
         assert!(summary.contains("sort_by_message_class_then_lastmod=true"));
         assert!(summary.contains("row_issue_count=0"));
         assert!(summary.contains("datatypes=0x00000004"));
@@ -21727,7 +22020,7 @@ mod tests {
 
         assert!(summary.contains("link_rows=1"));
         assert!(summary.contains("header_rows=1"));
-        assert!(summary.contains("missing_required_link_columns="));
+        assert!(summary.contains("not_selected_required_link_columns="));
         assert!(summary.contains("expected_link_default_columns=0x68420102"));
         assert!(summary.contains("0x68530003"));
         assert!(!summary.contains("0x68910102"));
