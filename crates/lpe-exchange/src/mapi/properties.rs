@@ -1760,6 +1760,9 @@ pub(in crate::mapi) fn email_property_value(
         return Some(value);
     }
     match property_tag {
+        PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => {
+            Some(MapiValue::U64(mapi_folder_id_for_email(email)))
+        }
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
             Some(MapiValue::String(email.subject.clone()))
@@ -8593,6 +8596,14 @@ mod tests {
             delivery_status: "stored".to_string(),
         };
 
+        assert_eq!(
+            email_property_value(&email, PID_TAG_FOLDER_ID),
+            Some(MapiValue::U64(INBOX_FOLDER_ID))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_PARENT_FOLDER_ID),
+            Some(MapiValue::U64(INBOX_FOLDER_ID))
+        );
         assert_eq!(
             email_property_value(&email, PID_TAG_FLAG_STATUS),
             Some(MapiValue::U32(1))

@@ -9254,6 +9254,35 @@ mod tests {
     }
 
     #[test]
+    fn message_row_projects_containing_folder_ids() {
+        let email_id = Uuid::from_u128(0x7171);
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(0x81),
+        );
+        let mut email = test_table_email(email_id, Uuid::from_u128(0x8181), "Test Draft");
+        email.mailbox_role = "drafts".to_string();
+
+        let row = serialize_message_row(
+            &email,
+            &[PID_TAG_FOLDER_ID, PID_TAG_PARENT_FOLDER_ID, PID_TAG_MID],
+        );
+
+        assert_eq!(
+            crate::mapi::identity::object_id_from_wire_id(&row[0..8]),
+            Some(DRAFTS_FOLDER_ID)
+        );
+        assert_eq!(
+            crate::mapi::identity::object_id_from_wire_id(&row[8..16]),
+            Some(DRAFTS_FOLDER_ID)
+        );
+        assert_eq!(
+            crate::mapi::identity::object_id_from_wire_id(&row[16..24]),
+            Some(mapi_message_id(&email))
+        );
+    }
+
+    #[test]
     fn access_rows_follow_microsoft_flags() {
         let mailbox = JmapMailbox {
             id: Uuid::nil(),
@@ -9733,6 +9762,9 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     let mut row = Vec::new();
     for column in columns {
         match *column {
+            PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => {
+                write_object_id(&mut row, mapi_folder_id_for_email(email))
+            }
             PID_TAG_MID => write_object_id(&mut row, mapi_message_id(email)),
             PID_TAG_INST_ID => write_u64(&mut row, mapi_message_id(email)),
             PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
@@ -11283,7 +11315,12 @@ pub(in crate::mapi) fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
 }
 
 pub(in crate::mapi) fn try_mapi_folder_id(mailbox: &JmapMailbox) -> Option<u64> {
-    match mailbox.role.as_str() {
+    try_mapi_folder_id_for_role(&mailbox.role)
+        .or_else(|| crate::mapi::identity::mapped_mapi_object_id(&mailbox.id))
+}
+
+fn try_mapi_folder_id_for_role(role: &str) -> Option<u64> {
+    match role {
         "__mapi_ipm_subtree" => Some(IPM_SUBTREE_FOLDER_ID),
         "__mapi_deferred_action" => Some(DEFERRED_ACTION_FOLDER_ID),
         "__mapi_spooler_queue" => Some(SPOOLER_QUEUE_FOLDER_ID),
@@ -11321,7 +11358,7 @@ pub(in crate::mapi) fn try_mapi_folder_id(mailbox: &JmapMailbox) -> Option<u64> 
         "quick_step_settings" => Some(QUICK_STEP_SETTINGS_FOLDER_ID),
         "archive" => Some(ARCHIVE_FOLDER_ID),
         "conversation_history" => Some(CONVERSATION_HISTORY_FOLDER_ID),
-        _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id),
+        _ => None,
     }
 }
 
@@ -11344,6 +11381,12 @@ fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> b
 
 pub(in crate::mapi) fn mapi_message_id(email: &JmapEmail) -> u64 {
     mapi_item_id(&email.id)
+}
+
+pub(in crate::mapi) fn mapi_folder_id_for_email(email: &JmapEmail) -> u64 {
+    try_mapi_folder_id_for_role(&email.mailbox_role)
+        .or_else(|| crate::mapi::identity::mapped_mapi_object_id(&email.mailbox_id))
+        .unwrap_or(IPM_SUBTREE_FOLDER_ID)
 }
 
 pub(in crate::mapi) fn mapi_item_id(id: &Uuid) -> u64 {

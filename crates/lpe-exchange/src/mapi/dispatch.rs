@@ -1449,7 +1449,7 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
             Some(RopId::OpenFolder) => {
                 let folder_id = session
                     .resolve_special_folder_alias(request.folder_id().unwrap_or(ROOT_FOLDER_ID));
-                if !is_store_independent_special_folder(folder_id) && folder_id != INBOX_FOLDER_ID {
+                if !is_store_independent_special_folder(folder_id) {
                     return false;
                 }
                 opened_probe_folder_by_index
@@ -1482,13 +1482,24 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     saw_open_folder && saw_get_properties
 }
 
-fn is_store_independent_folder_getprops_probe(folder_id: u64, _property_tags: &[u32]) -> bool {
+fn is_store_independent_folder_getprops_probe(folder_id: u64, property_tags: &[u32]) -> bool {
     is_store_independent_special_folder(folder_id)
+        && !property_tags
+            .iter()
+            .any(|tag| strips_default_folder_identification_value_for_folder_id(folder_id, *tag))
 }
 
 fn is_store_independent_special_folder(folder_id: u64) -> bool {
-    is_advertised_special_folder(folder_id)
-        && !matches!(folder_id, IPM_SUBTREE_FOLDER_ID | INBOX_FOLDER_ID)
+    matches!(
+        folder_id,
+        ROOT_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | SCHEDULE_FOLDER_ID
+            | SEARCH_FOLDER_ID
+            | VIEWS_FOLDER_ID
+            | SHORTCUTS_FOLDER_ID
+            | FREEBUSY_DATA_FOLDER_ID
+    )
 }
 
 fn rop_buffer_has_no_requests(rop_buffer: &[u8]) -> bool {
@@ -3788,34 +3799,25 @@ fn default_folder_identification_values_stripped_by_safe_values(
 }
 
 fn strips_default_folder_identification_value(object: Option<&MapiObject>, tag: u32) -> bool {
-    if !is_default_folder_identification_property_tag(tag) {
-        return false;
-    }
     match object {
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        }) => {
-            matches!(
-                canonical_property_storage_tag(tag),
-                PID_TAG_ADDITIONAL_REN_ENTRY_IDS
-                    | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
-                    | PID_TAG_FREE_BUSY_ENTRY_IDS
-            ) || is_scalar_default_folder_entry_id_property_tag(tag)
-        }
-        Some(MapiObject::Folder {
-            folder_id: INBOX_FOLDER_ID,
-            ..
-        }) => {
-            matches!(
-                canonical_property_storage_tag(tag),
-                PID_TAG_ADDITIONAL_REN_ENTRY_IDS
-                    | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
-                    | PID_TAG_FREE_BUSY_ENTRY_IDS
-            ) || is_scalar_default_folder_entry_id_property_tag(tag)
+        Some(MapiObject::Folder { folder_id, .. }) => {
+            strips_default_folder_identification_value_for_folder_id(*folder_id, tag)
         }
         _ => false,
     }
+}
+
+fn strips_default_folder_identification_value_for_folder_id(folder_id: u64, tag: u32) -> bool {
+    if !is_default_folder_identification_property_tag(tag) {
+        return false;
+    }
+    matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID)
+        && (matches!(
+            canonical_property_storage_tag(tag),
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
+                | PID_TAG_FREE_BUSY_ENTRY_IDS
+        ) || is_scalar_default_folder_entry_id_property_tag(tag))
 }
 
 fn strips_any_default_folder_identification_values(object: Option<&MapiObject>) -> bool {
@@ -20278,6 +20280,91 @@ mod tests {
         let probe = rop_buffer_with_response(probe, &[u32::MAX]);
 
         assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn root_folder_type_getprops_probe_stays_store_independent() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn root_default_folder_entry_id_getprops_probe_loads_store_snapshot() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn role_backed_special_folder_getprops_probes_load_store_snapshot() {
+        for folder_id in [
+            INBOX_FOLDER_ID,
+            DRAFTS_FOLDER_ID,
+            SENT_FOLDER_ID,
+            TRASH_FOLDER_ID,
+            OUTBOX_FOLDER_ID,
+            CONTACTS_FOLDER_ID,
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+            CONTACTS_SEARCH_FOLDER_ID,
+            CALENDAR_FOLDER_ID,
+            JOURNAL_FOLDER_ID,
+            NOTES_FOLDER_ID,
+            TASKS_FOLDER_ID,
+            REMINDERS_FOLDER_ID,
+            DOCUMENT_LIBRARIES_FOLDER_ID,
+            SYNC_ISSUES_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+            JUNK_FOLDER_ID,
+            RSS_FEEDS_FOLDER_ID,
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            TODO_SEARCH_FOLDER_ID,
+            QUICK_STEP_SETTINGS_FOLDER_ID,
+            ARCHIVE_FOLDER_ID,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            CONVERSATION_HISTORY_FOLDER_ID,
+        ] {
+            let session = test_mapi_session();
+            let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+            probe.extend_from_slice(
+                &crate::mapi::identity::wire_id_bytes_from_object_id(folder_id).unwrap(),
+            );
+            probe.push(0);
+            probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+            probe.extend_from_slice(&4096u16.to_le_bytes());
+            probe.extend_from_slice(&1u16.to_le_bytes());
+            probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
+            let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+            assert!(
+                !rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session),
+                "folder {folder_id:#018x} must load store state"
+            );
+        }
     }
 
     #[test]
