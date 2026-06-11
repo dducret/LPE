@@ -7582,6 +7582,34 @@ mod tests {
     }
 
     #[test]
+    fn navigation_shortcut_parser_accepts_binary_wlink_group_ids() {
+        let group_id = Uuid::from_bytes([0x33; 16]);
+        let mut header_properties = HashMap::new();
+        header_properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("My Calendars".to_string()),
+        );
+        header_properties.insert(PID_TAG_WLINK_TYPE, MapiValue::U32(4));
+        header_properties.insert(0x6842_0102, MapiValue::Binary(group_id.as_bytes().to_vec()));
+
+        let header =
+            navigation_shortcut_from_mapi_properties(Uuid::nil(), None, &header_properties);
+
+        assert_eq!(header.shortcut_type, 4);
+        assert_eq!(header.group_header_id, Some(group_id));
+
+        let mut link_properties = HashMap::new();
+        link_properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Calendar".to_string()));
+        link_properties.insert(PID_TAG_WLINK_TYPE, MapiValue::U32(0));
+        link_properties.insert(0x6850_0102, MapiValue::Binary(group_id.as_bytes().to_vec()));
+
+        let link = navigation_shortcut_from_mapi_properties(Uuid::nil(), None, &link_properties);
+
+        assert_eq!(link.shortcut_type, 0);
+        assert_eq!(link.group_header_id, Some(group_id));
+    }
+
+    #[test]
     fn common_views_find_row_honors_restriction() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002);
@@ -10373,16 +10401,15 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
         .and_then(MapiValue::as_i64)
         .map(|value| value as u32)
         .unwrap_or(2);
-    let group_header_id = properties
-        .get(if shortcut_type == 4 {
+    let group_header_id = navigation_shortcut_property_by_id(
+        properties,
+        if shortcut_type == 4 {
             &PID_TAG_WLINK_GROUP_HEADER_ID
         } else {
             &PID_TAG_WLINK_GROUP_CLSID
-        })
-        .and_then(|value| match value {
-            MapiValue::Guid(value) => Some(Uuid::from_bytes(*value)),
-            _ => None,
-        });
+        },
+    )
+    .and_then(navigation_shortcut_guid_value);
     let group_name = properties
         .get(&PID_TAG_WLINK_GROUP_NAME_W)
         .and_then(|value| match value {
@@ -10441,6 +10468,29 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
             .unwrap_or(0),
         group_header_id,
         group_name,
+    }
+}
+
+fn navigation_shortcut_property_by_id<'a>(
+    properties: &'a HashMap<u32, MapiValue>,
+    property_tag: &u32,
+) -> Option<&'a MapiValue> {
+    properties.get(property_tag).or_else(|| {
+        properties
+            .iter()
+            .find(|(tag, _)| property_tag_id_matches(**tag, *property_tag))
+            .map(|(_, value)| value)
+    })
+}
+
+fn navigation_shortcut_guid_value(value: &MapiValue) -> Option<Uuid> {
+    match value {
+        MapiValue::Guid(value) => Some(Uuid::from_bytes(*value)),
+        MapiValue::Binary(value) => value
+            .get(..16)
+            .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+            .map(Uuid::from_bytes),
+        _ => None,
     }
 }
 

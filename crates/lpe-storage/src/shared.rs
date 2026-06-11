@@ -307,6 +307,8 @@ impl Storage {
         })
         .execute(&mut **tx)
         .await?;
+        Self::recalculate_mailbox_counts_in_tx(tx, tenant_id, account_id, mailbox_id, modseq)
+            .await?;
 
         let principals = Self::affected_mail_principals_in_tx(tx, tenant_id, account_id).await?;
         Self::insert_mail_change_log_in_tx(
@@ -328,6 +330,44 @@ impl Storage {
         )
         .await?;
         Ok(membership_id)
+    }
+
+    pub(crate) async fn recalculate_mailbox_counts_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        modseq: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE mailboxes mb
+            SET total_messages = counts.total_messages,
+                unread_messages = counts.unread_messages,
+                modseq = GREATEST(mb.modseq, $4),
+                updated_at = NOW()
+            FROM (
+                SELECT
+                    COUNT(*)::integer AS total_messages,
+                    COUNT(*) FILTER (WHERE NOT is_seen)::integer AS unread_messages
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND visibility = 'visible'
+            ) counts
+            WHERE mb.tenant_id = $1
+              AND mb.account_id = $2
+              AND mb.id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(modseq)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
     }
 
     pub(crate) async fn load_account_domain_id_in_tx(

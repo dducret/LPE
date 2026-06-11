@@ -2003,6 +2003,30 @@ fn existing_draft_updates_write_mailbox_message_change_log_entries() {
 }
 
 #[test]
+fn mailbox_count_mutations_recalculate_from_visible_memberships() {
+    let draft_destroy_body =
+        function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
+    let imap_expunge_body = function_body(PROTOCOLS_STORAGE, "pub async fn expunge_imap_deleted");
+    assert!(
+        SUBMISSION_STORAGE
+            .matches("recalculate_mailbox_counts_in_tx")
+            .count()
+            >= 2,
+        "draft creation/update paths must recalculate mailbox counters from visible memberships"
+    );
+    assert!(
+        draft_destroy_body.contains("visibility = 'expunged'")
+            && draft_destroy_body.contains("recalculate_mailbox_counts_in_tx"),
+        "draft membership destruction must recalculate counters after expunging the visible row"
+    );
+    assert!(
+        imap_expunge_body.contains("visibility = 'expunged'")
+            && imap_expunge_body.contains("recalculate_mailbox_counts_in_tx"),
+        "IMAP expunge must recalculate counters after expunging visible rows"
+    );
+}
+
+#[test]
 fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
     assert_schema_contains_all(&[
         "uid_validity BIGINT NOT NULL CHECK (uid_validity > 0)",
@@ -2045,14 +2069,25 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
 #[test]
 fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
     let move_body = function_body(MESSAGE_OPS_STORAGE, "async fn move_jmap_email_membership");
+    let shared_membership_body = function_body(
+        SHARED_STORAGE,
+        "pub(crate) async fn allocate_mailbox_membership_in_tx",
+    );
     assert!(
         move_body.contains("INSERT INTO mailbox_messages")
             && move_body.contains("UPDATE mailboxes\n            SET uid_next = uid_next + 1")
             && move_body.contains("visibility = 'expunged'")
             && move_body.contains("'move'")
             && move_body.contains("sourceImapUid")
-            && move_body.contains("targetImapUid"),
-        "mailbox moves must create a target membership from target UIDNEXT and tombstone the source membership with the original IMAP UID"
+            && move_body.contains("targetImapUid")
+            && move_body.matches("recalculate_mailbox_counts_in_tx").count() >= 2,
+        "mailbox moves must create a target membership from target UIDNEXT, tombstone the source membership with the original IMAP UID, and recalculate both mailbox counters"
+    );
+    assert!(
+        SHARED_STORAGE.contains("pub(crate) async fn recalculate_mailbox_counts_in_tx")
+            && SHARED_STORAGE.contains("COUNT(*) FILTER (WHERE NOT is_seen)::integer")
+            && shared_membership_body.contains("recalculate_mailbox_counts_in_tx"),
+        "mailbox membership inserts must keep stored counts exact from visible mailbox_messages rows"
     );
     assert!(
         !move_body.contains("SET mailbox_id = $4"),

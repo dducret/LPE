@@ -192,6 +192,14 @@ pub(crate) fn remember_mapi_identity_with_source_key(
     );
 }
 
+pub(crate) fn forget_mapi_identity(canonical_id: &Uuid) {
+    MAPI_OBJECT_IDS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(canonical_id);
+}
+
 pub(crate) fn mapped_mapi_object_id(canonical_id: &Uuid) -> Option<u64> {
     MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -584,6 +592,19 @@ mod tests {
             assert_eq!(&change_key[16..22], &globcnt_bytes(global_counter));
             assert_eq!(&instance_key[16..22], &globcnt_bytes(global_counter));
         }
+    }
+
+    #[test]
+    fn forgotten_mapi_identity_is_not_mapped() {
+        let canonical_id = Uuid::parse_str("aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa").unwrap();
+        let object_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 90);
+        remember_mapi_identity(canonical_id, object_id);
+
+        assert_eq!(mapped_mapi_object_id(&canonical_id), Some(object_id));
+
+        forget_mapi_identity(&canonical_id);
+
+        assert_eq!(mapped_mapi_object_id(&canonical_id), None);
     }
 
     #[test]

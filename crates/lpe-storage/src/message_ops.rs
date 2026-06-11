@@ -430,6 +430,22 @@ impl Storage {
         .bind(modseq)
         .execute(&mut *tx)
         .await?;
+        Self::recalculate_mailbox_counts_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            target_mailbox_id,
+            modseq,
+        )
+        .await?;
+        Self::recalculate_mailbox_counts_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            source_mailbox_id,
+            modseq,
+        )
+        .await?;
         sqlx::query(
             r#"
             INSERT INTO mail_search_documents (

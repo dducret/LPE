@@ -27931,7 +27931,7 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeholder() {
+async fn mapi_over_http_missing_associated_config_identity_is_not_recreated() {
     let account = FakeStore::account();
     let config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a8").unwrap();
     let config_object_id = crate::mapi::identity::mapi_store_id(302);
@@ -28000,26 +28000,14 @@ async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeh
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
+        contains_bytes(&response_rops, &[0x03, 0x02, 0x0f, 0x01, 0x04, 0x80]),
         "{response_rops:02x?}"
     );
-    assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x2B, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]
-    ));
-    assert!(contains_bytes(&response_rops, &[0x2F, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x2D, 0x03, 0, 0, 0, 0, stream_body.len() as u8, 0]
-    ));
-    assert!(contains_bytes(&response_rops, &[0x5D, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x07, 0x02, 0, 0, 0, 0]));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Recovered view state")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Recovered body stream")
     ));

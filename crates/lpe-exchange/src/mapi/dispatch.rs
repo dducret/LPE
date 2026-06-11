@@ -17,7 +17,7 @@ use crate::store::{
     UpsertMapiNavigationShortcutInput,
 };
 use lpe_storage::{
-    AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
+    AuditEntryInput, CancelSubmissionResult, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
     PublicFolderPermissionInput, SearchFolderDefinition, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
@@ -61,6 +61,10 @@ fn create_folder_existing_mailbox_satisfies_deleted_advertised_request(
     advertised_special_folder_id_for_create(parent_folder_id, display_name)
         .map(|folder_id| session.advertised_special_folder_was_deleted(folder_id))
         .unwrap_or(false)
+}
+
+fn advertised_special_folder_delete_uses_session_tombstone(folder_id: u64) -> bool {
+    folder_id == QUICK_STEP_SETTINGS_FOLDER_ID
 }
 
 fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
@@ -689,6 +693,7 @@ fn builtin_search_scope_folder_ids(role: &str) -> Option<Vec<u64>> {
         "contacts_search" => Some(vec![CONTACTS_FOLDER_ID]),
         "todo_search" => Some(vec![TASKS_FOLDER_ID]),
         "reminders" => Some(vec![CALENDAR_FOLDER_ID, TASKS_FOLDER_ID]),
+        "tracked_mail_processing" => Some(vec![IPM_SUBTREE_FOLDER_ID]),
         _ => None,
     }
 }
@@ -698,6 +703,7 @@ fn builtin_search_role_for_folder_id(folder_id: u64) -> Option<&'static str> {
         CONTACTS_SEARCH_FOLDER_ID => Some("contacts_search"),
         TODO_SEARCH_FOLDER_ID => Some("todo_search"),
         REMINDERS_FOLDER_ID => Some("reminders"),
+        TRACKED_MAIL_PROCESSING_FOLDER_ID => Some("tracked_mail_processing"),
         _ => None,
     }
 }
@@ -3031,7 +3037,8 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
     ];
-    if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
+    let mailbox = folder_row_for_id(folder_id, mailboxes);
+    if let Some(mailbox) = mailbox {
         for property_tag in open_folder_property_tags {
             if let Some(value) = mailbox_property_value_with_context_for_account(
                 mailbox,
@@ -3059,6 +3066,11 @@ fn folder_properties_for_open_from_mailboxes(
             }
         }
     }
+    if mailbox.is_none() && is_advertised_special_folder(folder_id) {
+        let (content_count, unread_count) = snapshot_message_counts_for_folder(snapshot, folder_id);
+        properties.insert(PID_TAG_CONTENT_COUNT, MapiValue::U32(content_count));
+        properties.insert(PID_TAG_CONTENT_UNREAD_COUNT, MapiValue::U32(unread_count));
+    }
     if folder_id == INBOX_FOLDER_ID {
         if let Some(value) =
             special_folder_property_value(folder_id, PID_TAG_DISPLAY_NAME_W, principal.account_id)
@@ -3071,6 +3083,32 @@ fn folder_properties_for_open_from_mailboxes(
         MapiValue::U32(associated_folder_message_count(folder_id, snapshot)),
     );
     properties
+}
+
+fn snapshot_message_counts_for_folder(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> (u32, u32) {
+    let emails = snapshot.emails();
+    let count = folder_message_count(folder_id, &[], &emails, snapshot);
+    let unread = emails
+        .iter()
+        .filter(|email| snapshot_email_belongs_to_folder(email, folder_id) && email.unread)
+        .count();
+    (count, unread.min(u32::MAX as usize) as u32)
+}
+
+fn snapshot_email_belongs_to_folder(email: &JmapEmail, folder_id: u64) -> bool {
+    email_role_folder_id(&email.mailbox_role) == Some(folder_id)
+        || email
+            .mailbox_states
+            .iter()
+            .any(|state| email_role_folder_id(&state.role) == Some(folder_id))
+}
+
+fn email_role_folder_id(role: &str) -> Option<u64> {
+    crate::mapi_store::reserved_folder_counter_for_role(role)
+        .map(crate::mapi::identity::mapi_store_id)
 }
 
 fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
@@ -13097,6 +13135,25 @@ where
                         continue;
                     }
                 } else if is_advertised_special_folder(folder_id) {
+                    if !advertised_special_folder_delete_uses_session_tombstone(folder_id) {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = principal.email.as_str(),
+                            request_type = "Execute",
+                            request_rop_id = "0x1d",
+                            parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                            folder_id = %format!("{folder_id:#018x}"),
+                            message = "rca debug mapi delete advertised special folder denied",
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1D,
+                            request.response_handle_index(),
+                            0x8007_0005,
+                        ));
+                        continue;
+                    }
                     session.record_deleted_advertised_special_folder(folder_id);
                     tracing::info!(
                         rca_debug = true,
@@ -20416,6 +20473,82 @@ mod tests {
         );
     }
 
+    #[test]
+    fn advertised_special_folder_counts_snapshot_messages_when_mailbox_not_loaded() {
+        let principal = test_principal();
+        let draft_id = Uuid::from_u128(0x3333);
+        crate::mapi::identity::remember_mapi_identity(draft_id, 0x0000_0000_01a4_0001);
+        let draft = JmapEmail {
+            id: draft_id,
+            thread_id: Uuid::from_u128(0x4444),
+            mailbox_ids: Vec::new(),
+            mailbox_states: vec![test_mailbox_state(Uuid::from_u128(0x5555), "drafts")],
+            mailbox_id: Uuid::from_u128(0x5555),
+            mailbox_role: "drafts".to_string(),
+            mailbox_name: "Drafts".to_string(),
+            modseq: 1,
+            received_at: "2026-06-11T13:41:41Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Test Draft".to_string(),
+            preview: String::new(),
+            body_text: "Draft".to_string(),
+            body_html_sanitized: None,
+            unread: true,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 5,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            vec![draft],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let properties =
+            folder_properties_for_open_from_mailboxes(&principal, DRAFTS_FOLDER_ID, &[], &snapshot);
+
+        assert_eq!(
+            properties.get(&PID_TAG_CONTENT_COUNT),
+            Some(&MapiValue::U32(1))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTENT_UNREAD_COUNT),
+            Some(&MapiValue::U32(1))
+        );
+    }
+
     fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
         lpe_storage::JmapEmailMailboxState {
             mailbox_id,
@@ -21047,6 +21180,28 @@ mod tests {
                 "Ordinary Folder",
             )
         );
+    }
+
+    #[test]
+    fn advertised_contact_folders_do_not_use_session_delete_tombstones() {
+        for folder_id in [
+            CONTACTS_FOLDER_ID,
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+        ] {
+            assert!(
+                is_advertised_special_folder(folder_id),
+                "expected advertised special folder {folder_id:#018x}"
+            );
+            assert!(
+                !advertised_special_folder_delete_uses_session_tombstone(folder_id),
+                "contact folder delete must be denied instead of hidden in session {folder_id:#018x}"
+            );
+        }
+        assert!(advertised_special_folder_delete_uses_session_tombstone(
+            QUICK_STEP_SETTINGS_FOLDER_ID
+        ));
     }
 
     #[test]
@@ -22126,6 +22281,21 @@ mod tests {
         assert_eq!(
             builtin_search_role_for_folder_id(REMINDERS_FOLDER_ID),
             Some("reminders")
+        );
+    }
+
+    #[test]
+    fn builtin_search_criteria_fallback_covers_tracked_mail_processing_folder() {
+        let (restriction, folder_ids, flags) =
+            builtin_search_criteria_to_rop_for_folder_id(TRACKED_MAIL_PROCESSING_FOLDER_ID)
+                .expect("tracked mail processing built-in search criteria");
+
+        assert!(restriction.is_empty());
+        assert_eq!(folder_ids, vec![IPM_SUBTREE_FOLDER_ID]);
+        assert_eq!(flags, SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG);
+        assert_eq!(
+            builtin_search_role_for_folder_id(TRACKED_MAIL_PROCESSING_FOLDER_ID),
+            Some("tracked_mail_processing")
         );
     }
 

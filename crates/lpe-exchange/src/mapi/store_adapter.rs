@@ -214,7 +214,33 @@ where
         .await
         .context("fetch MAPI requested object identities")?;
     log_mapi_requested_identity_resolution(account_id, plan, &identities);
+    log_mapi_store_load_step(account_id, plan, "fetch search folders", 0);
+    let search_folder_definitions = store
+        .fetch_search_folders(account_id)
+        .await
+        .context("fetch MAPI search folders")?;
+    let search_folder_definition_ids = search_folder_definitions
+        .iter()
+        .map(|definition| definition.id)
+        .collect::<HashSet<_>>();
+    log_mapi_store_load_step(account_id, plan, "fetch associated config messages", 0);
+    let associated_configs = store
+        .fetch_mapi_associated_configs(account_id)
+        .await
+        .context("fetch MAPI associated config messages")?;
+    let associated_config_ids = associated_configs
+        .iter()
+        .map(|config| config.id)
+        .collect::<HashSet<_>>();
     for identity in &identities {
+        if !requested_identity_has_backing_row(
+            identity,
+            &search_folder_definition_ids,
+            &associated_config_ids,
+        ) {
+            crate::mapi::identity::forget_mapi_identity(&identity.canonical_id);
+            continue;
+        }
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
@@ -351,21 +377,11 @@ where
         .fetch_accessible_task_collections(account_id)
         .await
         .context("fetch MAPI task collections")?;
-    log_mapi_store_load_step(account_id, plan, "fetch search folders", 0);
-    let search_folder_definitions = store
-        .fetch_search_folders(account_id)
-        .await
-        .context("fetch MAPI search folders")?;
     log_mapi_store_load_step(account_id, plan, "fetch conversation actions", 0);
     let conversation_actions = store
         .fetch_conversation_actions(account_id)
         .await
         .context("fetch MAPI conversation actions")?;
-    log_mapi_store_load_step(account_id, plan, "fetch associated config messages", 0);
-    let associated_configs = store
-        .fetch_mapi_associated_configs(account_id)
-        .await
-        .context("fetch MAPI associated config messages")?;
     let snapshot_backed_contents = plan.requires_associated_contents
         || plan
             .content_queries
@@ -379,7 +395,10 @@ where
         .collect::<Vec<_>>();
     let associated_config_identity_ids = identities
         .iter()
-        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::AssociatedConfig)
+        .filter(|identity| {
+            identity.object_kind == MapiIdentityObjectKind::AssociatedConfig
+                && associated_config_ids.contains(&identity.canonical_id)
+        })
         .map(|identity| identity.object_id)
         .collect::<Vec<_>>();
     let navigation_shortcuts = if snapshot_backed_contents || !navigation_shortcut_ids.is_empty() {
@@ -779,6 +798,22 @@ where
     .with_calendar_attachments(calendar_attachments))
 }
 
+fn requested_identity_has_backing_row(
+    identity: &MapiIdentityLookupRecord,
+    search_folder_definition_ids: &HashSet<Uuid>,
+    associated_config_ids: &HashSet<Uuid>,
+) -> bool {
+    match identity.object_kind {
+        MapiIdentityObjectKind::SearchFolderDefinition => {
+            search_folder_definition_ids.contains(&identity.canonical_id)
+        }
+        MapiIdentityObjectKind::AssociatedConfig => {
+            associated_config_ids.contains(&identity.canonical_id)
+        }
+        _ => true,
+    }
+}
+
 fn log_mapi_store_load_step(
     account_id: Uuid,
     plan: &MapiAccessPlan,
@@ -983,6 +1018,9 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_quick_step_default_associated_config_id(object_id) {
         return "virtual_quick_step_associated_config";
     }
+    if mapi_store::is_outlook_contact_sync_default_associated_config_id(object_id) {
+        return "virtual_contact_sync_associated_config";
+    }
     if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
         return "virtual_common_view_named_view";
     }
@@ -1003,6 +1041,7 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
         || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
+        || mapi_store::is_outlook_contact_sync_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
@@ -1553,6 +1592,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id)
                 && !mapi_store::is_outlook_quick_step_default_associated_config_id(*config_id)
+                && !mapi_store::is_outlook_contact_sync_default_associated_config_id(*config_id)
             {
                 push_unique(&mut plan.object_ids, *config_id);
             }
@@ -1909,6 +1949,25 @@ mod tests {
     }
 
     #[test]
+    fn access_plan_does_not_fetch_virtual_contact_sync_associated_config_identity() {
+        let folder_id = crate::mapi::identity::mapi_store_id(0x54);
+        let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FF00_0054);
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::AssociatedConfig {
+                folder_id,
+                config_id,
+                saved_message: None,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&[]));
+
+        assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
+    }
+
+    #[test]
     fn access_plan_does_not_decode_set_properties_payload_as_import_source_key() {
         let mut rop = vec![0x0A, 0x00, 0x00];
         rop.extend_from_slice(&[0x01, 0x00]);
@@ -2021,6 +2080,78 @@ mod tests {
     }
 
     #[test]
+    fn requested_store_identity_requires_backing_row_for_optional_mapi_state() {
+        let orphan_id = Uuid::parse_str("dcf3fa88-eefa-4231-a932-7747c6f38fb5").unwrap();
+        let live_id = Uuid::parse_str("28848baa-5f82-44cf-8ac6-26e1d6ffcc96").unwrap();
+        let live_search_ids = HashSet::from([live_id]);
+        let live_config_ids = HashSet::from([live_id]);
+        let orphan_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+            canonical_id: orphan_id,
+            object_id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 91,
+            ),
+            source_key: Vec::new(),
+        };
+        let live_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+            canonical_id: live_id,
+            object_id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 92,
+            ),
+            source_key: Vec::new(),
+        };
+        let mailbox_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id: orphan_id,
+            object_id: INBOX_FOLDER_ID,
+            source_key: Vec::new(),
+        };
+        let orphan_config_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::AssociatedConfig,
+            canonical_id: orphan_id,
+            object_id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 93,
+            ),
+            source_key: Vec::new(),
+        };
+        let live_config_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::AssociatedConfig,
+            canonical_id: live_id,
+            object_id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 94,
+            ),
+            source_key: Vec::new(),
+        };
+
+        assert!(!requested_identity_has_backing_row(
+            &orphan_identity,
+            &live_search_ids,
+            &live_config_ids
+        ));
+        assert!(requested_identity_has_backing_row(
+            &live_identity,
+            &live_search_ids,
+            &live_config_ids
+        ));
+        assert!(requested_identity_has_backing_row(
+            &mailbox_identity,
+            &live_search_ids,
+            &live_config_ids
+        ));
+        assert!(!requested_identity_has_backing_row(
+            &orphan_config_identity,
+            &live_search_ids,
+            &live_config_ids
+        ));
+        assert!(requested_identity_has_backing_row(
+            &live_config_identity,
+            &live_search_ids,
+            &live_config_ids
+        ));
+    }
+
+    #[test]
     fn unresolved_mapi_identity_summary_classifies_expected_special_and_invalid_ids() {
         let invalid_replid_id = 0x0201_047c_2800_0002;
         let dynamic_id = crate::mapi::identity::mapi_store_id(
@@ -2029,6 +2160,7 @@ mod tests {
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
         let common_view_shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+        let contact_sync_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FF00_0054);
         let conversation_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 
         assert_eq!(
@@ -2037,12 +2169,13 @@ mod tests {
                 common_view_named_view_id,
                 common_view_shortcut_id,
                 quick_step_config_id,
+                contact_sync_config_id,
                 conversation_action_id,
                 dynamic_id,
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{contact_sync_config_id:#018x}:virtual_contact_sync_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
     }
@@ -2054,6 +2187,7 @@ mod tests {
         );
         let inbox_default_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
         let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+        let contact_sync_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FF00_0054);
         let common_view_named_view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
         let common_view_shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let conversation_action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
@@ -2061,6 +2195,7 @@ mod tests {
         assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
         assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
         assert!(is_expected_unbacked_mapi_object(quick_step_config_id));
+        assert!(is_expected_unbacked_mapi_object(contact_sync_config_id));
         assert!(is_expected_unbacked_mapi_object(common_view_named_view_id));
         assert!(is_expected_unbacked_mapi_object(common_view_shortcut_id));
         assert!(is_expected_unbacked_mapi_object(conversation_action_id));

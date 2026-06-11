@@ -400,6 +400,14 @@ impl Storage {
             .bind(draft_mailbox_id)
             .execute(&mut *tx)
             .await?;
+            Self::recalculate_mailbox_counts_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                draft_mailbox_id,
+                modseq,
+            )
+            .await?;
         } else {
             sqlx::query(
                 r#"
@@ -2353,6 +2361,8 @@ impl Storage {
         .bind(modseq)
         .execute(&mut **tx)
         .await?;
+        Self::recalculate_mailbox_counts_in_tx(tx, tenant_id, account_id, mailbox_id, modseq)
+            .await?;
 
         Ok(())
     }

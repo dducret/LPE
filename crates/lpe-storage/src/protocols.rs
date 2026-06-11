@@ -3710,6 +3710,10 @@ impl Storage {
                 )
                 .await?;
             }
+            Self::recalculate_mailbox_counts_in_tx(
+                &mut tx, &tenant_id, account_id, mailbox_id, modseq,
+            )
+            .await?;
         }
 
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
@@ -3849,6 +3853,10 @@ impl Storage {
             .bind(unread_removed)
             .bind(modseq)
             .execute(&mut *tx)
+            .await?;
+            Self::recalculate_mailbox_counts_in_tx(
+                &mut tx, &tenant_id, account_id, mailbox_id, modseq,
+            )
             .await?;
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
             Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
@@ -4136,6 +4144,10 @@ impl Storage {
             .bind(unread_removed)
             .bind(modseq)
             .execute(&mut *tx)
+            .await?;
+            Self::recalculate_mailbox_counts_in_tx(
+                &mut tx, &tenant_id, account_id, mailbox_id, modseq,
+            )
             .await?;
         }
 

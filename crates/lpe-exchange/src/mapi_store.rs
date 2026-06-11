@@ -250,6 +250,24 @@ pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -
     item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
 }
 
+pub(crate) fn is_outlook_contact_sync_default_associated_config_id(item_id: u64) -> bool {
+    if matches!(
+        item_id,
+        OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID
+            | OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID
+            | OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID
+            | OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID
+    ) {
+        return true;
+    }
+    crate::mapi::identity::global_counter_from_store_id(item_id).is_some_and(|counter| {
+        let folder_counter = counter & 0x00FF_FFFF;
+        (counter & !0x00FF_FFFF) == OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE
+            && folder_counter != 0
+            && folder_counter < 0x00FF_FF00
+    })
+}
+
 pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
     item_id == OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
 }
@@ -392,7 +410,7 @@ fn outlook_contact_sync_associated_config_defaults(
 
 fn outlook_dynamic_contact_sync_config_id(folder_id: u64) -> Option<u64> {
     let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)?;
-    if folder_counter > 0x00FF_FFFF {
+    if folder_counter == 0 || folder_counter >= 0x00FF_FF00 {
         return None;
     }
     Some(crate::mapi::identity::mapi_store_id(
@@ -795,7 +813,11 @@ impl MapiMailStoreSnapshot {
                 flags: shortcut.flags,
                 section: shortcut.section,
                 ordinal: shortcut.ordinal,
-                group_header_id: shortcut.group_header_id,
+                group_header_id: Some(
+                    shortcut
+                        .group_header_id
+                        .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
+                ),
                 group_name: shortcut.group_name,
             })
             .collect();
@@ -1578,10 +1600,8 @@ impl MapiMailStoreSnapshot {
         folder_id: u64,
         item_id: u64,
     ) -> bool {
-        match self.associated_config_message_for_id(item_id) {
-            Some(message) => message.folder_id == folder_id,
-            None => self.associated_config_identity_ids.contains(&item_id),
-        }
+        self.associated_config_message_for_id(item_id)
+            .is_some_and(|message| message.folder_id == folder_id)
     }
 
     fn contact_sync_default_supported_folder(&self, folder_id: u64) -> bool {
@@ -1739,6 +1759,7 @@ fn fixed_search_folder_role(folder_id: u64) -> Option<&'static str> {
         crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID => Some("contacts_search"),
         crate::mapi::identity::TODO_SEARCH_FOLDER_ID => Some("todo_search"),
         crate::mapi::identity::REMINDERS_FOLDER_ID => Some("reminders"),
+        crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID => Some("tracked_mail_processing"),
         _ => None,
     }
 }
@@ -2456,6 +2477,7 @@ fn deduplicate_navigation_shortcuts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi::properties::default_wlink_group_uuid;
     use lpe_storage::{
         AccessibleContact, CollaborationCollection, CollaborationRights, JmapEmailAddress,
         JmapEmailMailboxState,
@@ -2799,6 +2821,9 @@ mod tests {
             crate::mapi::identity::INBOX_FOLDER_ID,
             message_id
         ));
+        assert!(is_outlook_contact_sync_default_associated_config_id(
+            message_id
+        ));
     }
 
     #[test]
@@ -2886,18 +2911,18 @@ mod tests {
     }
 
     #[test]
-    fn associated_config_identity_only_placeholder_remains_folder_agnostic() {
+    fn associated_config_identity_only_placeholder_does_not_open_without_backing_message() {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 901,
         );
         let snapshot =
             MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![object_id]);
 
-        assert!(snapshot.associated_config_identity_matches_folder(
+        assert!(!snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::INBOX_FOLDER_ID,
             object_id
         ));
-        assert!(snapshot.associated_config_identity_matches_folder(
+        assert!(!snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
             object_id
         ));
@@ -2989,6 +3014,7 @@ mod tests {
             })
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
+        assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
         assert_eq!(messages.len(), 2);
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
@@ -3600,6 +3626,44 @@ mod tests {
         assert!(snapshot
             .search_folder_definition_for_role("todo_search")
             .is_none());
+    }
+
+    #[test]
+    fn snapshot_resolves_tracked_mail_processing_by_advertised_folder_id() {
+        let definition = SearchFolderDefinition {
+            id: Uuid::parse_str("aaaaaaaa-1212-4111-8111-aaaaaaaaaaaa").unwrap(),
+            account_id: Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap(),
+            role: "tracked_mail_processing".to_string(),
+            display_name: "Tracked Mail Processing".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_tracked_mail_processing"}),
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
+            is_builtin: true,
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![definition]);
+
+        let definition = snapshot
+            .search_folder_definition_for_folder_id(
+                crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            )
+            .expect("tracked mail processing definition");
+
+        assert_eq!(definition.role, "tracked_mail_processing");
+        assert!(definition.is_builtin);
     }
 
     #[test]
