@@ -19,7 +19,8 @@ use crate::store::{
 use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermissionInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    PublicFolderPermissionInput, SearchFolderDefinition, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -387,6 +388,9 @@ fn bounded_search_criteria_from_rop(
         Some(restriction) => bounded_search_restriction_clauses(&restriction)?,
         None => Vec::new(),
     };
+    if clauses.is_empty() {
+        return Err(EC_SEARCH_INVALID_PARAMETER);
+    }
     let folder_ids = request
         .search_criteria_folder_ids()
         .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
@@ -12778,10 +12782,33 @@ where
                         output_handles.push(handle);
                         continue;
                     }
-                    let input = UpsertSearchFolderInput {
-                        id: None,
+                    let definition_id = Uuid::new_v4();
+                    let folder_id = match remember_created_mapi_identity(
+                        store,
+                        principal,
+                        MapiIdentityObjectKind::SearchFolderDefinition,
+                        definition_id,
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(folder_id) => folder_id,
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x1C,
+                                request.output_handle_index.unwrap_or(0),
+                                0x8004_0102,
+                            ));
+                            continue;
+                        }
+                    };
+                    let definition = SearchFolderDefinition {
+                        id: definition_id,
                         account_id: principal.account_id,
+                        role: "custom".to_string(),
                         display_name: display_name.to_string(),
+                        definition_kind: "user_saved".to_string(),
                         result_object_kind: "message".to_string(),
                         scope_json: json!({
                             "kind": "mapi_bounded",
@@ -12795,69 +12822,37 @@ where
                             "all": []
                         }),
                         excluded_folder_roles: Vec::new(),
+                        is_builtin: false,
                     };
-                    match store.upsert_search_folder(input).await {
-                        Ok(definition) => {
-                            let folder_id = match remember_created_mapi_identity(
-                                store,
-                                principal,
-                                MapiIdentityObjectKind::SearchFolderDefinition,
-                                definition.id,
-                                None,
-                                None,
-                            )
-                            .await
-                            {
-                                Ok(folder_id) => folder_id,
-                                Err(_) => {
-                                    responses.extend_from_slice(&rop_error_response(
-                                        0x1C,
-                                        request.output_handle_index.unwrap_or(0),
-                                        0x8004_0102,
-                                    ));
-                                    continue;
-                                }
-                            };
-                            tracing::info!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                tenant_id = %principal.tenant_id,
-                                account_id = %principal.account_id,
-                                mailbox = %principal.email,
-                                request_type = "Execute",
-                                request_rop_id = "0x1c",
-                                parent_folder_id = %format!("{parent_folder_id:#018x}"),
-                                folder_id = %format!("{folder_id:#018x}"),
-                                search_folder_id = %definition.id,
-                                folder_type = request.create_folder_type(),
-                                open_existing = request.create_folder_open_existing(),
-                                display_name = display_name,
-                                message = "rca debug mapi create folder created search folder",
-                            );
-                            let handle = session.allocate_output_handle(
-                                request.output_handle_index,
-                                MapiObject::Folder {
-                                    folder_id,
-                                    properties: HashMap::new(),
-                                },
-                            );
-                            set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                            responses.extend_from_slice(&rop_create_folder_response(
-                                &request, folder_id, false,
-                            ));
-                            session.record_notification(MapiNotificationEvent::hierarchy(
-                                parent_folder_id,
-                                Some(folder_id),
-                            ));
-                            output_handles.push(handle);
-                        }
-                        Err(_) => responses.extend_from_slice(&rop_error_response(
-                            0x1C,
-                            request.output_handle_index.unwrap_or(0),
-                            0x8004_0102,
-                        )),
-                    }
+                    session.remember_search_folder_definition(folder_id, definition.clone());
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1c",
+                        parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                        folder_id = %format!("{folder_id:#018x}"),
+                        search_folder_id = %definition.id,
+                        folder_type = request.create_folder_type(),
+                        open_existing = request.create_folder_open_existing(),
+                        display_name = display_name,
+                        message = "rca debug mapi create folder staged search folder",
+                    );
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Folder {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses
+                        .extend_from_slice(&rop_create_folder_response(&request, folder_id, false));
+                    output_handles.push(handle);
                     continue;
                 }
 
@@ -21953,6 +21948,25 @@ mod tests {
         assert!(context.contains("folder_count=1"));
         assert!(context.contains("invalid:0000000000000000"));
         assert!(context.contains("flags=0x00000001"));
+    }
+
+    #[test]
+    fn blank_search_criteria_is_invalid() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&INBOX_FOLDER_ID.to_le_bytes());
+        payload.extend_from_slice(&(SEARCH_RUNNING_FLAG | SEARCH_RECURSIVE_FLAG).to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::SetSearchCriteria.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let error = bounded_search_criteria_from_rop(&request, &[]).unwrap_err();
+
+        assert_eq!(error, EC_SEARCH_INVALID_PARAMETER);
     }
 
     #[test]

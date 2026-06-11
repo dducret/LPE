@@ -623,6 +623,9 @@ impl MapiMailStoreSnapshot {
         let mut projected_user_saved_keys = HashSet::new();
         self.folders
             .extend(search_folder_definitions.iter().filter_map(|definition| {
+                if !user_saved_search_folder_is_projectable(definition) {
+                    return None;
+                }
                 if definition.is_builtin || definition.definition_kind != "user_saved" {
                     return mapi_search_folder_definition_to_folder(definition);
                 }
@@ -1328,6 +1331,7 @@ impl MapiMailStoreSnapshot {
         self.search_folder_definitions.iter().find(|definition| {
             !definition.is_builtin
                 && definition.definition_kind == "user_saved"
+                && user_saved_search_folder_is_projectable(definition)
                 && definition.result_object_kind == result_object_kind
                 && definition
                     .display_name
@@ -1698,6 +1702,26 @@ fn user_saved_search_folder_projection_key(definition: &SearchFolderDefinition) 
         definition.display_name.trim().to_ascii_lowercase(),
         definition.result_object_kind
     )
+}
+
+fn user_saved_search_folder_is_projectable(definition: &SearchFolderDefinition) -> bool {
+    if definition.is_builtin || definition.definition_kind != "user_saved" {
+        return true;
+    }
+    if definition
+        .restriction_json
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        != Some("mapi_bounded")
+    {
+        return true;
+    }
+    definition
+        .restriction_json
+        .get("all")
+        .and_then(serde_json::Value::as_array)
+        .map(|clauses| !clauses.is_empty())
+        .unwrap_or(true)
 }
 
 fn mapi_search_folder_role(result_object_kind: &str) -> &'static str {
@@ -3382,6 +3406,50 @@ mod tests {
                 .map(|definition| definition.id),
             Some(first_id)
         );
+    }
+
+    #[test]
+    fn snapshot_ignores_blank_mapi_bounded_user_saved_search_folder() {
+        let definition_id = Uuid::parse_str("aaaaaaaa-3434-4111-8111-aaaaaaaaaaaa").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(0x7FFF_1000_0125),
+        );
+        let account_id = Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap();
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            SearchFolderDefinition {
+                id: definition_id,
+                account_id,
+                role: "custom".to_string(),
+                display_name: "Categories Rename Search Folder".to_string(),
+                definition_kind: "user_saved".to_string(),
+                result_object_kind: "message".to_string(),
+                scope_json: serde_json::json!({
+                    "kind": "mapi_bounded",
+                    "scope": "folders",
+                    "folderIds": [],
+                    "folderRoles": ["inbox"],
+                    "recursive": true
+                }),
+                restriction_json: serde_json::json!({
+                    "kind": "mapi_bounded",
+                    "all": []
+                }),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: false,
+            },
+        ]);
+
+        assert!(snapshot
+            .folders()
+            .iter()
+            .all(|folder| folder.canonical_id != definition_id));
+        assert!(snapshot
+            .user_saved_search_folder_definition_by_display_name(
+                "Categories Rename Search Folder",
+                "message"
+            )
+            .is_none());
     }
 
     #[test]
