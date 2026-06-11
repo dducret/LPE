@@ -105,7 +105,7 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 22] = [
     ARCHIVE_FOLDER_ID,
 ];
 
-const SEARCH_VIRTUAL_FOLDER_IDS: [u64; 2] = [SEARCH_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID];
+const SEARCH_VIRTUAL_FOLDER_IDS: [u64; 1] = [CONTACTS_SEARCH_FOLDER_ID];
 
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
@@ -413,12 +413,7 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | ARCHIVE_FOLDER_ID
                 | CONVERSATION_HISTORY_FOLDER_ID
         ),
-        SEARCH_FOLDER_ID => {
-            matches!(
-                special_folder_id,
-                SEARCH_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID
-            )
-        }
+        SEARCH_FOLDER_ID => special_folder_id == CONTACTS_SEARCH_FOLDER_ID,
         _ => false,
     }
 }
@@ -1793,8 +1788,16 @@ mod tests {
         )];
 
         assert!(hierarchy_virtual_folder_ids(ROOT_FOLDER_ID).contains(&CONTACTS_SEARCH_FOLDER_ID));
+        assert!(!hierarchy_virtual_folder_ids(SEARCH_FOLDER_ID).contains(&SEARCH_FOLDER_ID));
         assert!(!hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID)
             .contains(&CONTACTS_SEARCH_FOLDER_ID));
+        assert_eq!(
+            sync_mailboxes_for(SEARCH_FOLDER_ID, 0x02, &[])
+                .iter()
+                .filter(|mailbox| mapi_folder_id(mailbox) == SEARCH_FOLDER_ID)
+                .count(),
+            0
+        );
         assert_eq!(
             sync_mailboxes_for(SEARCH_FOLDER_ID, 0x02, &mailboxes)
                 .iter()

@@ -8644,6 +8644,89 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_query_rows_returns_umolk_user_options_default() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MID, PID_TAG_MESSAGE_CLASS_W, PID_TAG_SUBJECT_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                order: 1,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string()),
+            }),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 2, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert_response_contains_utf16(&response, "IPM.Configuration.UMOLK.UserOptions");
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_returns_rule_organizer_default() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_LAST_MODIFICATION_TIME,
+            ],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                order: 1,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.RuleOrganizer".to_string()),
+            }),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 35, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
+    }
+
+    #[test]
     fn inbox_associated_query_rows_default_columns_cover_required_configuration_contract() {
         let snapshot = inbox_associated_sort_snapshot();
         let columns = default_associated_config_columns();
