@@ -13145,12 +13145,13 @@ where
                             request_rop_id = "0x1d",
                             parent_folder_id = %format!("{_parent_folder_id:#018x}"),
                             folder_id = %format!("{folder_id:#018x}"),
-                            message = "rca debug mapi delete advertised special folder denied",
+                            partial_completion = false,
+                            message = "rca debug mapi delete advertised special folder ignored",
                         );
-                        responses.extend_from_slice(&rop_error_response(
+                        responses.extend_from_slice(&rop_partial_completion_response(
                             0x1D,
                             request.response_handle_index(),
-                            0x8007_0005,
+                            false,
                         ));
                         continue;
                     }

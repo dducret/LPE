@@ -5625,6 +5625,7 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let default_group_header_id = crate::mapi::properties::default_wlink_group_uuid();
             let id = match input.id {
                 Some(id) => id,
                 None => sqlx::query_scalar::<_, Uuid>(
@@ -5637,7 +5638,7 @@ impl ExchangeStore for Storage {
                       AND target_folder_id IS NOT DISTINCT FROM $4
                       AND shortcut_type = $5
                       AND section = $6
-                      AND group_header_id IS NOT DISTINCT FROM $7
+                      AND COALESCE(group_header_id, $9) = COALESCE($7, $9)
                       AND group_name = $8
                     ORDER BY updated_at DESC, id
                     LIMIT 1
@@ -5651,6 +5652,7 @@ impl ExchangeStore for Storage {
                 .bind(input.section as i64)
                 .bind(input.group_header_id)
                 .bind(&input.group_name)
+                .bind(default_group_header_id)
                 .fetch_optional(self.pool())
                 .await?
                 .unwrap_or_else(Uuid::new_v4),
@@ -5689,6 +5691,33 @@ impl ExchangeStore for Storage {
             .bind(input.group_header_id)
             .bind(input.group_name)
             .fetch_one(self.pool())
+            .await?;
+
+            sqlx::query(
+                r#"
+                DELETE FROM mapi_navigation_shortcuts
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND id <> $3
+                  AND subject = $4
+                  AND target_folder_id IS NOT DISTINCT FROM $5
+                  AND shortcut_type = $6
+                  AND section = $7
+                  AND COALESCE(group_header_id, $10) = COALESCE($8, $10)
+                  AND group_name = $9
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(input.account_id)
+            .bind(id)
+            .bind(&row.try_get::<String, _>("subject")?)
+            .bind(row.try_get::<Option<i64>, _>("target_folder_id")?)
+            .bind(row.try_get::<i64, _>("shortcut_type")?)
+            .bind(row.try_get::<i64, _>("section")?)
+            .bind(row.try_get::<Option<Uuid>, _>("group_header_id")?)
+            .bind(&row.try_get::<String, _>("group_name")?)
+            .bind(default_group_header_id)
+            .execute(self.pool())
             .await?;
 
             mapi_navigation_shortcut_from_row(row)

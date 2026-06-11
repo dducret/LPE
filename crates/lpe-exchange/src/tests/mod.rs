@@ -337,6 +337,24 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
     assert_eq!(second.id, first.id);
     assert_eq!(second.flags, 8);
     assert_eq!(second.ordinal, 191);
+    let third = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 8,
+            section: 1,
+            ordinal: 191,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Mail".to_string(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(third.id, first.id);
     assert_eq!(
         fixture
             .storage
