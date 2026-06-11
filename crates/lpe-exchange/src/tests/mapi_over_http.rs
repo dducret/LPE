@@ -27776,6 +27776,71 @@ async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeh
 }
 
 #[tokio::test]
+async fn mapi_over_http_quick_step_config_0e0b_is_not_defaulted() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let quick_step_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+        quick_step_config_id,
+    );
+    append_rop_get_properties_specific(&mut rops, 2, &[0x7C08_0102, 0x0E0B_0102, 0x001A_001F]);
+
+    let mut headers = mapi_headers("Execute");
+    headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
+    let marker = [0x07, 0x02, 0, 0, 0, 0];
+    let offset = response_rops
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .unwrap_or_else(|| panic!("missing GetPropertiesSpecific: {response_rops:02x?}"));
+    assert_eq!(response_rops[offset + marker.len()], 1);
+    assert!(contains_bytes(
+        &response_rops[offset..],
+        &[0x0A, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.CustomAction")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_virtual_associated_config_write_preserves_default_class() {
     let account = FakeStore::account();
     let associated_configs = Arc::new(Mutex::new(Vec::new()));

@@ -2233,6 +2233,13 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_PST_PATH_W
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
+        Some(MapiObject::AssociatedConfig { config_id, .. })
+            if crate::mapi_store::is_outlook_quick_step_default_associated_config_id(
+                *config_id,
+            ) && storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B =>
+        {
+            false
+        }
         Some(MapiObject::AssociatedConfig { .. }) => {
             MapiPropertyTag::new(storage_tag).property_type().is_some()
         }
@@ -7609,6 +7616,20 @@ mod tests {
         assert!(!modeled_zero_or_default_property(
             Some(&object),
             0x801D_0000
+        ));
+    }
+
+    #[test]
+    fn quick_step_custom_action_does_not_default_undocumented_0e0b() {
+        let object = MapiObject::AssociatedConfig {
+            folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+            config_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4),
+            saved_message: None,
+        };
+
+        assert!(!modeled_zero_or_default_property(
+            Some(&object),
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ));
     }
 
