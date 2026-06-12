@@ -38023,8 +38023,8 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert!(contains_bytes(&body, b"EX:"));
-    assert!(!contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
-    assert!(!contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x8CA8_001Eu32.to_le_bytes()));
     let mut search_key = format!(
         "EX:{}",
@@ -38404,9 +38404,9 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 6);
-    assert!(!contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
-    assert!(!contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 8);
+    assert!(contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x800F_101Fu32.to_le_bytes()));
     let proxy_tag_offset = body
         .windows(4)

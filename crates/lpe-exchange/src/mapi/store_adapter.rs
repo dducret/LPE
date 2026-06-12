@@ -1822,8 +1822,8 @@ fn mailbox_id_for_mapi_folder_id(mailboxes: &[JmapMailbox], folder_id: u64) -> O
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::sync::DRAFTS_FOLDER_ID;
+    use super::*;
     use std::collections::{HashMap, VecDeque};
     use std::time::SystemTime;
 

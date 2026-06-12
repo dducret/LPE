@@ -208,6 +208,8 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x8CE2_0003, // PidTagAddressBookDistributionListMemberCount
     0x8CE3_0003, // PidTagAddressBookDistributionListExternalMemberCount
     0x8C6D_0102, // PidTagAddressBookObjectGuid
+    0x3E04_0003, // Outlook account-row compatibility column
+    0x8888_0003, // Outlook account-row compatibility column
     0xFFFD_0003, // PidTagAddressBookContainerId
 ];
 
