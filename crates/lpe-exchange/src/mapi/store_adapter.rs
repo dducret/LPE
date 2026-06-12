@@ -1,9 +1,7 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
-use super::sync::{
-    CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, DRAFTS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID,
-};
+use super::sync::{CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
@@ -1825,6 +1823,7 @@ fn mailbox_id_for_mapi_folder_id(mailboxes: &[JmapMailbox], folder_id: u64) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::sync::DRAFTS_FOLDER_ID;
     use std::collections::{HashMap, VecDeque};
     use std::time::SystemTime;
 
