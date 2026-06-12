@@ -18769,6 +18769,30 @@ where
                     }
                 }
                 if !request.named_property_create() && property_ids.iter().any(|id| *id == 0) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x56",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = mapi_object_debug_kind(input_object(
+                            session,
+                            &handle_slots,
+                            &request,
+                        )),
+                        create_missing = request.named_property_create(),
+                        requested_named_property_count = properties.len(),
+                        requested_named_properties = %requested_named_properties,
+                        missing_named_property_count = missing_properties.len(),
+                        missing_named_properties = %format_debug_named_properties(&missing_properties),
+                        returned_property_id_count = property_ids.len(),
+                        returned_property_ids = %format_debug_property_ids(&property_ids),
+                        rop_return_value = "0x8004010f",
+                        message = "rca debug mapi get property ids from names",
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x56,
                         request.response_handle_index(),
