@@ -7644,7 +7644,7 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            1
+            2
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
@@ -8176,6 +8176,91 @@ mod tests {
         assert!(response
             .windows(4)
             .any(|window| window == 14_745_605u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn common_views_find_row_returns_default_sent_to_named_view() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION,
+                PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+            ],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::And as u8];
+        restriction.extend_from_slice(&5u16.to_le_bytes());
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Microsoft.FolderDesign.NamedView");
+        restriction.push(MapiRestrictionType::Bitmask as u8);
+        restriction.push(1);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&1u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_VERSION.to_le_bytes());
+        restriction.extend_from_slice(&8u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Or as u8);
+        restriction.extend_from_slice(&2u16.to_le_bytes());
+        restriction.push(MapiRestrictionType::Content as u8);
+        restriction.extend_from_slice(&0u32.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Sent To");
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&15_269_893u32.to_le_bytes());
+        restriction.push(MapiRestrictionType::Property as u8);
+        restriction.push(0x04);
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE.to_le_bytes());
+        restriction.extend_from_slice(&16u16.to_le_bytes());
+        restriction.extend_from_slice(&[
+            0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]);
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(0);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_response_contains_utf16(&response, "Sent To");
+        assert!(response
+            .windows(4)
+            .any(|window| window == 15_269_893u32.to_le_bytes()));
     }
 
     #[test]

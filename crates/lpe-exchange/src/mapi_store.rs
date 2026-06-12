@@ -217,6 +217,8 @@ const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
 const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
 const OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
@@ -294,7 +296,10 @@ pub(crate) fn is_outlook_contact_default_associated_config_id(item_id: u64) -> b
 }
 
 pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
-    item_id == OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+    matches!(
+        item_id,
+        OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID | OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
+    )
 }
 
 pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u64) -> bool {
@@ -396,14 +401,24 @@ fn outlook_quick_step_associated_config_defaults(
 }
 
 fn outlook_common_views_default_named_views() -> Vec<MapiCommonViewNamedViewMessage> {
-    vec![MapiCommonViewNamedViewMessage {
-        id: OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
-        name: "Compact".to_string(),
-        view_flags: 14_745_605,
-        view_type: 8,
-    }]
+    vec![
+        MapiCommonViewNamedViewMessage {
+            id: OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
+            name: "Compact".to_string(),
+            view_flags: 14_745_605,
+            view_type: 8,
+        },
+        MapiCommonViewNamedViewMessage {
+            id: OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000002),
+            name: "Sent To".to_string(),
+            view_flags: 15_269_893,
+            view_type: 8,
+        },
+    ]
 }
 
 fn outlook_contact_sync_associated_config_default(
@@ -3553,26 +3568,35 @@ mod tests {
     }
 
     #[test]
-    fn common_views_projects_default_compact_named_view_for_table_only() {
+    fn common_views_projects_default_named_views_for_table_only() {
         let snapshot = MapiMailStoreSnapshot::empty();
         assert!(snapshot.navigation_shortcut_messages().is_empty());
         assert_eq!(snapshot.common_views_messages().count(), 0);
         let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 1);
-        let named_view = match &messages[0] {
-            MapiCommonViewsMessage::NamedView(view) => view,
-            _ => panic!("expected default named view"),
-        };
-        assert_eq!(named_view.name, "Compact");
-        assert_eq!(named_view.view_flags, 14_745_605);
-        assert_eq!(named_view.view_type, 8);
+        assert_eq!(messages.len(), 2);
+        let named_views = messages
+            .iter()
+            .map(|message| match message {
+                MapiCommonViewsMessage::NamedView(view) => view,
+                _ => panic!("expected default named view"),
+            })
+            .collect::<Vec<_>>();
+        assert!(named_views
+            .iter()
+            .any(|view| view.name == "Compact" && view.view_flags == 14_745_605));
+        assert!(named_views
+            .iter()
+            .any(|view| view.name == "Sent To" && view.view_flags == 15_269_893));
+        assert!(named_views.iter().all(|view| view.view_type == 8));
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
             .is_none());
-        assert!(snapshot
-            .common_view_named_view_message_for_id(named_view.id)
-            .is_some());
+        for named_view in named_views {
+            assert!(snapshot
+                .common_view_named_view_message_for_id(named_view.id)
+                .is_some());
+        }
     }
 
     #[test]
@@ -3614,7 +3638,7 @@ mod tests {
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
-        assert_eq!(messages.len(), 2);
+        assert_eq!(messages.len(), 3);
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
             .is_none());
