@@ -4406,19 +4406,7 @@ fn split_object_property_values(
     if !matches!(object, MapiObject::AssociatedConfig { .. }) {
         return split_custom_property_values(values);
     }
-    values.into_iter().partition(|(tag, _)| {
-        !is_custom_property_tag(*tag) || is_associated_config_durable_property_tag(*tag)
-    })
-}
-
-fn is_associated_config_durable_property_tag(property_tag: u32) -> bool {
-    matches!(
-        canonical_property_storage_tag(property_tag),
-        PID_TAG_ROAMING_DATATYPES
-            | PID_TAG_ROAMING_DICTIONARY
-            | PID_TAG_ROAMING_XML_STREAM
-            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-    )
+    (values, Vec::new())
 }
 
 fn apply_mapi_property_values_to_map(
