@@ -788,7 +788,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
 
@@ -864,7 +863,6 @@ pub(in crate::mapi) fn mailbox_shadowed_by_active_outlook_special_folder(
             | "local failures"
             | "notes"
             | "quick contacts"
-            | "quick step settings"
             | "rss feeds"
             | "server failures"
             | "suggested contacts"
@@ -7312,13 +7310,13 @@ mod tests {
         assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(row_ids.contains(&TASKS_FOLDER_ID));
         assert!(!row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
-        assert!(row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
         assert!(!row_ids.contains(&quick_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&tasks_shadow_folder_id));
-        assert!(!row_ids.contains(&quick_step_shadow_folder_id));
+        assert!(row_ids.contains(&quick_step_shadow_folder_id));
         assert_eq!(
             rows.iter()
                 .filter(|row| hierarchy_row_display_name(row) == "Tasks")
@@ -7336,13 +7334,13 @@ mod tests {
         assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(sync_ids.contains(&TASKS_FOLDER_ID));
         assert!(!sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
-        assert!(sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));
         assert!(!sync_ids.contains(&quick_contacts_shadow_folder_id));
         assert!(!sync_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!sync_ids.contains(&tasks_shadow_folder_id));
-        assert!(!sync_ids.contains(&quick_step_shadow_folder_id));
+        assert!(sync_ids.contains(&quick_step_shadow_folder_id));
 
         let calendar_row = rows
             .iter()

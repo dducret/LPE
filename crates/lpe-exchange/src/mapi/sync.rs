@@ -80,7 +80,7 @@ const ROOT_VIRTUAL_FOLDER_IDS: [u64; 35] = [
     FREEBUSY_DATA_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 22] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 21] = [
     IPM_SUBTREE_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
@@ -101,7 +101,6 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 22] = [
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
 
@@ -409,7 +408,6 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | SERVER_FAILURES_FOLDER_ID
                 | JUNK_FOLDER_ID
                 | RSS_FEEDS_FOLDER_ID
-                | QUICK_STEP_SETTINGS_FOLDER_ID
                 | ARCHIVE_FOLDER_ID
                 | CONVERSATION_HISTORY_FOLDER_ID
         ),
