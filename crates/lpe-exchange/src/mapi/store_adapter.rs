@@ -1,7 +1,9 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
-use super::sync::{CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
+use super::sync::{
+    CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, DRAFTS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID,
+};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
@@ -343,10 +345,14 @@ where
         "fetch content messages",
         message_ids.len(),
     );
-    let emails = store
-        .fetch_jmap_emails(account_id, &message_ids)
-        .await
-        .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?;
+    let emails = if message_ids.is_empty() {
+        Vec::new()
+    } else {
+        store
+            .fetch_jmap_emails(account_id, &message_ids)
+            .await
+            .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?
+    };
     let mut attachments = Vec::with_capacity(emails.len());
     for (email_index, email) in emails.iter().enumerate() {
         log_mapi_store_load_step(account_id, plan, "fetch message attachments", email_index);
@@ -487,10 +493,14 @@ where
         contacts
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch contacts by id", contact_ids.len());
-        store
-            .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
-            .await
-            .with_context(|| format!("fetch {} MAPI contacts by id", contact_ids.len()))?
+        if contact_ids.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
+                .await
+                .with_context(|| format!("fetch {} MAPI contacts by id", contact_ids.len()))?
+        }
     };
     let events = if snapshot_backed_contents {
         log_mapi_store_load_step(
@@ -522,18 +532,24 @@ where
         events
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch events by id", event_ids.len());
-        store
-            .fetch_accessible_events_by_ids(account_id, &event_ids)
-            .await
-            .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
+        if event_ids.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .fetch_accessible_events_by_ids(account_id, &event_ids)
+                .await
+                .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
+        }
     };
-    let calendar_attachments = store
-        .fetch_calendar_attachments_for_events(
-            account_id,
-            &events.iter().map(|event| event.id).collect::<Vec<_>>(),
-        )
-        .await
-        .context("fetch MAPI calendar attachments")?;
+    let calendar_event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+    let calendar_attachments = if calendar_event_ids.is_empty() {
+        Vec::new()
+    } else {
+        store
+            .fetch_calendar_attachments_for_events(account_id, &calendar_event_ids)
+            .await
+            .context("fetch MAPI calendar attachments")?
+    };
     let tasks = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,
@@ -553,10 +569,14 @@ where
         tasks
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch tasks by id", task_ids.len());
-        store
-            .fetch_accessible_tasks_by_ids(account_id, &task_ids)
-            .await
-            .with_context(|| format!("fetch {} MAPI tasks by id", task_ids.len()))?
+        if task_ids.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .fetch_accessible_tasks_by_ids(account_id, &task_ids)
+                .await
+                .with_context(|| format!("fetch {} MAPI tasks by id", task_ids.len()))?
+        }
     };
     let notes = if snapshot_backed_contents {
         log_mapi_store_load_step(account_id, plan, "fetch snapshot notes", 0);
@@ -566,10 +586,14 @@ where
             .context("fetch MAPI notes")?
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch notes by id", note_ids.len());
-        store
-            .fetch_mapi_notes_by_ids(account_id, &note_ids)
-            .await
-            .with_context(|| format!("fetch {} MAPI notes by id", note_ids.len()))?
+        if note_ids.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .fetch_mapi_notes_by_ids(account_id, &note_ids)
+                .await
+                .with_context(|| format!("fetch {} MAPI notes by id", note_ids.len()))?
+        }
     };
     let journal_entries = if snapshot_backed_contents {
         log_mapi_store_load_step(account_id, plan, "fetch snapshot journal entries", 0);
@@ -584,15 +608,19 @@ where
             "fetch journal entries by id",
             journal_entry_ids.len(),
         );
-        store
-            .fetch_mapi_journal_entries_by_ids(account_id, &journal_entry_ids)
-            .await
-            .with_context(|| {
-                format!(
-                    "fetch {} MAPI journal entries by id",
-                    journal_entry_ids.len()
-                )
-            })?
+        if journal_entry_ids.is_empty() {
+            Vec::new()
+        } else {
+            store
+                .fetch_mapi_journal_entries_by_ids(account_id, &journal_entry_ids)
+                .await
+                .with_context(|| {
+                    format!(
+                        "fetch {} MAPI journal entries by id",
+                        journal_entry_ids.len()
+                    )
+                })?
+        }
     };
     log_mapi_requested_collaboration_resolution(
         account_id,
@@ -1161,7 +1189,6 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
             | 0x4C
             | 0x4D
             | 0x4E
-            | 0x4F
             | 0x58
             | 0x3F
             | 0x70
@@ -1336,7 +1363,9 @@ fn simulate_table_access(
         0x15 => {
             let Some(MapiObject::ContentsTable {
                 folder_id,
+                associated,
                 sort_orders,
+                category_count,
                 restriction,
                 position,
                 ..
@@ -1344,7 +1373,14 @@ fn simulate_table_access(
             else {
                 return;
             };
+            if *associated {
+                return;
+            }
             if restriction.is_some() {
+                plan.requires_full_snapshot = true;
+                return;
+            }
+            if *category_count > 0 || !is_windowable_mail_contents_folder(*folder_id) {
                 plan.requires_full_snapshot = true;
                 return;
             }
@@ -1403,11 +1439,64 @@ fn simulate_table_access(
             );
         }
         0x18 => {
-            if input_handle(handle_slots, request)
-                .and_then(|handle| handles.get(&handle))
-                .is_some_and(|object| matches!(object, MapiObject::ContentsTable { .. }))
+            if let Some(MapiObject::ContentsTable {
+                folder_id,
+                associated,
+                sort_orders,
+                category_count,
+                restriction,
+                position,
+                ..
+            }) = input_handle(handle_slots, request).and_then(|handle| handles.get_mut(&handle))
             {
-                plan.requires_full_snapshot = true;
+                if request.seek_origin().unwrap_or(1) == 2 {
+                    plan.requires_full_snapshot = true;
+                    return;
+                }
+                let base_position = if request.seek_origin().unwrap_or(1) == 0 {
+                    0isize
+                } else {
+                    *position as isize
+                };
+                let requested_position =
+                    base_position.saturating_add(request.seek_row_count().unwrap_or(0) as isize);
+                *position = requested_position.max(0) as usize;
+                if *associated {
+                    return;
+                }
+                if *category_count > 0
+                    || restriction.is_some()
+                    || !is_windowable_mail_contents_folder(*folder_id)
+                {
+                    plan.requires_full_snapshot = true;
+                    return;
+                }
+                let Some(sql_sort_orders) = mapi_content_table_sort_orders(sort_orders) else {
+                    plan.requires_full_snapshot = true;
+                    return;
+                };
+                add_content_query(
+                    plan,
+                    *folder_id,
+                    table_view_signature(sort_orders, restriction.as_ref()),
+                    *position,
+                    0,
+                    sql_sort_orders,
+                );
+            }
+        }
+        0x4F => {
+            let Some(object) =
+                input_handle(handle_slots, request).and_then(|handle| handles.get(&handle))
+            else {
+                return;
+            };
+            match object {
+                MapiObject::HierarchyTable { .. } => {}
+                MapiObject::ContentsTable {
+                    associated: true, ..
+                } => {}
+                _ => plan.requires_full_snapshot = true,
             }
         }
         _ => {}
@@ -1440,21 +1529,84 @@ fn add_content_query(
     limit: usize,
     sort_orders: Vec<MapiContentTableSort>,
 ) {
-    if plan.content_queries.iter().any(|query| {
-        query.folder_id == folder_id
+    let mut merged_offset = offset;
+    let mut merged_limit = limit;
+    let mut index = 0;
+    while index < plan.content_queries.len() {
+        let query = &plan.content_queries[index];
+        if query.folder_id == folder_id
             && query.view_signature == view_signature
-            && query.offset == offset
-            && query.limit == limit
-    }) {
-        return;
+            && query.sort_orders == sort_orders
+            && content_query_ranges_can_merge(
+                query.offset,
+                query.limit,
+                merged_offset,
+                merged_limit,
+            )
+        {
+            let query = plan.content_queries.remove(index);
+            if query.limit == 0 {
+                if merged_limit == 0 {
+                    merged_offset = query.offset;
+                }
+            } else if merged_limit == 0 {
+                merged_offset = query.offset;
+                merged_limit = query.limit;
+            } else {
+                let merged_start = query.offset.min(merged_offset);
+                let merged_end = query
+                    .offset
+                    .saturating_add(query.limit)
+                    .max(merged_offset.saturating_add(merged_limit));
+                merged_offset = merged_start;
+                merged_limit = merged_end.saturating_sub(merged_start);
+            }
+        } else {
+            index += 1;
+        }
     }
     plan.content_queries.push(MapiContentAccessQuery {
         folder_id,
         view_signature,
-        offset,
-        limit,
+        offset: merged_offset,
+        limit: merged_limit,
         sort_orders,
     });
+}
+
+fn content_query_ranges_can_merge(
+    left_offset: usize,
+    left_limit: usize,
+    right_offset: usize,
+    right_limit: usize,
+) -> bool {
+    if left_limit == 0 && right_limit == 0 {
+        return true;
+    }
+    if left_limit == 0 || right_limit == 0 {
+        return true;
+    }
+    let left_end = left_offset.saturating_add(left_limit);
+    let right_end = right_offset.saturating_add(right_limit);
+    left_offset <= right_end && right_offset <= left_end
+}
+
+fn is_windowable_mail_contents_folder(folder_id: u64) -> bool {
+    match role_for_folder_id(folder_id) {
+        Some(
+            "inbox"
+            | "drafts"
+            | "sent"
+            | "trash"
+            | "outbox"
+            | "junk"
+            | "rss_feeds"
+            | "archive"
+            | "conversation_history",
+        )
+        | None => true,
+        Some(_) => false,
+    }
 }
 
 fn mapi_content_table_sort_orders(
@@ -1961,7 +2113,7 @@ mod tests {
     }
 
     #[test]
-    fn access_plan_contents_seek_still_requires_full_snapshot() {
+    fn access_plan_contents_seek_from_end_still_requires_full_snapshot() {
         let mut session = empty_session();
         session.handles.insert(
             1,
@@ -1980,12 +2132,413 @@ mod tests {
             },
         );
         session.next_handle = 2;
-        let mut seek_row = vec![0x18, 0x00, 0x00, 0x00];
+        let mut seek_row = vec![0x18, 0x00, 0x02];
         seek_row.extend_from_slice(&0i32.to_le_bytes());
+        seek_row.push(0x01);
+        seek_row.extend_from_slice(&0u16.to_le_bytes());
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&seek_row));
+
+        assert!(plan.requires_full_snapshot, "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_normal_mail_contents_seek_uses_content_window_total() {
+        let session = empty_session();
+        let mut handles = HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: DRAFTS_FOLDER_ID,
+                associated: false,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+        let mut next_handle = 2;
+        let mut handle_slots = vec![1];
+        let mut payload = vec![0x00];
+        payload.extend_from_slice(&1i32.to_le_bytes());
+        payload.push(0x01);
+        let request = RopRequest {
+            rop_id: 0x18,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        simulate_table_access(
+            &mut plan,
+            &session,
+            &mut handles,
+            &mut next_handle,
+            &mut handle_slots,
+            &request,
+        );
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].folder_id, DRAFTS_FOLDER_ID);
+        assert_eq!(plan.content_queries[0].offset, 1);
+        assert_eq!(plan.content_queries[0].limit, 0);
+    }
+
+    #[test]
+    fn access_plan_non_mail_contents_query_rows_requires_full_snapshot() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: CALENDAR_FOLDER_ID,
+                associated: false,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.next_handle = 2;
+        let query_rows = [0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&query_rows));
+
+        assert!(plan.requires_full_snapshot, "plan={plan:?}");
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_associated_contents_query_rows_stays_store_selective() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: INBOX_FOLDER_ID,
+                associated: true,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.next_handle = 2;
+        let query_rows = [0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&query_rows));
+
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_merges_seek_total_query_with_following_query_rows_window() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 1, 0, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 1, 40, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 1);
+        assert_eq!(plan.content_queries[0].limit, 40);
+    }
+
+    #[test]
+    fn access_plan_merges_overlapping_content_windows() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 16, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 1, 16, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 0);
+        assert_eq!(plan.content_queries[0].limit, 17);
+    }
+
+    #[test]
+    fn access_plan_merges_content_window_that_bridges_existing_ranges() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 10, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 20, 10, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 10, 10, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 0);
+        assert_eq!(plan.content_queries[0].limit, 30);
+    }
+
+    #[test]
+    fn access_plan_merges_total_probe_inside_existing_content_window() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 20, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 5, 0, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 0);
+        assert_eq!(plan.content_queries[0].limit, 20);
+    }
+
+    #[test]
+    fn access_plan_merges_existing_total_probe_inside_later_content_window() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 5, 0, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 20, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 0);
+        assert_eq!(plan.content_queries[0].limit, 20);
+    }
+
+    #[test]
+    fn access_plan_merges_total_probe_before_existing_content_window_without_widening() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 5, 20, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 0, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 5);
+        assert_eq!(plan.content_queries[0].limit, 20);
+    }
+
+    #[test]
+    fn access_plan_merges_existing_total_probe_before_later_content_window_without_widening() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 0, 0, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 5, 20, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].offset, 5);
+        assert_eq!(plan.content_queries[0].limit, 20);
+    }
+
+    #[test]
+    fn access_plan_merges_total_probes_at_different_offsets() {
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 1, 0, Vec::new());
+        add_content_query(&mut plan, DRAFTS_FOLDER_ID, 42, 40, 0, Vec::new());
+
+        assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+        assert_eq!(plan.content_queries[0].limit, 0);
+    }
+
+    #[test]
+    fn access_plan_non_mail_contents_seek_still_requires_full_snapshot() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: CALENDAR_FOLDER_ID,
+                associated: false,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.next_handle = 2;
+        let mut seek_row = vec![0x18, 0x00, 0x00];
+        seek_row.extend_from_slice(&1i32.to_le_bytes());
         seek_row.push(0x01);
 
         let plan = plan_mapi_store_access(&session, &single_rop_buffer(&seek_row));
 
+        assert!(plan.requires_full_snapshot, "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_associated_contents_seek_stays_selective() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: INBOX_FOLDER_ID,
+                associated: true,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.next_handle = 2;
+        let mut rops = vec![0x18, 0x00, 0x01];
+        rops.extend_from_slice(&1i32.to_le_bytes());
+        rops.push(0x00);
+        rops.extend_from_slice(&[0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00]);
+        rops.extend_from_slice(&0u16.to_le_bytes());
+
+        let plan = plan_mapi_store_access(&session, &rop_buffer(&rops, &[1]));
+
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert_eq!(plan.object_ids, vec![INBOX_FOLDER_ID], "plan={plan:?}");
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_associated_contents_find_row_stays_selective() {
+        let session = empty_session();
+        let mut handles = HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                associated: true,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+        let mut next_handle = 2;
+        let mut handle_slots = vec![1];
+        let request = RopRequest {
+            rop_id: 0x4F,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        assert!(!rop_requires_full_snapshot(0x4F));
+        simulate_table_access(
+            &mut plan,
+            &session,
+            &mut handles,
+            &mut next_handle,
+            &mut handle_slots,
+            &request,
+        );
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_normal_contents_find_row_still_requires_full_snapshot() {
+        let session = empty_session();
+        let mut handles = HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: INBOX_FOLDER_ID,
+                associated: false,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        let mut plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: Vec::new(),
+            content_queries: Vec::new(),
+        };
+        let mut next_handle = 2;
+        let mut handle_slots = vec![1];
+        let request = RopRequest {
+            rop_id: 0x4F,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        simulate_table_access(
+            &mut plan,
+            &session,
+            &mut handles,
+            &mut next_handle,
+            &mut handle_slots,
+            &request,
+        );
         assert!(plan.requires_full_snapshot, "plan={plan:?}");
     }
 

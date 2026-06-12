@@ -1024,27 +1024,40 @@ impl MapiMailStoreSnapshot {
         offset: usize,
         limit: usize,
     ) -> Option<(usize, Vec<&JmapEmail>)> {
-        let window = self.content_windows.iter().find(|window| {
-            window.folder_id == folder_id
-                && window.view_signature == view_signature
-                && window.offset == offset
-                && (window.message_ids.len() >= limit
-                    || offset + window.message_ids.len() >= window.total)
-        })?;
-        let emails = window
-            .message_ids
+        self.content_windows
             .iter()
-            .filter_map(|id| {
-                self.messages
-                    .iter()
-                    .find(|message| message.canonical_id == *id)
-                    .map(|message| &message.email)
+            .filter(|window| {
+                window.folder_id == folder_id
+                    && window.view_signature == view_signature
+                    && offset >= window.offset
+                    && offset <= window.offset.saturating_add(window.message_ids.len())
             })
-            .collect::<Vec<_>>();
-        if emails.len() != window.message_ids.len() {
-            return None;
-        }
-        Some((window.total, emails))
+            .find_map(|window| {
+                let emails = window
+                    .message_ids
+                    .iter()
+                    .filter_map(|id| {
+                        self.messages
+                            .iter()
+                            .find(|message| message.canonical_id == *id)
+                            .map(|message| &message.email)
+                    })
+                    .collect::<Vec<_>>();
+                if emails.len() != window.message_ids.len() {
+                    return None;
+                }
+                let local_offset = offset.saturating_sub(window.offset);
+                let available = emails.len().saturating_sub(local_offset);
+                let window_reaches_end = window.offset.saturating_add(emails.len()) >= window.total;
+                if available < limit && !window_reaches_end {
+                    return None;
+                }
+                let row_count = available.min(limit);
+                Some((
+                    window.total,
+                    emails[local_offset..local_offset + row_count].to_vec(),
+                ))
+            })
     }
 
     pub(crate) fn content_table_window_emails_containing(
@@ -1053,40 +1066,48 @@ impl MapiMailStoreSnapshot {
         view_signature: u64,
         position: usize,
     ) -> Option<(usize, usize, Vec<&JmapEmail>)> {
-        let window = self.content_windows.iter().find(|window| {
-            window.folder_id == folder_id
-                && window.view_signature == view_signature
-                && position >= window.offset
-                && position <= window.offset.saturating_add(window.message_ids.len())
-        })?;
-        let emails = window
-            .message_ids
+        self.content_windows
             .iter()
-            .filter_map(|id| {
-                self.messages
-                    .iter()
-                    .find(|message| message.canonical_id == *id)
-                    .map(|message| &message.email)
+            .filter(|window| {
+                window.folder_id == folder_id
+                    && window.view_signature == view_signature
+                    && position >= window.offset
+                    && position <= window.offset.saturating_add(window.message_ids.len())
             })
-            .collect::<Vec<_>>();
-        if emails.len() != window.message_ids.len() {
-            return None;
-        }
-        Some((window.offset, window.total, emails))
+            .filter_map(|window| {
+                let emails = window
+                    .message_ids
+                    .iter()
+                    .filter_map(|id| {
+                        self.messages
+                            .iter()
+                            .find(|message| message.canonical_id == *id)
+                            .map(|message| &message.email)
+                    })
+                    .collect::<Vec<_>>();
+                if emails.len() != window.message_ids.len() {
+                    return None;
+                }
+                let local_offset = position.saturating_sub(window.offset);
+                let tail_len = emails.len().saturating_sub(local_offset);
+                Some((window.offset, window.total, emails, tail_len))
+            })
+            .max_by_key(|(offset, _, _, tail_len)| (*tail_len, *offset))
+            .map(|(offset, total, emails, _)| (offset, total, emails))
     }
 
     pub(crate) fn content_table_total(&self, folder_id: u64, view_signature: u64) -> Option<usize> {
         self.content_windows
             .iter()
-            .filter(|window| {
-                window.folder_id == folder_id && window.view_signature == view_signature
-            })
             .find(|window| {
-                window.message_ids.iter().all(|id| {
-                    self.messages
-                        .iter()
-                        .any(|message| message.canonical_id == *id)
-                })
+                window.folder_id == folder_id
+                    && window.view_signature == view_signature
+                    && (window.message_ids.is_empty()
+                        || window.message_ids.iter().all(|id| {
+                            self.messages
+                                .iter()
+                                .any(|message| message.canonical_id == *id)
+                        }))
             })
             .map(|window| window.total)
     }
@@ -2521,6 +2542,441 @@ mod tests {
         .into_iter()
         .map(str::to_string)
         .collect()
+    }
+
+    fn test_mailbox(id: Uuid) -> JmapMailbox {
+        JmapMailbox {
+            id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 3,
+            unread_emails: 0,
+            is_subscribed: true,
+        }
+    }
+
+    fn test_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
+        JmapEmail {
+            id,
+            thread_id: Uuid::from_u128(0x12121212_1212_4212_8212_121212121212),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 2,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 2,
+                unread: false,
+                flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                categories: Vec::new(),
+                draft: false,
+            }],
+            received_at: "2026-05-20T12:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "alice@example.test".to_string(),
+            from_display: Some("Alice".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: subject.to_string(),
+            preview: subject.to_string(),
+            body_text: subject.to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 42,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        }
+    }
+
+    #[test]
+    fn content_table_window_emails_reuses_wider_window_slice() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444444);
+        let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555555);
+        let second_id = Uuid::from_u128(0x66666666_6666_4666_8666_666666666666);
+        let third_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777777);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(101),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(102),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            third_id,
+            crate::mapi::identity::mapi_store_id(103),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            vec![
+                test_email(first_id, mailbox_id, "First"),
+                test_email(second_id, mailbox_id, "Second"),
+                test_email(third_id, mailbox_id, "Third"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![MapiContentTableWindow {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            view_signature: 42,
+            offset: 0,
+            total: 3,
+            message_ids: vec![first_id, second_id, third_id],
+        }]);
+
+        let (total, emails) = snapshot
+            .content_table_window_emails(crate::mapi::identity::INBOX_FOLDER_ID, 42, 1, 2)
+            .expect("wider window should satisfy subrange");
+
+        assert_eq!(total, 3);
+        assert_eq!(emails.len(), 2);
+        assert_eq!(emails[0].subject, "Second");
+        assert_eq!(emails[1].subject, "Third");
+    }
+
+    #[test]
+    fn content_table_window_emails_skips_insufficient_containing_window() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444445);
+        let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555556);
+        let second_id = Uuid::from_u128(0x66666666_6666_4666_8666_666666666667);
+        let third_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777778);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(104),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(105),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            third_id,
+            crate::mapi::identity::mapi_store_id(106),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            vec![
+                test_email(first_id, mailbox_id, "First"),
+                test_email(second_id, mailbox_id, "Second"),
+                test_email(third_id, mailbox_id, "Third"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 0,
+                total: 4,
+                message_ids: vec![first_id, second_id],
+            },
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 1,
+                total: 4,
+                message_ids: vec![second_id, third_id],
+            },
+        ]);
+
+        let (total, emails) = snapshot
+            .content_table_window_emails(crate::mapi::identity::INBOX_FOLDER_ID, 42, 1, 2)
+            .expect("later sufficient window should satisfy subrange");
+
+        assert_eq!(total, 4);
+        assert_eq!(emails.len(), 2);
+        assert_eq!(emails[0].subject, "Second");
+        assert_eq!(emails[1].subject, "Third");
+    }
+
+    #[test]
+    fn content_table_window_emails_containing_skips_incomplete_window() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444446);
+        let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555557);
+        let second_id = Uuid::from_u128(0x66666666_6666_4666_8666_666666666668);
+        let third_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777779);
+        let missing_id = Uuid::from_u128(0x88888888_8888_4888_8888_888888888889);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(107),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(108),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            third_id,
+            crate::mapi::identity::mapi_store_id(109),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            vec![
+                test_email(first_id, mailbox_id, "First"),
+                test_email(second_id, mailbox_id, "Second"),
+                test_email(third_id, mailbox_id, "Third"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 0,
+                total: 4,
+                message_ids: vec![first_id, missing_id],
+            },
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 1,
+                total: 4,
+                message_ids: vec![second_id, third_id],
+            },
+        ]);
+
+        let (offset, total, emails) = snapshot
+            .content_table_window_emails_containing(crate::mapi::identity::INBOX_FOLDER_ID, 42, 1)
+            .expect("later complete window should satisfy position");
+
+        assert_eq!(offset, 1);
+        assert_eq!(total, 4);
+        assert_eq!(emails.len(), 2);
+        assert_eq!(emails[0].subject, "Second");
+        assert_eq!(emails[1].subject, "Third");
+    }
+
+    #[test]
+    fn content_table_window_emails_containing_prefers_boundary_window() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444448888);
+        let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555558888);
+        let second_id = Uuid::from_u128(0x66666666_6666_4666_8666_666666668888);
+        let third_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777778888);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(111),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(112),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            third_id,
+            crate::mapi::identity::mapi_store_id(113),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            vec![
+                test_email(first_id, mailbox_id, "First"),
+                test_email(second_id, mailbox_id, "Second"),
+                test_email(third_id, mailbox_id, "Third"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 0,
+                total: 3,
+                message_ids: vec![first_id, second_id],
+            },
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 2,
+                total: 3,
+                message_ids: vec![third_id],
+            },
+        ]);
+
+        let (offset, total, emails) = snapshot
+            .content_table_window_emails_containing(crate::mapi::identity::INBOX_FOLDER_ID, 42, 2)
+            .expect("boundary window should satisfy position");
+
+        assert_eq!(offset, 2);
+        assert_eq!(total, 3);
+        assert_eq!(emails.len(), 1);
+        assert_eq!(emails[0].subject, "Third");
+    }
+
+    #[test]
+    fn content_table_window_emails_containing_prefers_longer_tail_window() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444449999);
+        let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555559999);
+        let second_id = Uuid::from_u128(0x66666666_6666_4666_8666_666666669999);
+        let third_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777779999);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            first_id,
+            crate::mapi::identity::mapi_store_id(114),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            second_id,
+            crate::mapi::identity::mapi_store_id(115),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            third_id,
+            crate::mapi::identity::mapi_store_id(116),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            vec![
+                test_email(first_id, mailbox_id, "First"),
+                test_email(second_id, mailbox_id, "Second"),
+                test_email(third_id, mailbox_id, "Third"),
+            ],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 0,
+                total: 3,
+                message_ids: vec![first_id, second_id, third_id],
+            },
+            MapiContentTableWindow {
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                view_signature: 42,
+                offset: 1,
+                total: 3,
+                message_ids: vec![second_id],
+            },
+        ]);
+
+        let (offset, total, emails) = snapshot
+            .content_table_window_emails_containing(crate::mapi::identity::INBOX_FOLDER_ID, 42, 1)
+            .expect("longer complete window should satisfy position");
+
+        assert_eq!(offset, 0);
+        assert_eq!(total, 3);
+        assert_eq!(emails.len(), 3);
+        assert_eq!(emails[1].subject, "Second");
+        assert_eq!(emails[2].subject, "Third");
+    }
+
+    #[test]
+    fn content_table_total_survives_total_only_window_without_rows() {
+        let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444447);
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![test_mailbox(mailbox_id)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_content_windows(vec![MapiContentTableWindow {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            view_signature: 42,
+            offset: 0,
+            total: 2,
+            message_ids: Vec::new(),
+        }]);
+
+        assert_eq!(
+            snapshot.content_table_total(crate::mapi::identity::INBOX_FOLDER_ID, 42),
+            Some(2)
+        );
     }
 
     #[test]
