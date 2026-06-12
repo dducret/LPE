@@ -588,6 +588,7 @@ pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_GUID: u32 = 0x0000_8903;
 pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL: u32 = 0x0000_8904;
 pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_XML: u32 = 0x0000_8905;
 pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION: u32 = 0x0000_8906;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8AA6: u32 = 0x0000_8AA6;
 
 pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
@@ -762,6 +763,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_POST_RSS_CHANNEL, PSETID_POST_RSS_GUID),
             (PID_LID_POST_RSS_ITEM_XML, PSETID_POST_RSS_GUID),
             (PID_LID_POST_RSS_SUBSCRIPTION, PSETID_POST_RSS_GUID),
+            (PID_LID_OUTLOOK_SHARING_8AA6, PSETID_SHARING_GUID),
         ]
         .into_iter()
         .map(|(lid, guid)| (lid as u16, lid, guid)),

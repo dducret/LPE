@@ -9634,6 +9634,60 @@ async fn mapi_over_http_named_property_no_create_missing_returns_not_found() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let psetid_sharing_guid = [
+        0x40, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+
+    let mut rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x56, 0x00, 0x00, 0x00, // RopGetPropertyIdsFromNames, do not create missing
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x00);
+    rops.extend_from_slice(&psetid_sharing_guid);
+    rops.extend_from_slice(&0x8AA6u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0xA6, 0x8A]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x56, 0x00, 0x0f, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_named_property_mapping_survives_restart_style_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
