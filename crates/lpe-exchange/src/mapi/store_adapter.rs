@@ -677,9 +677,6 @@ where
             reserved_global_counter: None,
             source_key: None,
         }))
-        .chain(crate::mapi_store::default_calendar_folder_identity_request(
-            &calendar_collections,
-        ))
         .chain(tasks.iter().map(|task| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Task,
             canonical_id: task.id,
@@ -1799,6 +1796,7 @@ fn push_unique(values: &mut Vec<u64>, value: u64) {
 fn mapi_identity_requests_for_mailboxes(mailboxes: &[JmapMailbox]) -> Vec<MapiIdentityRequest> {
     mailboxes
         .iter()
+        .filter(|mailbox| !mapi_store::is_virtual_special_mailbox(mailbox))
         .map(|mailbox| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Mailbox,
             canonical_id: mailbox.id,

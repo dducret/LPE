@@ -565,6 +565,36 @@ async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
 }
 
 #[tokio::test]
+async fn mapi_full_snapshot_does_not_persist_virtual_special_mailbox_identity() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..FakeStore::default()
+    };
+    let virtual_mailbox = mapi_mailstore::virtual_special_mailbox(
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    )
+    .unwrap();
+    store
+        .mailboxes
+        .lock()
+        .unwrap()
+        .push(virtual_mailbox.clone());
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.folders().len(), 1);
+    assert!(!store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .contains_key(&virtual_mailbox.id));
+}
+
+#[tokio::test]
 async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
     let account = FakeStore::account();
     let store = FakeStore {

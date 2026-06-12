@@ -3405,6 +3405,8 @@ impl ExchangeStore for Storage {
             .await?
             .ok_or_else(|| anyhow::anyhow!("account not found"))?;
 
+            let preserved_mailbox_identity_ids =
+                mapi_collaboration_folder_identity_ids_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
             sqlx::query(
                 r#"
@@ -3438,7 +3440,13 @@ impl ExchangeStore for Storage {
                 .await?;
             repair_reserved_mapi_mailbox_identities(&mut tx, tenant_id, account_id).await?;
             repair_invalid_mapi_identity_material(&mut tx, tenant_id, account_id).await?;
-            repair_stale_mapi_object_identities(&mut tx, tenant_id, account_id).await?;
+            repair_stale_mapi_object_identities(
+                &mut tx,
+                tenant_id,
+                account_id,
+                &preserved_mailbox_identity_ids,
+            )
+            .await?;
 
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {
@@ -7292,10 +7300,34 @@ async fn repair_invalid_mapi_identity_material(
     Ok(())
 }
 
+async fn mapi_collaboration_folder_identity_ids_for_account(
+    storage: &Storage,
+    account_id: Uuid,
+) -> Result<Vec<Uuid>> {
+    let contact_collections = storage
+        .fetch_accessible_contact_collections(account_id)
+        .await?;
+    let calendar_collections = storage
+        .fetch_accessible_calendar_collections(account_id)
+        .await?;
+    let task_collections = storage
+        .fetch_accessible_task_collections(account_id)
+        .await?;
+    Ok(crate::mapi_store::collaboration_folder_identity_requests(
+        &contact_collections,
+        &calendar_collections,
+        &task_collections,
+    )
+    .into_iter()
+    .map(|request| request.canonical_id)
+    .collect())
+}
+
 async fn repair_stale_mapi_object_identities(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     account_id: Uuid,
+    preserved_mailbox_identity_ids: &[Uuid],
 ) -> Result<()> {
     let contact_count = sqlx::query(
         r#"
@@ -7376,6 +7408,7 @@ async fn repair_stale_mapi_object_identities(
           AND identity.object_kind = 'mailbox'
           AND identity.deleted_at IS NULL
           AND identity.mapi_global_counter >= $3
+          AND NOT (identity.canonical_id = ANY($4::uuid[]))
           AND NOT EXISTS (
               SELECT 1
               FROM mailboxes mailbox
@@ -7388,6 +7421,7 @@ async fn repair_stale_mapi_object_identities(
     .bind(tenant_id)
     .bind(account_id)
     .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+    .bind(preserved_mailbox_identity_ids)
     .execute(&mut **tx)
     .await?
     .rows_affected();
