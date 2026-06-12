@@ -237,6 +237,16 @@ const OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
 const OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEE);
 const OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE: u64 = 0x7FFF_FF00_0000;
+const OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS: &str = "IPM.Microsoft.ContactLink.TimeStamp";
+const OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC);
+const OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEB);
+const OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEA);
+const OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
+const OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE: u64 = 0x7FFF_FE00_0000;
 const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
@@ -258,20 +268,27 @@ pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -
     item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
 }
 
-pub(crate) fn is_outlook_contact_sync_default_associated_config_id(item_id: u64) -> bool {
+pub(crate) fn is_outlook_contact_default_associated_config_id(item_id: u64) -> bool {
     if matches!(
         item_id,
         OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID
             | OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID
             | OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID
             | OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID
+            | OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
+            | OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
+            | OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
+            | OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID
     ) {
         return true;
     }
     crate::mapi::identity::global_counter_from_store_id(item_id).is_some_and(|counter| {
         let folder_counter = counter & 0x00FF_FFFF;
-        (counter & !0x00FF_FFFF) == OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE
-            && folder_counter != 0
+        matches!(
+            counter & !0x00FF_FFFF,
+            OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE
+                | OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE
+        ) && folder_counter != 0
             && folder_counter < 0x00FF_FF00
     })
 }
@@ -424,11 +441,47 @@ fn outlook_contact_sync_associated_config_default(
     })
 }
 
-fn outlook_contact_sync_associated_config_defaults(
+fn outlook_contact_link_timestamp_associated_config_default(
     folder_id: u64,
-) -> Vec<MapiAssociatedConfigMessage> {
+) -> Option<MapiAssociatedConfigMessage> {
+    let (id, canonical_id) = match folder_id {
+        crate::mapi::identity::CONTACTS_FOLDER_ID => (
+            OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
+            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000001),
+        ),
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => (
+            OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
+            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000002),
+        ),
+        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID => (
+            OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
+            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000003),
+        ),
+        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID => (
+            OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID,
+            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000004),
+        ),
+        _ => (
+            outlook_dynamic_contact_link_timestamp_config_id(folder_id)?,
+            outlook_dynamic_contact_link_timestamp_canonical_id(folder_id),
+        ),
+    };
+    Some(MapiAssociatedConfigMessage {
+        id,
+        folder_id,
+        canonical_id,
+        message_class: OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string(),
+        subject: OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string(),
+        properties_json: serde_json::json!({}),
+    })
+}
+
+fn outlook_contact_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
     outlook_contact_sync_associated_config_default(folder_id)
         .into_iter()
+        .chain(outlook_contact_link_timestamp_associated_config_default(
+            folder_id,
+        ))
         .collect()
 }
 
@@ -442,9 +495,31 @@ fn outlook_dynamic_contact_sync_config_id(folder_id: u64) -> Option<u64> {
     ))
 }
 
+fn outlook_dynamic_contact_link_timestamp_config_id(folder_id: u64) -> Option<u64> {
+    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)?;
+    if folder_counter == 0 || folder_counter >= 0x00FF_FF00 {
+        return None;
+    }
+    Some(crate::mapi::identity::mapi_store_id(
+        OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE | folder_counter,
+    ))
+}
+
 fn outlook_dynamic_contact_sync_canonical_id(folder_id: u64) -> Uuid {
     let mut hash = Sha256::new();
     hash.update(b"lpe:mapi:outlook-osc-contact-sync:v1");
+    hash.update(folder_id.to_le_bytes());
+    let digest = hash.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+fn outlook_dynamic_contact_link_timestamp_canonical_id(folder_id: u64) -> Uuid {
+    let mut hash = Sha256::new();
+    hash.update(b"lpe:mapi:outlook-contact-link-timestamp:v1");
     hash.update(folder_id.to_le_bytes());
     let digest = hash.finalize();
     let mut bytes = [0u8; 16];
@@ -1564,7 +1639,7 @@ impl MapiMailStoreSnapshot {
                 }
             }
         } else if self.contact_sync_default_supported_folder(folder_id) {
-            for default_message in outlook_contact_sync_associated_config_defaults(folder_id) {
+            for default_message in outlook_contact_associated_config_defaults(folder_id) {
                 if !messages
                     .iter()
                     .any(|message| message.message_class == default_message.message_class)
@@ -1604,21 +1679,21 @@ impl MapiMailStoreSnapshot {
                     crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
                 ]
                 .into_iter()
-                .flat_map(outlook_contact_sync_associated_config_defaults)
+                .flat_map(outlook_contact_associated_config_defaults)
                 .find(|message| message.id == item_id)
             })
             .or_else(|| {
                 self.collaboration_folders
                     .iter()
                     .filter(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
-                    .filter_map(|folder| outlook_contact_sync_associated_config_default(folder.id))
+                    .flat_map(|folder| outlook_contact_associated_config_defaults(folder.id))
                     .find(|message| message.id == item_id)
             })
             .or_else(|| {
                 self.folders
                     .iter()
                     .filter(|folder| mailbox_contact_sync_default_supported(&folder.mailbox))
-                    .filter_map(|folder| outlook_contact_sync_associated_config_default(folder.id))
+                    .flat_map(|folder| outlook_contact_associated_config_defaults(folder.id))
                     .find(|message| message.id == item_id)
             })
     }
@@ -3197,14 +3272,16 @@ mod tests {
     fn contacts_include_default_osc_contact_sync_without_duplicate() {
         let snapshot = MapiMailStoreSnapshot::empty();
 
-        for (folder_id, message_id) in [
+        for (folder_id, sync_message_id, timestamp_message_id) in [
             (
                 crate::mapi::identity::CONTACTS_FOLDER_ID,
                 OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
+                OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
             ),
             (
                 crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
                 OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID,
+                OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
             ),
         ] {
             let messages = snapshot.associated_config_messages_for_folder(folder_id);
@@ -3216,21 +3293,42 @@ mod tests {
                 1
             );
             assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| {
+                        message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS
+                    })
+                    .count(),
+                1
+            );
+            assert_eq!(
                 snapshot
-                    .associated_config_message_for_id(message_id)
+                    .associated_config_message_for_id(sync_message_id)
                     .map(|message| message.message_class),
                 Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
             );
             assert_eq!(
                 snapshot
-                    .associated_config_message_for_folder_and_source_key_id(folder_id, message_id)
+                    .associated_config_message_for_id(timestamp_message_id)
                     .map(|message| message.message_class),
-                Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
+                Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
             );
-            assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
+            assert_eq!(
+                snapshot
+                    .associated_config_message_for_folder_and_source_key_id(
+                        folder_id,
+                        timestamp_message_id
+                    )
+                    .map(|message| message.message_class),
+                Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
+            );
+            assert!(snapshot.associated_config_identity_matches_folder(folder_id, sync_message_id));
+            assert!(
+                snapshot.associated_config_identity_matches_folder(folder_id, timestamp_message_id)
+            );
             assert!(!snapshot.associated_config_identity_matches_folder(
                 crate::mapi::identity::INBOX_FOLDER_ID,
-                message_id
+                timestamp_message_id
             ));
         }
     }
@@ -3274,12 +3372,23 @@ mod tests {
             Vec::new(),
         );
         let message_id = outlook_dynamic_contact_sync_config_id(folder_id).unwrap();
+        let timestamp_message_id =
+            outlook_dynamic_contact_link_timestamp_config_id(folder_id).unwrap();
         let messages = snapshot.associated_config_messages_for_folder(folder_id);
 
         assert_eq!(
             messages
                 .iter()
                 .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
+                .count(),
+            1
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(
+                    |message| message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS
+                )
                 .count(),
             1
         );
@@ -3291,17 +3400,28 @@ mod tests {
         );
         assert_eq!(
             snapshot
+                .associated_config_message_for_id(timestamp_message_id)
+                .map(|message| (message.folder_id, message.message_class)),
+            Some((
+                folder_id,
+                OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string()
+            ))
+        );
+        assert_eq!(
+            snapshot
                 .associated_config_message_for_folder_and_source_key_id(folder_id, message_id)
                 .map(|message| message.message_class),
             Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
         );
         assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
+        assert!(snapshot.associated_config_identity_matches_folder(folder_id, timestamp_message_id));
         assert!(!snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::INBOX_FOLDER_ID,
-            message_id
+            timestamp_message_id
         ));
-        assert!(is_outlook_contact_sync_default_associated_config_id(
-            message_id
+        assert!(is_outlook_contact_default_associated_config_id(message_id));
+        assert!(is_outlook_contact_default_associated_config_id(
+            timestamp_message_id
         ));
     }
 

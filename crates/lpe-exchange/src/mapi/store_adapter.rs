@@ -1051,8 +1051,8 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_quick_step_default_associated_config_id(object_id) {
         return "virtual_quick_step_associated_config";
     }
-    if mapi_store::is_outlook_contact_sync_default_associated_config_id(object_id) {
-        return "virtual_contact_sync_associated_config";
+    if mapi_store::is_outlook_contact_default_associated_config_id(object_id) {
+        return "virtual_contact_associated_config";
     }
     if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
         return "virtual_common_view_named_view";
@@ -1074,7 +1074,7 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
         || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
-        || mapi_store::is_outlook_contact_sync_default_associated_config_id(object_id)
+        || mapi_store::is_outlook_contact_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
@@ -1756,7 +1756,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id)
                 && !mapi_store::is_outlook_quick_step_default_associated_config_id(*config_id)
-                && !mapi_store::is_outlook_contact_sync_default_associated_config_id(*config_id)
+                && !mapi_store::is_outlook_contact_default_associated_config_id(*config_id)
             {
                 push_unique(&mut plan.object_ids, *config_id);
             }
@@ -2650,7 +2650,7 @@ mod tests {
     }
 
     #[test]
-    fn access_plan_does_not_fetch_virtual_contact_sync_associated_config_identity() {
+    fn access_plan_does_not_fetch_virtual_contact_associated_config_identity() {
         let folder_id = crate::mapi::identity::mapi_store_id(0x54);
         let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FF00_0054);
         let mut session = empty_session();
@@ -2895,7 +2895,7 @@ mod tests {
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{contact_sync_config_id:#018x}:virtual_contact_sync_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{contact_sync_config_id:#018x}:virtual_contact_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
     }

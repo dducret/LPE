@@ -8415,6 +8415,15 @@ mod tests {
     }
 
     #[test]
+    fn contacts_associated_find_row_returns_contact_link_timestamp_config() {
+        assert_contact_folder_associated_find_row_returns_config(
+            CONTACTS_FOLDER_ID,
+            "IPM.Microsoft.ContactLink.TimeStamp",
+            &MapiMailStoreSnapshot::empty(),
+        );
+    }
+
+    #[test]
     fn suggested_contacts_associated_find_row_returns_osc_contact_sync_config() {
         assert_contact_folder_associated_find_row_returns_osc_contact_sync(
             SUGGESTED_CONTACTS_FOLDER_ID,
@@ -8493,7 +8502,7 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 2);
     }
 
     #[test]
@@ -9244,6 +9253,18 @@ mod tests {
         folder_id: u64,
         snapshot: &MapiMailStoreSnapshot,
     ) {
+        assert_contact_folder_associated_find_row_returns_config(
+            folder_id,
+            "IPM.Microsoft.OSC.ContactSync",
+            snapshot,
+        );
+    }
+
+    fn assert_contact_folder_associated_find_row_returns_config(
+        folder_id: u64,
+        message_class: &str,
+        snapshot: &MapiMailStoreSnapshot,
+    ) {
         let mut table = MapiObject::ContentsTable {
             folder_id,
             associated: true,
@@ -9269,7 +9290,7 @@ mod tests {
         let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-        write_utf16z(&mut restriction, "IPM.Microsoft.OSC.ContactSync");
+        write_utf16z(&mut restriction, message_class);
         let mut payload = vec![0];
         payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
         payload.extend_from_slice(&restriction);
@@ -9289,7 +9310,7 @@ mod tests {
         assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
         assert_eq!(response[7], 1);
         let mut encoded_message_class = Vec::new();
-        write_utf16z(&mut encoded_message_class, "IPM.Microsoft.OSC.ContactSync");
+        write_utf16z(&mut encoded_message_class, message_class);
         assert!(response
             .windows(encoded_message_class.len())
             .any(|window| window == encoded_message_class.as_slice()));
