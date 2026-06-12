@@ -533,6 +533,8 @@ pub(in crate::mapi) const PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL
 pub(in crate::mapi) const OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG: u32 = 0x8FFF_0102;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
+pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514: u32 = 0x0000_8514;
+pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_85B1: u32 = 0x0000_85B1;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
 pub(in crate::mapi) const PID_LID_REMINDER_SET: u32 = 0x0000_8503;
 pub(in crate::mapi) const PID_LID_REMINDER_DELTA: u32 = 0x0000_8501;
@@ -687,6 +689,8 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         [
             (PID_LID_COMMON_START, PSETID_COMMON_GUID),
             (PID_LID_COMMON_END, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_COMMON_8514, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_COMMON_85B1, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_DELTA, PSETID_COMMON_GUID),
@@ -8379,6 +8383,24 @@ mod tests {
                 kind: MapiNamedPropertyKind::Name("content-type".to_string()),
             }),
             Some(MapiPropertyTag::new(PID_NAME_CONTENT_TYPE_W_TAG).property_id())
+        );
+    }
+
+    #[test]
+    fn outlook_common_probe_named_properties_have_stable_ids() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_8514),
+            }),
+            Some(PID_LID_OUTLOOK_COMMON_8514 as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_85B1),
+            }),
+            Some(PID_LID_OUTLOOK_COMMON_85B1 as u16)
         );
     }
 
