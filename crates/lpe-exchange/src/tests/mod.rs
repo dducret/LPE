@@ -364,6 +364,70 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             .len(),
         1
     );
+    let shortcut_identity = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(
+            fixture.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id: first.id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    let common_views_mailbox_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+            .unwrap()
+            .id;
+    let changed = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            Some(common_views_mailbox_id),
+            MapiCheckpointKind::Content,
+            0,
+        )
+        .await
+        .unwrap();
+    assert!(changed.changed_navigation_shortcut_ids.contains(&first.id));
+
+    fixture
+        .storage
+        .delete_mapi_navigation_shortcut(fixture.account_id, first.id)
+        .await
+        .unwrap();
+    let deleted = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            Some(common_views_mailbox_id),
+            MapiCheckpointKind::Content,
+            changed.current_change_sequence,
+        )
+        .await
+        .unwrap();
+    assert!(deleted.deleted_navigation_shortcut_ids.contains(&first.id));
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_object_ids_for_deleted_changes(
+                fixture.account_id,
+                MapiIdentityObjectKind::NavigationShortcut,
+                &[first.id],
+            )
+            .await
+            .unwrap(),
+        vec![shortcut_identity.object_id]
+    );
+    assert!(fixture
+        .storage
+        .fetch_mapi_identities_by_object_ids(fixture.account_id, &[shortcut_identity.object_id])
+        .await
+        .unwrap()
+        .is_empty());
 
     fixture.cleanup().await.unwrap();
 }
@@ -555,6 +619,463 @@ async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
         .unwrap();
 
     assert_eq!(fetched, checkpoint);
+}
+
+#[tokio::test]
+async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let tenant_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let mailbox = storage
+        .create_jmap_mailbox(
+            JmapMailboxCreateInput {
+                account_id,
+                name: "MAPI repair".to_string(),
+                parent_id: None,
+                sort_order: Some(300),
+                is_subscribed: true,
+            },
+            lpe_storage::AuditEntryInput {
+                actor: "alice@example.test".to_string(),
+                action: "create-mailbox".to_string(),
+                subject: account_id.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let identity = storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: mailbox.id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    storage
+        .store_mapi_sync_checkpoint(
+            account_id,
+            Some(mailbox.id),
+            MapiCheckpointKind::Content,
+            12,
+            3,
+            serde_json::json!({"source": "valid"}),
+        )
+        .await
+        .unwrap();
+    storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            account_id,
+            id: Some(Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap()),
+            folder_id: identity.object_id,
+            message_class: "IPM.Configuration.Valid".to_string(),
+            subject: "IPM.Configuration.Valid".to_string(),
+            properties_json: serde_json::json!({}),
+        })
+        .await
+        .unwrap();
+
+    let missing_mailbox_id = Uuid::parse_str("20000000-0000-0000-0000-000000000002").unwrap();
+    let orphaned_config_id = Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_sync_checkpoints (
+            id, tenant_id, account_id, mailbox_id, checkpoint_kind, mapi_replica_guid,
+            last_change_sequence, last_modseq, cursor_json, expires_at
+        )
+        VALUES ($1, $2, $3, $4, 'content', $5, 50, 10, '{"source":"orphan"}'::jsonb, NOW() + INTERVAL '30 days')
+        "#,
+    )
+    .bind(Uuid::parse_str("20000000-0000-0000-0000-000000000004").unwrap())
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(missing_mailbox_id)
+    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_associated_config_messages (
+            tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+        )
+        VALUES ($1, $2, $3, 983041, 'IPM.Configuration.Orphan', 'IPM.Configuration.Orphan', '{}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(orphaned_config_id)
+    .bind(account_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
+            mapi_object_id, source_key, change_key, instance_key
+        )
+        SELECT $1, $2, 'associated_config', $3, 50000, (50000::bigint << 16) | 1,
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex')
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(orphaned_config_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let orphaned_config_object_id = ((50000i64) << 16) | 1;
+    let stale_search_folder_id = Uuid::parse_str("20000000-0000-0000-0000-000000000006").unwrap();
+    let stale_search_folder_object_id = ((50002i64) << 16) | 1;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
+            mapi_object_id, source_key, change_key, instance_key
+        )
+        SELECT $1, $2, 'search_folder_definition', $3, 50002, $4,
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex')
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(stale_search_folder_id)
+    .bind(stale_search_folder_object_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let stale_search_folder_source_key = sqlx::query_scalar::<_, Vec<u8>>(
+        r#"
+        SELECT source_key
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'search_folder_definition'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(stale_search_folder_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    assert!(storage
+        .fetch_mapi_identities_by_object_ids(
+            account_id,
+            &[
+                orphaned_config_object_id as u64,
+                stale_search_folder_object_id as u64,
+            ],
+        )
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(storage
+        .fetch_mapi_identities_by_source_keys(account_id, &[stale_search_folder_source_key])
+        .await
+        .unwrap()
+        .is_empty());
+    let active_search_folder_id = Uuid::parse_str("20000000-0000-0000-0000-000000000007").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO search_folders (
+            id, tenant_id, account_id, role, display_name, definition_kind,
+            result_object_kind, scope_json, restriction_json, is_builtin
+        )
+        VALUES ($1, $2, $3, 'custom', 'Active search', 'user_saved',
+                'message', '{}'::jsonb, '{"kind":"mapi_bounded","all":[{"kind":"exists"}]}'::jsonb, FALSE)
+        "#,
+    )
+    .bind(active_search_folder_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        VALUES
+            ($1, $2, 'search_folder_definition', $3, 'created', 103, ARRAY[$2]::uuid[], '{}'::jsonb),
+            ($1, $2, 'search_folder_definition', $4, 'created', 104, ARRAY[$2]::uuid[], '{}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(active_search_folder_id)
+    .bind(stale_search_folder_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let deleted_mailbox_object_id = ((50001i64) << 16) | 1;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
+            mapi_object_id, source_key, change_key, instance_key, deleted_at
+        )
+        SELECT $1, $2, 'mailbox', $3, 50001, $4,
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
+               NOW()
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(missing_mailbox_id)
+    .bind(deleted_mailbox_object_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let deleted_search_folder_id = Uuid::parse_str("20000000-0000-0000-0000-000000000008").unwrap();
+    let deleted_search_folder_object_id = ((50003i64) << 16) | 1;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
+            mapi_object_id, source_key, change_key, instance_key, deleted_at
+        )
+        SELECT $1, $2, 'search_folder_definition', $3, 50003, $4,
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
+               NOW()
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(deleted_search_folder_id)
+    .bind(deleted_search_folder_object_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let deleted_search_folder_change_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, 'search_folder_definition', $3, 'destroyed', 105, ARRAY[$2]::uuid[], '{}'::jsonb)
+        RETURNING cursor
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(deleted_search_folder_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tombstones (
+            id, tenant_id, account_id, object_kind, object_id,
+            deleted_modseq, change_cursor, reason
+        )
+        VALUES ($1, $2, $3, 'search_folder_definition', $4, 105, $5, 'destroyed')
+        "#,
+    )
+    .bind(Uuid::parse_str("20000000-0000-0000-0000-000000000009").unwrap())
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(deleted_search_folder_id)
+    .bind(deleted_search_folder_change_cursor)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, $3, 'mailbox', $3, 'created', 100, ARRAY[$2]::uuid[], '{}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(missing_mailbox_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    let deleted_mailbox_change_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, $3, 'mailbox', $3, 'destroyed', 102, ARRAY[$2]::uuid[], '{}'::jsonb)
+        RETURNING cursor
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(missing_mailbox_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tombstones (
+            id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+            deleted_modseq, change_cursor, reason
+        )
+        VALUES ($1, $2, $3, $4, 'mailbox', $4, 102, $5, 'destroyed')
+        "#,
+    )
+    .bind(Uuid::parse_str("20000000-0000-0000-0000-000000000005").unwrap())
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(missing_mailbox_id)
+    .bind(deleted_mailbox_change_cursor)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, 'associated_config', $3, 'updated', 101, ARRAY[$2]::uuid[], '{"folderId":"983041"}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(orphaned_config_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+
+    storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: mailbox.id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let checkpoint_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_sync_checkpoints
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let config_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_associated_config_messages
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let orphaned_config_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'associated_config'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(orphaned_config_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(checkpoint_count, 1);
+    assert_eq!(config_count, 1);
+    assert_eq!(orphaned_config_identity_count, 0);
+    assert!(storage
+        .fetch_mapi_sync_checkpoint(account_id, Some(mailbox.id), MapiCheckpointKind::Content)
+        .await
+        .unwrap()
+        .is_some());
+    let associated_configs = storage
+        .fetch_mapi_associated_configs(account_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        associated_configs[0].id,
+        Uuid::parse_str("20000000-0000-0000-0000-000000000001").unwrap()
+    );
+    let hierarchy_changes = storage
+        .fetch_mapi_sync_changes(account_id, None, MapiCheckpointKind::Hierarchy, 0)
+        .await
+        .unwrap();
+    let content_changes = storage
+        .fetch_mapi_sync_changes(account_id, None, MapiCheckpointKind::Content, 0)
+        .await
+        .unwrap();
+    assert!(!hierarchy_changes
+        .changed_mailbox_ids
+        .contains(&missing_mailbox_id));
+    assert!(hierarchy_changes
+        .changed_mailbox_ids
+        .contains(&active_search_folder_id));
+    assert!(!hierarchy_changes
+        .changed_mailbox_ids
+        .contains(&stale_search_folder_id));
+    assert!(hierarchy_changes
+        .deleted_mailbox_object_ids
+        .contains(&(deleted_mailbox_object_id as u64)));
+    assert!(hierarchy_changes
+        .deleted_search_folder_object_ids
+        .contains(&(deleted_search_folder_object_id as u64)));
+    assert!(!content_changes
+        .changed_associated_config_ids
+        .iter()
+        .any(|change| change.config_id == orphaned_config_id));
+    assert!(content_changes
+        .changed_associated_config_ids
+        .iter()
+        .any(|change| change.config_id == associated_configs[0].id));
+
+    fixture.cleanup().await.unwrap();
 }
 
 #[derive(Clone, Default)]
@@ -2797,6 +3318,25 @@ impl ExchangeStore for FakeStore {
         let records = object_ids
             .iter()
             .filter_map(|object_id| self.fake_mapi_identity_lookup_for_object_id(*object_id))
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(records) })
+    }
+
+    fn fetch_mapi_object_ids_for_deleted_changes<'a>(
+        &'a self,
+        _account_id: Uuid,
+        object_kind: MapiIdentityObjectKind,
+        canonical_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<u64>> {
+        let identities = self.mapi_identities.lock().unwrap().clone();
+        let records = canonical_ids
+            .iter()
+            .filter_map(|canonical_id| {
+                identities.get(canonical_id).copied().filter(|object_id| {
+                    self.fake_mapi_identity_lookup_for_object_id(*object_id)
+                        .is_some_and(|record| record.object_kind == object_kind)
+                })
+            })
             .collect::<Vec<_>>();
         Box::pin(async move { Ok(records) })
     }

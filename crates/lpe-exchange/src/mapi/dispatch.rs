@@ -13317,13 +13317,13 @@ where
                             request_rop_id = "0x1d",
                             parent_folder_id = %format!("{_parent_folder_id:#018x}"),
                             folder_id = %format!("{folder_id:#018x}"),
-                            partial_completion = false,
-                            message = "rca debug mapi delete advertised special folder ignored",
+                            response_error = "0x80070005",
+                            message = "rca debug mapi delete advertised special folder denied",
                         );
-                        responses.extend_from_slice(&rop_partial_completion_response(
+                        responses.extend_from_slice(&rop_error_response(
                             0x1D,
                             request.response_handle_index(),
-                            false,
+                            0x8007_0005,
                         ));
                         continue;
                     }
@@ -16038,6 +16038,11 @@ where
                 } else {
                     Vec::new()
                 };
+                if checkpoint.is_some() && checkpoint_kind == MapiCheckpointKind::Hierarchy {
+                    deleted_message_ids.extend(changes.deleted_mailbox_object_ids.iter().copied());
+                    deleted_message_ids
+                        .extend(changes.deleted_search_folder_object_ids.iter().copied());
+                }
                 if checkpoint.is_some() && folder_id == NOTES_FOLDER_ID {
                     deleted_message_ids.extend(
                         mapi_object_ids_for_deleted_changes(
@@ -18729,6 +18734,14 @@ where
                         Err(_) => {}
                     }
                 }
+                if !request.named_property_create() && property_ids.iter().any(|id| *id == 0) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x56,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -19686,6 +19699,12 @@ fn changed_special_ids_for_folder(
     snapshot: &MapiMailStoreSnapshot,
     changes: &MapiSyncChangeSet,
 ) -> Vec<Uuid> {
+    let mut changed_ids = changes
+        .changed_associated_config_ids
+        .iter()
+        .filter(|change| change.folder_id == folder_id)
+        .map(|change| change.config_id)
+        .collect::<Vec<_>>();
     if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
@@ -19697,33 +19716,37 @@ fn changed_special_ids_for_folder(
                 | IM_CONTACT_LIST_FOLDER_ID
         )
     {
-        return changes.changed_contact_ids.clone();
+        changed_ids.extend(changes.changed_contact_ids.iter().copied());
+        return changed_ids;
     }
     if folder_id == CALENDAR_FOLDER_ID
         || snapshot
             .collaboration_folder_for_id(folder_id)
             .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
-        return changes.changed_calendar_event_ids.clone();
+        changed_ids.extend(changes.changed_calendar_event_ids.iter().copied());
+        return changed_ids;
     }
     if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Task)
         || matches!(folder_id, TODO_SEARCH_FOLDER_ID | REMINDERS_FOLDER_ID)
     {
-        return changes.changed_task_ids.clone();
+        changed_ids.extend(changes.changed_task_ids.iter().copied());
+        return changed_ids;
     }
     match folder_id {
-        NOTES_FOLDER_ID => changes.changed_note_ids.clone(),
-        JOURNAL_FOLDER_ID => changes.changed_journal_entry_ids.clone(),
-        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => changes.changed_conversation_action_ids.clone(),
-        _ => changes
-            .changed_associated_config_ids
-            .iter()
-            .filter(|change| change.folder_id == folder_id)
-            .map(|change| change.config_id)
-            .collect(),
+        NOTES_FOLDER_ID => changed_ids.extend(changes.changed_note_ids.iter().copied()),
+        JOURNAL_FOLDER_ID => changed_ids.extend(changes.changed_journal_entry_ids.iter().copied()),
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
+            changed_ids.extend(changes.changed_conversation_action_ids.iter().copied())
+        }
+        COMMON_VIEWS_FOLDER_ID => {
+            changed_ids.extend(changes.changed_navigation_shortcut_ids.iter().copied())
+        }
+        _ => {}
     }
+    changed_ids
 }
 
 fn mapi_calendar_content_items_suppressed(
@@ -19778,28 +19801,44 @@ where
             MapiIdentityObjectKind::Task,
             changes.deleted_task_ids.clone(),
         ))
+    } else if folder_id == COMMON_VIEWS_FOLDER_ID {
+        return store
+            .fetch_mapi_object_ids_for_deleted_changes(
+                principal.account_id,
+                MapiIdentityObjectKind::NavigationShortcut,
+                &changes.deleted_navigation_shortcut_ids,
+            )
+            .await
+            .unwrap_or_default();
     } else {
-        let associated_config_ids = changes
-            .deleted_associated_config_ids
-            .iter()
-            .filter(|change| change.folder_id == folder_id)
-            .map(|change| change.config_id)
-            .collect::<Vec<_>>();
-        if associated_config_ids.is_empty() {
-            None
-        } else {
-            Some((
-                MapiIdentityObjectKind::AssociatedConfig,
-                associated_config_ids,
-            ))
-        }
+        None
     };
-    let Some((object_kind, object_ids)) = kind_and_ids else {
-        return Vec::new();
+    let mut deleted_object_ids = if let Some((object_kind, object_ids)) = kind_and_ids {
+        mapi_object_ids_for_deleted_changes(store, principal, object_kind, &object_ids)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
     };
-    mapi_object_ids_for_deleted_changes(store, principal, object_kind, &object_ids)
-        .await
-        .unwrap_or_default()
+    let associated_config_ids = changes
+        .deleted_associated_config_ids
+        .iter()
+        .filter(|change| change.folder_id == folder_id)
+        .map(|change| change.config_id)
+        .collect::<Vec<_>>();
+    if !associated_config_ids.is_empty() {
+        deleted_object_ids.extend(
+            store
+                .fetch_mapi_object_ids_for_deleted_changes(
+                    principal.account_id,
+                    MapiIdentityObjectKind::AssociatedConfig,
+                    &associated_config_ids,
+                )
+                .await
+                .unwrap_or_default(),
+        );
+    }
+    deleted_object_ids
 }
 
 async fn remember_created_mapi_identity<S>(
@@ -20350,6 +20389,28 @@ mod tests {
         );
 
         assert_eq!(changed_ids, vec![changed_event_id]);
+    }
+
+    #[test]
+    fn calendar_content_sync_changed_ids_include_associated_config() {
+        let changed_event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
+        let changed_config_id = Uuid::from_u128(0xc5a11c0ff1ce4c998b07111111111111);
+        let changes = MapiSyncChangeSet {
+            changed_calendar_event_ids: vec![changed_event_id],
+            changed_associated_config_ids: vec![crate::store::MapiAssociatedConfigChange {
+                folder_id: CALENDAR_FOLDER_ID,
+                config_id: changed_config_id,
+            }],
+            ..Default::default()
+        };
+
+        let changed_ids = changed_special_ids_for_folder(
+            CALENDAR_FOLDER_ID,
+            &MapiMailStoreSnapshot::empty(),
+            &changes,
+        );
+
+        assert_eq!(changed_ids, vec![changed_config_id, changed_event_id]);
     }
 
     #[test]

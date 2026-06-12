@@ -237,6 +237,28 @@ CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages (
 CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx
     ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
+UPDATE public.mapi_object_identities
+SET source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
+    change_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
+    instance_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
+    updated_at = NOW()
+WHERE deleted_at IS NULL
+  AND (
+      source_key IS DISTINCT FROM decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+          || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex')
+      OR change_key IS DISTINCT FROM decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+          || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex')
+      OR instance_key IS DISTINCT FROM decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+          || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex')
+  );
+
+CREATE UNIQUE INDEX IF NOT EXISTS mapi_object_identities_active_source_key_uidx
+    ON public.mapi_object_identities (tenant_id, account_id, source_key)
+    WHERE deleted_at IS NULL;
+
 ALTER TABLE public.accounts
   ADD COLUMN IF NOT EXISTS recoverable_items_retention_days INTEGER NOT NULL DEFAULT 14,
   ADD COLUMN IF NOT EXISTS litigation_hold_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1202,6 +1224,7 @@ BEGIN
           AND (
               pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
               OR pg_get_constraintdef(oid) NOT LIKE '%associated_config%'
+              OR pg_get_constraintdef(oid) NOT LIKE '%navigation_shortcut%'
           )
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
@@ -1236,6 +1259,7 @@ BEGIN
                 'search_folder_definition',
                 'sieve_script',
                 'conversation_action',
+                'navigation_shortcut',
                 'associated_config',
                 'recoverable_item',
                 'public_folder_tree',
@@ -1257,6 +1281,7 @@ BEGIN
           AND (
               pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
               OR pg_get_constraintdef(oid) NOT LIKE '%associated_config%'
+              OR pg_get_constraintdef(oid) NOT LIKE '%navigation_shortcut%'
               OR (
                   pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'
                   AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
@@ -1344,6 +1369,7 @@ BEGIN
                         'search_folder_definition',
                         'sieve_script',
                         'conversation_action',
+                        'navigation_shortcut',
                         'associated_config',
                         'public_folder_tree',
                         'public_folder',

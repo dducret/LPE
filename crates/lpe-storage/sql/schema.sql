@@ -1635,6 +1635,7 @@ CREATE TABLE mail_change_log (
         'search_folder_definition',
         'sieve_script',
         'conversation_action',
+        'navigation_shortcut',
         'associated_config',
         'recoverable_item',
         'public_folder_tree',
@@ -1728,6 +1729,7 @@ CREATE TABLE mail_change_log (
                 'search_folder_definition',
                 'sieve_script',
                 'conversation_action',
+                'navigation_shortcut',
                 'associated_config',
                 'public_folder_tree',
                 'public_folder',
@@ -2175,6 +2177,10 @@ CREATE INDEX mapi_object_identities_lookup_idx
 
 CREATE INDEX mapi_object_identities_source_key_idx
     ON mapi_object_identities (tenant_id, account_id, source_key);
+
+CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx
+    ON mapi_object_identities (tenant_id, account_id, source_key)
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE mapi_named_properties (
     tenant_id UUID NOT NULL,

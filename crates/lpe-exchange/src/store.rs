@@ -475,6 +475,8 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) current_change_sequence: u64,
     pub(crate) current_modseq: u64,
     pub(crate) changed_mailbox_ids: Vec<Uuid>,
+    pub(crate) deleted_mailbox_object_ids: Vec<u64>,
+    pub(crate) deleted_search_folder_object_ids: Vec<u64>,
     pub(crate) changed_message_ids: Vec<Uuid>,
     pub(crate) changed_contact_ids: Vec<Uuid>,
     pub(crate) changed_calendar_event_ids: Vec<Uuid>,
@@ -482,6 +484,7 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) changed_note_ids: Vec<Uuid>,
     pub(crate) changed_journal_entry_ids: Vec<Uuid>,
     pub(crate) changed_conversation_action_ids: Vec<Uuid>,
+    pub(crate) changed_navigation_shortcut_ids: Vec<Uuid>,
     pub(crate) changed_associated_config_ids: Vec<MapiAssociatedConfigChange>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
     pub(crate) deleted_contact_ids: Vec<Uuid>,
@@ -490,6 +493,7 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) deleted_note_ids: Vec<Uuid>,
     pub(crate) deleted_journal_entry_ids: Vec<Uuid>,
     pub(crate) deleted_conversation_action_ids: Vec<Uuid>,
+    pub(crate) deleted_navigation_shortcut_ids: Vec<Uuid>,
     pub(crate) deleted_associated_config_ids: Vec<MapiAssociatedConfigChange>,
 }
 
@@ -499,6 +503,8 @@ impl Default for MapiSyncChangeSet {
             current_change_sequence: 0,
             current_modseq: 1,
             changed_mailbox_ids: Vec::new(),
+            deleted_mailbox_object_ids: Vec::new(),
+            deleted_search_folder_object_ids: Vec::new(),
             changed_message_ids: Vec::new(),
             changed_contact_ids: Vec::new(),
             changed_calendar_event_ids: Vec::new(),
@@ -506,6 +512,7 @@ impl Default for MapiSyncChangeSet {
             changed_note_ids: Vec::new(),
             changed_journal_entry_ids: Vec::new(),
             changed_conversation_action_ids: Vec::new(),
+            changed_navigation_shortcut_ids: Vec::new(),
             changed_associated_config_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             deleted_contact_ids: Vec::new(),
@@ -514,6 +521,7 @@ impl Default for MapiSyncChangeSet {
             deleted_note_ids: Vec::new(),
             deleted_journal_entry_ids: Vec::new(),
             deleted_conversation_action_ids: Vec::new(),
+            deleted_navigation_shortcut_ids: Vec::new(),
             deleted_associated_config_ids: Vec::new(),
         }
     }
@@ -620,6 +628,13 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         object_ids: &'a [u64],
     ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>>;
+
+    fn fetch_mapi_object_ids_for_deleted_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiIdentityObjectKind,
+        canonical_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<u64>>;
 
     #[allow(dead_code)]
     fn fetch_mapi_identities_by_source_keys<'a>(
@@ -3422,8 +3437,8 @@ impl ExchangeStore for Storage {
             repair_reserved_mapi_identity_counter_collisions(&mut tx, tenant_id, account_id)
                 .await?;
             repair_reserved_mapi_mailbox_identities(&mut tx, tenant_id, account_id).await?;
-            repair_invalid_mapi_identity_change_keys(&mut tx, tenant_id, account_id).await?;
-            repair_stale_mapi_collaboration_identities(&mut tx, tenant_id, account_id).await?;
+            repair_invalid_mapi_identity_material(&mut tx, tenant_id, account_id).await?;
+            repair_stale_mapi_object_identities(&mut tx, tenant_id, account_id).await?;
 
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {
@@ -3535,17 +3550,104 @@ impl ExchangeStore for Storage {
                   AND account_id = $2
                   AND mapi_object_id = ANY($3)
                   AND deleted_at IS NULL
+                  AND (
+                    object_kind <> 'mailbox'
+                    OR mapi_global_counter < $4
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mailboxes mailbox
+                        WHERE mailbox.tenant_id = mapi_object_identities.tenant_id
+                          AND mailbox.account_id = mapi_object_identities.account_id
+                          AND mailbox.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'search_folder_definition'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM search_folders search_folder
+                        WHERE search_folder.tenant_id = mapi_object_identities.tenant_id
+                          AND search_folder.account_id = mapi_object_identities.account_id
+                          AND search_folder.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'associated_config'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mapi_associated_config_messages config
+                        JOIN mapi_object_identities folder_identity
+                          ON folder_identity.tenant_id = config.tenant_id
+                         AND folder_identity.account_id = config.account_id
+                         AND folder_identity.mapi_object_id = config.folder_id
+                         AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
+                         AND folder_identity.deleted_at IS NULL
+                        WHERE config.tenant_id = mapi_object_identities.tenant_id
+                          AND config.account_id = mapi_object_identities.account_id
+                          AND config.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'navigation_shortcut'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mapi_navigation_shortcuts shortcut
+                        WHERE shortcut.tenant_id = mapi_object_identities.tenant_id
+                          AND shortcut.account_id = mapi_object_identities.account_id
+                          AND shortcut.id = mapi_object_identities.canonical_id
+                    )
+                  )
                 "#,
             )
             .bind(&tenant_id)
             .bind(account_id)
             .bind(&object_ids)
+            .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
             .fetch_all(self.pool())
             .await?;
 
             rows.into_iter()
                 .map(mapi_identity_lookup_from_row)
                 .collect()
+        })
+    }
+
+    fn fetch_mapi_object_ids_for_deleted_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiIdentityObjectKind,
+        canonical_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<u64>> {
+        Box::pin(async move {
+            if canonical_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT mapi_object_id
+                FROM mapi_object_identities
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = $3
+                  AND canonical_id = ANY($4)
+                ORDER BY mapi_object_id
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(object_kind.as_str())
+            .bind(canonical_ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .filter_map(|row| {
+                    let object_id = row.get::<i64, _>("mapi_object_id");
+                    (object_id > 0).then_some(object_id as u64)
+                })
+                .collect())
         })
     }
 
@@ -3567,11 +3669,59 @@ impl ExchangeStore for Storage {
                   AND account_id = $2
                   AND source_key = ANY($3)
                   AND deleted_at IS NULL
+                  AND (
+                    object_kind <> 'mailbox'
+                    OR mapi_global_counter < $4
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mailboxes mailbox
+                        WHERE mailbox.tenant_id = mapi_object_identities.tenant_id
+                          AND mailbox.account_id = mapi_object_identities.account_id
+                          AND mailbox.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'search_folder_definition'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM search_folders search_folder
+                        WHERE search_folder.tenant_id = mapi_object_identities.tenant_id
+                          AND search_folder.account_id = mapi_object_identities.account_id
+                          AND search_folder.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'associated_config'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mapi_associated_config_messages config
+                        JOIN mapi_object_identities folder_identity
+                          ON folder_identity.tenant_id = config.tenant_id
+                         AND folder_identity.account_id = config.account_id
+                         AND folder_identity.mapi_object_id = config.folder_id
+                         AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
+                         AND folder_identity.deleted_at IS NULL
+                        WHERE config.tenant_id = mapi_object_identities.tenant_id
+                          AND config.account_id = mapi_object_identities.account_id
+                          AND config.id = mapi_object_identities.canonical_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'navigation_shortcut'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mapi_navigation_shortcuts shortcut
+                        WHERE shortcut.tenant_id = mapi_object_identities.tenant_id
+                          AND shortcut.account_id = mapi_object_identities.account_id
+                          AND shortcut.id = mapi_object_identities.canonical_id
+                    )
+                  )
                 "#,
             )
             .bind(&tenant_id)
             .bind(account_id)
             .bind(source_keys)
+            .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
             .fetch_all(self.pool())
             .await?;
 
@@ -4036,7 +4186,7 @@ impl ExchangeStore for Storage {
                   AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
                   AND (retained_until IS NULL OR retained_until > NOW())
                   AND (
-                    ($4 = 'hierarchy' AND object_kind = 'mailbox')
+                    ($4 = 'hierarchy' AND object_kind IN ('mailbox', 'search_folder_definition'))
                     OR (
                         $4 IN ('content', 'read_state')
                         AND (
@@ -4051,11 +4201,57 @@ impl ExchangeStore for Storage {
                                 'note',
                                 'journal_entry',
                                 'conversation_action',
+                                'navigation_shortcut',
                                 'associated_config'
                             ))
                             OR object_kind = 'associated_config'
                             OR ($6::text IS NOT NULL AND object_kind = $6)
                         )
+                    )
+                  )
+                  AND (
+                    object_kind <> 'mailbox'
+                    OR change_kind IN ('destroyed', 'expunged')
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mailboxes mailbox
+                        WHERE mailbox.tenant_id = mail_change_log.tenant_id
+                          AND mailbox.account_id = mail_change_log.account_id
+                          AND mailbox.id = mail_change_log.object_id
+                    )
+                  )
+                  AND (
+                    object_kind <> 'associated_config'
+                    OR change_kind IN ('destroyed', 'expunged')
+                    OR (
+                        EXISTS (
+                            SELECT 1
+                            FROM mapi_associated_config_messages config
+                            WHERE config.tenant_id = mail_change_log.tenant_id
+                              AND config.account_id = mail_change_log.account_id
+                              AND config.id = mail_change_log.object_id
+                        )
+                        AND (summary_json ->> 'folderId') ~ '^[0-9]+$'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM mapi_object_identities identity
+                            WHERE identity.tenant_id = mail_change_log.tenant_id
+                              AND identity.account_id = mail_change_log.account_id
+                              AND identity.mapi_object_id = (summary_json ->> 'folderId')::bigint
+                              AND identity.object_kind IN ('mailbox', 'search_folder_definition')
+                              AND identity.deleted_at IS NULL
+                        )
+                    )
+                  )
+                  AND (
+                    object_kind <> 'search_folder_definition'
+                    OR change_kind IN ('destroyed', 'expunged')
+                    OR EXISTS (
+                        SELECT 1
+                        FROM search_folders search_folder
+                        WHERE search_folder.tenant_id = mail_change_log.tenant_id
+                          AND search_folder.account_id = mail_change_log.account_id
+                          AND search_folder.id = mail_change_log.object_id
                     )
                   )
                 ORDER BY cursor ASC
@@ -4077,6 +4273,13 @@ impl ExchangeStore for Storage {
                 let summary_json = row.get::<serde_json::Value, _>("summary_json");
                 match object_kind.as_str() {
                     "mailbox" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            continue;
+                        }
+                        push_unique_uuid(&mut changes.changed_mailbox_ids, object_id);
+                    }
+                    "search_folder_definition" => {
                         let object_id = row.get::<Uuid, _>("object_id");
                         if change_kind == "destroyed" || change_kind == "expunged" {
                             continue;
@@ -4151,6 +4354,20 @@ impl ExchangeStore for Storage {
                             );
                         }
                     }
+                    "navigation_shortcut" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(
+                                &mut changes.deleted_navigation_shortcut_ids,
+                                object_id,
+                            );
+                        } else {
+                            push_unique_uuid(
+                                &mut changes.changed_navigation_shortcut_ids,
+                                object_id,
+                            );
+                        }
+                    }
                     "associated_config" => {
                         let object_id = row.get::<Uuid, _>("object_id");
                         let Some(folder_id) = summary_json
@@ -4175,6 +4392,69 @@ impl ExchangeStore for Storage {
                         }
                     }
                     _ => {}
+                }
+            }
+
+            if checkpoint_kind == MapiCheckpointKind::Hierarchy {
+                let mailbox_tombstones = sqlx::query(
+                    r#"
+                    SELECT DISTINCT identity.mapi_object_id
+                    FROM tombstones tombstone
+                    JOIN mapi_object_identities identity
+                      ON identity.tenant_id = tombstone.tenant_id
+                     AND identity.account_id = tombstone.account_id
+                     AND identity.object_kind = 'mailbox'
+                     AND identity.canonical_id = tombstone.object_id
+                    WHERE tombstone.tenant_id = $1
+                      AND tombstone.account_id = $2
+                      AND tombstone.object_kind = 'mailbox'
+                      AND tombstone.change_cursor > $3
+                      AND (tombstone.retained_until IS NULL OR tombstone.retained_until > NOW())
+                    ORDER BY identity.mapi_object_id
+                    LIMIT 1000
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(after_change_sequence as i64)
+                .fetch_all(self.pool())
+                .await?;
+                for row in mailbox_tombstones {
+                    let object_id = row.get::<i64, _>("mapi_object_id");
+                    if object_id > 0 {
+                        changes.deleted_mailbox_object_ids.push(object_id as u64);
+                    }
+                }
+                let search_folder_tombstones = sqlx::query(
+                    r#"
+                    SELECT DISTINCT identity.mapi_object_id
+                    FROM tombstones tombstone
+                    JOIN mapi_object_identities identity
+                      ON identity.tenant_id = tombstone.tenant_id
+                     AND identity.account_id = tombstone.account_id
+                     AND identity.object_kind = 'search_folder_definition'
+                     AND identity.canonical_id = tombstone.object_id
+                    WHERE tombstone.tenant_id = $1
+                      AND tombstone.account_id = $2
+                      AND tombstone.object_kind = 'search_folder_definition'
+                      AND tombstone.change_cursor > $3
+                      AND (tombstone.retained_until IS NULL OR tombstone.retained_until > NOW())
+                    ORDER BY identity.mapi_object_id
+                    LIMIT 1000
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(after_change_sequence as i64)
+                .fetch_all(self.pool())
+                .await?;
+                for row in search_folder_tombstones {
+                    let object_id = row.get::<i64, _>("mapi_object_id");
+                    if object_id > 0 {
+                        changes
+                            .deleted_search_folder_object_ids
+                            .push(object_id as u64);
+                    }
                 }
             }
 
@@ -5626,6 +5906,7 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
             let default_group_header_id = crate::mapi::properties::default_wlink_group_uuid();
+            let mut tx = self.pool().begin().await?;
             let id = match input.id {
                 Some(id) => id,
                 None => sqlx::query_scalar::<_, Uuid>(
@@ -5653,10 +5934,24 @@ impl ExchangeStore for Storage {
                 .bind(input.group_header_id)
                 .bind(&input.group_name)
                 .bind(default_group_header_id)
-                .fetch_optional(self.pool())
+                .fetch_optional(&mut *tx)
                 .await?
                 .unwrap_or_else(Uuid::new_v4),
             };
+            let existed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM mapi_navigation_shortcuts
+                    WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                )
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(input.account_id)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
             let row = sqlx::query(
                 r#"
                 INSERT INTO mapi_navigation_shortcuts (
@@ -5690,7 +5985,7 @@ impl ExchangeStore for Storage {
             .bind(input.ordinal as i64)
             .bind(input.group_header_id)
             .bind(input.group_name)
-            .fetch_one(self.pool())
+            .fetch_one(&mut *tx)
             .await?;
 
             sqlx::query(
@@ -5717,8 +6012,17 @@ impl ExchangeStore for Storage {
             .bind(row.try_get::<Option<Uuid>, _>("group_header_id")?)
             .bind(&row.try_get::<String, _>("group_name")?)
             .bind(default_group_header_id)
-            .execute(self.pool())
+            .execute(&mut *tx)
             .await?;
+            insert_mapi_navigation_shortcut_change(
+                &mut tx,
+                tenant_id,
+                input.account_id,
+                id,
+                if existed { "updated" } else { "created" },
+            )
+            .await?;
+            tx.commit().await?;
 
             mapi_navigation_shortcut_from_row(row)
         })
@@ -5731,6 +6035,7 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
             let deleted = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 DELETE FROM mapi_navigation_shortcuts
@@ -5741,11 +6046,20 @@ impl ExchangeStore for Storage {
             .bind(tenant_id)
             .bind(account_id)
             .bind(shortcut_id)
-            .fetch_optional(self.pool())
+            .fetch_optional(&mut *tx)
             .await?;
             if deleted.is_none() {
                 anyhow::bail!("MAPI navigation shortcut not found");
             }
+            insert_mapi_navigation_shortcut_change(
+                &mut tx,
+                tenant_id,
+                account_id,
+                shortcut_id,
+                "destroyed",
+            )
+            .await?;
+            tx.commit().await?;
             Ok(())
         })
     }
@@ -6416,6 +6730,9 @@ fn mapi_special_object_kind_for_checkpoint_mailbox(
     if matches_virtual_folder(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID) {
         return Some("conversation_action");
     }
+    if matches_virtual_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID) {
+        return Some("navigation_shortcut");
+    }
     None
 }
 
@@ -6831,6 +7148,43 @@ fn mapi_associated_config_from_row(
     })
 }
 
+async fn insert_mapi_navigation_shortcut_change(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    shortcut_id: Uuid,
+    change_kind: &str,
+) -> Result<()> {
+    let modseq = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(MAX(modseq), 0) + 1
+        FROM mail_change_log
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind, modseq,
+            affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, 'navigation_shortcut', $3, $4, $5, ARRAY[$2]::uuid[], '{}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(shortcut_id)
+    .bind(change_kind)
+    .bind(modseq)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn insert_mapi_associated_config_change(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
@@ -6870,18 +7224,18 @@ async fn insert_mapi_associated_config_change(
     Ok(())
 }
 
-async fn repair_invalid_mapi_identity_change_keys(
+async fn repair_invalid_mapi_identity_material(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     account_id: Uuid,
 ) -> Result<()> {
     let rows = sqlx::query(
         r#"
-        SELECT object_kind, canonical_id, mapi_global_counter
+        SELECT object_kind, canonical_id, mapi_global_counter, source_key, change_key, instance_key
         FROM mapi_object_identities
         WHERE tenant_id = $1
           AND account_id = $2
-          AND octet_length(change_key) <> 22
+          AND deleted_at IS NULL
         "#,
     )
     .bind(tenant_id)
@@ -6889,14 +7243,23 @@ async fn repair_invalid_mapi_identity_change_keys(
     .fetch_all(&mut **tx)
     .await?;
 
+    let mut repaired_count = 0u64;
     for row in rows {
         let global_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        let (_, _, change_key, _) =
+        let (_, source_key, change_key, instance_key) =
             crate::mapi::identity::persisted_identity_material(global_counter);
+        if row.get::<Vec<u8>, _>("source_key") == source_key
+            && row.get::<Vec<u8>, _>("change_key") == change_key
+            && row.get::<Vec<u8>, _>("instance_key") == instance_key
+        {
+            continue;
+        }
         sqlx::query(
             r#"
             UPDATE mapi_object_identities
-            SET change_key = $5,
+            SET source_key = $5,
+                change_key = $6,
+                instance_key = $7,
                 updated_at = NOW()
             WHERE tenant_id = $1
               AND account_id = $2
@@ -6908,15 +7271,28 @@ async fn repair_invalid_mapi_identity_change_keys(
         .bind(account_id)
         .bind(row.get::<String, _>("object_kind"))
         .bind(row.get::<Uuid, _>("canonical_id"))
+        .bind(source_key)
         .bind(change_key)
+        .bind(instance_key)
         .execute(&mut **tx)
         .await?;
+        repaired_count += 1;
+    }
+
+    if repaired_count > 0 {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            account_id = %account_id,
+            repaired_invalid_identity_material_count = repaired_count,
+            message = "rca debug mapi repaired invalid identity material",
+        );
     }
 
     Ok(())
 }
 
-async fn repair_stale_mapi_collaboration_identities(
+async fn repair_stale_mapi_object_identities(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     account_id: Uuid,
@@ -6990,8 +7366,151 @@ async fn repair_stale_mapi_collaboration_identities(
     .execute(&mut **tx)
     .await?
     .rows_affected();
+    let mailbox_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'mailbox'
+          AND identity.deleted_at IS NULL
+          AND identity.mapi_global_counter >= $3
+          AND NOT EXISTS (
+              SELECT 1
+              FROM mailboxes mailbox
+              WHERE mailbox.tenant_id = identity.tenant_id
+                AND mailbox.account_id = identity.account_id
+                AND mailbox.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let search_folder_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'search_folder_definition'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM search_folders search_folder
+              WHERE search_folder.tenant_id = identity.tenant_id
+                AND search_folder.account_id = identity.account_id
+                AND search_folder.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let orphaned_sync_checkpoint_count = sqlx::query(
+        r#"
+        DELETE FROM mapi_sync_checkpoints checkpoint
+        WHERE checkpoint.tenant_id = $1
+          AND checkpoint.account_id = $2
+          AND checkpoint.mailbox_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM mailboxes mailbox
+              WHERE mailbox.tenant_id = checkpoint.tenant_id
+                AND mailbox.account_id = checkpoint.account_id
+                AND mailbox.id = checkpoint.mailbox_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let orphaned_associated_config_count = sqlx::query(
+        r#"
+        DELETE FROM mapi_associated_config_messages config
+        WHERE config.tenant_id = $1
+          AND config.account_id = $2
+          AND NOT EXISTS (
+              SELECT 1
+              FROM mapi_object_identities identity
+              WHERE identity.tenant_id = config.tenant_id
+                AND identity.account_id = config.account_id
+                AND identity.mapi_object_id = config.folder_id
+                AND identity.object_kind IN ('mailbox', 'search_folder_definition')
+                AND identity.deleted_at IS NULL
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let associated_config_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'associated_config'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM mapi_associated_config_messages config
+              WHERE config.tenant_id = identity.tenant_id
+                AND config.account_id = identity.account_id
+                AND config.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let navigation_shortcut_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM mapi_navigation_shortcuts shortcut
+              WHERE shortcut.tenant_id = identity.tenant_id
+                AND shortcut.account_id = identity.account_id
+                AND shortcut.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
 
-    let total_count = contact_count + calendar_event_count + task_count;
+    let total_count = contact_count
+        + calendar_event_count
+        + task_count
+        + mailbox_count
+        + search_folder_count
+        + associated_config_count
+        + navigation_shortcut_count
+        + orphaned_sync_checkpoint_count
+        + orphaned_associated_config_count;
     if total_count > 0 {
         tracing::info!(
             rca_debug = true,
@@ -7000,8 +7519,14 @@ async fn repair_stale_mapi_collaboration_identities(
             repaired_stale_contact_identity_count = contact_count,
             repaired_stale_calendar_event_identity_count = calendar_event_count,
             repaired_stale_task_identity_count = task_count,
-            repaired_stale_collaboration_identity_count = total_count,
-            message = "rca debug mapi repaired stale collaboration identities",
+            repaired_stale_mailbox_identity_count = mailbox_count,
+            repaired_stale_search_folder_identity_count = search_folder_count,
+            repaired_stale_associated_config_identity_count = associated_config_count,
+            repaired_stale_navigation_shortcut_identity_count = navigation_shortcut_count,
+            repaired_orphaned_mapi_sync_checkpoint_count = orphaned_sync_checkpoint_count,
+            repaired_orphaned_mapi_associated_config_count = orphaned_associated_config_count,
+            repaired_stale_mapi_object_identity_count = total_count,
+            message = "rca debug mapi repaired stale object identities",
         );
     }
 

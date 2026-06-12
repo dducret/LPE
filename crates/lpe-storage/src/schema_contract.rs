@@ -570,6 +570,7 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         "summary_json ? 'imapUid'",
         "object_kind = 'submission'",
         "summary_json ? 'status'",
+        "'navigation_shortcut'",
     ] {
         assert!(
             change_log.contains(required),
@@ -650,6 +651,8 @@ fn mapi_identity_mapping_is_store_backed() {
     assert_schema_contains_all(&[
         "CREATE INDEX mapi_object_identities_lookup_idx",
         "CREATE INDEX mapi_object_identities_source_key_idx",
+        "CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx",
+        "WHERE deleted_at IS NULL",
     ]);
 }
 
@@ -883,6 +886,16 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         ],
     );
     assert_source_contains_all(
+        "update-lpe.sh MAPI source key uniqueness compatibility patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "mapi_object_identities_active_source_key_uidx",
+            "decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')",
+            "lpad(to_hex(mapi_global_counter), 12, '0')",
+            "WHERE deleted_at IS NULL",
+        ],
+    );
+    assert_source_contains_all(
         "check-lpe.sh MAPI associated configuration compatibility check",
         CHECK_LPE_SCRIPT,
         &[
@@ -890,6 +903,14 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "mapi_associated_config_shape_constraint_ok",
             "mail_change_log_object_shape_check",
             "associated_config",
+        ],
+    );
+    assert_source_contains_all(
+        "check-lpe.sh MAPI source key uniqueness compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "to_regclass('public.mapi_object_identities_active_source_key_uidx')",
+            "MAPI active source-key uniqueness index is present",
         ],
     );
     assert_source_contains_all(

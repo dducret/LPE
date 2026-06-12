@@ -6766,6 +6766,32 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
 }
 
 #[tokio::test]
+async fn mapi_over_http_delete_non_tombstoned_special_folder_is_denied() {
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x1D, 0x00, 0x01, // RopDeleteFolder
+        0x00, // deletion flags
+    ]);
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::CONTACTS_FOLDER_ID);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+    let delete = &response_rops[8..];
+
+    assert_eq!(delete[0], 0x1D);
+    assert_eq!(delete[1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(delete[2..6].try_into().unwrap()),
+        0x8007_0005
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_create_folder_invalid_type_returns_invalid_parameter() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -9552,6 +9578,58 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     assert!(contains_bytes(
         &response_rops,
         &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_named_property_no_create_missing_returns_not_found() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let named_header = utf16z("X-LPE-Missing-NoCreate");
+
+    let mut rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x56, 0x00, 0x00, 0x00, // RopGetPropertyIdsFromNames, do not create missing
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&FAKE_PS_INTERNET_HEADERS_GUID);
+    rops.push(named_header.len() as u8);
+    rops.extend_from_slice(&named_header);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x56, 0x00, 0x0f, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
 }
 
@@ -16373,6 +16451,118 @@ async fn mapi_over_http_associated_config_content_sync_exports_deletes() {
     assert!(strict_replid_globset_contains_counter(
         stream.deleted_idset.as_deref().unwrap(),
         &globcnt_bytes(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 44)
+    )
+    .unwrap());
+}
+
+#[tokio::test]
+async fn mapi_over_http_associated_config_delete_does_not_allocate_identity() {
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555511").unwrap();
+    let config_id = Uuid::parse_str("61616161-6161-4161-8161-616161616171").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 0;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            account.account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            50,
+            50,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 51,
+        current_modseq: 51,
+        deleted_associated_config_ids: vec![crate::store::MapiAssociatedConfigChange {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            config_id,
+        }],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(stream.deleted_idset.is_none());
+    assert!(!store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .contains_key(&config_id));
+}
+
+#[tokio::test]
+async fn mapi_over_http_contacts_sync_exports_associated_config_deletes() {
+    let contact_id = Uuid::parse_str("fb129372-d6b6-4d69-99f7-977ab2a8094f").unwrap();
+    let config_id = Uuid::parse_str("61616161-6161-4161-8161-616161616181").unwrap();
+    let config_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 54,
+    );
+    let contacts_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap()
+            .id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .insert(config_id, config_object_id);
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(contacts_checkpoint_id),
+            MapiCheckpointKind::Content,
+            50,
+            50,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 51,
+        current_modseq: 51,
+        deleted_contact_ids: vec![contact_id],
+        deleted_associated_config_ids: vec![crate::store::MapiAssociatedConfigChange {
+            folder_id: crate::mapi::identity::CONTACTS_FOLDER_ID,
+            config_id,
+        }],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        b"client-content-state",
+    )
+    .await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    let deleted_idset = stream.deleted_idset.as_deref().unwrap();
+    let contact_object_id = crate::mapi::identity::legacy_migration_object_id(&contact_id);
+    assert!(strict_replid_globset_contains_counter(
+        deleted_idset,
+        &globcnt_bytes(config_object_id >> 16)
+    )
+    .unwrap());
+    assert!(strict_replid_globset_contains_counter(
+        deleted_idset,
+        &globcnt_bytes(contact_object_id >> 16)
     )
     .unwrap());
 }

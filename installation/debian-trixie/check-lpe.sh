@@ -222,6 +222,10 @@ mapi_identity_constraint_count="$(mapi_identity_key_constraint_count "$DATABASE_
   || fail "MAPI identity key constraints do not match the current 22-byte schema. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI identity key constraints match the current 22-byte schema"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_object_identities_active_source_key_uidx');" | grep -qx 'mapi_object_identities_active_source_key_uidx' \
+  || fail "MAPI active source-key uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI active source-key uniqueness index is present"
+
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'

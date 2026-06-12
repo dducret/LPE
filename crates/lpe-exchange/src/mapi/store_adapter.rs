@@ -229,21 +229,6 @@ where
         .iter()
         .map(|config| config.id)
         .collect::<HashSet<_>>();
-    for identity in &identities {
-        if !requested_identity_has_backing_row(
-            identity,
-            &search_folder_definition_ids,
-            &associated_config_ids,
-        ) {
-            crate::mapi::identity::forget_mapi_identity(&identity.canonical_id);
-            continue;
-        }
-        crate::mapi::identity::remember_mapi_identity_with_source_key(
-            identity.canonical_id,
-            identity.object_id,
-            Some(identity.source_key.clone()),
-        );
-    }
 
     let requested_mailbox_ids = identities
         .iter()
@@ -265,6 +250,32 @@ where
             .await
             .context("fetch requested MAPI mailbox folders")?;
         merge_requested_mailboxes(&mut mailboxes, &all_mailboxes, &requested_mailbox_ids);
+    }
+    let mailbox_ids = mailboxes
+        .iter()
+        .map(|mailbox| mailbox.id)
+        .collect::<HashSet<_>>();
+    let identities = identities
+        .into_iter()
+        .filter(|identity| {
+            let has_backing_row = requested_identity_has_backing_row(
+                identity,
+                &mailbox_ids,
+                &search_folder_definition_ids,
+                &associated_config_ids,
+            );
+            if !has_backing_row {
+                crate::mapi::identity::forget_mapi_identity(&identity.canonical_id);
+            }
+            has_backing_row
+        })
+        .collect::<Vec<_>>();
+    for identity in &identities {
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key.clone()),
+        );
     }
 
     let mut content_windows = Vec::new();
@@ -823,10 +834,12 @@ where
 
 fn requested_identity_has_backing_row(
     identity: &MapiIdentityLookupRecord,
+    mailbox_ids: &HashSet<Uuid>,
     search_folder_definition_ids: &HashSet<Uuid>,
     associated_config_ids: &HashSet<Uuid>,
 ) -> bool {
     match identity.object_kind {
+        MapiIdentityObjectKind::Mailbox => mailbox_ids.contains(&identity.canonical_id),
         MapiIdentityObjectKind::SearchFolderDefinition => {
             search_folder_definition_ids.contains(&identity.canonical_id)
         }
@@ -2773,6 +2786,8 @@ mod tests {
     fn requested_store_identity_requires_backing_row_for_optional_mapi_state() {
         let orphan_id = Uuid::parse_str("dcf3fa88-eefa-4231-a932-7747c6f38fb5").unwrap();
         let live_id = Uuid::parse_str("28848baa-5f82-44cf-8ac6-26e1d6ffcc96").unwrap();
+        let live_mailbox_id = Uuid::parse_str("87b34a59-29dd-4638-a2e8-91e8f7616f36").unwrap();
+        let live_mailbox_ids = HashSet::from([live_mailbox_id]);
         let live_search_ids = HashSet::from([live_id]);
         let live_config_ids = HashSet::from([live_id]);
         let orphan_identity = MapiIdentityLookupRecord {
@@ -2797,6 +2812,12 @@ mod tests {
             object_id: INBOX_FOLDER_ID,
             source_key: Vec::new(),
         };
+        let live_mailbox_identity = MapiIdentityLookupRecord {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id: live_mailbox_id,
+            object_id: INBOX_FOLDER_ID,
+            source_key: Vec::new(),
+        };
         let orphan_config_identity = MapiIdentityLookupRecord {
             object_kind: MapiIdentityObjectKind::AssociatedConfig,
             canonical_id: orphan_id,
@@ -2816,26 +2837,37 @@ mod tests {
 
         assert!(!requested_identity_has_backing_row(
             &orphan_identity,
+            &live_mailbox_ids,
             &live_search_ids,
             &live_config_ids
         ));
         assert!(requested_identity_has_backing_row(
             &live_identity,
+            &live_mailbox_ids,
+            &live_search_ids,
+            &live_config_ids
+        ));
+        assert!(!requested_identity_has_backing_row(
+            &mailbox_identity,
+            &live_mailbox_ids,
             &live_search_ids,
             &live_config_ids
         ));
         assert!(requested_identity_has_backing_row(
-            &mailbox_identity,
+            &live_mailbox_identity,
+            &live_mailbox_ids,
             &live_search_ids,
             &live_config_ids
         ));
         assert!(!requested_identity_has_backing_row(
             &orphan_config_identity,
+            &live_mailbox_ids,
             &live_search_ids,
             &live_config_ids
         ));
         assert!(requested_identity_has_backing_row(
             &live_config_identity,
+            &live_mailbox_ids,
             &live_search_ids,
             &live_config_ids
         ));
