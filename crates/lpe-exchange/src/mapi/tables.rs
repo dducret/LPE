@@ -3638,6 +3638,14 @@ pub(in crate::mapi) fn rop_free_bookmark_response(
     response
 }
 
+fn rop_find_row_no_match_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x4F, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response.push(0);
+    response
+}
+
 pub(in crate::mapi) fn rop_find_row_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
@@ -3699,7 +3707,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     &serialize_hierarchy_row(row, mailboxes, snapshot, &columns, mailbox_guid),
                 );
             } else {
-                return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                return rop_find_row_no_match_response(request);
             }
         }
         MapiObject::ContentsTable {
@@ -3764,7 +3772,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         ),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                 let rows = snapshot.conversation_action_table_messages();
@@ -3783,7 +3791,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_conversation_action_row(message, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
                 let rows = snapshot
@@ -3804,7 +3812,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_delegate_freebusy_row(message, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *associated
                 && !snapshot
@@ -3830,7 +3838,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         ),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows =
@@ -3848,7 +3856,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_event_row(&event.event, event.id, event.folder_id, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
@@ -3878,11 +3886,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 ),
                             );
                         } else {
-                            return rop_error_response(
-                                0x4F,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            );
+                            return rop_find_row_no_match_response(request);
                         }
                     }
                     MapiCollaborationFolderKind::Calendar => {
@@ -3906,11 +3910,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 ),
                             );
                         } else {
-                            return rop_error_response(
-                                0x4F,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            );
+                            return rop_find_row_no_match_response(request);
                         }
                     }
                     MapiCollaborationFolderKind::Task => {
@@ -3931,11 +3931,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 &serialize_task_row(&task.task, task.id, task.folder_id, &columns),
                             );
                         } else {
-                            return rop_error_response(
-                                0x4F,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            );
+                            return rop_find_row_no_match_response(request);
                         }
                     }
                 }
@@ -3962,7 +3958,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         ),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == TODO_SEARCH_FOLDER_ID {
                 let mut rows = todo_search_content_rows(snapshot, table_restriction.as_ref());
@@ -3980,7 +3976,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_search_content_row(*row, snapshot, &columns, false),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 let mut rows = snapshot.tracked_mail_processing_messages();
@@ -4000,7 +3996,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_message_row(&message.email, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 let mut rows = reminder_search_content_rows(snapshot, table_restriction.as_ref());
@@ -4018,7 +4014,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_search_content_row(*row, snapshot, &columns, true),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == NOTES_FOLDER_ID {
                 let mut rows = snapshot.notes_for_folder(*folder_id);
@@ -4036,7 +4032,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_note_row(&note.note, note.id, note.folder_id, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == JOURNAL_FOLDER_ID {
                 let mut rows = snapshot.journal_entries_for_folder(*folder_id);
@@ -4061,7 +4057,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         ),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
                 let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
@@ -4078,7 +4074,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_recoverable_item_row(item, &columns),
                     );
                 } else {
-                    return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                    return rop_find_row_no_match_response(request);
                 }
             } else {
                 let view_signature = table_view_signature(sort_orders, table_restriction.as_ref());
@@ -4122,11 +4118,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 &serialize_message_row(email, &columns),
                             );
                         } else {
-                            return rop_error_response(
-                                0x4F,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            );
+                            return rop_find_row_no_match_response(request);
                         }
                     }
                 } else {
@@ -4147,11 +4139,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                             &serialize_message_row(email, &columns),
                         );
                     } else {
-                        return rop_error_response(
-                            0x4F,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        );
+                        return rop_find_row_no_match_response(request);
                     }
                 }
             }
@@ -4191,7 +4179,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     &serialize_attachment_row(attachment, &columns),
                 );
             } else {
-                return rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F);
+                return rop_find_row_no_match_response(request);
             }
         }
         _ => return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102),
@@ -7783,10 +7771,9 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(
-            u32::from_le_bytes(response[2..6].try_into().unwrap()),
-            0x8004_010F
-        );
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 0);
         assert_eq!(table_position(&table), Some(0));
     }
 
@@ -8454,6 +8441,69 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_find_row_no_match_returns_success_without_row_data() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_MESSAGE_CLASS_W,
+                0x81AB_001F,
+                0x81AC_001F,
+                0x81A1_0048,
+                0x81ED_0003,
+                0x8AA6_0003,
+            ],
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                    order: 1,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Content as u8];
+        restriction.extend_from_slice(&0u32.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Aggregation");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 0);
+        assert_eq!(table_position(&table), Some(0));
+    }
+
+    #[test]
     fn quick_step_associated_find_row_returns_custom_action_config() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -8711,7 +8761,10 @@ mod tests {
         let response =
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
-        assert_eq!(response, rop_error_response(0x4F, 0, 0x8004_010F));
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 0);
     }
 
     #[test]
