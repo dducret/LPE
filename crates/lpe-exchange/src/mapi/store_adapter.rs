@@ -394,12 +394,7 @@ where
         .fetch_conversation_actions(account_id)
         .await
         .context("fetch MAPI conversation actions")?;
-    let snapshot_backed_contents = plan.requires_associated_contents
-        || plan
-            .content_queries
-            .iter()
-            .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
-        || plan.object_ids.contains(&CALENDAR_FOLDER_ID);
+    let snapshot_backed_contents = requires_snapshot_backed_contents(plan, &mailboxes);
     let navigation_shortcut_ids = identities
         .iter()
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::NavigationShortcut)
@@ -1186,6 +1181,16 @@ fn format_search_folder_roles(definitions: &[lpe_storage::SearchFolderDefinition
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn requires_snapshot_backed_contents(plan: &MapiAccessPlan, mailboxes: &[JmapMailbox]) -> bool {
+    plan.requires_associated_contents
+        || plan.object_ids.contains(&COMMON_VIEWS_FOLDER_ID)
+        || plan
+            .content_queries
+            .iter()
+            .any(|query| mailbox_id_for_mapi_folder_id(mailboxes, query.folder_id).is_none())
+        || plan.object_ids.contains(&CALENDAR_FOLDER_ID)
 }
 
 fn rop_requires_full_snapshot(rop_id: u8) -> bool {
@@ -2259,6 +2264,51 @@ mod tests {
 
         assert!(!plan.requires_full_snapshot, "plan={plan:?}");
         assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn access_plan_common_views_query_rows_requests_common_views_backing_data() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::ContentsTable {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                associated: true,
+                columns: Vec::new(),
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 7,
+            },
+        );
+        session.next_handle = 2;
+        let query_rows = [0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&query_rows));
+
+        assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+        assert_eq!(
+            plan.object_ids,
+            vec![COMMON_VIEWS_FOLDER_ID],
+            "plan={plan:?}"
+        );
+        assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    }
+
+    #[test]
+    fn common_views_object_id_requires_snapshot_backed_contents() {
+        let plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: vec![COMMON_VIEWS_FOLDER_ID],
+            content_queries: Vec::new(),
+        };
+
+        assert!(requires_snapshot_backed_contents(&plan, &[]));
     }
 
     #[test]

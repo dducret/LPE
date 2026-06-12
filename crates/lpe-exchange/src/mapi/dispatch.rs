@@ -2723,6 +2723,7 @@ fn format_inbox_associated_query_context(
         associated,
         columns,
         position,
+        restriction,
         sort_orders,
         ..
     }) = object
@@ -2747,7 +2748,8 @@ fn format_inbox_associated_query_context(
             request.query_forward_read(),
             requested_row_count,
             sort_orders,
-            snapshot
+            restriction.as_ref(),
+            snapshot,
         ),
         format_outlook_query_row_values(
             mailbox_guid,
@@ -2757,6 +2759,7 @@ fn format_inbox_associated_query_context(
             request.query_forward_read(),
             requested_row_count,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             snapshot
         ),
@@ -2768,6 +2771,7 @@ fn format_inbox_associated_query_context(
             request.query_forward_read(),
             requested_row_count,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             snapshot
         )
@@ -2806,7 +2810,14 @@ fn format_inbox_associated_find_context(
         format_debug_property_tags(&selected_columns),
         format_debug_sort_orders(sort_orders),
         format_debug_restriction(request_restriction_bytes(request)),
-        format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot),
+        format_inbox_associated_query_row_window(
+            *position,
+            true,
+            1,
+            sort_orders,
+            None,
+            snapshot
+        ),
         format_outlook_query_row_values(
             mailbox_guid,
             *folder_id,
@@ -2815,6 +2826,7 @@ fn format_inbox_associated_find_context(
             true,
             1,
             sort_orders,
+            None,
             &selected_columns,
             snapshot
         ),
@@ -2826,6 +2838,7 @@ fn format_inbox_associated_find_context(
             true,
             1,
             sort_orders,
+            None,
             &selected_columns,
             snapshot
         ),
@@ -6888,7 +6901,13 @@ fn log_outlook_contents_table_query_rows(
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     let total_row_count = if *associated {
-        associated_folder_message_count(*folder_id, snapshot)
+        restricted_associated_folder_message_count(
+            *folder_id,
+            snapshot,
+            restriction.as_ref(),
+            principal.account_id,
+        )
+        .min(u32::MAX as usize) as u32
     } else {
         folder_message_count(*folder_id, mailboxes, emails, snapshot)
     };
@@ -6900,6 +6919,8 @@ fn log_outlook_contents_table_query_rows(
         request.query_forward_read(),
         requested_row_count,
         sort_orders,
+        restriction.as_ref(),
+        principal.account_id,
         snapshot,
     );
     let query_row_value_summary = format_outlook_query_row_values(
@@ -6910,6 +6931,7 @@ fn log_outlook_contents_table_query_rows(
         request.query_forward_read(),
         requested_row_count,
         sort_orders,
+        restriction.as_ref(),
         &selected_columns,
         snapshot,
     );
@@ -6932,6 +6954,7 @@ fn log_outlook_contents_table_query_rows(
         request.query_forward_read(),
         requested_row_count,
         sort_orders,
+        restriction.as_ref(),
         &selected_columns,
         snapshot,
     );
@@ -7001,6 +7024,7 @@ fn log_outlook_contents_table_query_rows_response(
         associated,
         columns,
         position,
+        restriction,
         sort_orders,
         ..
     }) = object
@@ -7029,9 +7053,10 @@ fn log_outlook_contents_table_query_rows_response(
             *folder_id,
             *associated,
             queried_position,
-            true,
+            request.query_forward_read(),
             row_count as usize,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             snapshot,
         )
@@ -7365,6 +7390,7 @@ fn log_outlook_contents_table_find_row(
             true,
             1,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             snapshot,
         )
@@ -7380,6 +7406,7 @@ fn log_outlook_contents_table_find_row(
             true,
             1,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             snapshot,
         )
@@ -7782,6 +7809,8 @@ fn format_outlook_query_row_window(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    account_id: Uuid,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     if !associated || row_count == 0 {
@@ -7793,6 +7822,7 @@ fn format_outlook_query_row_window(
             forward_read,
             row_count,
             sort_orders,
+            restriction,
             snapshot,
         );
     }
@@ -7802,6 +7832,8 @@ fn format_outlook_query_row_window(
             forward_read,
             row_count,
             sort_orders,
+            restriction,
+            account_id,
             snapshot,
         );
     }
@@ -7816,6 +7848,7 @@ fn format_outlook_query_row_values(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
@@ -7824,6 +7857,9 @@ fn format_outlook_query_row_values(
     }
     if folder_id == COMMON_VIEWS_FOLDER_ID {
         let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+        rows.retain(|message| {
+            restriction_matches_common_views_message(restriction, message, account_id)
+        });
         sort_common_views_messages(&mut rows, sort_orders);
         return select_query_window(rows.len(), position, forward_read, row_count)
             .iter()
@@ -7867,6 +7903,7 @@ fn format_outlook_query_row_values(
     if rows.is_empty() {
         return String::new();
     }
+    rows.retain(|message| restriction_matches_associated_config(restriction, message));
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     select_query_window(rows.len(), position, forward_read, row_count)
         .iter()
@@ -8140,6 +8177,7 @@ fn format_inbox_associated_wire_row_summary(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
@@ -8150,6 +8188,7 @@ fn format_inbox_associated_wire_row_summary(
     if rows.is_empty() {
         return String::new();
     }
+    rows.retain(|message| restriction_matches_associated_config(restriction, message));
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let column_shape = columns
@@ -8342,9 +8381,11 @@ fn format_inbox_associated_query_row_window(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    rows.retain(|message| restriction_matches_associated_config(restriction, message));
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
@@ -8373,9 +8414,14 @@ fn format_common_views_query_row_window(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    account_id: Uuid,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+    rows.retain(|message| {
+        restriction_matches_common_views_message(restriction, message, account_id)
+    });
     sort_common_views_messages(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
@@ -21947,6 +21993,7 @@ mod tests {
             true,
             1,
             &[],
+            None,
             &[PID_TAG_MESSAGE_CLASS_W],
             &snapshot,
         );
@@ -21954,6 +22001,94 @@ mod tests {
         assert!(summary.contains("position=1"), "{summary}");
         assert!(summary.contains("class=IPM.Configuration.B"), "{summary}");
         assert!(!summary.contains("class=IPM.Configuration.A"), "{summary}");
+    }
+
+    #[test]
+    fn associated_config_debug_summaries_honor_table_restriction() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let eas_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000021);
+        let umolk_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000022);
+        crate::mapi::identity::remember_mapi_identity(
+            eas_id,
+            crate::mapi::identity::mapi_store_id(0x7021),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            umolk_id,
+            crate::mapi::identity::mapi_store_id(0x7022),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: eas_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.EAS".to_string(),
+                subject: "IPM.Configuration.EAS".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: umolk_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+                subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+        let restriction = MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string()),
+        };
+
+        let window = format_inbox_associated_query_row_window(
+            0,
+            true,
+            2,
+            &[],
+            Some(&restriction),
+            &snapshot,
+        );
+        let values = format_outlook_query_row_values(
+            account_id,
+            INBOX_FOLDER_ID,
+            true,
+            0,
+            true,
+            2,
+            &[],
+            Some(&restriction),
+            &[PID_TAG_MESSAGE_CLASS_W],
+            &snapshot,
+        );
+        let wire = format_inbox_associated_wire_row_summary(
+            account_id,
+            INBOX_FOLDER_ID,
+            true,
+            0,
+            true,
+            2,
+            &[],
+            Some(&restriction),
+            &[PID_TAG_MESSAGE_CLASS_W],
+            &snapshot,
+        );
+
+        assert!(window.contains("total=1"), "{window}");
+        assert!(
+            window.contains("IPM.Configuration.UMOLK.UserOptions"),
+            "{window}"
+        );
+        assert!(!window.contains("IPM.Configuration.EAS"), "{window}");
+        assert!(
+            values.contains("IPM.Configuration.UMOLK.UserOptions"),
+            "{values}"
+        );
+        assert!(!values.contains("IPM.Configuration.EAS"), "{values}");
+        assert!(
+            wire.contains("IPM.Configuration.UMOLK.UserOptions"),
+            "{wire}"
+        );
+        assert!(!wire.contains("IPM.Configuration.EAS"), "{wire}");
     }
 
     #[test]
@@ -21987,6 +22122,7 @@ mod tests {
             true,
             10,
             &[],
+            None,
             &[
                 PID_TAG_FOLDER_ID,
                 PID_TAG_INST_ID,
@@ -22028,6 +22164,7 @@ mod tests {
             true,
             1,
             &[],
+            None,
             &columns,
             &snapshot,
         );
@@ -22039,6 +22176,7 @@ mod tests {
             true,
             1,
             &[],
+            None,
             &columns,
             &snapshot,
         );

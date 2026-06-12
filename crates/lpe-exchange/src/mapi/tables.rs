@@ -124,7 +124,7 @@ pub(in crate::mapi) fn associated_folder_message_count(
     }
 }
 
-fn restricted_associated_folder_message_count(
+pub(in crate::mapi) fn restricted_associated_folder_message_count(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
@@ -166,7 +166,7 @@ fn restricted_associated_folder_message_count(
     }
 }
 
-fn restriction_matches_common_views_message(
+pub(in crate::mapi) fn restriction_matches_common_views_message(
     restriction: Option<&MapiRestriction>,
     message: &MapiCommonViewsMessage,
     mailbox_guid: Uuid,
@@ -2026,6 +2026,13 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             ..
         }) if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID => {
             let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+            rows.retain(|message| {
+                restriction_matches_common_views_message(
+                    restriction.as_ref(),
+                    message,
+                    mailbox_guid,
+                )
+            });
             sort_common_views_messages(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -2047,10 +2054,14 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             folder_id,
             associated,
             sort_orders,
+            restriction,
             position,
             ..
         }) if *associated && *folder_id == INBOX_FOLDER_ID => {
             let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
+            rows.retain(|message| {
+                restriction_matches_associated_config(restriction.as_ref(), message)
+            });
             sort_associated_config_messages(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
