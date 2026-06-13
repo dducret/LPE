@@ -8355,7 +8355,7 @@ fn format_common_views_wlink_contract_summary(
         .collect::<Vec<_>>();
 
     format!(
-        "link_rows={};header_rows={};not_selected_required_link_columns={};expected_link_default_columns={};note=header_id_and_calendar_wlink_fields_default_on_non_header_mail_shortcut_rows",
+        "link_rows={};header_rows={};not_selected_required_link_columns={};expected_link_default_columns={};note=calendar_wlink_fields_default_on_non_header_mail_shortcut_rows",
         link_rows,
         header_rows,
         format_debug_property_tags(&missing_required_link_columns),
@@ -8369,11 +8369,10 @@ fn property_ids_match(left: u32, right: u32) -> bool {
 
 fn common_views_link_row_expected_default(property_tag: u32) -> bool {
     let property_id = property_tag & 0xffff_0000;
-    property_id == (PID_TAG_WLINK_GROUP_HEADER_ID & 0xffff_0000)
-        || matches!(
-            property_id,
-            0x6853_0000 | 0x6854_0000 | 0x6890_0000 | 0x6892_0000 | 0x6893_0000
-        )
+    matches!(
+        property_id,
+        0x6853_0000 | 0x6854_0000 | 0x6890_0000 | 0x6892_0000 | 0x6893_0000
+    )
 }
 
 fn format_inbox_associated_query_row_window(
@@ -20732,7 +20731,16 @@ mod tests {
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
         );
-        assert_eq!(properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID), None);
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                principal.account_id,
+                COMMON_VIEWS_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            )
+            .map(MapiValue::Binary)
+            .as_ref()
+        );
         assert_eq!(
             properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
             Some(&MapiValue::U32(0))
@@ -22321,7 +22329,8 @@ mod tests {
         assert!(summary.contains("link_rows=1"));
         assert!(summary.contains("header_rows=1"));
         assert!(summary.contains("not_selected_required_link_columns="));
-        assert!(summary.contains("expected_link_default_columns=0x68420102"));
+        assert!(summary.contains("expected_link_default_columns=0x68530003"));
+        assert!(!summary.contains("0x68420102"));
         assert!(summary.contains("0x68530003"));
         assert!(!summary.contains("0x68910102"));
         assert!(summary.contains("0x68930102"));

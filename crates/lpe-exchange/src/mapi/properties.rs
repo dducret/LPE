@@ -1492,7 +1492,9 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID => default_folder_view_entry_id(mailbox_guid, folder_id),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if default_view_supported_container_class(message_class) => {
+            default_folder_view_entry_id(mailbox_guid, folder_id)
+        }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
@@ -1570,24 +1572,20 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    matches!(
-        container_class,
-        "IPF.Note"
-            | "IPF.Appointment"
-            | "IPF.Contact"
-            | "IPF.Contact.MOC.QuickContacts"
-            | "IPF.Task"
-            | "IPF.StickyNote"
-            | "IPF.Journal"
-    )
+    matches!(container_class, "IPF.Note")
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
     mailbox_guid: Uuid,
     folder_id: u64,
 ) -> Option<MapiValue> {
-    let _ = (mailbox_guid, folder_id);
-    None
+    let _ = folder_id;
+    crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_guid,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+    )
+    .map(MapiValue::Binary)
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -1661,7 +1659,11 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             ))
             .map(|message_class| MapiValue::String(message_class.to_string()))
         }
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID => {
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            if default_view_supported_container_class(collaboration_folder_message_class(
+                folder.kind,
+            )) =>
+        {
             default_folder_view_entry_id(folder.collection.owner_account_id, folder.id)
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
@@ -1979,8 +1981,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
         PID_TAG_WLINK_ORDINAL => Some(MapiValue::Binary(wlink_ordinal_bytes(message.ordinal))),
         property_tag
-            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_HEADER_ID)
-                && message.shortcut_type == 4 =>
+            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_HEADER_ID) =>
         {
             let group_id = message
                 .group_header_id
@@ -7737,7 +7738,7 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_properties_do_not_advertise_incomplete_default_mail_view() {
+    fn mailbox_properties_advertise_common_views_compact_default_mail_view() {
         let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
         let mailbox = mailbox(
             "56565656-5656-4656-9656-565656565656",
@@ -7747,6 +7748,13 @@ mod tests {
         );
         crate::mapi::identity::remember_mapi_identity(mailbox.id, INBOX_FOLDER_ID);
 
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            COMMON_VIEWS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        )
+        .unwrap();
+
         assert_eq!(
             mailbox_property_value_with_context_for_account(
                 &mailbox,
@@ -7754,7 +7762,7 @@ mod tests {
                 PID_TAG_DEFAULT_VIEW_ENTRY_ID,
                 account_id,
             ),
-            None
+            Some(MapiValue::Binary(expected_entry_id))
         );
     }
 
@@ -10164,6 +10172,10 @@ mod tests {
         );
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_CLSID),
+            Some(MapiValue::Guid([0x33; 16]))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
             Some(MapiValue::Guid([0x33; 16]))
         );
         assert_eq!(
