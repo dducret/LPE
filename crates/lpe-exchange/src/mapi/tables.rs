@@ -9344,6 +9344,21 @@ mod tests {
             )))
         );
         assert_eq!(
+            associated_config_property_value(&message, PID_TAG_PARENT_SOURCE_KEY),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                INBOX_FOLDER_ID
+            )))
+        );
+        assert_eq!(
+            associated_config_property_value_with_mailbox_guid(
+                &message,
+                mailbox_guid,
+                PID_TAG_PARENT_ENTRY_ID
+            ),
+            crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, INBOX_FOLDER_ID)
+                .map(MapiValue::Binary)
+        );
+        assert_eq!(
             associated_config_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
             Some(MapiValue::I64(
                 mapi_mailstore::filetime_from_change_number(change_number) as i64
@@ -10761,6 +10776,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
                 mapi_mailstore::source_key_for_store_id(message.folder_id),
             )),
+            PID_TAG_PARENT_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                message.folder_id,
+            )
+            .map(MapiValue::Binary),
             PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
                 mapi_mailstore::change_key_for_change_number(change_number),
             )),
