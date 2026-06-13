@@ -966,7 +966,7 @@ impl MapiMailStoreSnapshot {
             .first()
             .map(|shortcut| shortcut.account_id);
         let persisted_shortcut_count = navigation_shortcuts.len();
-        self.navigation_shortcuts = navigation_shortcuts
+        let persisted_navigation_shortcuts = navigation_shortcuts
             .into_iter()
             .map(|shortcut| MapiNavigationShortcutMessage {
                 id: mapi_item_id(&shortcut.id),
@@ -985,7 +985,11 @@ impl MapiMailStoreSnapshot {
                 ),
                 group_name: shortcut.group_name,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let persisted_navigation_shortcut_summary =
+            format_navigation_shortcut_debug_summary(&persisted_navigation_shortcuts);
+        self.navigation_shortcuts = persisted_navigation_shortcuts;
+        materialize_default_mail_group_header(&mut self.navigation_shortcuts);
         let deduped_shortcuts = self.navigation_shortcut_messages();
         let table_messages = self.common_views_table_messages().collect::<Vec<_>>();
         let table_shortcut_count = table_messages
@@ -1009,11 +1013,14 @@ impl MapiMailStoreSnapshot {
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
             persisted_navigation_shortcut_count = persisted_shortcut_count,
+            materialized_navigation_shortcut_count = self.navigation_shortcuts.len(),
             deduped_navigation_shortcut_count = deduped_shortcuts.len(),
             common_views_table_shortcut_count = table_shortcut_count,
             common_views_default_table_shortcut_count = default_table_shortcut_count,
             common_views_named_view_count = table_messages.len().saturating_sub(table_shortcut_count),
             persisted_navigation_shortcuts =
+                %persisted_navigation_shortcut_summary,
+            materialized_navigation_shortcuts =
                 %format_navigation_shortcut_debug_summary(&self.navigation_shortcuts),
             deduped_navigation_shortcuts =
                 %format_navigation_shortcut_debug_summary(&deduped_shortcuts),
@@ -2708,6 +2715,31 @@ fn deduplicate_navigation_shortcuts(
         .collect()
 }
 
+fn materialize_default_mail_group_header(shortcuts: &mut Vec<MapiNavigationShortcutMessage>) {
+    let default_group_id = crate::mapi::properties::default_wlink_group_uuid();
+    let has_default_mail_link = shortcuts.iter().any(|shortcut| {
+        shortcut.shortcut_type != 4
+            && shortcut.section == 1
+            && shortcut.group_header_id == Some(default_group_id)
+            && shortcut.group_name == "Mail"
+    });
+    let has_default_mail_header = shortcuts.iter().any(|shortcut| {
+        shortcut.shortcut_type == 4
+            && shortcut.section == 1
+            && shortcut.group_header_id == Some(default_group_id)
+            && shortcut.group_name == "Mail"
+    });
+
+    if has_default_mail_link && !has_default_mail_header {
+        if let Some(header) = outlook_common_views_default_navigation_shortcuts()
+            .into_iter()
+            .find(|shortcut| shortcut.shortcut_type == 4 && shortcut.group_name == "Mail")
+        {
+            shortcuts.push(header);
+        }
+    }
+}
+
 fn format_navigation_shortcut_debug_summary(shortcuts: &[MapiNavigationShortcutMessage]) -> String {
     shortcuts
         .iter()
@@ -3910,8 +3942,13 @@ mod tests {
         ]);
 
         let shortcuts = snapshot.navigation_shortcut_messages();
-        assert_eq!(shortcuts.len(), 2);
+        assert_eq!(shortcuts.len(), 3);
         assert_eq!(shortcuts[0].canonical_id, inbox_first_id);
+        assert!(shortcuts.iter().any(|shortcut| {
+            shortcut.shortcut_type == 4
+                && shortcut.subject == "Mail"
+                && shortcut.group_header_id == Some(group_uuid)
+        }));
         let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
         assert_eq!(
             table_messages
@@ -3926,6 +3963,46 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn common_views_materializes_mail_group_header_for_persisted_favorite_links() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let inbox_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000020);
+        crate::mapi::identity::remember_mapi_identity(
+            inbox_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 91,
+            ),
+        );
+        let group_uuid = default_wlink_group_uuid();
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            MapiNavigationShortcutRecord {
+                id: inbox_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0x0010_8000,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(group_uuid),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        let shortcuts = snapshot.navigation_shortcut_messages();
+        assert!(shortcuts.iter().any(|shortcut| {
+            shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID
+                && shortcut.shortcut_type == 4
+                && shortcut.subject == "Mail"
+                && shortcut.group_header_id == Some(group_uuid)
+        }));
+        assert!(snapshot.common_views_messages().any(|message| matches!(
+            message,
+            MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+        )));
     }
 
     #[test]
