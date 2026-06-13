@@ -7847,6 +7847,27 @@ mod tests {
     }
 
     #[test]
+    fn navigation_shortcut_parser_decodes_typed_and_wrapped_entry_id() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let inbox_entry_id =
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, INBOX_FOLDER_ID)
+                .unwrap();
+        let mut wrapped_entry_id = vec![0xaa; 17];
+        wrapped_entry_id.extend_from_slice(&inbox_entry_id);
+        wrapped_entry_id.extend_from_slice(&[0xbb; 13]);
+        let mut properties = HashMap::new();
+        properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Inbox".to_string()));
+        properties.insert(PID_TAG_WLINK_TYPE, MapiValue::U32(0));
+        properties.insert(0x684C_0102, MapiValue::Binary(wrapped_entry_id));
+        properties.insert(0x6850_0102, MapiValue::Binary([0x44; 16].to_vec()));
+
+        let shortcut = navigation_shortcut_from_mapi_properties(account_id, None, &properties);
+
+        assert_eq!(shortcut.target_folder_id, Some(INBOX_FOLDER_ID));
+        assert_eq!(shortcut.group_header_id, Some(Uuid::from_bytes([0x44; 16])));
+    }
+
+    #[test]
     fn common_views_find_row_honors_restriction() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002);
@@ -10974,12 +10995,9 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
     id: Option<Uuid>,
     properties: &HashMap<u32, MapiValue>,
 ) -> MapiNavigationShortcutMessage {
-    let entry_target = properties
-        .get(&PID_TAG_WLINK_ENTRY_ID)
+    let entry_target = navigation_shortcut_property_by_id(properties, &PID_TAG_WLINK_ENTRY_ID)
         .and_then(|value| match value {
-            MapiValue::Binary(bytes) => {
-                crate::mapi::identity::object_id_from_folder_entry_id(bytes)
-            }
+            MapiValue::Binary(bytes) => navigation_shortcut_folder_id_from_entry_id(bytes),
             _ => None,
         });
     let subject = properties
@@ -11065,6 +11083,14 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
         group_header_id,
         group_name,
     }
+}
+
+fn navigation_shortcut_folder_id_from_entry_id(bytes: &[u8]) -> Option<u64> {
+    crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes).or_else(|| {
+        bytes
+            .windows(46)
+            .find_map(crate::mapi::identity::object_id_from_folder_entry_id)
+    })
 }
 
 fn navigation_shortcut_property_by_id<'a>(

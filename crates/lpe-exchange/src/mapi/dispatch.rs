@@ -8367,6 +8367,59 @@ fn property_ids_match(left: u32, right: u32) -> bool {
     left & 0xffff_0000 == right & 0xffff_0000
 }
 
+fn common_views_saved_shortcut_summary(
+    shortcut: &crate::mapi_store::MapiNavigationShortcutMessage,
+    properties: &HashMap<u32, MapiValue>,
+) -> String {
+    let property_tags = properties.keys().copied().collect::<Vec<_>>();
+    let entry_id = property_value_by_id(properties, PID_TAG_WLINK_ENTRY_ID);
+    let entry_id_shape = entry_id
+        .map(mapi_value_debug_shape)
+        .unwrap_or_else(|| "missing".to_string());
+    let entry_id_decoded = entry_id.and_then(|value| match value {
+        MapiValue::Binary(bytes) => {
+            crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes).or_else(|| {
+                bytes
+                    .windows(46)
+                    .find_map(crate::mapi::identity::object_id_from_folder_entry_id)
+            })
+        }
+        _ => None,
+    });
+    let store_entry_id_shape = property_value_by_id(properties, PID_TAG_WLINK_STORE_ENTRY_ID)
+        .map(mapi_value_debug_shape)
+        .unwrap_or_else(|| "missing".to_string());
+    format!(
+        "subject={};type={};section={};ordinal={};target={};entry_id={};entry_id_decoded={};store_entry_id={};group_header_id={};group_name={};property_tags={}",
+        shortcut.subject,
+        shortcut.shortcut_type,
+        shortcut.section,
+        shortcut.ordinal,
+        shortcut
+            .target_folder_id
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        entry_id_shape,
+        format_optional_folder_id(entry_id_decoded),
+        store_entry_id_shape,
+        shortcut
+            .group_header_id
+            .map(|group_id| group_id.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        shortcut.group_name,
+        format_debug_property_tags(&property_tags)
+    )
+}
+
+fn property_value_by_id(
+    properties: &HashMap<u32, MapiValue>,
+    property_tag: u32,
+) -> Option<&MapiValue> {
+    properties
+        .iter()
+        .find_map(|(tag, value)| property_ids_match(*tag, property_tag).then_some(value))
+}
+
 fn common_views_link_row_expected_default(property_tag: u32) -> bool {
     let property_id = property_tag & 0xffff_0000;
     matches!(
@@ -11597,6 +11650,18 @@ where
                             principal.account_id,
                             None,
                             &properties,
+                        );
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x0c",
+                            folder_id = format_args!("0x{:016x}", folder_id),
+                            decoded_shortcut =
+                                %common_views_saved_shortcut_summary(&shortcut, &properties),
+                            "rca debug mapi common views navigation shortcut save"
                         );
                         let input = UpsertMapiNavigationShortcutInput {
                             id: None,
@@ -17442,6 +17507,18 @@ where
                         principal.account_id,
                         None,
                         &properties,
+                    );
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x72",
+                        folder_id = format_args!("0x{:016x}", folder_id),
+                        decoded_shortcut =
+                            %common_views_saved_shortcut_summary(&shortcut, &properties),
+                        "rca debug mapi common views navigation shortcut import"
                     );
                     match store
                         .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
