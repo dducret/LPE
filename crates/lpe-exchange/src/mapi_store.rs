@@ -219,6 +219,8 @@ pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
 const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
+const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE7);
 const OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
@@ -303,7 +305,11 @@ pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> boo
 }
 
 pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u64) -> bool {
-    item_id == OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+    matches!(
+        item_id,
+        OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+    )
 }
 
 pub(crate) fn is_outlook_default_conversation_action_id(item_id: u64) -> bool {
@@ -422,19 +428,34 @@ fn outlook_common_views_default_named_views() -> Vec<MapiCommonViewNamedViewMess
 }
 
 fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShortcutMessage> {
-    vec![MapiNavigationShortcutMessage {
-        id: OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID,
-        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
-        subject: "Inbox".to_string(),
-        target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
-        shortcut_type: 0,
-        flags: 0,
-        section: 1,
-        ordinal: 127,
-        group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-        group_name: "Mail".to_string(),
-    }]
+    vec![
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: crate::mapi::properties::default_wlink_group_uuid(),
+            subject: "Mail".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            section: 1,
+            ordinal: 0,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Mail".to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 127,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Mail".to_string(),
+        },
+    ]
 }
 
 fn outlook_contact_sync_associated_config_default(
@@ -3606,7 +3627,24 @@ mod tests {
         assert_eq!(snapshot.common_views_messages().count(), 0);
         let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 4);
+        let default_header = messages
+            .iter()
+            .find_map(|message| match message {
+                MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                    if shortcut.subject == "Mail" && shortcut.shortcut_type == 4 =>
+                {
+                    Some(shortcut)
+                }
+                _ => None,
+            })
+            .expect("default mail navigation group header");
+        assert_eq!(default_header.target_folder_id, None);
+        assert_eq!(default_header.group_name, "Mail");
+        assert_eq!(
+            default_header.group_header_id,
+            Some(default_wlink_group_uuid())
+        );
         let default_shortcut = messages
             .iter()
             .find_map(|message| match message {
@@ -3693,7 +3731,7 @@ mod tests {
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
-        assert_eq!(messages.len(), 4);
+        assert_eq!(messages.len(), 5);
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
             .is_none());
