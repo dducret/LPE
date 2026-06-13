@@ -7,7 +7,7 @@ use super::*;
 use crate::mapi_store;
 use crate::store::{
     MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField,
-    MapiIdentityLookupRecord,
+    MapiIdentityLookupRecord, MapiIdentityRequest,
 };
 use anyhow::Context;
 use lpe_storage::ReminderQuery;
@@ -653,7 +653,7 @@ where
         journal_entry_ids.len(),
         journal_entries.len(),
     );
-    let identity_requests = contacts
+    let raw_identity_requests = contacts
         .iter()
         .map(|contact| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Contact,
@@ -737,17 +737,32 @@ where
             source_key: None,
         }))
         .collect::<Vec<_>>();
+    let raw_identity_request_count = raw_identity_requests.len();
+    let identity_requests = deduplicate_mapi_identity_requests(raw_identity_requests);
     log_mapi_store_load_step(
         account_id,
         plan,
         "allocate non-message identities",
         identity_requests.len(),
     );
-    for identity in store
+    log_mapi_identity_request_summary(
+        account_id,
+        plan,
+        "non-message",
+        raw_identity_request_count,
+        &identity_requests,
+    );
+    let allocated_non_message_identities = store
         .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
         .await
-        .context("allocate MAPI non-message identities")?
-    {
+        .context("allocate MAPI non-message identities")?;
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "allocated non-message identities",
+        allocated_non_message_identities.len(),
+    );
+    for identity in allocated_non_message_identities {
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
@@ -1013,6 +1028,85 @@ fn format_missing_mapi_identities(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn deduplicate_mapi_identity_requests(
+    requests: Vec<MapiIdentityRequest>,
+) -> Vec<MapiIdentityRequest> {
+    let mut deduplicated = Vec::with_capacity(requests.len());
+    for request in requests {
+        if !deduplicated.iter().any(|existing: &MapiIdentityRequest| {
+            existing.object_kind == request.object_kind
+                && existing.canonical_id == request.canonical_id
+        }) {
+            deduplicated.push(request);
+        }
+    }
+    deduplicated
+}
+
+fn log_mapi_identity_request_summary(
+    account_id: Uuid,
+    plan: &MapiAccessPlan,
+    request_set: &'static str,
+    raw_count: usize,
+    requests: &[MapiIdentityRequest],
+) {
+    let mut kind_counts = Vec::<(&'static str, usize)>::new();
+    let mut reserved_counter_count = 0usize;
+    let mut source_key_count = 0usize;
+    for request in requests {
+        let kind = mapi_identity_kind_name(request.object_kind);
+        if let Some((_, count)) = kind_counts
+            .iter_mut()
+            .find(|(candidate_kind, _)| *candidate_kind == kind)
+        {
+            *count += 1;
+        } else {
+            kind_counts.push((kind, 1));
+        }
+        if request.reserved_global_counter.is_some() {
+            reserved_counter_count += 1;
+        }
+        if request.source_key.is_some() {
+            source_key_count += 1;
+        }
+    }
+    let kind_counts = kind_counts
+        .into_iter()
+        .map(|(kind, count)| format!("{kind}={count}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sample = requests
+        .iter()
+        .take(12)
+        .map(|request| {
+            format!(
+                "{}:{}",
+                mapi_identity_kind_name(request.object_kind),
+                request.canonical_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = false,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        request_set,
+        raw_request_count = raw_count,
+        deduplicated_request_count = requests.len(),
+        duplicate_request_count = raw_count.saturating_sub(requests.len()),
+        reserved_counter_count,
+        source_key_count,
+        kind_counts = %kind_counts,
+        request_sample = %sample,
+        message = "rca debug mapi identity allocation request summary",
+    );
 }
 
 fn format_mapi_object_ids(object_ids: &[u64]) -> String {
@@ -1894,6 +1988,51 @@ mod tests {
             buffer.extend_from_slice(&handle.to_le_bytes());
         }
         buffer
+    }
+
+    #[test]
+    fn deduplicate_mapi_identity_requests_keeps_distinct_kinds() {
+        let canonical_id = Uuid::from_u128(0x6d617069_6964_5265_7100_000000000001);
+        let other_id = Uuid::from_u128(0x6d617069_6964_5265_7100_000000000002);
+        let requests = vec![
+            MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            },
+            MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            },
+            MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::ConversationAction,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            },
+            MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+                canonical_id: other_id,
+                reserved_global_counter: None,
+                source_key: None,
+            },
+        ];
+
+        let deduplicated = deduplicate_mapi_identity_requests(requests);
+
+        assert_eq!(deduplicated.len(), 3);
+        assert_eq!(
+            deduplicated[0].object_kind,
+            MapiIdentityObjectKind::SearchFolderDefinition
+        );
+        assert_eq!(
+            deduplicated[1].object_kind,
+            MapiIdentityObjectKind::ConversationAction
+        );
+        assert_eq!(deduplicated[2].canonical_id, other_id);
     }
 
     fn release_handle_zero_rop_buffer() -> Vec<u8> {
