@@ -1568,9 +1568,13 @@ const MAX_ROP_DEBUG_ENTRIES: usize = 32;
 
 #[derive(Debug, Default)]
 struct RopRequestDebugSummary {
+    full_ids: Vec<u8>,
     ids: Vec<u8>,
     ids_csv: String,
     names_csv: String,
+    tail_ids_csv: String,
+    tail_names_csv: String,
+    non_release_rops: String,
     total_count: usize,
     truncated: bool,
     all_release: bool,
@@ -1629,8 +1633,8 @@ fn log_execute_rop_debug(
     session: &MapiSession,
     post_hierarchy_observation: PostHierarchyExecuteObservation,
 ) {
-    let response = summarize_response_rop_buffer(response_rop_buffer, &request.ids);
-    let logon = summarize_logon_response_rop(response_rop_buffer, &request.ids);
+    let response = summarize_response_rop_buffer(response_rop_buffer, &request.full_ids);
+    let logon = summarize_logon_response_rop(response_rop_buffer, &request.full_ids);
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
@@ -1660,6 +1664,9 @@ fn log_execute_rop_debug(
         request_rop_count = request.total_count,
         request_rop_debug_entry_count = request.ids.len(),
         request_rop_debug_truncated = request.truncated,
+        request_rop_tail_ids = %request.tail_ids_csv,
+        request_rop_tail_names = %request.tail_names_csv,
+        request_non_release_rops = %request.non_release_rops,
         request_all_rops_are_release = request.all_release,
         request_handle_count = request.handle_count,
         input_handle_table_summary = %request.handle_table_summary,
@@ -1751,7 +1758,7 @@ fn log_execute_rop_debug(
     }
 
     if let Some(response_framing_context) =
-        execute_response_framing_context(&request.ids).filter(|_| endpoint == "emsmdb")
+        execute_response_framing_context(&request.full_ids).filter(|_| endpoint == "emsmdb")
     {
         tracing::info!(
             rca_debug = true,
@@ -1769,6 +1776,9 @@ fn log_execute_rop_debug(
             response_framing_context = response_framing_context,
             request_rop_ids = %request.ids_csv,
             request_rop_names = %request.names_csv,
+            request_rop_tail_ids = %request.tail_ids_csv,
+            request_rop_tail_names = %request.tail_names_csv,
+            request_non_release_rops = %request.non_release_rops,
             response_rop_ids = %response.ids_csv,
             response_rop_names = %response.names_csv,
             response_rop_results_best_effort = %response.results_csv,
@@ -2003,6 +2013,9 @@ fn log_execute_request_start_debug(
         rop_count = request.total_count,
         rop_debug_entry_count = request.ids.len(),
         rop_debug_truncated = request.truncated,
+        rop_tail_ids = %request.tail_ids_csv,
+        rop_tail_names = %request.tail_names_csv,
+        non_release_rops = %request.non_release_rops,
         all_rops_are_release = request.all_release,
         handle_count = request.handle_count,
         handle_table = %request.handle_table_summary,
@@ -5655,6 +5668,7 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
                 let rop_id = request.typed().rop_id();
                 summary.total_count += 1;
                 summary.all_release &= rop_id == RopId::Release.as_u8();
+                summary.full_ids.push(rop_id);
                 if summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
                     summary.ids.push(rop_id);
                 } else {
@@ -5679,10 +5693,28 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     }
     summary.ids_csv = rop_ids_csv(&summary.ids);
     summary.names_csv = rop_names_csv(&summary.ids);
+    if summary.truncated {
+        let tail_start = summary.full_ids.len().saturating_sub(16);
+        let tail_ids = &summary.full_ids[tail_start..];
+        summary.tail_ids_csv = rop_ids_csv(tail_ids);
+        summary.tail_names_csv = rop_names_csv(tail_ids);
+    }
+    summary.non_release_rops = summarize_non_release_request_rops(&summary.full_ids);
     let raw = summarize_request_rop_raw_frames(requests);
     summary.raw_frame_count = raw.0;
     summary.raw_frames = raw.1;
     summary
+}
+
+fn summarize_non_release_request_rops(rop_ids: &[u8]) -> String {
+    rop_ids
+        .iter()
+        .enumerate()
+        .filter(|(_, rop_id)| **rop_id != RopId::Release.as_u8())
+        .take(16)
+        .map(|(index, rop_id)| format!("{index}:{}", rop_name(*rop_id)))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn summarize_request_rop_raw_frames(requests: &[u8]) -> (usize, String) {
@@ -22738,12 +22770,56 @@ mod tests {
 
         let request_summary = summarize_request_rop_buffer(&request_buffer);
 
+        assert_eq!(request_summary.full_ids.len(), MAX_ROP_DEBUG_ENTRIES + 1);
         assert_eq!(request_summary.ids.len(), MAX_ROP_DEBUG_ENTRIES);
         assert_eq!(request_summary.total_count, MAX_ROP_DEBUG_ENTRIES + 1);
         assert!(request_summary.truncated);
         assert!(!request_summary.all_release);
         assert!(request_summary.ids.iter().all(|rop_id| *rop_id == 0x01));
+        assert!(request_summary.tail_ids_csv.ends_with("0x02"));
+        assert!(request_summary.tail_names_csv.ends_with("OpenFolder"));
+        assert_eq!(
+            request_summary.non_release_rops,
+            format!("{}:OpenFolder", MAX_ROP_DEBUG_ENTRIES)
+        );
         assert!(request_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_response_summary_uses_full_truncated_request_ids() {
+        let mut request_bytes = Vec::new();
+        for index in 0..MAX_ROP_DEBUG_ENTRIES {
+            request_bytes.extend_from_slice(&[RopId::Release.as_u8(), 0, index as u8]);
+        }
+        request_bytes.extend_from_slice(&[RopId::GetPropertyIdsFromNames.as_u8(), 0, 45, 0x02]);
+        request_bytes.extend_from_slice(&1u16.to_le_bytes());
+        request_bytes.push(0x00);
+        request_bytes.extend_from_slice(&[0x02; 16]);
+        request_bytes.extend_from_slice(&0x820du32.to_le_bytes());
+        let request_buffer =
+            rop_buffer_with_response(request_bytes, &vec![u32::MAX; MAX_ROP_DEBUG_ENTRIES + 1]);
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+        let property_ids_request = RopRequest {
+            rop_id: RopId::GetPropertyIdsFromNames.as_u8(),
+            input_handle_index: Some(45),
+            output_handle_index: Some(45),
+            payload: Vec::new(),
+        };
+        let response_buffer = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(
+            rop_get_property_ids_from_names_response(&property_ids_request, &[0x820d]),
+            &[0],
+        ));
+
+        let truncated_response =
+            summarize_response_rop_buffer(&response_buffer, &request_summary.ids);
+        let full_response =
+            summarize_response_rop_buffer(&response_buffer, &request_summary.full_ids);
+
+        assert_eq!(truncated_response.count, 0);
+        assert_eq!(full_response.ids_csv, "0x56");
+        assert_eq!(full_response.names_csv, "GetPropertyIdsFromNames");
+        assert_eq!(full_response.results_csv, "0x56:0x00000000");
+        assert!(full_response.parse_error.is_empty());
     }
 
     #[test]
