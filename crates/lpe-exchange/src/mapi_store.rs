@@ -962,6 +962,10 @@ impl MapiMailStoreSnapshot {
         mut self,
         navigation_shortcuts: Vec<MapiNavigationShortcutRecord>,
     ) -> Self {
+        let account_id = navigation_shortcuts
+            .first()
+            .map(|shortcut| shortcut.account_id);
+        let persisted_shortcut_count = navigation_shortcuts.len();
         self.navigation_shortcuts = navigation_shortcuts
             .into_iter()
             .map(|shortcut| MapiNavigationShortcutMessage {
@@ -982,6 +986,41 @@ impl MapiMailStoreSnapshot {
                 group_name: shortcut.group_name,
             })
             .collect();
+        let deduped_shortcuts = self.navigation_shortcut_messages();
+        let table_messages = self.common_views_table_messages().collect::<Vec<_>>();
+        let table_shortcut_count = table_messages
+            .iter()
+            .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
+            .count();
+        let default_table_shortcut_count = table_messages
+            .iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if is_outlook_common_views_default_navigation_shortcut_id(shortcut.id)
+                )
+            })
+            .count();
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            account_id = %account_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            persisted_navigation_shortcut_count = persisted_shortcut_count,
+            deduped_navigation_shortcut_count = deduped_shortcuts.len(),
+            common_views_table_shortcut_count = table_shortcut_count,
+            common_views_default_table_shortcut_count = default_table_shortcut_count,
+            common_views_named_view_count = table_messages.len().saturating_sub(table_shortcut_count),
+            persisted_navigation_shortcuts =
+                %format_navigation_shortcut_debug_summary(&self.navigation_shortcuts),
+            deduped_navigation_shortcuts =
+                %format_navigation_shortcut_debug_summary(&deduped_shortcuts),
+            common_views_table_shortcuts =
+                %format_common_views_table_shortcut_debug_summary(&table_messages),
+            "rca debug mapi navigation shortcut snapshot contract"
+        );
         self
     }
 
@@ -2667,6 +2706,50 @@ fn deduplicate_navigation_shortcuts(
             }
         })
         .collect()
+}
+
+fn format_navigation_shortcut_debug_summary(shortcuts: &[MapiNavigationShortcutMessage]) -> String {
+    shortcuts
+        .iter()
+        .take(8)
+        .map(format_navigation_shortcut_debug_entry)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn format_common_views_table_shortcut_debug_summary(messages: &[MapiCommonViewsMessage]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            MapiCommonViewsMessage::NavigationShortcut(shortcut) => Some(shortcut),
+            MapiCommonViewsMessage::NamedView(_) => None,
+        })
+        .take(8)
+        .map(format_navigation_shortcut_debug_entry)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn format_navigation_shortcut_debug_entry(shortcut: &MapiNavigationShortcutMessage) -> String {
+    format!(
+        "id=0x{:016x};canonical_id={};subject={};target={};type={};flags=0x{:08x};section={};ordinal={};group_header={};group_name={}",
+        shortcut.id,
+        shortcut.canonical_id,
+        shortcut.subject,
+        shortcut
+            .target_folder_id
+            .map(|target| format!("0x{target:016x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        shortcut.shortcut_type,
+        shortcut.flags,
+        shortcut.section,
+        shortcut.ordinal,
+        shortcut
+            .group_header_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        shortcut.group_name,
+    )
 }
 
 #[cfg(test)]
