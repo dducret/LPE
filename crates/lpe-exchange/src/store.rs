@@ -5893,7 +5893,7 @@ impl ExchangeStore for Storage {
                        flags, section, ordinal, group_header_id, group_name
                 FROM mapi_navigation_shortcuts
                 WHERE tenant_id = $1 AND account_id = $2
-                ORDER BY section, ordinal, subject, id
+                ORDER BY section, ordinal, subject, updated_at DESC, id
                 "#,
             )
             .bind(tenant_id)
@@ -5917,34 +5917,60 @@ impl ExchangeStore for Storage {
             let mut tx = self.pool().begin().await?;
             let id = match input.id {
                 Some(id) => id,
-                None => sqlx::query_scalar::<_, Uuid>(
-                    r#"
-                    SELECT id
-                    FROM mapi_navigation_shortcuts
-                    WHERE tenant_id = $1
-                      AND account_id = $2
-                      AND subject = $3
-                      AND target_folder_id IS NOT DISTINCT FROM $4
-                      AND shortcut_type = $5
-                      AND section = $6
-                      AND COALESCE(group_header_id, $9) = COALESCE($7, $9)
-                      AND group_name = $8
-                    ORDER BY updated_at DESC, id
-                    LIMIT 1
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(input.account_id)
-                .bind(&input.subject)
-                .bind(input.target_folder_id.map(|value| value as i64))
-                .bind(input.shortcut_type as i64)
-                .bind(input.section as i64)
-                .bind(input.group_header_id)
-                .bind(&input.group_name)
-                .bind(default_group_header_id)
-                .fetch_optional(&mut *tx)
-                .await?
-                .unwrap_or_else(Uuid::new_v4),
+                None => {
+                    let target_folder_id = input.target_folder_id.map(|value| value as i64);
+                    if target_folder_id.is_some() {
+                        sqlx::query_scalar::<_, Uuid>(
+                            r#"
+                            SELECT id
+                            FROM mapi_navigation_shortcuts
+                            WHERE tenant_id = $1
+                              AND account_id = $2
+                              AND target_folder_id IS NOT DISTINCT FROM $3
+                              AND shortcut_type = $4
+                              AND section = $5
+                            ORDER BY updated_at DESC, id
+                            LIMIT 1
+                            "#,
+                        )
+                        .bind(tenant_id)
+                        .bind(input.account_id)
+                        .bind(target_folder_id)
+                        .bind(input.shortcut_type as i64)
+                        .bind(input.section as i64)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                    } else {
+                        sqlx::query_scalar::<_, Uuid>(
+                            r#"
+                            SELECT id
+                            FROM mapi_navigation_shortcuts
+                            WHERE tenant_id = $1
+                              AND account_id = $2
+                              AND subject = $3
+                              AND target_folder_id IS NOT DISTINCT FROM $4
+                              AND shortcut_type = $5
+                              AND section = $6
+                              AND COALESCE(group_header_id, $9) = COALESCE($7, $9)
+                              AND group_name = $8
+                            ORDER BY updated_at DESC, id
+                            LIMIT 1
+                            "#,
+                        )
+                        .bind(tenant_id)
+                        .bind(input.account_id)
+                        .bind(&input.subject)
+                        .bind(target_folder_id)
+                        .bind(input.shortcut_type as i64)
+                        .bind(input.section as i64)
+                        .bind(input.group_header_id)
+                        .bind(&input.group_name)
+                        .bind(default_group_header_id)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                    }
+                    .unwrap_or_else(Uuid::new_v4)
+                }
             };
             let existed = sqlx::query_scalar::<_, bool>(
                 r#"
@@ -6002,12 +6028,23 @@ impl ExchangeStore for Storage {
                 WHERE tenant_id = $1
                   AND account_id = $2
                   AND id <> $3
-                  AND subject = $4
-                  AND target_folder_id IS NOT DISTINCT FROM $5
-                  AND shortcut_type = $6
-                  AND section = $7
-                  AND COALESCE(group_header_id, $10) = COALESCE($8, $10)
-                  AND group_name = $9
+                  AND (
+                    (
+                      target_folder_id IS NOT NULL
+                      AND target_folder_id IS NOT DISTINCT FROM $5
+                      AND shortcut_type = $6
+                      AND section = $7
+                    )
+                    OR (
+                      target_folder_id IS NULL
+                      AND subject = $4
+                      AND target_folder_id IS NOT DISTINCT FROM $5
+                      AND shortcut_type = $6
+                      AND section = $7
+                      AND COALESCE(group_header_id, $10) = COALESCE($8, $10)
+                      AND group_name = $9
+                    )
+                  )
                 "#,
             )
             .bind(tenant_id)

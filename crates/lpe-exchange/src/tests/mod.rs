@@ -364,6 +364,56 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             .len(),
         1
     );
+    let stale_calendar = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "My Calendars".to_string(),
+        })
+        .await
+        .unwrap();
+    let outlook_calendar_group_id =
+        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
+    let corrected_calendar = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(outlook_calendar_group_id),
+            group_name: "My Calendars".to_string(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(corrected_calendar.id, stale_calendar.id);
+    assert_eq!(
+        corrected_calendar.group_header_id,
+        Some(outlook_calendar_group_id)
+    );
+    assert_eq!(corrected_calendar.group_name, "My Calendars");
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_navigation_shortcuts(fixture.account_id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     let shortcut_identity = fixture
         .storage
         .fetch_or_allocate_mapi_identities(
