@@ -237,6 +237,27 @@ CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages (
 CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx
     ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
+WITH ranked_associated_configs AS (
+    SELECT tenant_id,
+           account_id,
+           id,
+           folder_id,
+           message_class,
+           row_number() OVER (
+               PARTITION BY tenant_id, account_id, folder_id, message_class
+               ORDER BY updated_at DESC, id
+           ) AS row_number
+    FROM public.mapi_associated_config_messages
+)
+DELETE FROM public.mapi_associated_config_messages config
+USING ranked_associated_configs ranked
+WHERE config.tenant_id = ranked.tenant_id
+  AND config.id = ranked.id
+  AND ranked.row_number > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS mapi_associated_config_messages_logical_idx
+    ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class);
+
 UPDATE public.mapi_object_identities
 SET source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
         || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
@@ -1532,8 +1553,9 @@ if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nu
   exit 1
 fi
 mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"
-if [[ "${mapi_associated_config_table}" != "mapi_associated_config_messages" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce public.mapi_associated_config_messages." >&2
+mapi_associated_config_logical_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages_logical_idx');")"
+if [[ "${mapi_associated_config_table}" != "mapi_associated_config_messages" || "${mapi_associated_config_logical_idx}" != "mapi_associated_config_messages_logical_idx" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_associated_config_messages shape." >&2
   exit 1
 fi
 search_folder_user_saved_name_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');")"
