@@ -233,6 +233,10 @@ const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE7);
 const OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+const OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE6);
+const OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE5);
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
@@ -319,6 +323,8 @@ pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u6
         item_id,
         OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID
             | OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
     )
 }
 
@@ -465,7 +471,43 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
         },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_536e_8000_000000000001),
+            subject: "Sent".to_string(),
+            target_folder_id: Some(crate::mapi::identity::SENT_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 128,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Mail".to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_5472_8000_000000000001),
+            subject: "Trash".to_string(),
+            target_folder_id: Some(crate::mapi::identity::TRASH_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 129,
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Mail".to_string(),
+        },
     ]
+}
+
+fn is_transient_outlook_migration_associated_config_class(message_class: &str) -> bool {
+    matches!(
+        message_class,
+        "IPM.Microsoft.MigrationStatus"
+            | "IPM.Microsoft.PendingChange.MigrateCategoriesList"
+            | "IPM.Microsoft.PendingChange.MigrateFlags"
+            | "IPM.Microsoft.PendingChange.MigrateLabels"
+    )
 }
 
 fn outlook_contact_sync_associated_config_default(
@@ -1038,6 +1080,9 @@ impl MapiMailStoreSnapshot {
         self.associated_configs = deduplicate_associated_config_messages(
             configs
                 .into_iter()
+                .filter(|config| {
+                    !is_transient_outlook_migration_associated_config_class(&config.message_class)
+                })
                 .map(|config| MapiAssociatedConfigMessage {
                     id: mapi_item_id(&config.id),
                     folder_id: config.folder_id,
@@ -3404,6 +3449,53 @@ mod tests {
     }
 
     #[test]
+    fn associated_configs_drop_transient_outlook_migration_markers() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let kept_id = Uuid::from_u128(0x6d617069_6b65_6570_8000_000000000001);
+        let dropped_id = Uuid::from_u128(0x6d617069_6472_6f70_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            kept_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 81,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            dropped_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 82,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: kept_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS.to_string(),
+                subject: OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS.to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: dropped_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: "IPM.Microsoft.PendingChange.MigrateFlags".to_string(),
+                subject: "IPM.Microsoft.PendingChange.MigrateFlags".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+
+        let messages =
+            snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
+
+        assert!(messages.iter().any(|message| {
+            message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
+        }));
+        assert!(!messages
+            .iter()
+            .any(|message| message.message_class == "IPM.Microsoft.PendingChange.MigrateFlags"));
+    }
+
+    #[test]
     fn quick_step_settings_include_default_custom_action_without_duplicate() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let messages = snapshot.associated_config_messages_for_folder(
@@ -3773,7 +3865,7 @@ mod tests {
         assert_eq!(snapshot.common_views_messages().count(), 0);
         let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 4);
+        assert_eq!(messages.len(), 6);
         let default_header = messages
             .iter()
             .find_map(|message| match message {
@@ -3808,6 +3900,24 @@ mod tests {
             Some(crate::mapi::identity::INBOX_FOLDER_ID)
         );
         assert_eq!(default_shortcut.group_name, "Mail");
+        for (subject, target_folder_id) in [
+            ("Sent", crate::mapi::identity::SENT_FOLDER_ID),
+            ("Trash", crate::mapi::identity::TRASH_FOLDER_ID),
+        ] {
+            let shortcut = messages
+                .iter()
+                .find_map(|message| match message {
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.subject == subject =>
+                    {
+                        Some(shortcut)
+                    }
+                    _ => None,
+                })
+                .expect("default mail navigation shortcut");
+            assert_eq!(shortcut.target_folder_id, Some(target_folder_id));
+            assert_eq!(shortcut.group_name, "Mail");
+        }
         let named_views = messages
             .iter()
             .filter_map(|message| match message {
@@ -3829,6 +3939,16 @@ mod tests {
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(
                 OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+            )
+            .is_some());
+        assert!(snapshot
+            .navigation_shortcut_table_message_for_id(
+                OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
+            )
+            .is_some());
+        assert!(snapshot
+            .navigation_shortcut_table_message_for_id(
+                OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
             )
             .is_some());
         for named_view in named_views {

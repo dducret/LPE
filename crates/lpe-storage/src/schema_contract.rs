@@ -883,6 +883,7 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "mail_change_log_object_shape_check",
             "CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx",
             "public.mapi_associated_config_messages",
+            "IPM.Microsoft.PendingChange.MigrateFlags",
         ],
     );
     assert_source_contains_all(

@@ -258,6 +258,14 @@ WHERE config.tenant_id = ranked.tenant_id
 CREATE UNIQUE INDEX IF NOT EXISTS mapi_associated_config_messages_logical_idx
     ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class);
 
+DELETE FROM public.mapi_associated_config_messages
+WHERE message_class IN (
+    'IPM.Microsoft.MigrationStatus',
+    'IPM.Microsoft.PendingChange.MigrateCategoriesList',
+    'IPM.Microsoft.PendingChange.MigrateFlags',
+    'IPM.Microsoft.PendingChange.MigrateLabels'
+);
+
 UPDATE public.mapi_object_identities
 SET source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
         || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
