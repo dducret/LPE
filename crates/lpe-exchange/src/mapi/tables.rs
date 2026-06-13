@@ -1510,6 +1510,46 @@ pub(in crate::mapi) fn rop_query_rows_response(
             if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+                    let total_common_views_rows = rows.len();
+                    let navigation_shortcut_count = rows
+                        .iter()
+                        .filter(|message| {
+                            matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
+                        })
+                        .count();
+                    let virtual_navigation_shortcut_count = rows
+                        .iter()
+                        .filter(|message| {
+                            matches!(
+                                message,
+                                MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                                    if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(shortcut.id)
+                            )
+                        })
+                        .count();
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        request_type = "Execute",
+                        request_rop_id = "0x15",
+                        folder_id = %format!("0x{folder_id:016x}"),
+                        folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                        associated = true,
+                        common_views_row_count = total_common_views_rows,
+                        common_views_navigation_shortcut_count = navigation_shortcut_count,
+                        common_views_persisted_navigation_shortcut_count =
+                            navigation_shortcut_count.saturating_sub(virtual_navigation_shortcut_count),
+                        common_views_virtual_navigation_shortcut_count =
+                            virtual_navigation_shortcut_count,
+                        common_views_named_view_count =
+                            total_common_views_rows.saturating_sub(navigation_shortcut_count),
+                        table_has_restriction = restriction.is_some(),
+                        current_position = *table_position,
+                        selected_property_tag_count = columns.len(),
+                        selected_property_tags = %format_table_property_tags(&columns),
+                        "rca debug outlook common views query rows"
+                    );
                     rows.retain(|message| {
                         restriction_matches_common_views_message(
                             restriction.as_ref(),
@@ -3646,6 +3686,24 @@ fn rop_find_row_no_match_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> bool {
+    matches!(
+        restriction,
+        MapiRestriction::Property {
+            relop: 0x02,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        } if value.eq_ignore_ascii_case("IPM.Configuration.")
+    )
+}
+
+fn format_table_property_tags(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub(in crate::mapi) fn rop_find_row_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
@@ -3739,6 +3797,43 @@ pub(in crate::mapi) fn rop_find_row_response(
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                 sort_common_views_messages(&mut rows, sort_orders);
+                let navigation_shortcut_count = rows
+                    .iter()
+                    .filter(|message| {
+                        matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
+                    })
+                    .count();
+                let virtual_navigation_shortcut_count = rows
+                    .iter()
+                    .filter(|message| {
+                        matches!(
+                            message,
+                            MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                                if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(shortcut.id)
+                        )
+                    })
+                    .count();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    request_type = "Execute",
+                    request_rop_id = "0x4f",
+                    folder_id = %format!("0x{folder_id:016x}"),
+                    folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                    associated = true,
+                    common_views_row_count = rows.len(),
+                    common_views_navigation_shortcut_count = navigation_shortcut_count,
+                    common_views_persisted_navigation_shortcut_count =
+                        navigation_shortcut_count.saturating_sub(virtual_navigation_shortcut_count),
+                    common_views_virtual_navigation_shortcut_count =
+                        virtual_navigation_shortcut_count,
+                    common_views_named_view_count = rows.len().saturating_sub(navigation_shortcut_count),
+                    current_position = *position,
+                    selected_property_tag_count = columns.len(),
+                    selected_property_tags = %format_table_property_tags(&columns),
+                    "rca debug outlook common views find row"
+                );
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) = find_row(
                     rows.as_slice(),
@@ -3821,9 +3916,45 @@ pub(in crate::mapi) fn rop_find_row_response(
             {
                 let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
                 sort_associated_config_messages(&mut rows, sort_orders);
+                let broad_outlook_configuration_probe = *folder_id == INBOX_FOLDER_ID
+                    && is_broad_outlook_configuration_find_row(&restriction);
+                let suppressed_virtual_default_count = if broad_outlook_configuration_probe {
+                    rows.iter()
+                        .filter(|message| {
+                            crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                                message.id,
+                            )
+                        })
+                        .count()
+                } else {
+                    0
+                };
+                if suppressed_virtual_default_count > 0 {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        request_type = "Execute",
+                        request_rop_id = "0x4f",
+                        folder_id = %format!("0x{folder_id:016x}"),
+                        folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                        associated = true,
+                        broad_outlook_configuration_probe = true,
+                        suppressed_virtual_default_count,
+                        total_candidate_count = rows.len(),
+                        "rca debug outlook associated config broad find row virtual defaults suppressed"
+                    );
+                }
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
                     find_row(rows.as_slice(), *position, request, |message| {
+                        if broad_outlook_configuration_probe
+                            && crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                                message.id,
+                            )
+                        {
+                            return false;
+                        }
                         restriction_matches_associated_config(Some(&restriction), message)
                     })
                 {
@@ -7638,18 +7769,18 @@ mod tests {
             rop_id: 0x15,
             input_handle_index: Some(0),
             output_handle_index: None,
-            payload: vec![0, 1, 1, 0],
+            payload: vec![0, 1, 3, 0],
         };
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            2
+            3
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 3);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -7665,7 +7796,7 @@ mod tests {
         assert!(response
             .windows(named_view_class.len())
             .any(|window| window == named_view_class.as_slice()));
-        assert!(!response
+        assert!(response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
         assert!(!response
@@ -8481,6 +8612,66 @@ mod tests {
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
         write_utf16z(&mut restriction, "IPM.Aggregation");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 0);
+        assert_eq!(table_position(&table), Some(0));
+    }
+
+    #[test]
+    fn inbox_associated_broad_configuration_find_row_ignores_virtual_defaults() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_ROAMING_DATATYPES,
+                PID_TAG_MESSAGE_CLASS_W,
+                0x685D_0003,
+                PID_TAG_LAST_MODIFICATION_TIME,
+            ],
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                    order: 0,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.");
         let mut payload = vec![0];
         payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
         payload.extend_from_slice(&restriction);
