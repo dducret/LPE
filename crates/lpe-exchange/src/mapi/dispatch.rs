@@ -2669,6 +2669,13 @@ fn inbox_open_loop_next_debug_focus(state: &PostHierarchyActionState) -> &'stati
     }
 }
 
+fn inbox_post_fai_reopen_stall_observed(state: &PostHierarchyActionState) -> bool {
+    state.post_inbox_fai_handoff_logged
+        && state.inbox_associated_contents_table_observed
+        && !state.inbox_normal_contents_table_observed
+        && !state.last_inbox_related_release_context.is_empty()
+}
+
 fn format_inbox_hierarchy_query_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
@@ -9861,11 +9868,53 @@ where
                         handle
                     ));
                 }
-                responses.extend_from_slice(&rop_open_folder_response(
-                    &request,
-                    is_public_folder_ghosted,
-                ));
+                let open_folder_response =
+                    rop_open_folder_response(&request, is_public_folder_ghosted);
+                let post_fai_reopen_stall = folder_id == INBOX_FOLDER_ID
+                    && inbox_post_fai_reopen_stall_observed(&session.post_hierarchy_actions)
+                    && !session.post_hierarchy_actions.post_inbox_fai_reopen_logged;
+                responses.extend_from_slice(&open_folder_response);
                 if folder_id == INBOX_FOLDER_ID {
+                    if post_fai_reopen_stall {
+                        tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x02",
+                            mapi_request_id = request_id,
+                            folder_id = format!("0x{folder_id:016x}"),
+                            output_handle_id = handle,
+                            open_mode_flags =
+                                format!("0x{:02x}", request.payload.get(8).copied().unwrap_or(0)),
+                            open_folder_response_bytes = open_folder_response.len(),
+                            open_folder_response_preview = %hex_preview(&open_folder_response, 32),
+                            last_open = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_open_folder_context
+                            ),
+                            last_associated_query = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_associated_query_context
+                            ),
+                            last_associated_find = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_associated_find_context
+                            ),
+                            last_inbox_related_release = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_related_release_context
+                            ),
+                            last_folder_type_getprops = %debug_context_or_none(
+                                &session
+                                    .post_hierarchy_actions
+                                    .last_inbox_folder_type_getprops_context
+                            ),
+                            recent_actions =
+                                %session.post_hierarchy_actions.recent_probe_actions.join(">"),
+                            expected_next_client_step =
+                                "Open Inbox normal contents table or SynchronizationConfigure",
+                            "rca warn mapi inbox reopened after associated FAI without normal contents"
+                        );
+                        session.mark_post_inbox_fai_reopen_logged();
+                    }
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -22494,6 +22543,24 @@ mod tests {
         assert!(context.contains(
             "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
         ));
+    }
+
+    #[test]
+    fn inbox_post_fai_reopen_stall_requires_handoff_release_without_normal_contents() {
+        let mut state = PostHierarchyActionState::default();
+        state.post_inbox_fai_handoff_logged = true;
+        state.inbox_associated_contents_table_observed = true;
+        state.last_inbox_related_release_context =
+            "handle=16;kind=contents_table;associated=true".to_string();
+
+        assert!(inbox_post_fai_reopen_stall_observed(&state));
+
+        state.inbox_normal_contents_table_observed = true;
+        assert!(!inbox_post_fai_reopen_stall_observed(&state));
+
+        state.inbox_normal_contents_table_observed = false;
+        state.last_inbox_related_release_context.clear();
+        assert!(!inbox_post_fai_reopen_stall_observed(&state));
     }
 
     #[test]
