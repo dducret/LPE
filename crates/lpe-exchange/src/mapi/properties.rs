@@ -1579,7 +1579,14 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
     mailbox_guid: Uuid,
     folder_id: u64,
 ) -> Option<MapiValue> {
-    let _ = folder_id;
+    if folder_id == INBOX_FOLDER_ID {
+        return crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            INBOX_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
+        )
+        .map(MapiValue::Binary);
+    }
     crate::mapi::identity::message_entry_id_from_object_ids(
         mailbox_guid,
         COMMON_VIEWS_FOLDER_ID,
@@ -7746,7 +7753,7 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_properties_advertise_common_views_compact_default_mail_view() {
+    fn inbox_mailbox_properties_advertise_inbox_associated_compact_default_view() {
         let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
         let mailbox = mailbox(
             "56565656-5656-4656-9656-565656565656",
@@ -7758,8 +7765,8 @@ mod tests {
 
         let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
             account_id,
-            COMMON_VIEWS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            INBOX_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
         )
         .unwrap();
 
