@@ -19619,9 +19619,6 @@ fn execute_response_handle_table(
     if responses.is_empty() {
         return Vec::new();
     }
-    if echo_input_handle_table && !output_handles.is_empty() {
-        return output_handles.to_vec();
-    }
     response_handle_table(handle_slots, output_handles, echo_input_handle_table)
 }
 
@@ -21887,7 +21884,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_release_execute_response_omits_input_only_release_handle_slot() {
+    fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
         let response_handles = execute_response_handle_table(
             &[0x02, 0x01, 0, 0, 0, 0, 0, 0],
             &[u32::MAX, 77],
@@ -21895,7 +21892,7 @@ mod tests {
             true,
         );
 
-        assert_eq!(response_handles, vec![77]);
+        assert_eq!(response_handles, vec![u32::MAX, 77]);
     }
 
     #[test]
