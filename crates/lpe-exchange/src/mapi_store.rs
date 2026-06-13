@@ -2637,18 +2637,22 @@ fn reserved_folder_id_for_role(role: &str) -> Option<u64> {
 fn deduplicate_navigation_shortcuts(
     shortcuts: Vec<MapiNavigationShortcutMessage>,
 ) -> Vec<MapiNavigationShortcutMessage> {
-    let mut seen = HashSet::new();
+    let mut seen_links = HashSet::new();
+    let mut seen_headers = HashSet::new();
     shortcuts
         .into_iter()
         .filter(|shortcut| {
-            seen.insert((
-                shortcut.subject.clone(),
-                shortcut.target_folder_id,
-                shortcut.shortcut_type,
-                shortcut.section,
-                shortcut.group_header_id,
-                shortcut.group_name.clone(),
-            ))
+            if let Some(target_folder_id) = shortcut.target_folder_id {
+                seen_links.insert((target_folder_id, shortcut.shortcut_type, shortcut.section))
+            } else {
+                seen_headers.insert((
+                    shortcut.subject.clone(),
+                    shortcut.shortcut_type,
+                    shortcut.section,
+                    shortcut.group_header_id,
+                    shortcut.group_name.clone(),
+                ))
+            }
         })
         .collect()
 }
@@ -3808,6 +3812,66 @@ mod tests {
                         if shortcut.subject == "Inbox"
                             && shortcut.target_folder_id
                                 == Some(crate::mapi::identity::INBOX_FOLDER_ID)
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn common_views_deduplicates_shortcuts_to_same_target_across_groups() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let first_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000020);
+        let second_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000021);
+        for (offset, id) in [first_calendar_id, second_calendar_id]
+            .into_iter()
+            .enumerate()
+        {
+            crate::mapi::identity::remember_mapi_identity(
+                id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90 + offset as u64,
+                ),
+            );
+        }
+
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            MapiNavigationShortcutRecord {
+                id: first_calendar_id,
+                account_id,
+                subject: "Calendar".to_string(),
+                target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 255,
+                group_header_id: Some(default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+            MapiNavigationShortcutRecord {
+                id: second_calendar_id,
+                account_id,
+                subject: "Calendar".to_string(),
+                target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 511,
+                group_header_id: Some(Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681)),
+                group_name: "My Calendars".to_string(),
+            },
+        ]);
+
+        assert_eq!(snapshot.navigation_shortcut_messages().len(), 1);
+        let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+        assert_eq!(
+            table_messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.target_folder_id
+                            == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
                 ))
                 .count(),
             1
