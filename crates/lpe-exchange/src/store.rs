@@ -28,6 +28,9 @@ use crate::mapi::properties::{
     is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
 };
 
+const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 1] =
+    [crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID as i64];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
     Account,
@@ -3585,15 +3588,21 @@ impl ExchangeStore for Storage {
                     OR EXISTS (
                         SELECT 1
                         FROM mapi_associated_config_messages config
-                        JOIN mapi_object_identities folder_identity
-                          ON folder_identity.tenant_id = config.tenant_id
-                         AND folder_identity.account_id = config.account_id
-                         AND folder_identity.mapi_object_id = config.folder_id
-                         AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
-                         AND folder_identity.deleted_at IS NULL
                         WHERE config.tenant_id = mapi_object_identities.tenant_id
                           AND config.account_id = mapi_object_identities.account_id
                           AND config.id = mapi_object_identities.canonical_id
+                          AND (
+                              config.folder_id = ANY($5::bigint[])
+                              OR EXISTS (
+                                  SELECT 1
+                                  FROM mapi_object_identities folder_identity
+                                  WHERE folder_identity.tenant_id = config.tenant_id
+                                    AND folder_identity.account_id = config.account_id
+                                    AND folder_identity.mapi_object_id = config.folder_id
+                                    AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
+                                    AND folder_identity.deleted_at IS NULL
+                              )
+                          )
                     )
                   )
                   AND (
@@ -3612,6 +3621,7 @@ impl ExchangeStore for Storage {
             .bind(account_id)
             .bind(&object_ids)
             .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+            .bind(MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS.as_slice())
             .fetch_all(self.pool())
             .await?;
 
@@ -3704,15 +3714,21 @@ impl ExchangeStore for Storage {
                     OR EXISTS (
                         SELECT 1
                         FROM mapi_associated_config_messages config
-                        JOIN mapi_object_identities folder_identity
-                          ON folder_identity.tenant_id = config.tenant_id
-                         AND folder_identity.account_id = config.account_id
-                         AND folder_identity.mapi_object_id = config.folder_id
-                         AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
-                         AND folder_identity.deleted_at IS NULL
                         WHERE config.tenant_id = mapi_object_identities.tenant_id
                           AND config.account_id = mapi_object_identities.account_id
                           AND config.id = mapi_object_identities.canonical_id
+                          AND (
+                              config.folder_id = ANY($5::bigint[])
+                              OR EXISTS (
+                                  SELECT 1
+                                  FROM mapi_object_identities folder_identity
+                                  WHERE folder_identity.tenant_id = config.tenant_id
+                                    AND folder_identity.account_id = config.account_id
+                                    AND folder_identity.mapi_object_id = config.folder_id
+                                    AND folder_identity.object_kind IN ('mailbox', 'search_folder_definition')
+                                    AND folder_identity.deleted_at IS NULL
+                              )
+                          )
                     )
                   )
                   AND (
@@ -3731,6 +3747,7 @@ impl ExchangeStore for Storage {
             .bind(account_id)
             .bind(source_keys)
             .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+            .bind(MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS.as_slice())
             .fetch_all(self.pool())
             .await?;
 
@@ -4241,14 +4258,17 @@ impl ExchangeStore for Storage {
                               AND config.id = mail_change_log.object_id
                         )
                         AND (summary_json ->> 'folderId') ~ '^[0-9]+$'
-                        AND EXISTS (
-                            SELECT 1
-                            FROM mapi_object_identities identity
-                            WHERE identity.tenant_id = mail_change_log.tenant_id
-                              AND identity.account_id = mail_change_log.account_id
-                              AND identity.mapi_object_id = (summary_json ->> 'folderId')::bigint
-                              AND identity.object_kind IN ('mailbox', 'search_folder_definition')
-                              AND identity.deleted_at IS NULL
+                        AND (
+                            (summary_json ->> 'folderId')::bigint = ANY($7::bigint[])
+                            OR EXISTS (
+                                SELECT 1
+                                FROM mapi_object_identities identity
+                                WHERE identity.tenant_id = mail_change_log.tenant_id
+                                  AND identity.account_id = mail_change_log.account_id
+                                  AND identity.mapi_object_id = (summary_json ->> 'folderId')::bigint
+                                  AND identity.object_kind IN ('mailbox', 'search_folder_definition')
+                                  AND identity.deleted_at IS NULL
+                            )
                         )
                     )
                   )
@@ -4273,6 +4293,7 @@ impl ExchangeStore for Storage {
             .bind(checkpoint_kind.as_str())
             .bind(mailbox_id)
             .bind(special_object_kind)
+            .bind(MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS.as_slice())
             .fetch_all(self.pool())
             .await?;
 
@@ -7583,19 +7604,23 @@ async fn repair_stale_mapi_object_identities(
         DELETE FROM mapi_associated_config_messages config
         WHERE config.tenant_id = $1
           AND config.account_id = $2
-          AND NOT EXISTS (
-              SELECT 1
-              FROM mapi_object_identities identity
-              WHERE identity.tenant_id = config.tenant_id
-                AND identity.account_id = config.account_id
-                AND identity.mapi_object_id = config.folder_id
-                AND identity.object_kind IN ('mailbox', 'search_folder_definition')
-                AND identity.deleted_at IS NULL
+          AND NOT (
+              config.folder_id = ANY($3::bigint[])
+              OR EXISTS (
+                  SELECT 1
+                  FROM mapi_object_identities identity
+                  WHERE identity.tenant_id = config.tenant_id
+                    AND identity.account_id = config.account_id
+                    AND identity.mapi_object_id = config.folder_id
+                    AND identity.object_kind IN ('mailbox', 'search_folder_definition')
+                    AND identity.deleted_at IS NULL
+              )
           )
         "#,
     )
     .bind(tenant_id)
     .bind(account_id)
+    .bind(MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS.as_slice())
     .execute(&mut **tx)
     .await?
     .rows_affected();
