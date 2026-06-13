@@ -1974,6 +1974,10 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
+        PID_TAG_PARENT_ENTRY_ID => {
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, message.folder_id)
+                .map(MapiValue::Binary)
+        }
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
         PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(wlink_save_stamp(message))),
         PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
@@ -10242,6 +10246,20 @@ mod tests {
             Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 shortcut.id
             )))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_PARENT_SOURCE_KEY),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                COMMON_VIEWS_FOLDER_ID
+            )))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_PARENT_ENTRY_ID),
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account_id,
+                COMMON_VIEWS_FOLDER_ID
+            )
+            .map(MapiValue::Binary)
         );
     }
 
