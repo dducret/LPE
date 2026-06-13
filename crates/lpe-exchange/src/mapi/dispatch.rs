@@ -14667,6 +14667,22 @@ where
             }
             Some(RopId::OpenStream) => {
                 let Some(input_handle) = input_handle(&handle_slots, &request) else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x2b",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = "missing",
+                        response_handle_index = request.response_handle_index(),
+                        output_handle_index = request.output_handle_index.unwrap_or(0),
+                        stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
+                        stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
+                        stream_open_result = "missing_input_handle",
+                        message = "rca debug mapi open stream"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
                         request.output_handle_index.unwrap_or(0),
@@ -14674,6 +14690,9 @@ where
                     ));
                     continue;
                 };
+                let input_object_kind = mapi_object_debug_kind(session.handles.get(&input_handle));
+                let input_folder_id =
+                    mapi_object_debug_folder_id(session.handles.get(&input_handle));
                 let is_inbox_associated_config_stream = matches!(
                     session.handles.get(&input_handle),
                     Some(MapiObject::AssociatedConfig {
@@ -14703,6 +14722,25 @@ where
                 )
                 .await
                 else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x2b",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = input_handle,
+                        response_handle_index = request.response_handle_index(),
+                        output_handle_index = request.output_handle_index.unwrap_or(0),
+                        object_kind = input_object_kind,
+                        folder_id = %input_folder_id,
+                        stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
+                        stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
+                        stream_open_result = "missing_stream_data",
+                        inbox_associated_config_stream = is_inbox_associated_config_stream,
+                        message = "rca debug mapi open stream"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
                         request.output_handle_index.unwrap_or(0),
@@ -14723,11 +14761,41 @@ where
                     session.record_inbox_associated_config_stream_handle(handle);
                 }
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x2b",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = input_handle,
+                    response_handle_index = request.response_handle_index(),
+                    output_handle_index = request.output_handle_index.unwrap_or(0),
+                    output_handle_value = handle,
+                    object_kind = input_object_kind,
+                    folder_id = %input_folder_id,
+                    stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
+                    stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
+                    stream_size,
+                    stream_empty = stream_size == 0,
+                    stream_preview = %hex_preview(
+                        match session.handles.get(&handle) {
+                            Some(MapiObject::AttachmentStream { data, .. }) => data.as_slice(),
+                            _ => &[],
+                        },
+                        32
+                    ),
+                    stream_open_result = "success",
+                    inbox_associated_config_stream = is_inbox_associated_config_stream,
+                    message = "rca debug mapi open stream"
+                );
                 responses.extend_from_slice(&rop_open_stream_response(&request, stream_size));
                 output_handles.push(handle);
             }
             Some(RopId::ReadStream) => {
-                if let Some(input_handle) = input_handle(&handle_slots, &request) {
+                let read_input_handle = input_handle(&handle_slots, &request);
+                if let Some(input_handle) = read_input_handle {
                     if session.is_inbox_associated_config_stream_handle(input_handle) {
                         session.record_inbox_associated_config_stream_read();
                         session.record_recent_probe_action(format!(
@@ -14738,6 +14806,22 @@ where
                     }
                 }
                 let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x2c",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = read_input_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "missing".to_string()),
+                        response_handle_index = request.response_handle_index(),
+                        requested_byte_count = request.read_byte_count().unwrap_or(0),
+                        stream_read_result = "missing_input_object",
+                        message = "rca debug mapi read stream"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x2C,
                         request.response_handle_index(),
@@ -14745,7 +14829,38 @@ where
                     ));
                     continue;
                 };
-                responses.extend_from_slice(&rop_read_stream_response(&request, stream));
+                let (before_position, stream_len) = match stream {
+                    MapiObject::AttachmentStream { data, position, .. } => (*position, data.len()),
+                    _ => (0, 0),
+                };
+                let response = rop_read_stream_response(&request, stream);
+                let after_position = match stream {
+                    MapiObject::AttachmentStream { position, .. } => *position,
+                    _ => 0,
+                };
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x2c",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = read_input_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "missing".to_string()),
+                    response_handle_index = request.response_handle_index(),
+                    requested_byte_count = request.read_byte_count().unwrap_or(0),
+                    stream_position_before = before_position,
+                    stream_position_after = after_position,
+                    returned_byte_count = after_position.saturating_sub(before_position),
+                    end_of_stream = after_position >= stream_len,
+                    response_bytes = response.len(),
+                    response_preview = %hex_preview(&response, 48),
+                    stream_read_result = "success",
+                    message = "rca debug mapi read stream"
+                );
+                responses.extend_from_slice(&response);
             }
             Some(RopId::SeekStream) => {
                 let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
