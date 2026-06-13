@@ -2090,6 +2090,10 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
+        PID_TAG_PARENT_ENTRY_ID => {
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, message.folder_id)
+                .map(MapiValue::Binary)
+        }
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::change_key_for_change_number(
                 mapi_mailstore::change_number_for_store_id(message.id),
@@ -10315,6 +10319,14 @@ mod tests {
                 OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
             ),
             Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            common_view_named_view_property_value(&view, account_id, PID_TAG_PARENT_ENTRY_ID),
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account_id,
+                COMMON_VIEWS_FOLDER_ID
+            )
+            .map(MapiValue::Binary)
         );
     }
 
