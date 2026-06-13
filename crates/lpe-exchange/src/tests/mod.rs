@@ -296,6 +296,126 @@ async fn mapi_associated_config_storage_is_account_scoped() {
 }
 
 #[tokio::test]
+async fn mapi_associated_config_upsert_reuses_logical_config_row() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+
+    let first = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: None,
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.RssRule".to_string(),
+            subject: "IPM.Configuration.RssRule".to_string(),
+            properties_json: serde_json::json!({"version": 1}),
+        })
+        .await
+        .unwrap();
+    let second = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: None,
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.RssRule".to_string(),
+            subject: "IPM.Configuration.RssRule".to_string(),
+            properties_json: serde_json::json!({"version": 2}),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.properties_json, serde_json::json!({"version": 2}));
+    let configs = fixture
+        .storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await
+        .unwrap();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].id, first.id);
+
+    let stale_id = Uuid::parse_str("10000000-0000-0000-0000-000000000016").unwrap();
+    let tenant_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    sqlx::query("DROP INDEX mapi_associated_config_messages_logical_idx")
+        .execute(fixture.storage.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_associated_config_messages (
+            tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+        )
+        VALUES ($1, $2, $3, $4, 'IPM.Configuration.RssRule', 'IPM.Configuration.RssRule', '{"stale":true}'::jsonb)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(stale_id)
+    .bind(fixture.account_id)
+    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
+    .execute(fixture.storage.pool())
+    .await
+    .unwrap();
+
+    let configs = fixture
+        .storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        configs
+            .iter()
+            .filter(|config| config.message_class == "IPM.Configuration.RssRule")
+            .count(),
+        1
+    );
+
+    let third = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: None,
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.RssRule".to_string(),
+            subject: "IPM.Configuration.RssRule".to_string(),
+            properties_json: serde_json::json!({"version": 3}),
+        })
+        .await
+        .unwrap();
+    assert_eq!(third.id, stale_id);
+    let physical_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_associated_config_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND folder_id = $3
+          AND message_class = 'IPM.Configuration.RssRule'
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(fixture.account_id)
+    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(physical_count, 1);
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

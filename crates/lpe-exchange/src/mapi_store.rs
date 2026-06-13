@@ -194,6 +194,16 @@ pub(crate) struct MapiAssociatedConfigMessage {
     pub(crate) properties_json: serde_json::Value,
 }
 
+fn deduplicate_associated_config_messages(
+    messages: Vec<MapiAssociatedConfigMessage>,
+) -> Vec<MapiAssociatedConfigMessage> {
+    let mut seen = HashSet::new();
+    messages
+        .into_iter()
+        .filter(|message| seen.insert((message.folder_id, message.message_class.clone())))
+        .collect()
+}
+
 const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS: &str = "IPM.Configuration.AccountPrefs";
 const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFB);
@@ -979,17 +989,19 @@ impl MapiMailStoreSnapshot {
         mut self,
         configs: Vec<MapiAssociatedConfigRecord>,
     ) -> Self {
-        self.associated_configs = configs
-            .into_iter()
-            .map(|config| MapiAssociatedConfigMessage {
-                id: mapi_item_id(&config.id),
-                folder_id: config.folder_id,
-                canonical_id: config.id,
-                message_class: config.message_class,
-                subject: config.subject,
-                properties_json: config.properties_json,
-            })
-            .collect();
+        self.associated_configs = deduplicate_associated_config_messages(
+            configs
+                .into_iter()
+                .map(|config| MapiAssociatedConfigMessage {
+                    id: mapi_item_id(&config.id),
+                    folder_id: config.folder_id,
+                    canonical_id: config.id,
+                    message_class: config.message_class,
+                    subject: config.subject,
+                    properties_json: config.properties_json,
+                })
+                .collect(),
+        );
         self
     }
 
@@ -1716,7 +1728,7 @@ impl MapiMailStoreSnapshot {
                 }
             }
         }
-        messages
+        deduplicate_associated_config_messages(messages)
     }
 
     pub(crate) fn associated_config_message_for_id(
@@ -3226,10 +3238,17 @@ mod tests {
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_6561_7343_8000_000000000002);
+        let duplicate_id = Uuid::from_u128(0x6d617069_6561_7343_8000_000000000003);
         crate::mapi::identity::remember_mapi_identity(
             persisted_id,
             crate::mapi::identity::mapi_store_id(
                 crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 71,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            duplicate_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 72,
             ),
         );
         let persisted = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
@@ -3239,6 +3258,14 @@ mod tests {
                 folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
                 message_class: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
                 subject: "Client EAS config".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: duplicate_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
+                subject: "Duplicate EAS config".to_string(),
                 properties_json: serde_json::json!({}),
             },
         ]);

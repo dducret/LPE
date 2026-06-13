@@ -19,6 +19,7 @@ use lpe_storage::{
     UpsertSearchFolderInput,
 };
 use sqlx::Row;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
@@ -6120,7 +6121,7 @@ impl ExchangeStore for Storage {
                 SELECT id, account_id, folder_id, message_class, subject, properties_json
                 FROM mapi_associated_config_messages
                 WHERE tenant_id = $1 AND account_id = $2
-                ORDER BY folder_id, subject, id
+                ORDER BY folder_id, message_class, updated_at DESC, id
                 "#,
             )
             .bind(tenant_id)
@@ -6128,8 +6129,19 @@ impl ExchangeStore for Storage {
             .fetch_all(self.pool())
             .await?;
 
+            let mut seen = HashSet::new();
             rows.into_iter()
                 .map(mapi_associated_config_from_row)
+                .filter_map(|result| match result {
+                    Ok(config) => {
+                        if seen.insert((config.folder_id, config.message_class.clone())) {
+                            Some(Ok(config))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(err) => Some(Err(err)),
+                })
                 .collect()
         })
     }
@@ -6140,8 +6152,52 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, MapiAssociatedConfigRecord> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
-            let id = input.id.unwrap_or_else(Uuid::new_v4);
             let mut tx = self.pool().begin().await?;
+            let message_class = input.message_class;
+            let subject = input.subject;
+            let properties_json = input.properties_json;
+            let logical_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM mapi_associated_config_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND folder_id = $3
+                  AND message_class = $4
+                ORDER BY updated_at DESC, id
+                LIMIT 1
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(input.account_id)
+            .bind(input.folder_id as i64)
+            .bind(&message_class)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let id = match input.id {
+                Some(id) => {
+                    let explicit_exists = sqlx::query_scalar::<_, bool>(
+                        r#"
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM mapi_associated_config_messages
+                            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                        )
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(input.account_id)
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if explicit_exists {
+                        id
+                    } else {
+                        logical_id.unwrap_or(id)
+                    }
+                }
+                None => logical_id.unwrap_or_else(Uuid::new_v4),
+            };
             let existed = sqlx::query_scalar::<_, bool>(
                 r#"
                 SELECT EXISTS (
@@ -6176,13 +6232,30 @@ impl ExchangeStore for Storage {
             .bind(id)
             .bind(input.account_id)
             .bind(input.folder_id as i64)
-            .bind(input.message_class)
-            .bind(input.subject)
-            .bind(input.properties_json)
+            .bind(&message_class)
+            .bind(subject)
+            .bind(properties_json)
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?;
             let saved = mapi_associated_config_from_row(row)?;
+            sqlx::query(
+                r#"
+                DELETE FROM mapi_associated_config_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND id <> $3
+                  AND folder_id = $4
+                  AND message_class = $5
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(input.account_id)
+            .bind(saved.id)
+            .bind(saved.folder_id as i64)
+            .bind(&saved.message_class)
+            .execute(&mut *tx)
+            .await?;
             insert_mapi_associated_config_change(
                 &mut tx,
                 tenant_id,
