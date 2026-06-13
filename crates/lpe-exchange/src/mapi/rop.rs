@@ -2299,7 +2299,6 @@ fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u
             | SPOOLER_QUEUE_FOLDER_ID
             | COMMON_VIEWS_FOLDER_ID
             | VIEWS_FOLDER_ID
-            | FREEBUSY_DATA_FOLDER_ID
     ) && matches!(
         storage_tag,
         PID_TAG_CONTAINER_CLASS_W
@@ -8594,7 +8593,6 @@ mod tests {
             SPOOLER_QUEUE_FOLDER_ID,
             COMMON_VIEWS_FOLDER_ID,
             VIEWS_FOLDER_ID,
-            FREEBUSY_DATA_FOLDER_ID,
         ] {
             let folder = MapiObject::Folder {
                 folder_id,
@@ -8612,6 +8610,23 @@ mod tests {
                     property_tag
                 ));
             }
+        }
+
+        let freebusy = MapiObject::Folder {
+            folder_id: FREEBUSY_DATA_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        for property_tag in [
+            PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        ] {
+            assert!(!modeled_zero_or_default_property(
+                Some(&freebusy),
+                property_tag
+            ));
         }
 
         let inbox = MapiObject::Folder {

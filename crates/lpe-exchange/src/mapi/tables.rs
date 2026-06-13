@@ -5120,7 +5120,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             false,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
-        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
+        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "IPF.Note", false),
         CONVERSATION_HISTORY_FOLDER_ID => (
             "Conversation History",
             IPM_SUBTREE_FOLDER_ID,
@@ -5489,6 +5489,7 @@ mod tests {
             (QUICK_STEP_SETTINGS_FOLDER_ID, "IPF.Configuration"),
             (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
             (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
+            (FREEBUSY_DATA_FOLDER_ID, "IPF.Note"),
         ] {
             assert_eq!(debug_expected_container_class(folder_id), Some(expected));
         }
@@ -9932,22 +9933,12 @@ mod tests {
     #[test]
     fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
-        assert_eq!(
-            special_folder_property_value(
-                INBOX_FOLDER_ID,
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-                account_id
-            ),
-            None
-        );
-        assert_eq!(
-            special_folder_property_value(
-                SENT_FOLDER_ID,
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-                account_id
-            ),
-            None
-        );
+        for folder_id in [INBOX_FOLDER_ID, SENT_FOLDER_ID, FREEBUSY_DATA_FOLDER_ID] {
+            assert!(matches!(
+                special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
+                Some(MapiValue::Binary(value)) if !value.is_empty()
+            ));
+        }
         assert_eq!(
             special_folder_property_value(
                 CALENDAR_FOLDER_ID,
@@ -10007,6 +9998,22 @@ mod tests {
                 Uuid::nil()
             ),
             Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                FREEBUSY_DATA_FOLDER_ID,
+                PID_TAG_CONTAINER_CLASS_W,
+                account_id
+            ),
+            Some(MapiValue::String("IPF.Note".to_string()))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                FREEBUSY_DATA_FOLDER_ID,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+                account_id
+            ),
+            Some(MapiValue::String("IPM.Note".to_string()))
         );
     }
 
@@ -10071,12 +10078,19 @@ mod tests {
             SPOOLER_QUEUE_FOLDER_ID,
             COMMON_VIEWS_FOLDER_ID,
             VIEWS_FOLDER_ID,
-            FREEBUSY_DATA_FOLDER_ID,
         ] {
             let row =
                 serialize_special_folder_row(folder_id, &[], &[PID_TAG_CONTAINER_CLASS_W], None);
             assert_eq!(row, utf16z_test_bytes(""));
         }
+
+        let row = serialize_special_folder_row(
+            FREEBUSY_DATA_FOLDER_ID,
+            &[],
+            &[PID_TAG_CONTAINER_CLASS_W],
+            None,
+        );
+        assert_eq!(row, utf16z_test_bytes("IPF.Note"));
     }
 
     #[test]
