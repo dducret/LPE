@@ -3697,6 +3697,13 @@ fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> boo
     )
 }
 
+fn outlook_configuration_prefix_restriction() -> MapiRestriction {
+    MapiRestriction::Content {
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: "IPM.Configuration.".to_string(),
+    }
+}
+
 fn format_table_property_tags(tags: &[u32]) -> String {
     tags.iter()
         .map(|tag| format!("0x{tag:08x}"))
@@ -3959,6 +3966,22 @@ pub(in crate::mapi) fn rop_find_row_response(
                     })
                 {
                     *position = index;
+                    if broad_outlook_configuration_probe {
+                        *table_restriction = Some(outlook_configuration_prefix_restriction());
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            request_type = "Execute",
+                            request_rop_id = "0x4f",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                            associated = true,
+                            matched_row_index = index,
+                            matched_message_class = %message.message_class,
+                            "rca debug outlook associated config broad find row followup query restricted"
+                        );
+                    }
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
@@ -9022,6 +9045,96 @@ mod tests {
         assert_eq!(response[7], 1);
         assert_eq!(response[8], 0);
         assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
+    }
+
+    #[test]
+    fn inbox_associated_broad_configuration_find_row_filters_followup_query_rows() {
+        let snapshot = inbox_associated_sort_snapshot();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let find_request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let find_response = rop_find_row_response(
+            &find_request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+        assert_eq!(find_response[0], RopId::FindRow.as_u8());
+        assert_eq!(find_response[7], 1);
+
+        let seek_request = RopRequest {
+            rop_id: RopId::SeekRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![1, 1, 0, 0, 0, 0],
+        };
+        let seek_response = rop_seek_row_response(
+            &seek_request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+        assert_eq!(seek_response[0], RopId::SeekRow.as_u8());
+        assert_eq!(table_position(&table), Some(1));
+
+        let query_request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+        let query_response = rop_query_rows_response(
+            &query_request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+        assert_eq!(
+            u16::from_le_bytes([query_response[7], query_response[8]]),
+            4
+        );
+        assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
+        assert_response_contains_utf16(&query_response, "IPM.Configuration.ELC");
+        assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
+        assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
+        assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     }
 
     #[test]

@@ -6485,6 +6485,7 @@ fn outlook_bootstrap_query_rows_total_count(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Option<u32> {
     let Some(
         MapiObject::HierarchyTable { folder_id, .. } | MapiObject::ContentsTable { folder_id, .. },
@@ -6508,9 +6509,19 @@ fn outlook_bootstrap_query_rows_total_count(
                 deleted_advertised_special_folders,
             ))
         }
-        Some(MapiObject::ContentsTable { associated, .. }) if *associated => {
-            Some(associated_folder_message_count(*folder_id, snapshot))
-        }
+        Some(MapiObject::ContentsTable {
+            associated,
+            restriction,
+            ..
+        }) if *associated => Some(
+            restricted_associated_folder_message_count(
+                *folder_id,
+                snapshot,
+                restriction.as_ref(),
+                mailbox_guid,
+            )
+            .min(u32::MAX as usize) as u32,
+        ),
         Some(MapiObject::ContentsTable { associated, .. })
             if !*associated && *folder_id == INBOX_FOLDER_ID =>
         {
@@ -9498,6 +9509,7 @@ where
                         associated,
                         columns,
                         position,
+                        restriction,
                         sort_orders,
                         ..
                     }) if *folder_id == INBOX_FOLDER_ID
@@ -9508,16 +9520,28 @@ where
                         && !session
                             .post_hierarchy_actions
                             .inbox_normal_contents_table_observed
-                        && !session
-                            .post_hierarchy_actions
-                            .post_inbox_fai_handoff_logged =>
+                        && !session.post_hierarchy_actions.post_inbox_fai_handoff_logged =>
                     {
+                        let filtered_row_count = restricted_associated_folder_message_count(
+                            *folder_id,
+                            snapshot,
+                            restriction.as_ref(),
+                            principal.account_id,
+                        );
+                        let unfiltered_row_count =
+                            associated_folder_message_count(*folder_id, snapshot);
                         Some((
                             format!(
-                                "handle={};folder=0x{folder_id:016x};position={position};columns={};sort={}",
+                                "handle={};folder=0x{folder_id:016x};position={position};columns={};sort={};restriction={};filtered_row_count={};unfiltered_row_count={}",
                                 format_optional_debug_handle(released_handle),
                                 format_debug_property_tags(columns),
-                                format_debug_sort_orders(sort_orders)
+                                format_debug_sort_orders(sort_orders),
+                                restriction
+                                    .as_ref()
+                                    .map(format_debug_parsed_restriction)
+                                    .unwrap_or_default(),
+                                filtered_row_count,
+                                unfiltered_row_count
                             ),
                             format_inbox_post_fai_handoff_context(
                                 &session.post_hierarchy_actions,
@@ -12713,6 +12737,7 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    principal.account_id,
                 );
                 let selected_named_property_context =
                     format_contents_table_named_property_context(session, query_object);
@@ -23472,6 +23497,7 @@ mod tests {
                 &[],
                 &[],
                 &MapiMailStoreSnapshot::empty(),
+                Uuid::nil(),
             ),
             Some(3)
         );
