@@ -5432,13 +5432,21 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
         1,
         crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
     );
-    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x02]); // associated contents table
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // contents table
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
     rops.extend_from_slice(&50u16.to_le_bytes());
+    let mut restriction = vec![0x04, 0x04];
+    restriction.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    restriction.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    restriction.extend_from_slice(&utf16z("LocalFreebusy"));
+    rops.extend_from_slice(&[0x14, 0x00, 0x02, 0x00]); // RopRestrict
+    rops.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&restriction);
+    rops.extend_from_slice(&[0x17, 0x00, 0x02]); // RopQueryPosition
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -5466,6 +5474,13 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
         &response_rops,
         &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
     ));
+    assert!(
+        contains_bytes(
+            &response_rops,
+            &[0x17, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+        ),
+        "{response_rops:02x?}"
+    );
 }
 
 #[tokio::test]

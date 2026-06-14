@@ -75,6 +75,12 @@ pub(in crate::mapi) fn folder_message_count(
             .len()
             .min(u32::MAX as usize) as u32;
     }
+    if folder_id == FREEBUSY_DATA_FOLDER_ID {
+        return snapshot
+            .delegate_freebusy_messages()
+            .len()
+            .min(u32::MAX as usize) as u32;
+    }
     if is_contact_contents_folder(folder_id) {
         return snapshot
             .contacts_for_folder(folder_id)
@@ -1513,7 +1519,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
-                } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
                     default_message_property_tags()
                 } else if *associated
                     && (*folder_id == CALENDAR_FOLDER_ID
@@ -1536,7 +1542,18 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            if *associated {
+            if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                snapshot
+                    .delegate_freebusy_messages()
+                    .iter()
+                    .filter(|message| {
+                        restriction_matches(restriction.as_ref(), |property_tag| {
+                            delegate_freebusy_property_value(message, property_tag)
+                        })
+                    })
+                    .map(|message| serialize_delegate_freebusy_row(message, &columns))
+                    .collect::<Vec<_>>()
+            } else if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                     let total_common_views_rows = rows.len();
@@ -1606,17 +1623,6 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             })
                         })
                         .map(|message| serialize_conversation_action_row(message, &columns))
-                        .collect::<Vec<_>>()
-                } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
-                    snapshot
-                        .delegate_freebusy_messages()
-                        .iter()
-                        .filter(|message| {
-                            restriction_matches(restriction.as_ref(), |property_tag| {
-                                delegate_freebusy_property_value(message, property_tag)
-                            })
-                        })
-                        .map(|message| serialize_delegate_freebusy_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else if !snapshot
                     .associated_config_messages_for_folder(*folder_id)
@@ -3960,7 +3966,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_find_row_no_match_response(request);
                 }
-            } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+            } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
                 let rows = snapshot
                     .delegate_freebusy_messages()
                     .iter()
@@ -4519,7 +4525,14 @@ pub(in crate::mapi) fn table_position_and_count(
             collapsed_categories,
             ..
         }) => {
-            let total = if *associated {
+            let total = if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                restricted_associated_folder_message_count(
+                    *folder_id,
+                    snapshot,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                )
+            } else if *associated {
                 restricted_associated_folder_message_count(
                     *folder_id,
                     snapshot,
@@ -4830,6 +4843,18 @@ pub(in crate::mapi) fn table_row_keys(
                 });
                 sort_contacts(&mut rows, sort_orders);
                 return rows.into_iter().map(|contact| contact.id).collect();
+            }
+            if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                let mut rows = snapshot
+                    .delegate_freebusy_messages()
+                    .iter()
+                    .collect::<Vec<_>>();
+                rows.retain(|message| {
+                    restriction_matches(restriction.as_ref(), |property_tag| {
+                        delegate_freebusy_property_value(message, property_tag)
+                    })
+                });
+                return rows.into_iter().map(|message| message.id).collect();
             }
             if *folder_id == TODO_SEARCH_FOLDER_ID {
                 let mut rows = todo_search_content_rows(snapshot, restriction.as_ref());
