@@ -21978,6 +21978,10 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &utf16z("Alice")
     ));
     assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
+    assert!(contains_bytes(
+        &bootstrap_store_props_rops,
+        &[0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01]
+    ));
 
     let mut trace_store_props_headers = mapi_headers("Execute");
     trace_store_props_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());

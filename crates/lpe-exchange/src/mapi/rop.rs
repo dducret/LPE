@@ -9090,7 +9090,7 @@ mod tests {
     }
 
     #[test]
-    pub(in crate::mapi) fn outlook_logon_bootstrap_details_omit_custom_icons() {
+    pub(in crate::mapi) fn outlook_logon_bootstrap_details_include_store_icons() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -9123,11 +9123,11 @@ mod tests {
         assert!(details.contains("dn_null_terminated=true"));
         assert!(details.contains("private=true"));
         assert!(details.contains("max_submit_message_size_kb=35840"));
-        assert!(!details.contains("bit_count=32"));
-        assert!(!details.contains("length_matches_directory=true"));
-        assert_eq!(row_shape.estimated_rop_payload_bytes, 153);
-        assert_eq!(row_shape.property_row_bytes, 146);
-        assert_eq!(row_shape.icon_row_bytes, 0);
+        assert!(details.contains("bit_count=32"));
+        assert!(details.contains("length_matches_directory=true"));
+        assert_eq!(row_shape.estimated_rop_payload_bytes, 297);
+        assert_eq!(row_shape.property_row_bytes, 290);
+        assert_eq!(row_shape.icon_row_bytes, 144);
         assert_eq!(row_shape.non_icon_row_bytes, 146);
     }
 
