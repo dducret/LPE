@@ -267,6 +267,9 @@ const OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID: u64 =
 const OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE: u64 = 0x7FFF_FE00_0000;
 const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
+const OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
     matches!(
         item_id,
@@ -656,6 +659,29 @@ fn outlook_default_conversation_action() -> MapiConversationActionMessage {
     }
 }
 
+fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {
+    let canonical_id = Uuid::from_u128(0x6d617069_6672_4266_8000_000000000001);
+    MapiDelegateFreeBusyMessage {
+        id: OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        folder_id: crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+        canonical_id,
+        message: DelegateFreeBusyMessageObject {
+            id: canonical_id,
+            account_id: Uuid::nil(),
+            owner_account_id: Uuid::nil(),
+            owner_email: String::new(),
+            message_kind: "freebusy".to_string(),
+            subject: "LocalFreebusy".to_string(),
+            body_text: String::new(),
+            starts_at: None,
+            ends_at: None,
+            busy_status: None,
+            payload_json: "{}".to_string(),
+            updated_at: "1970-01-01T00:00:00Z".to_string(),
+        },
+    }
+}
+
 pub(crate) enum MapiCommonViewsMessage {
     NavigationShortcut(MapiNavigationShortcutMessage),
     #[allow(dead_code)]
@@ -978,6 +1004,10 @@ impl MapiMailStoreSnapshot {
                 message,
             })
             .collect();
+        if self.delegate_freebusy_messages.is_empty() {
+            self.delegate_freebusy_messages
+                .push(virtual_local_freebusy_message());
+        }
         self
     }
 

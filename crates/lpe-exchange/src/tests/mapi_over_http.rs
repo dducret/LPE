@@ -5413,7 +5413,7 @@ async fn mapi_over_http_execute_opens_freebusy_data_folder() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_freebusy_data_folder_has_no_placeholder_messages_without_canonical_state() {
+async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_canonical_state() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -5454,14 +5454,15 @@ async fn mapi_over_http_freebusy_data_folder_has_no_placeholder_messages_without
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 2, 0, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0, 1, 0]),
         "{response_rops:02x?}"
     );
+    assert!(contains_bytes(&response_rops, &utf16z("LocalFreebusy")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
     ));
@@ -5550,7 +5551,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 2, 2, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0, 2, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(
