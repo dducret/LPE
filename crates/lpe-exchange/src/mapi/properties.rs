@@ -450,6 +450,7 @@ pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835: u32 = 0x6835_0102;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C: u32 = 0x683C_0102;
+pub(in crate::mapi) const OUTLOOK_RULE_ORGANIZER_BINARY_6802: u32 = 0x6802_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
@@ -10617,6 +10618,7 @@ mod tests {
     fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let config_id = crate::mapi::identity::mapi_store_id(0x13f);
+        let rule_organizer_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
         let message = MapiAssociatedConfigMessage {
             id: config_id,
             folder_id: INBOX_FOLDER_ID,
@@ -10632,6 +10634,23 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 config_id,
                 saved_message: Some(message),
+            },
+        );
+        handles.insert(
+            2,
+            MapiObject::AssociatedConfig {
+                folder_id: INBOX_FOLDER_ID,
+                config_id: rule_organizer_config_id,
+                saved_message: Some(MapiAssociatedConfigMessage {
+                    id: rule_organizer_config_id,
+                    folder_id: INBOX_FOLDER_ID,
+                    canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
+                    message_class: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+                        .to_string(),
+                    subject: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+                        .to_string(),
+                    properties_json: serde_json::json!({}),
+                }),
             },
         );
         let session = MapiSession {
@@ -10668,9 +10687,28 @@ mod tests {
         };
         let snapshot = MapiMailStoreSnapshot::empty();
 
-        assert!(
-            property_stream_data(&session, 1, 0x6802_0102, 0, &[], account_id, &snapshot).is_none()
-        );
+        assert!(property_stream_data(
+            &session,
+            1,
+            OUTLOOK_RULE_ORGANIZER_BINARY_6802,
+            0,
+            &[],
+            account_id,
+            &snapshot
+        )
+        .is_none());
+        let (rule_stream, writable_target) = property_stream_data(
+            &session,
+            2,
+            OUTLOOK_RULE_ORGANIZER_BINARY_6802,
+            0,
+            &[],
+            account_id,
+            &snapshot,
+        )
+        .expect("rule organizer stream");
+        assert!(rule_stream.is_empty());
+        assert!(writable_target.is_none());
         let (modeled_stream, writable_target) = property_stream_data(
             &session,
             1,

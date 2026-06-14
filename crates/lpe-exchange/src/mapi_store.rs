@@ -218,7 +218,7 @@ const OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID: u64 =
 const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS: &str = "IPM.Configuration.UMOLK.UserOptions";
 const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
-const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
+pub(crate) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
 const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS: &str =

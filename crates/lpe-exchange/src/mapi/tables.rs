@@ -9570,6 +9570,23 @@ mod tests {
     }
 
     #[test]
+    fn rule_organizer_default_projects_outlook_binary_stream_property() {
+        let message = MapiAssociatedConfigMessage {
+            id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED),
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
+            message_class: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+            subject: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        };
+
+        assert_eq!(
+            associated_config_property_value(&message, OUTLOOK_RULE_ORGANIZER_BINARY_6802),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+    }
+
+    #[test]
     fn inbox_associated_query_rows_default_columns_cover_required_configuration_contract() {
         let snapshot = inbox_associated_sort_snapshot();
         let columns = default_associated_config_columns();
@@ -11189,6 +11206,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             }
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::Binary(Vec::new()))
+            }
+            OUTLOOK_RULE_ORGANIZER_BINARY_6802
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS =>
             {
                 Some(MapiValue::Binary(Vec::new()))
             }
