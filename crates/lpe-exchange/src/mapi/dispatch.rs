@@ -5309,6 +5309,9 @@ fn normalize_table_property_tag_for_session(session: &MapiSession, property_tag:
     let Some(property) = session.named_property_ids.get(&tag.property_id()) else {
         return property_tag;
     };
+    if let Some(well_known_id) = well_known_named_property_id(property) {
+        return (u32::from(well_known_id) << 16) | u32::from(tag.property_type_code());
+    }
     if is_sharing_local_folder_named_property(property) {
         return (PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
             & 0xffff_0000)
@@ -20857,6 +20860,28 @@ mod tests {
                 PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
                 PID_TAG_SUBJECT_W
             ]
+        );
+    }
+
+    #[test]
+    fn table_columns_normalize_well_known_contact_email_named_property_alias() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x8022,
+            MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_EMAIL_ADDRESS),
+            },
+        );
+
+        let columns = normalize_table_property_tags_for_session(
+            &session,
+            vec![0x8022_001f, PID_TAG_SUBJECT_W],
+        );
+
+        assert_eq!(
+            columns,
+            vec![PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG, PID_TAG_SUBJECT_W]
         );
     }
 
