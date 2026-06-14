@@ -1,7 +1,11 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
-use super::sync::{CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
+use super::sync::{
+    CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONTACTS_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID,
+    IM_CONTACT_LIST_FOLDER_ID, INBOX_FOLDER_ID, QUICK_CONTACTS_FOLDER_ID, ROOT_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID, TASKS_FOLDER_ID,
+};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
@@ -1281,10 +1285,27 @@ fn requires_snapshot_backed_contents(plan: &MapiAccessPlan, mailboxes: &[JmapMai
     plan.requires_associated_contents
         || plan.object_ids.contains(&COMMON_VIEWS_FOLDER_ID)
         || plan
+            .object_ids
+            .iter()
+            .any(|folder_id| is_snapshot_backed_collaboration_folder(*folder_id))
+        || plan
             .content_queries
             .iter()
             .any(|query| mailbox_id_for_mapi_folder_id(mailboxes, query.folder_id).is_none())
         || plan.object_ids.contains(&CALENDAR_FOLDER_ID)
+}
+
+fn is_snapshot_backed_collaboration_folder(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CONTACTS_FOLDER_ID
+            | SUGGESTED_CONTACTS_FOLDER_ID
+            | QUICK_CONTACTS_FOLDER_ID
+            | IM_CONTACT_LIST_FOLDER_ID
+            | CONTACTS_SEARCH_FOLDER_ID
+            | CALENDAR_FOLDER_ID
+            | TASKS_FOLDER_ID
+    )
 }
 
 fn rop_requires_full_snapshot(rop_id: u8) -> bool {
@@ -2444,6 +2465,18 @@ mod tests {
             requires_full_snapshot: false,
             requires_associated_contents: false,
             object_ids: vec![COMMON_VIEWS_FOLDER_ID],
+            content_queries: Vec::new(),
+        };
+
+        assert!(requires_snapshot_backed_contents(&plan, &[]));
+    }
+
+    #[test]
+    fn default_contacts_object_id_requires_snapshot_backed_contents() {
+        let plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: vec![CONTACTS_FOLDER_ID],
             content_queries: Vec::new(),
         };
 
