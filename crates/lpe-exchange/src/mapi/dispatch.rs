@@ -1808,6 +1808,7 @@ fn log_execute_rop_debug(
         && request.all_release
         && request.total_count != 0
         && response.count == 0
+        && response.handle_count == 0
     {
         tracing::info!(
             rca_debug = true,
@@ -19813,7 +19814,7 @@ fn execute_response_handle_table(
     output_handles: &[u32],
     echo_input_handle_table: bool,
 ) -> Vec<u32> {
-    if responses.is_empty() {
+    if responses.is_empty() && !echo_input_handle_table {
         return Vec::new();
     }
     response_handle_table(handle_slots, output_handles, echo_input_handle_table)
@@ -22096,10 +22097,10 @@ mod tests {
     }
 
     #[test]
-    fn release_only_execute_response_has_no_output_handle_table() {
+    fn release_only_execute_response_echoes_input_handle_table() {
         let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], true);
 
-        assert!(response_handles.is_empty());
+        assert_eq!(response_handles, vec![u32::MAX]);
     }
 
     #[test]
