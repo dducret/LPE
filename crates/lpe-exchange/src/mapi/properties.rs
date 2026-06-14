@@ -3762,7 +3762,9 @@ fn property_stream_data(
     if open_mode != 0 {
         return None;
     }
-    let value = match session.handles.get(&input_handle)? {
+    let object = session.handles.get(&input_handle)?;
+    let allow_empty_missing_stream = !matches!(object, MapiObject::AssociatedConfig { .. });
+    let value = match object {
         MapiObject::Folder {
             folder_id,
             properties,
@@ -3807,7 +3809,8 @@ fn property_stream_data(
     };
     let stream = match value {
         Some(value) => mapi_value_stream_bytes(property_tag, value)?,
-        None => empty_stream_bytes_for_property_tag(property_tag)?,
+        None if allow_empty_missing_stream => empty_stream_bytes_for_property_tag(property_tag)?,
+        None => return None,
     };
     Some((stream, None))
 }
@@ -10607,6 +10610,78 @@ mod tests {
 
         assert_eq!(stream, minimal_view_descriptor_binary());
         assert_eq!(stream.len(), 96);
+        assert!(writable_target.is_none());
+    }
+
+    #[test]
+    fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let config_id = crate::mapi::identity::mapi_store_id(0x13f);
+        let message = MapiAssociatedConfigMessage {
+            id: config_id,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x11111111222243338444555555555555),
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({}),
+        };
+        let mut handles = std::collections::HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::AssociatedConfig {
+                folder_id: INBOX_FOLDER_ID,
+                config_id,
+                saved_message: Some(message),
+            },
+        );
+        let session = MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "test@example.com".to_string(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
+            last_seen_at: std::time::SystemTime::UNIX_EPOCH,
+            first_request_type: String::new(),
+            first_request_id: String::new(),
+            last_request_type: String::new(),
+            last_request_id: String::new(),
+            request_count: 0,
+            execute_request_count: 0,
+            next_handle: 2,
+            handles,
+            message_statuses: std::collections::HashMap::new(),
+            saved_search_folder_definitions: std::collections::HashMap::new(),
+            special_folder_aliases: std::collections::HashMap::new(),
+            deleted_advertised_special_folders: std::collections::HashSet::new(),
+            deleted_search_folder_definitions: std::collections::HashSet::new(),
+            named_properties: std::collections::HashMap::new(),
+            named_property_ids: std::collections::HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: std::collections::VecDeque::new(),
+            completed_execute_requests: std::collections::HashMap::new(),
+            completed_execute_request_order: std::collections::VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+            inbox_associated_config_stream_handles: std::collections::HashSet::new(),
+            logon_identity: None,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        assert!(
+            property_stream_data(&session, 1, 0x6802_0102, 0, &[], account_id, &snapshot).is_none()
+        );
+        let (modeled_stream, writable_target) = property_stream_data(
+            &session,
+            1,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            0,
+            &[],
+            account_id,
+            &snapshot,
+        )
+        .expect("modeled associated config stream");
+        assert!(modeled_stream.is_empty());
         assert!(writable_target.is_none());
     }
 

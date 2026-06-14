@@ -2427,6 +2427,39 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn associated_config_debug_fields(
+    session: &MapiSession,
+    snapshot: &MapiMailStoreSnapshot,
+    handle: u32,
+) -> (String, String, String) {
+    let Some(MapiObject::AssociatedConfig {
+        folder_id,
+        config_id,
+        saved_message,
+    }) = session.handles.get(&handle)
+    else {
+        return ("none".to_string(), "none".to_string(), "none".to_string());
+    };
+    snapshot
+        .associated_config_message_for_id(*config_id)
+        .or_else(|| saved_message.clone())
+        .filter(|message| message.folder_id == *folder_id)
+        .map(|message| {
+            (
+                format!("0x{:016x}", message.id),
+                message.message_class,
+                message.subject,
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                format!("0x{config_id:016x}"),
+                "missing".to_string(),
+                "missing".to_string(),
+            )
+        })
+}
+
 fn log_open_message_debug(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -14776,6 +14809,8 @@ where
                 let input_object_kind = mapi_object_debug_kind(session.handles.get(&input_handle));
                 let input_folder_id =
                     mapi_object_debug_folder_id(session.handles.get(&input_handle));
+                let (associated_config_id, associated_config_class, associated_config_subject) =
+                    associated_config_debug_fields(session, snapshot, input_handle);
                 let is_inbox_associated_config_stream = matches!(
                     session.handles.get(&input_handle),
                     Some(MapiObject::AssociatedConfig {
@@ -14818,6 +14853,9 @@ where
                         output_handle_index = request.output_handle_index.unwrap_or(0),
                         object_kind = input_object_kind,
                         folder_id = %input_folder_id,
+                        associated_config_id = %associated_config_id,
+                        associated_config_class = %associated_config_class,
+                        associated_config_subject = %associated_config_subject,
                         stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
                         stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
                         stream_open_result = "missing_stream_data",
@@ -14858,6 +14896,9 @@ where
                     output_handle_value = handle,
                     object_kind = input_object_kind,
                     folder_id = %input_folder_id,
+                    associated_config_id = %associated_config_id,
+                    associated_config_class = %associated_config_class,
+                    associated_config_subject = %associated_config_subject,
                     stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
                     stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
                     stream_size,
