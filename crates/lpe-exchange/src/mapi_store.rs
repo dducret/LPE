@@ -1208,6 +1208,22 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_collaboration_folder_item_count(
+        mut self,
+        folder_id: u64,
+        item_count: u32,
+    ) -> Self {
+        if let Some(folder) = self
+            .collaboration_folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id)
+        {
+            folder.item_count = item_count;
+        }
+        self
+    }
+
     pub(crate) fn with_calendar_attachments(
         mut self,
         calendar_attachments: Vec<(Uuid, Vec<CalendarEventAttachment>)>,

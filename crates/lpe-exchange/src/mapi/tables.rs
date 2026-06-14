@@ -48,13 +48,19 @@ pub(in crate::mapi) fn folder_message_count(
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
-        return if folder.kind == MapiCollaborationFolderKind::Calendar {
-            snapshot
+        return match folder.kind {
+            MapiCollaborationFolderKind::Contacts => snapshot
+                .contacts_for_folder(folder_id)
+                .len()
+                .min(u32::MAX as usize) as u32,
+            MapiCollaborationFolderKind::Calendar => snapshot
                 .events_for_folder(folder_id)
                 .len()
-                .min(u32::MAX as usize) as u32
-        } else {
-            folder.item_count
+                .min(u32::MAX as usize) as u32,
+            MapiCollaborationFolderKind::Task => snapshot
+                .tasks_for_folder(folder_id)
+                .len()
+                .min(u32::MAX as usize) as u32,
         };
     }
     if folder_id == CALENDAR_FOLDER_ID {
@@ -5845,7 +5851,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
-        );
+        )
+        .with_collaboration_folder_item_count(CONTACTS_FOLDER_ID, 0);
         let mut table = MapiObject::ContentsTable {
             folder_id: CONTACTS_FOLDER_ID,
             associated: false,
