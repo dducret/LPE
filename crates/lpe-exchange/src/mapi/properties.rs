@@ -1204,17 +1204,13 @@ pub(in crate::mapi) fn restriction_matches_email(
     })
 }
 
-pub(in crate::mapi) fn restriction_matches_contact(
+pub(in crate::mapi) fn restriction_matches_contact_in_folder(
     restriction: Option<&MapiRestriction>,
     contact: &AccessibleContact,
+    folder_id: u64,
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
-        contact_property_value(
-            contact,
-            mapi_item_id(&contact.id),
-            CONTACTS_FOLDER_ID,
-            property_tag,
-        )
+        contact_property_value(contact, mapi_item_id(&contact.id), folder_id, property_tag)
     })
 }
 
@@ -7820,6 +7816,40 @@ mod tests {
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
             None
         );
+    }
+
+    #[test]
+    fn contact_restriction_uses_projected_folder_context() {
+        let account_id = Uuid::from_u128(0x11111111_1111_4111_8111_111111111111);
+        let mut contact = default_contact_for_mapping(account_id, "default");
+        contact.id = Uuid::from_u128(0x22222222_2222_4222_8222_222222222222);
+        crate::mapi::identity::remember_mapi_identity(
+            contact.id,
+            crate::mapi::identity::mapi_store_id(88),
+        );
+        let expected_parent_source_key = contact_property_value(
+            &contact,
+            mapi_item_id(&contact.id),
+            CONTACTS_SEARCH_FOLDER_ID,
+            PID_TAG_PARENT_SOURCE_KEY,
+        )
+        .expect("projected contact parent source key");
+        let restriction = MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_PARENT_SOURCE_KEY,
+            value: expected_parent_source_key,
+        };
+
+        assert!(restriction_matches_contact_in_folder(
+            Some(&restriction),
+            &contact,
+            CONTACTS_SEARCH_FOLDER_ID
+        ));
+        assert!(!restriction_matches_contact_in_folder(
+            Some(&restriction),
+            &contact,
+            CONTACTS_FOLDER_ID
+        ));
     }
 
     #[test]

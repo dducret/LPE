@@ -7044,6 +7044,9 @@ fn log_outlook_contents_table_query_rows(
         current_position = *position,
         table_total_row_count = total_row_count,
         table_has_restriction = restriction.is_some(),
+        table_restriction_decoded = %format_debug_restriction_option(restriction.as_ref()),
+        table_restriction_property_tags =
+            %format_debug_restriction_property_tags(restriction.as_ref()),
         table_sort_order_count = sort_orders.len(),
         table_sort_orders = %format_debug_sort_orders(sort_orders),
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
@@ -7271,7 +7274,14 @@ fn log_mapi_query_position_debug(
         .and_then(|bytes| bytes.try_into().ok())
         .map(u32::from_le_bytes)
         .unwrap_or(0);
-    let (associated, selected_columns, sort_order_count, restriction_present) = match object {
+    let (
+        associated,
+        selected_columns,
+        sort_order_count,
+        restriction_present,
+        restriction_decoded,
+        restriction_property_tags,
+    ) = match object {
         Some(MapiObject::ContentsTable {
             folder_id,
             associated,
@@ -7288,8 +7298,10 @@ fn log_mapi_query_position_debug(
             )),
             sort_orders.len(),
             restriction.is_some(),
+            format_debug_restriction_option(restriction.as_ref()),
+            format_debug_restriction_property_tags(restriction.as_ref()),
         ),
-        _ => (None, String::new(), 0, false),
+        _ => (None, String::new(), 0, false, String::new(), String::new()),
     };
     tracing::info!(
         rca_debug = true,
@@ -7314,6 +7326,8 @@ fn log_mapi_query_position_debug(
         selected_property_tags = %selected_columns,
         sort_order_count,
         restriction_present,
+        restriction_decoded = %restriction_decoded,
+        restriction_property_tags = %restriction_property_tags,
         inbox_associated_config_summary = object
             .and_then(MapiObject::folder_id)
             .map(|folder_id| {
@@ -7772,6 +7786,21 @@ fn format_debug_restriction(bytes: &[u8]) -> String {
         Ok(restriction) => format_debug_parsed_restriction(&restriction),
         Err(error) => format!("parse_error={error}"),
     }
+}
+
+fn format_debug_restriction_option(restriction: Option<&MapiRestriction>) -> String {
+    restriction
+        .map(format_debug_parsed_restriction)
+        .unwrap_or_default()
+}
+
+fn format_debug_restriction_property_tags(restriction: Option<&MapiRestriction>) -> String {
+    let Some(restriction) = restriction else {
+        return String::new();
+    };
+    let mut tags = Vec::new();
+    collect_restriction_property_tags(restriction, &mut tags);
+    format_debug_property_tags(&tags)
 }
 
 fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {

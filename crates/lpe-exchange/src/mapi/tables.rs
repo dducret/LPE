@@ -1664,7 +1664,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     MapiCollaborationFolderKind::Contacts => {
                         let mut rows = snapshot.contacts_for_folder(*folder_id);
                         rows.retain(|contact| {
-                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                            restriction_matches_contact_in_folder(
+                                restriction.as_ref(),
+                                &contact.contact,
+                                *folder_id,
+                            )
                         });
                         sort_contacts(&mut rows, sort_orders);
                         rows.into_iter()
@@ -1709,7 +1713,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else if is_contact_contents_folder(*folder_id) {
                 let mut rows = snapshot.contacts_for_folder(*folder_id);
                 rows.retain(|contact| {
-                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    restriction_matches_contact_in_folder(
+                        restriction.as_ref(),
+                        &contact.contact,
+                        *folder_id,
+                    )
                 });
                 sort_contacts(&mut rows, sort_orders);
                 rows.into_iter()
@@ -1725,7 +1733,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
                 let mut rows = snapshot.contacts_search_results();
                 rows.retain(|contact| {
-                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    restriction_matches_contact_in_folder(
+                        restriction.as_ref(),
+                        &contact.contact,
+                        CONTACTS_SEARCH_FOLDER_ID,
+                    )
                 });
                 sort_contacts(&mut rows, sort_orders);
                 rows.into_iter()
@@ -4070,15 +4082,20 @@ pub(in crate::mapi) fn rop_find_row_response(
                     MapiCollaborationFolderKind::Contacts => {
                         let mut rows = snapshot.contacts_for_folder(*folder_id);
                         rows.retain(|contact| {
-                            restriction_matches_contact(
+                            restriction_matches_contact_in_folder(
                                 table_restriction.as_ref(),
                                 &contact.contact,
+                                *folder_id,
                             )
                         });
                         sort_contacts(&mut rows, sort_orders);
                         if let Some((index, contact)) =
                             find_row(rows.as_slice(), *position, request, |contact| {
-                                restriction_matches_contact(Some(&restriction), &contact.contact)
+                                restriction_matches_contact_in_folder(
+                                    Some(&restriction),
+                                    &contact.contact,
+                                    *folder_id,
+                                )
                             })
                         {
                             *position = index;
@@ -4145,12 +4162,20 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
                 let mut rows = snapshot.contacts_search_results();
                 rows.retain(|contact| {
-                    restriction_matches_contact(table_restriction.as_ref(), &contact.contact)
+                    restriction_matches_contact_in_folder(
+                        table_restriction.as_ref(),
+                        &contact.contact,
+                        CONTACTS_SEARCH_FOLDER_ID,
+                    )
                 });
                 sort_contacts(&mut rows, sort_orders);
                 if let Some((index, contact)) =
                     find_row(rows.as_slice(), *position, request, |contact| {
-                        restriction_matches_contact(Some(&restriction), &contact.contact)
+                        restriction_matches_contact_in_folder(
+                            Some(&restriction),
+                            &contact.contact,
+                            CONTACTS_SEARCH_FOLDER_ID,
+                        )
                     })
                 {
                     *position = index;
@@ -4509,7 +4534,11 @@ pub(in crate::mapi) fn table_position_and_count(
                         .contacts_for_folder(*folder_id)
                         .into_iter()
                         .filter(|contact| {
-                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                            restriction_matches_contact_in_folder(
+                                restriction.as_ref(),
+                                &contact.contact,
+                                *folder_id,
+                            )
                         })
                         .count(),
                     MapiCollaborationFolderKind::Calendar => {
@@ -4526,7 +4555,11 @@ pub(in crate::mapi) fn table_position_and_count(
                     .contacts_for_folder(*folder_id)
                     .into_iter()
                     .filter(|contact| {
-                        restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                        restriction_matches_contact_in_folder(
+                            restriction.as_ref(),
+                            &contact.contact,
+                            *folder_id,
+                        )
                     })
                     .count()
             } else if *folder_id == NOTES_FOLDER_ID {
@@ -4540,7 +4573,11 @@ pub(in crate::mapi) fn table_position_and_count(
                     .contacts_search_results()
                     .into_iter()
                     .filter(|contact| {
-                        restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                        restriction_matches_contact_in_folder(
+                            restriction.as_ref(),
+                            &contact.contact,
+                            CONTACTS_SEARCH_FOLDER_ID,
+                        )
                     })
                     .count()
             } else if *folder_id == TODO_SEARCH_FOLDER_ID {
@@ -4739,7 +4776,11 @@ pub(in crate::mapi) fn table_row_keys(
                     MapiCollaborationFolderKind::Contacts => {
                         let mut rows = snapshot.contacts_for_folder(*folder_id);
                         rows.retain(|contact| {
-                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                            restriction_matches_contact_in_folder(
+                                restriction.as_ref(),
+                                &contact.contact,
+                                *folder_id,
+                            )
                         });
                         sort_contacts(&mut rows, sort_orders);
                         rows.into_iter().map(|contact| contact.id).collect()
@@ -4763,7 +4804,11 @@ pub(in crate::mapi) fn table_row_keys(
             if is_contact_contents_folder(*folder_id) {
                 let mut rows = snapshot.contacts_for_folder(*folder_id);
                 rows.retain(|contact| {
-                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    restriction_matches_contact_in_folder(
+                        restriction.as_ref(),
+                        &contact.contact,
+                        *folder_id,
+                    )
                 });
                 sort_contacts(&mut rows, sort_orders);
                 return rows.into_iter().map(|contact| contact.id).collect();
@@ -4777,7 +4822,11 @@ pub(in crate::mapi) fn table_row_keys(
             if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
                 let mut rows = snapshot.contacts_search_results();
                 rows.retain(|contact| {
-                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    restriction_matches_contact_in_folder(
+                        restriction.as_ref(),
+                        &contact.contact,
+                        CONTACTS_SEARCH_FOLDER_ID,
+                    )
                 });
                 sort_contacts(&mut rows, sort_orders);
                 return rows.into_iter().map(|contact| contact.id).collect();
