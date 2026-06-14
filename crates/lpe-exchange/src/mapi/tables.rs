@@ -69,6 +69,12 @@ pub(in crate::mapi) fn folder_message_count(
             .len()
             .min(u32::MAX as usize) as u32;
     }
+    if is_contact_contents_folder(folder_id) {
+        return snapshot
+            .contacts_for_folder(folder_id)
+            .len()
+            .min(u32::MAX as usize) as u32;
+    }
     if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
         return folder.item_count;
     }
@@ -85,6 +91,13 @@ pub(in crate::mapi) fn folder_message_count(
     folder_row_for_id(folder_id, mailboxes)
         .map(|mailbox| mailbox.total_emails)
         .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len() as u32)
+}
+
+fn is_contact_contents_folder(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID | QUICK_CONTACTS_FOLDER_ID
+    )
 }
 
 pub(in crate::mapi) fn associated_folder_message_count(
@@ -1480,7 +1493,17 @@ pub(in crate::mapi) fn rop_query_rows_response(
         }) => {
             start_position = *table_position;
             let columns = if columns.is_empty() {
-                if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                if !*associated
+                    && (is_contact_contents_folder(*folder_id)
+                        || *folder_id == CONTACTS_SEARCH_FOLDER_ID
+                        || snapshot
+                            .collaboration_folder_for_id(*folder_id)
+                            .is_some_and(|folder| {
+                                folder.kind == MapiCollaborationFolderKind::Contacts
+                            }))
+                {
+                    default_contact_property_tags()
+                } else if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                     default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
@@ -1677,6 +1700,22 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             .collect::<Vec<_>>()
                     }
                 }
+            } else if is_contact_contents_folder(*folder_id) {
+                let mut rows = snapshot.contacts_for_folder(*folder_id);
+                rows.retain(|contact| {
+                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                });
+                sort_contacts(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|contact| {
+                        serialize_contact_row(
+                            &contact.contact,
+                            contact.id,
+                            contact.folder_id,
+                            &columns,
+                        )
+                    })
+                    .collect::<Vec<_>>()
             } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
                 let mut rows = snapshot.contacts_search_results();
                 rows.retain(|contact| {
@@ -1951,7 +1990,15 @@ fn query_rows_response_columns(
             if !columns.is_empty() {
                 return columns.clone();
             }
-            if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+            if !*associated
+                && (is_contact_contents_folder(*folder_id)
+                    || *folder_id == CONTACTS_SEARCH_FOLDER_ID
+                    || snapshot
+                        .collaboration_folder_for_id(*folder_id)
+                        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts))
+            {
+                default_contact_property_tags()
+            } else if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 default_navigation_shortcut_property_tags()
             } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                 default_conversation_action_property_tags()
@@ -4468,6 +4515,14 @@ pub(in crate::mapi) fn table_position_and_count(
                         .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
                         .count(),
                 }
+            } else if is_contact_contents_folder(*folder_id) {
+                snapshot
+                    .contacts_for_folder(*folder_id)
+                    .into_iter()
+                    .filter(|contact| {
+                        restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    })
+                    .count()
             } else if *folder_id == NOTES_FOLDER_ID {
                 snapshot
                     .notes_for_folder(*folder_id)
@@ -4698,6 +4753,14 @@ pub(in crate::mapi) fn table_row_keys(
                         rows.into_iter().map(|task| task.id).collect()
                     }
                 };
+            }
+            if is_contact_contents_folder(*folder_id) {
+                let mut rows = snapshot.contacts_for_folder(*folder_id);
+                rows.retain(|contact| {
+                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                });
+                sort_contacts(&mut rows, sort_orders);
+                return rows.into_iter().map(|contact| contact.id).collect();
             }
             if *folder_id == NOTES_FOLDER_ID {
                 let mut rows = snapshot.notes_for_folder(*folder_id);
@@ -5731,6 +5794,115 @@ mod tests {
             folder_message_count(CONTACTS_SEARCH_FOLDER_ID, &[], &[], &snapshot),
             1
         );
+    }
+
+    #[test]
+    fn default_contacts_contents_table_uses_contact_rows_and_columns() {
+        let account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let collection = CollaborationCollection {
+            id: "default".to_string(),
+            kind: "contacts".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            display_name: "Contacts".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        };
+        let contact_id = Uuid::parse_str("81818181-8181-4181-8181-818181818181").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            contact_id,
+            crate::mapi::identity::mapi_store_id(681),
+        );
+        let contact = AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            rights: collection.rights.clone(),
+            name: "Denis Ducret".to_string(),
+            role: String::new(),
+            email: "denis@example.test".to_string(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+            ..Default::default()
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            vec![contact],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: false,
+            columns: Vec::new(),
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        assert_eq!(
+            folder_message_count(CONTACTS_FOLDER_ID, &[], &[], &snapshot),
+            1
+        );
+
+        let position_response = rop_query_position_response(
+            &RopRequest {
+                rop_id: RopId::QueryPosition.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&table),
+            &[],
+            &[],
+            &snapshot,
+            account_id,
+        );
+        assert_eq!(
+            u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
+            1
+        );
+
+        let rows_response = rop_query_rows_response(
+            &RopRequest {
+                rop_id: RopId::QueryRows.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![0, 1, 1, 0],
+            },
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            account_id,
+        );
+
+        assert_eq!(
+            u16::from_le_bytes(rows_response[7..9].try_into().unwrap()),
+            1
+        );
+        assert_response_contains_utf16(&rows_response, "Denis Ducret");
+        assert_response_contains_utf16(&rows_response, "denis@example.test");
     }
 
     #[test]
