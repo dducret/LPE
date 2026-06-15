@@ -11405,11 +11405,31 @@ where
                                     contact_id,
                                 );
                             }
-                            Err(_) => responses.extend_from_slice(&rop_error_response(
-                                0x0C,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            )),
+                            Err(error) => {
+                                let (message_class, subject) =
+                                    associated_config_class_and_subject(&properties);
+                                let property_tags = properties.keys().copied().collect::<Vec<_>>();
+                                tracing::warn!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0c",
+                                    folder_id = %format!("{folder_id:#018x}"),
+                                    associated_message_class = %message_class,
+                                    associated_subject = %subject,
+                                    property_tag_count = property_tags.len(),
+                                    property_tags = %format_debug_property_tags(&property_tags),
+                                    save_error = %error,
+                                    "rca debug failed to persist associated config message"
+                                );
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0C,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                            }
                         }
                         continue;
                     }

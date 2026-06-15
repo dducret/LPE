@@ -437,6 +437,22 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
 
     assert_eq!(second.id, first.id);
     assert_eq!(second.properties_json, serde_json::json!({"version": 2}));
+    let explicit_new_id = Uuid::parse_str("10000000-0000-0000-0000-000000000015").unwrap();
+    let explicit = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(explicit_new_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.RssRule".to_string(),
+            subject: "IPM.Configuration.RssRule".to_string(),
+            properties_json: serde_json::json!({"version": 22}),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(explicit.id, first.id);
+    assert_eq!(explicit.properties_json, serde_json::json!({"version": 22}));
     let configs = fixture
         .storage
         .fetch_mapi_associated_configs(fixture.account_id)

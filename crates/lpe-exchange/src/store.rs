@@ -6188,6 +6188,24 @@ impl ExchangeStore for Storage {
             let message_class = input.message_class;
             let subject = input.subject;
             let properties_json = input.properties_json;
+            let explicit_exists = if let Some(id) = input.id {
+                sqlx::query_scalar::<_, bool>(
+                    r#"
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM mapi_associated_config_messages
+                        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                    )
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(input.account_id)
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?
+            } else {
+                false
+            };
             let logical_id = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 SELECT id
@@ -6208,20 +6226,6 @@ impl ExchangeStore for Storage {
             .await?;
             let id = match input.id {
                 Some(id) => {
-                    let explicit_exists = sqlx::query_scalar::<_, bool>(
-                        r#"
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM mapi_associated_config_messages
-                            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                        )
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(input.account_id)
-                    .bind(id)
-                    .fetch_one(&mut *tx)
-                    .await?;
                     if explicit_exists {
                         id
                     } else {
@@ -6230,47 +6234,105 @@ impl ExchangeStore for Storage {
                 }
                 None => logical_id.unwrap_or_else(Uuid::new_v4),
             };
-            let existed = sqlx::query_scalar::<_, bool>(
+            let has_logical_index = sqlx::query_scalar::<_, bool>(
                 r#"
                 SELECT EXISTS (
                     SELECT 1
-                    FROM mapi_associated_config_messages
-                    WHERE tenant_id = $1 AND id = $2
+                    FROM pg_index index_info
+                    JOIN pg_class index_class
+                      ON index_class.oid = index_info.indexrelid
+                    WHERE index_info.indrelid = 'mapi_associated_config_messages'::regclass
+                      AND index_class.relname = 'mapi_associated_config_messages_logical_idx'
                 )
                 "#,
             )
-            .bind(tenant_id)
-            .bind(id)
             .fetch_one(&mut *tx)
             .await?;
-            let row = sqlx::query(
-                r#"
-                INSERT INTO mapi_associated_config_messages (
-                    tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+            let existed = explicit_exists || logical_id.is_some();
+            let row = if explicit_exists {
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_associated_config_messages (
+                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (tenant_id, id)
+                    DO UPDATE SET
+                        folder_id = EXCLUDED.folder_id,
+                        message_class = EXCLUDED.message_class,
+                        subject = EXCLUDED.subject,
+                        properties_json = EXCLUDED.properties_json,
+                        updated_at = NOW()
+                    WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    "#,
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (tenant_id, id)
-                DO UPDATE SET
-                    folder_id = EXCLUDED.folder_id,
-                    message_class = EXCLUDED.message_class,
-                    subject = EXCLUDED.subject,
-                    properties_json = EXCLUDED.properties_json,
-                    updated_at = NOW()
-                WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
-                RETURNING id, account_id, folder_id, message_class, subject, properties_json
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(id)
-            .bind(input.account_id)
-            .bind(input.folder_id as i64)
-            .bind(&message_class)
-            .bind(subject)
-            .bind(properties_json)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?;
+                .bind(tenant_id)
+                .bind(id)
+                .bind(input.account_id)
+                .bind(input.folder_id as i64)
+                .bind(&message_class)
+                .bind(&subject)
+                .bind(&properties_json)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
+            } else if has_logical_index {
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_associated_config_messages (
+                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (tenant_id, account_id, folder_id, message_class)
+                    DO UPDATE SET
+                        subject = EXCLUDED.subject,
+                        properties_json = EXCLUDED.properties_json,
+                        updated_at = NOW()
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(id)
+                .bind(input.account_id)
+                .bind(input.folder_id as i64)
+                .bind(&message_class)
+                .bind(&subject)
+                .bind(&properties_json)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_associated_config_messages (
+                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (tenant_id, id)
+                    DO UPDATE SET
+                        folder_id = EXCLUDED.folder_id,
+                        message_class = EXCLUDED.message_class,
+                        subject = EXCLUDED.subject,
+                        properties_json = EXCLUDED.properties_json,
+                        updated_at = NOW()
+                    WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(id)
+                .bind(input.account_id)
+                .bind(input.folder_id as i64)
+                .bind(&message_class)
+                .bind(&subject)
+                .bind(&properties_json)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
+            };
             let saved = mapi_associated_config_from_row(row)?;
+            let existed = existed || saved.id != id;
             sqlx::query(
                 r#"
                 DELETE FROM mapi_associated_config_messages
