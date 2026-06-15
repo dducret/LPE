@@ -3790,16 +3790,36 @@ fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> boo
 
 pub(in crate::mapi) fn associated_config_visible_in_table(
     folder_id: u64,
-    _restriction: Option<&MapiRestriction>,
+    restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
     if folder_id != INBOX_FOLDER_ID {
         return true;
     }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
-        return false;
+        return message.message_class == "IPM.Sharing.Configuration"
+            && restriction.is_some_and(|restriction| {
+                message_class_restriction_matches_exact(restriction, &message.message_class)
+            });
     }
     !is_empty_inbox_configuration_placeholder(message)
+}
+
+fn message_class_restriction_matches_exact(
+    restriction: &MapiRestriction,
+    message_class: &str,
+) -> bool {
+    matches!(
+        restriction,
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        } | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+        } if value.eq_ignore_ascii_case(message_class)
+    )
 }
 
 fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
@@ -8943,8 +8963,8 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_suppresses_outlook_sharing_configuration() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Configuration");
+    fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
     }
 
     #[test]
