@@ -28,8 +28,14 @@ use crate::mapi::properties::{
     is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
 };
 
-const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 1] =
-    [crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID as i64];
+const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 6] = [
+    crate::mapi::identity::CONTACTS_FOLDER_ID as i64,
+    crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID as i64,
+    crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID as i64,
+    crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID as i64,
+    crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID as i64,
+    crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID as i64,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
@@ -7820,6 +7826,18 @@ mod tests {
         assert!(!order_by.contains("m."));
         assert!(order_by.contains("message_flags ASC"));
         assert!(order_by.ends_with("id DESC"));
+    }
+
+    #[test]
+    fn associated_config_cleanup_keeps_virtual_parent_folders() {
+        let allowed = MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS;
+
+        assert!(allowed.contains(&(crate::mapi::identity::CONTACTS_FOLDER_ID as i64)));
+        assert!(allowed.contains(&(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID as i64)));
+        assert!(allowed.contains(&(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID as i64)));
+        assert!(allowed.contains(&(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID as i64)));
+        assert!(allowed.contains(&(crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID as i64)));
+        assert!(allowed.contains(&(crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID as i64)));
     }
 }
 
