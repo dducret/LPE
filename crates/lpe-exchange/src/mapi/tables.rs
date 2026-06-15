@@ -9629,6 +9629,57 @@ mod tests {
     }
 
     #[test]
+    fn delegate_freebusy_projects_outlook_view_probe_properties() {
+        let message = MapiDelegateFreeBusyMessage {
+            id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4),
+            folder_id: FREEBUSY_DATA_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_6672_4266_8000_000000000001),
+            message: lpe_storage::DelegateFreeBusyMessageObject {
+                id: Uuid::from_u128(0x6d617069_6672_4266_8000_000000000001),
+                account_id: Uuid::nil(),
+                owner_account_id: Uuid::nil(),
+                owner_email: String::new(),
+                message_kind: "freebusy".to_string(),
+                subject: "LocalFreebusy".to_string(),
+                body_text: String::new(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: "{}".to_string(),
+                updated_at: "1970-01-01T00:00:00Z".to_string(),
+            },
+        };
+
+        for tag in [
+            0x6841_0003,
+            0x6842_000B,
+            0x6843_000B,
+            0x684A_101F,
+            0x6845_1102,
+            0x686B_1003,
+            0x6870_1102,
+            0x6871_1003,
+            0x6872_001F,
+            0x686D_000B,
+            0x686E_000B,
+            0x686F_000B,
+            0x684B_000B,
+            0x6844_101F,
+            0x3008_0040,
+            0x0E0B_0102,
+        ] {
+            assert!(
+                delegate_freebusy_property_value(&message, tag).is_some(),
+                "missing modeled freebusy property 0x{tag:08x}"
+            );
+        }
+        assert_ne!(
+            delegate_freebusy_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
+            Some(MapiValue::I64(0))
+        );
+    }
+
+    #[test]
     fn inbox_associated_query_rows_default_columns_cover_required_configuration_contract() {
         let snapshot = inbox_associated_sort_snapshot();
         let columns = default_associated_config_columns();
@@ -11418,10 +11469,21 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
             mapi_mailstore::predecessor_change_list(change_number),
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
-        PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
             mapi_mailstore::filetime_from_rfc3339_utc(&message.message.updated_at) as i64,
         )),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
+        0x6842_000B | 0x6843_000B | 0x684B_000B | 0x686D_000B | 0x686E_000B | 0x686F_000B => {
+            Some(MapiValue::Bool(false))
+        }
+        0x6844_101F | 0x684A_101F => Some(MapiValue::MultiString(Vec::new())),
+        0x6845_1102 | 0x6870_1102 => Some(MapiValue::MultiBinary(Vec::new())),
+        0x686B_1003 | 0x6871_1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x6872_001F => Some(MapiValue::String(String::new())),
         _ => None,
     }
 }

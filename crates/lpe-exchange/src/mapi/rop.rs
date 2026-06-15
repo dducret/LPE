@@ -2232,6 +2232,24 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
                 | PID_TAG_VIEW_DESCRIPTOR_BINARY
         ),
+        Some(MapiObject::DelegateFreeBusyMessage { .. }) => matches!(
+            storage_tag,
+            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                | 0x6842_000B
+                | 0x6843_000B
+                | 0x6844_101F
+                | 0x6845_1102
+                | 0x684A_101F
+                | 0x684B_000B
+                | 0x686B_1003
+                | 0x686D_000B
+                | 0x686E_000B
+                | 0x686F_000B
+                | 0x6870_1102
+                | 0x6871_1003
+                | 0x6872_001F
+        ),
         Some(MapiObject::Folder { folder_id, .. }) => {
             is_acl_member_name_property_tag(tag)
                 || is_modeled_empty_special_folder_class_property(*folder_id, storage_tag)
