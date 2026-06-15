@@ -10698,7 +10698,7 @@ mod tests {
             &snapshot
         )
         .is_none());
-        let (rule_stream, writable_target) = property_stream_data(
+        assert!(property_stream_data(
             &session,
             2,
             OUTLOOK_RULE_ORGANIZER_BINARY_6802,
@@ -10707,9 +10707,7 @@ mod tests {
             account_id,
             &snapshot,
         )
-        .expect("rule organizer stream");
-        assert!(rule_stream.is_empty());
-        assert!(writable_target.is_none());
+        .is_none());
         let (modeled_stream, writable_target) = property_stream_data(
             &session,
             1,

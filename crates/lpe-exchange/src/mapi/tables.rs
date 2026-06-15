@@ -9986,6 +9986,20 @@ mod tests {
             associated_config_property_value(&xml_only, PID_TAG_ROAMING_XML_STREAM),
             Some(MapiValue::Binary(b"<xml/>".to_vec()))
         );
+        let explicit_no_streams = MapiAssociatedConfigMessage {
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "i32", "value": 0}
+            }),
+            ..message.clone()
+        };
+        assert_eq!(
+            associated_config_property_value(&explicit_no_streams, PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::I32(0))
+        );
+        assert_eq!(
+            associated_config_property_value(&explicit_no_streams, PID_TAG_ROAMING_DICTIONARY),
+            None
+        );
         let quick_step = MapiAssociatedConfigMessage {
             id: crate::mapi::identity::mapi_store_id(
                 crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 92,
@@ -11383,7 +11397,8 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_ROAMING_DICTIONARY
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
-                Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
+                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_roaming_dictionary_stream()))
             }
             PID_TAG_ROAMING_DATATYPES
                 if message.message_class

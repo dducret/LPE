@@ -22468,7 +22468,9 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 message_class: "IPM.Configuration.A".to_string(),
                 subject: "A".to_string(),
-                properties_json: serde_json::json!({}),
+                properties_json: serde_json::json!({
+                    "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
             },
             crate::store::MapiAssociatedConfigRecord {
                 id: second_id,
@@ -22476,7 +22478,9 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 message_class: "IPM.Configuration.B".to_string(),
                 subject: "B".to_string(),
-                properties_json: serde_json::json!({}),
+                properties_json: serde_json::json!({
+                    "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
             },
         ]);
 
