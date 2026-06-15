@@ -9567,7 +9567,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_query_rows_returns_rule_organizer_default() {
+    fn inbox_associated_query_rows_does_not_return_empty_rule_organizer_default() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -9607,12 +9607,12 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.RuleOrganizer").is_none());
     }
 
     #[test]
-    fn rule_organizer_default_projects_outlook_binary_stream_property() {
+    fn rule_organizer_without_client_payload_has_no_synthetic_stream_property() {
         let message = MapiAssociatedConfigMessage {
             id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED),
             folder_id: INBOX_FOLDER_ID,
@@ -9624,7 +9624,7 @@ mod tests {
 
         assert_eq!(
             associated_config_property_value(&message, OUTLOOK_RULE_ORGANIZER_BINARY_6802),
-            Some(MapiValue::Binary(Vec::new()))
+            None
         );
     }
 
@@ -11248,12 +11248,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             }
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                Some(MapiValue::Binary(Vec::new()))
-            }
-            OUTLOOK_RULE_ORGANIZER_BINARY_6802
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS =>
             {
                 Some(MapiValue::Binary(Vec::new()))
             }

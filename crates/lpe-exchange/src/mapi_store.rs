@@ -222,8 +222,7 @@ const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS: &str = "IPM.Configuration.U
 const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
 pub(crate) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
-const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
+const OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY: &str = "0x68020102";
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS: &str =
     "IPM.Microsoft.FolderDesign.NamedView";
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
@@ -281,7 +280,6 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID
-            | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
             | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
             | OUTLOOK_INBOX_SHARING_INDEX_ID
@@ -385,14 +383,6 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             properties_json: serde_json::json!({}),
         },
         MapiAssociatedConfigMessage {
-            id: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
-            folder_id,
-            canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
-            message_class: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
-            subject: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
-            properties_json: serde_json::json!({}),
-        },
-        MapiAssociatedConfigMessage {
             id: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
             folder_id,
             canonical_id: Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000001),
@@ -428,7 +418,6 @@ fn outlook_inbox_persisted_associated_config_defaults(
             matches!(
                 message.message_class.as_str(),
                 OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                    | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
                     | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
             )
         })
@@ -483,12 +472,12 @@ fn log_outlook_inbox_associated_config_bootstrap(
     inserted: &[MapiAssociatedConfigRecord],
     required_defaults: &[UpsertMapiAssociatedConfigInput],
 ) {
-    // Keep EAS, ELC, and Sharing rows virtual until Outlook traces require
-    // durable modeled state; persisting empty placeholders would create
-    // speculative Exchange-only configuration.
+    // Keep EAS, ELC, Sharing, and RuleOrganizer rows virtual or client-created
+    // until Outlook traces require durable modeled state with non-empty payloads.
     let virtual_only_defaults = [
         OUTLOOK_INBOX_EAS_CONFIG_CLASS,
         OUTLOOK_INBOX_ELC_CONFIG_CLASS,
+        OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
         OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS,
         OUTLOOK_INBOX_SHARING_INDEX_CLASS,
     ];
@@ -503,6 +492,17 @@ fn log_outlook_inbox_associated_config_bootstrap(
         virtual_only_defaults = %virtual_only_defaults.join(","),
         "rca debug mapi inbox associated config bootstrap"
     );
+}
+
+fn is_empty_outlook_rule_organizer_placeholder(config: &MapiAssociatedConfigRecord) -> bool {
+    config.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+        && config.message_class == OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+        && !config
+            .properties_json
+            .get(OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY)
+            .and_then(|value| value.get("value"))
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.is_empty())
 }
 
 fn outlook_quick_step_associated_config_defaults(
@@ -2353,6 +2353,24 @@ impl<T: ExchangeStore> MapiStore for T {
             let rules = self.list_mailbox_rules(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
             let mut associated_configs = self.fetch_mapi_associated_configs(account_id).await?;
+            let dropped_empty_rule_organizer_configs = associated_configs
+                .iter()
+                .filter(|config| is_empty_outlook_rule_organizer_placeholder(config))
+                .count();
+            if dropped_empty_rule_organizer_configs > 0 {
+                associated_configs
+                    .retain(|config| !is_empty_outlook_rule_organizer_placeholder(config));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    account_id = %account_id,
+                    folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
+                    dropped_empty_rule_organizer_configs,
+                    message_class = OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
+                    stream_property = OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY,
+                    "rca debug mapi dropped empty inbox rule organizer associated config"
+                );
+            }
             let required_inbox_configs =
                 outlook_inbox_persisted_associated_config_defaults(account_id);
             let missing_inbox_configs = required_inbox_configs
@@ -3505,10 +3523,6 @@ mod tests {
                 OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
             ),
             (
-                OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
-                OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
-            ),
-            (
                 OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
                 OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
             ),
@@ -3621,10 +3635,10 @@ mod tests {
             .map(|input| input.message_class.as_str())
             .collect::<HashSet<_>>();
 
-        assert_eq!(defaults.len(), 3);
+        assert_eq!(defaults.len(), 2);
         assert!(classes.contains(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS));
-        assert!(classes.contains(OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS));
         assert!(classes.contains(OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS));
+        assert!(!classes.contains(OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS));
         assert!(!classes.contains(OUTLOOK_INBOX_EAS_CONFIG_CLASS));
         assert!(!classes.contains(OUTLOOK_INBOX_ELC_CONFIG_CLASS));
         assert!(!classes.contains(OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS));
@@ -3640,7 +3654,6 @@ mod tests {
                     matches!(
                         message.message_class.as_str(),
                         OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                            | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
                             | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
                     )
                 })
@@ -3660,6 +3673,31 @@ mod tests {
                 Some(default.id)
             );
         }
+    }
+
+    #[test]
+    fn empty_rule_organizer_placeholder_is_not_modeled_state() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let empty = crate::store::MapiAssociatedConfigRecord {
+            id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
+            account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        };
+        let non_empty = crate::store::MapiAssociatedConfigRecord {
+            properties_json: serde_json::json!({
+                OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY: {
+                    "type": "binary",
+                    "value": "0102"
+                }
+            }),
+            ..empty.clone()
+        };
+
+        assert!(is_empty_outlook_rule_organizer_placeholder(&empty));
+        assert!(!is_empty_outlook_rule_organizer_placeholder(&non_empty));
     }
 
     #[test]

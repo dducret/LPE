@@ -266,6 +266,11 @@ WHERE message_class IN (
     'IPM.Microsoft.PendingChange.MigrateLabels'
 );
 
+DELETE FROM public.mapi_associated_config_messages
+WHERE folder_id = 327681
+  AND message_class = 'IPM.RuleOrganizer'
+  AND COALESCE(properties_json #>> '{0x68020102,value}', '') = '';
+
 UPDATE public.mapi_object_identities
 SET source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
         || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),

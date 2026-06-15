@@ -247,7 +247,6 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
 
     for class in [
         "IPM.Configuration.UMOLK.UserOptions",
-        "IPM.RuleOrganizer",
         "IPM.Microsoft.FolderDesign.NamedView",
     ] {
         assert_eq!(
@@ -277,6 +276,7 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
     for class in [
         "IPM.Configuration.EAS",
         "IPM.Configuration.ELC",
+        "IPM.RuleOrganizer",
         "IPM.Sharing.Configuration",
         "IPM.Sharing.Index",
     ] {
