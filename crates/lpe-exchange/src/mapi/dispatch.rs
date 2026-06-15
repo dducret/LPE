@@ -20493,6 +20493,31 @@ where
         .and_then(persistable_import_source_key_global_counter);
     let id = associated_config_uuid(properties);
     let (message_class, subject) = associated_config_class_and_subject(properties);
+    if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, properties) {
+        let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
+        let reserved_global_counter =
+            crate::mapi::identity::global_counter_from_store_id(default.id);
+        let message_id = remember_created_mapi_identity(
+            store,
+            principal,
+            MapiIdentityObjectKind::AssociatedConfig,
+            default.canonical_id,
+            reserved_global_counter,
+            None,
+        )
+        .await?;
+        return Ok((
+            crate::store::MapiAssociatedConfigRecord {
+                id: default.canonical_id,
+                account_id: principal.account_id,
+                folder_id: default.folder_id,
+                message_class: default.message_class,
+                subject: default.subject,
+                properties_json: default.properties_json,
+            },
+            message_id,
+        ));
+    }
     let saved = store
         .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
             id: Some(id),
@@ -20513,6 +20538,25 @@ where
     )
     .await?;
     Ok((saved, message_id))
+}
+
+fn is_empty_inbox_message_list_settings_placeholder(
+    folder_id: u64,
+    message_class: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> bool {
+    folder_id == INBOX_FOLDER_ID
+        && message_class == "IPM.Configuration.MessageListSettings"
+        && properties
+            .get(&PID_TAG_ROAMING_DATATYPES)
+            .cloned()
+            .and_then(MapiValue::into_u32)
+            .unwrap_or(0)
+            == 0
+        && !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
+        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
+        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+        && !properties.contains_key(&0x7C09_0102)
 }
 
 fn associated_config_uuid(properties: &HashMap<u32, MapiValue>) -> Uuid {
@@ -22300,6 +22344,39 @@ mod tests {
         assert!(summary.contains("PidTagRoamingDatatypes=i32"));
         assert!(summary.contains("PidTagRoamingXmlStream=binary:bytes=6"));
         assert!(summary.contains("OutlookConfigurationStamp=i32"));
+    }
+
+    #[test]
+    fn empty_inbox_message_list_settings_save_is_transient() {
+        let properties = HashMap::from([
+            (
+                PID_TAG_MESSAGE_CLASS_W,
+                MapiValue::String("IPM.Configuration.MessageListSettings".to_string()),
+            ),
+            (PID_TAG_ROAMING_DATATYPES, MapiValue::I32(0)),
+        ]);
+
+        assert!(is_empty_inbox_message_list_settings_placeholder(
+            INBOX_FOLDER_ID,
+            "IPM.Configuration.MessageListSettings",
+            &properties
+        ));
+
+        let with_payload = HashMap::from([
+            (
+                PID_TAG_MESSAGE_CLASS_W,
+                MapiValue::String("IPM.Configuration.MessageListSettings".to_string()),
+            ),
+            (
+                PID_TAG_ROAMING_DICTIONARY,
+                MapiValue::Binary(b"<xml/>".to_vec()),
+            ),
+        ]);
+        assert!(!is_empty_inbox_message_list_settings_placeholder(
+            INBOX_FOLDER_ID,
+            "IPM.Configuration.MessageListSettings",
+            &with_payload
+        ));
     }
 
     #[test]
