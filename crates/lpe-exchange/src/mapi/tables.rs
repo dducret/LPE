@@ -3788,31 +3788,13 @@ fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> boo
     )
 }
 
-fn is_outlook_configuration_prefix_restriction(restriction: Option<&MapiRestriction>) -> bool {
-    matches!(
-        restriction,
-        Some(MapiRestriction::Content {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value,
-        }) if value.eq_ignore_ascii_case("IPM.Configuration.")
-    ) || matches!(
-        restriction,
-        Some(MapiRestriction::Property {
-            relop: 0x02,
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value: MapiValue::String(value),
-        }) if value.eq_ignore_ascii_case("IPM.Configuration.")
-    )
-}
-
 pub(in crate::mapi) fn associated_config_visible_in_table(
     folder_id: u64,
-    restriction: Option<&MapiRestriction>,
+    _restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
     !(folder_id == INBOX_FOLDER_ID
-        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
-        && (restriction.is_none() || is_outlook_configuration_prefix_restriction(restriction)))
+        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id))
 }
 
 fn outlook_configuration_prefix_restriction() -> MapiRestriction {
@@ -4040,6 +4022,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                     .is_empty()
             {
                 let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                rows.retain(|message| {
+                    associated_config_visible_in_table(*folder_id, Some(&restriction), message)
+                });
                 sort_associated_config_messages(&mut rows, sort_orders);
                 let broad_outlook_configuration_probe = *folder_id == INBOX_FOLDER_ID
                     && is_broad_outlook_configuration_find_row(&restriction);
@@ -8923,13 +8908,13 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_eas_config() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.EAS");
+    fn inbox_associated_find_row_suppresses_outlook_eas_config() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.EAS");
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_elc_config() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
+    fn inbox_associated_find_row_suppresses_outlook_elc_config() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
     }
 
     #[test]
@@ -8940,13 +8925,13 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
+    fn inbox_associated_find_row_suppresses_outlook_sharing_configuration() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Configuration");
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_sharing_index() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
+    fn inbox_associated_find_row_suppresses_outlook_sharing_index() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
     }
 
     #[test]
@@ -10099,6 +10084,15 @@ mod tests {
         assert!(response
             .windows(encoded_message_class.len())
             .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    fn assert_inbox_associated_find_row_no_match_for_message_class(message_class: &str) {
+        let response = inbox_associated_find_row_response_for_message_class(message_class);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 0);
     }
 
     fn inbox_associated_find_row_response_for_message_class(message_class: &str) -> Vec<u8> {
