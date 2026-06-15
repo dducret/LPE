@@ -137,7 +137,9 @@ pub(in crate::mapi) fn associated_folder_message_count(
     {
         snapshot
             .associated_config_messages_for_folder(folder_id)
-            .len()
+            .into_iter()
+            .filter(|message| associated_config_visible_in_table(folder_id, None, message))
+            .count()
             .min(u32::MAX as usize) as u32
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
@@ -186,7 +188,10 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
         snapshot
             .associated_config_messages_for_folder(folder_id)
             .iter()
-            .filter(|message| restriction_matches_associated_config(restriction, message))
+            .filter(|message| {
+                restriction_matches_associated_config(restriction, message)
+                    && associated_config_visible_in_table(folder_id, restriction, message)
+            })
             .count()
     }
 }
@@ -1631,6 +1636,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
                     rows.retain(|message| {
                         restriction_matches_associated_config(restriction.as_ref(), message)
+                            && associated_config_visible_in_table(
+                                *folder_id,
+                                restriction.as_ref(),
+                                message,
+                            )
                     });
                     sort_associated_config_messages(&mut rows, sort_orders);
                     rows.iter()
@@ -2172,6 +2182,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
             rows.retain(|message| {
                 restriction_matches_associated_config(restriction.as_ref(), message)
+                    && associated_config_visible_in_table(*folder_id, restriction.as_ref(), message)
             });
             sort_associated_config_messages(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
@@ -3775,6 +3786,33 @@ fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> boo
             value: MapiValue::String(value),
         } if value.eq_ignore_ascii_case("IPM.Configuration.")
     )
+}
+
+fn is_outlook_configuration_prefix_restriction(restriction: Option<&MapiRestriction>) -> bool {
+    matches!(
+        restriction,
+        Some(MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+        }) if value.eq_ignore_ascii_case("IPM.Configuration.")
+    ) || matches!(
+        restriction,
+        Some(MapiRestriction::Property {
+            relop: 0x02,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        }) if value.eq_ignore_ascii_case("IPM.Configuration.")
+    )
+}
+
+pub(in crate::mapi) fn associated_config_visible_in_table(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    !(folder_id == INBOX_FOLDER_ID
+        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+        && (restriction.is_none() || is_outlook_configuration_prefix_restriction(restriction)))
 }
 
 fn outlook_configuration_prefix_restriction() -> MapiRestriction {
@@ -9423,10 +9461,12 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            4
+            2
         );
         assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
-        assert_response_contains_utf16(&query_response, "IPM.Configuration.ELC");
+        assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
+        assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
+        assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
         assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
         assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
         assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
@@ -9464,13 +9504,15 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(response[9], 0);
         let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
-        let eas = utf16_position(&response, "IPM.Configuration.EAS").unwrap();
-        let elc = utf16_position(&response, "IPM.Configuration.ELC").unwrap();
         let message_list =
             utf16_position(&response, "IPM.Configuration.MessageListSettings").unwrap();
-        assert!(account_prefs < eas);
-        assert!(eas < elc);
-        assert!(elc < message_list);
+        let user_options =
+            utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").unwrap();
+        assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
+        assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
+        assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
+        assert!(account_prefs < message_list);
+        assert!(message_list < user_options);
     }
 
     #[test]

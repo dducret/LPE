@@ -2934,6 +2934,7 @@ fn format_inbox_associated_prefix_find_summary(
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    rows.retain(|message| associated_config_visible_in_table(INBOX_FOLDER_ID, None, message));
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let first_class = rows
         .get(position)
@@ -7670,7 +7671,10 @@ fn format_ipm_configuration_contract_summary(
     let rows = snapshot
         .associated_config_messages_for_folder(folder_id)
         .into_iter()
-        .filter(|message| message.message_class.starts_with("IPM.Configuration."))
+        .filter(|message| {
+            message.message_class.starts_with("IPM.Configuration.")
+                && associated_config_visible_in_table(folder_id, None, message)
+        })
         .collect::<Vec<_>>();
     let missing_columns = missing_debug_property_tags(
         &[
@@ -8047,7 +8051,10 @@ fn format_outlook_query_row_values(
     if rows.is_empty() {
         return String::new();
     }
-    rows.retain(|message| restriction_matches_associated_config(restriction, message));
+    rows.retain(|message| {
+        restriction_matches_associated_config(restriction, message)
+            && associated_config_visible_in_table(folder_id, restriction, message)
+    });
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     select_query_window(rows.len(), position, forward_read, row_count)
         .iter()
@@ -8332,7 +8339,10 @@ fn format_inbox_associated_wire_row_summary(
     if rows.is_empty() {
         return String::new();
     }
-    rows.retain(|message| restriction_matches_associated_config(restriction, message));
+    rows.retain(|message| {
+        restriction_matches_associated_config(restriction, message)
+            && associated_config_visible_in_table(folder_id, restriction, message)
+    });
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let column_shape = columns
@@ -8581,7 +8591,10 @@ fn format_inbox_associated_query_row_window(
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
-    rows.retain(|message| restriction_matches_associated_config(restriction, message));
+    rows.retain(|message| {
+        restriction_matches_associated_config(restriction, message)
+            && associated_config_visible_in_table(INBOX_FOLDER_ID, restriction, message)
+    });
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
@@ -8705,7 +8718,11 @@ fn format_inbox_associated_config_summary(
     if !associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let messages = snapshot.associated_config_messages_for_folder(folder_id);
+    let messages = snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .into_iter()
+        .filter(|message| associated_config_visible_in_table(folder_id, None, message))
+        .collect::<Vec<_>>();
     let mut parts = Vec::new();
     for message in &messages {
         let source_key = mapi_mailstore::source_key_for_store_id(message.id);
@@ -22301,7 +22318,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_config_summary_includes_tail_default_rows() {
+    fn inbox_associated_config_summary_suppresses_virtual_only_rows() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000099999);
         let header_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
@@ -22347,10 +22364,26 @@ mod tests {
         let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
         assert!(
-            summary.contains("class=IPM.Sharing.Configuration"),
+            summary.contains("class=IPM.Configuration.AccountPrefs"),
             "{summary}"
         );
-        assert!(summary.contains("class=IPM.Sharing.Index"), "{summary}");
+        assert!(
+            summary.contains("class=IPM.Configuration.MessageListSettings"),
+            "{summary}"
+        );
+        assert!(
+            !summary.contains("class=IPM.Configuration.EAS"),
+            "{summary}"
+        );
+        assert!(
+            !summary.contains("class=IPM.Configuration.ELC"),
+            "{summary}"
+        );
+        assert!(
+            !summary.contains("class=IPM.Sharing.Configuration"),
+            "{summary}"
+        );
+        assert!(!summary.contains("class=IPM.Sharing.Index"), "{summary}");
         assert!(!summary.contains("truncated="), "{summary}");
     }
 

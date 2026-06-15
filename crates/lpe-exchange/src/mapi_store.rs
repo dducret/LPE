@@ -286,6 +286,16 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
     )
 }
 
+pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -> bool {
+    matches!(
+        item_id,
+        OUTLOOK_INBOX_EAS_CONFIG_ID
+            | OUTLOOK_INBOX_ELC_CONFIG_ID
+            | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
+            | OUTLOOK_INBOX_SHARING_INDEX_ID
+    )
+}
+
 pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -> bool {
     item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
 }
