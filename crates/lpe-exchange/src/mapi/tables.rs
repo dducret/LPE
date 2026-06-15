@@ -5247,7 +5247,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
     match folder_id {
         ROOT_FOLDER_ID => ("Root", 0, "", true),
         IPM_SUBTREE_FOLDER_ID => ("Top of Information Store", ROOT_FOLDER_ID, "IPF.Note", true),
-        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "", false),
+        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "IPF.Note", false),
         SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "", false),
         INBOX_FOLDER_ID => ("Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         OUTBOX_FOLDER_ID => ("Outbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
@@ -10567,6 +10567,7 @@ mod tests {
         let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
         for folder_id in [
             INBOX_FOLDER_ID,
+            DEFERRED_ACTION_FOLDER_ID,
             SENT_FOLDER_ID,
             FREEBUSY_DATA_FOLDER_ID,
             CALENDAR_FOLDER_ID,
