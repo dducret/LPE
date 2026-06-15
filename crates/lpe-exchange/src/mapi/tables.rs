@@ -2351,14 +2351,18 @@ where
     .join("|");
 
     format!(
-        "row={row_index} kind={row_kind} object_id={} display_name={} entry_id={} record_key={} source_key={} parent_source_key={} parent_entry_id={} folder_id={} instance_key={} container_class={} expected_container_class={} folder_type={} content_count={} associated_content_count={} folder_id_consistent={} parent_id_consistent={} source_key_stable_non_empty={} record_key_stable_non_empty={} instance_key_stable_non_empty={} folder_type_valid={} counts_present_non_negative={} container_class_status={} issues={}",
+        "row={row_index} kind={row_kind} object_id={} display_name={} entry_id={} entry_id_decoded={} record_key={} source_key={} source_key_decoded={} parent_source_key={} parent_source_key_decoded={} parent_entry_id={} parent_entry_id_decoded={} folder_id={} instance_key={} container_class={} expected_container_class={} folder_type={} content_count={} associated_content_count={} folder_id_consistent={} parent_id_consistent={} source_key_stable_non_empty={} record_key_stable_non_empty={} instance_key_stable_non_empty={} folder_type_valid={} counts_present_non_negative={} container_class_status={} issues={}",
         format_debug_u64(Some(object_id)),
         display_name.unwrap_or_default(),
         format_debug_binary(entry_id.as_deref()),
+        format_debug_u64(entry_id_decoded),
         format_debug_binary(record_key.as_deref()),
         format_debug_binary(source_key.as_deref()),
+        format_debug_u64(source_key_decoded),
         format_debug_binary(parent_source_key.as_deref()),
+        format_debug_u64(parent_source_key_decoded),
         format_debug_binary(parent_entry_id.as_deref()),
+        format_debug_u64(parent_entry_id_decoded),
         format_debug_u64(folder_id),
         format_debug_binary(instance_key.as_deref()),
         container_class.unwrap_or_default(),
@@ -2442,16 +2446,21 @@ fn debug_expected_container_class(folder_id: u64) -> Option<&'static str> {
 
 fn format_debug_binary(value: Option<&[u8]>) -> String {
     match value {
-        Some(bytes) => format!(
-            "present:{}:{}",
-            bytes.len(),
-            bytes
+        Some(bytes) => {
+            let head = bytes
                 .iter()
                 .take(12)
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<Vec<_>>()
-                .join("")
-        ),
+                .join("");
+            let tail = bytes
+                .iter()
+                .skip(bytes.len().saturating_sub(6))
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join("");
+            format!("present:{}:{}..{}", bytes.len(), head, tail)
+        }
         None => "missing".to_string(),
     }
 }
@@ -5644,6 +5653,39 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert!(summaries[0].contains("kind=inbox_associated"));
         assert!(summaries[0].contains("entry_id=present:70:00000000067073bc1344b949"));
+    }
+
+    #[test]
+    fn common_views_invariant_reports_decoded_row_identity() {
+        let mailbox_guid = Uuid::parse_str("bc737006-4413-49b9-aefc-3cb6e0088492").unwrap();
+        let object = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: Vec::new(),
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: std::collections::HashSet::new(),
+            restriction: None,
+            bookmarks: std::collections::HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let summaries = outlook_bootstrap_row_invariant_summaries(
+            Some(&object),
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            mailbox_guid,
+            true,
+            1,
+        );
+
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].contains("kind=common_views_associated"));
+        assert!(summaries[0].contains("source_key_decoded=0x"));
+        assert!(summaries[0].contains("parent_source_key_decoded=0x0000000000090001"));
+        assert!(summaries[0].contains("issues=none"));
     }
 
     #[test]
