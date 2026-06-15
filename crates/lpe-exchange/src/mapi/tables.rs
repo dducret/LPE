@@ -3793,8 +3793,26 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     _restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    !(folder_id == INBOX_FOLDER_ID
-        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id))
+    if folder_id != INBOX_FOLDER_ID {
+        return true;
+    }
+    if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
+        return false;
+    }
+    !is_empty_inbox_configuration_placeholder(message)
+}
+
+fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
+    if !message.message_class.starts_with("IPM.Configuration.")
+        || message.message_class == "IPM.Configuration.UMOLK.UserOptions"
+    {
+        return false;
+    }
+    let properties = mapi_properties_from_json(&message.properties_json);
+    !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
+        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
+        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+        && !properties.contains_key(&0x7C09_0102)
 }
 
 fn outlook_configuration_prefix_restriction() -> MapiRestriction {
@@ -9446,12 +9464,12 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            2
+            1
         );
         assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
-        assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
+        assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
         assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
         assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
@@ -9489,15 +9507,65 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(response[9], 0);
         let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
-        let message_list =
-            utf16_position(&response, "IPM.Configuration.MessageListSettings").unwrap();
         let user_options =
             utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").unwrap();
+        let compact_view =
+            utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").unwrap();
+        assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
         assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
-        assert!(account_prefs < message_list);
-        assert!(message_list < user_options);
+        assert!(account_prefs < user_options);
+        assert!(user_options < compact_view);
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_keeps_configuration_with_stored_stream() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000099);
+        crate::mapi::identity::remember_mapi_identity(
+            config_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 82,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: config_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.MessageListSettings".to_string(),
+                subject: "Message list settings".to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
+            },
+        ]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(outlook_configuration_prefix_restriction()),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
     }
 
     #[test]
@@ -10219,7 +10287,9 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 message_class: "IPM.Configuration.AccountPrefs".to_string(),
                 subject: "Account prefs".to_string(),
-                properties_json: serde_json::json!({}),
+                properties_json: serde_json::json!({
+                    "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
             },
         ])
     }

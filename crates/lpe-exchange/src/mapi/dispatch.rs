@@ -22364,11 +22364,19 @@ mod tests {
         let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
         assert!(
-            summary.contains("class=IPM.Configuration.AccountPrefs"),
+            !summary.contains("class=IPM.Configuration.AccountPrefs"),
             "{summary}"
         );
         assert!(
-            summary.contains("class=IPM.Configuration.MessageListSettings"),
+            !summary.contains("class=IPM.Configuration.MessageListSettings"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("class=IPM.Configuration.UMOLK.UserOptions"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{summary}"
         );
         assert!(

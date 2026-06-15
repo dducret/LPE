@@ -271,6 +271,17 @@ WHERE folder_id = 327681
   AND message_class = 'IPM.RuleOrganizer'
   AND COALESCE(properties_json #>> '{0x68020102,value}', '') = '';
 
+DELETE FROM public.mapi_associated_config_messages
+WHERE folder_id = 327681
+  AND message_class LIKE 'IPM.Configuration.%'
+  AND message_class <> 'IPM.Configuration.UMOLK.UserOptions'
+  AND NOT (
+      properties_json ? '0x7c070102'
+      OR properties_json ? '0x7c080102'
+      OR properties_json ? '0x0e0b0102'
+      OR properties_json ? '0x7c090102'
+  );
+
 UPDATE public.mapi_object_identities
 SET source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
         || decode(lpad(to_hex(mapi_global_counter), 12, '0'), 'hex'),
