@@ -10435,6 +10435,27 @@ where
                     .associated_config_message_for_id(message_id)
                     .filter(|message| message.folder_id == folder_id)
                     .or_else(|| {
+                        snapshot
+                            .associated_config_message_for_identity_id(message_id)
+                            .filter(|message| message.folder_id == folder_id)
+                            .inspect(|message| {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = format_args!("0x{:02x}", request.rop_id),
+                                    folder_id = format_args!("0x{folder_id:016x}"),
+                                    requested_message_id = format_args!("0x{message_id:016x}"),
+                                    canonical_config_id = %message.canonical_id,
+                                    modeled_config_id = format_args!("0x{:016x}", message.id),
+                                    message_class = %message.message_class,
+                                    "rca debug mapi opened virtual associated config identity"
+                                );
+                            })
+                    })
+                    .or_else(|| {
                         snapshot.associated_config_message_for_folder_and_source_key_id(
                             folder_id, message_id,
                         )

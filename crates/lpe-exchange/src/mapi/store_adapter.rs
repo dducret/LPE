@@ -408,9 +408,16 @@ where
         .iter()
         .filter(|identity| {
             identity.object_kind == MapiIdentityObjectKind::AssociatedConfig
-                && associated_config_ids.contains(&identity.canonical_id)
+                && (associated_config_ids.contains(&identity.canonical_id)
+                    || mapi_store::modeled_virtual_associated_config_message_for_canonical_id(
+                        identity.canonical_id,
+                    )
+                    .is_some())
         })
-        .map(|identity| identity.object_id)
+        .map(|identity| mapi_store::MapiAssociatedConfigIdentity {
+            canonical_id: identity.canonical_id,
+            object_id: identity.object_id,
+        })
         .collect::<Vec<_>>();
     let navigation_shortcuts = if snapshot_backed_contents || !navigation_shortcut_ids.is_empty() {
         log_mapi_store_load_step(
@@ -856,6 +863,10 @@ fn requested_identity_has_backing_row(
         }
         MapiIdentityObjectKind::AssociatedConfig => {
             associated_config_ids.contains(&identity.canonical_id)
+                || mapi_store::modeled_virtual_associated_config_message_for_canonical_id(
+                    identity.canonical_id,
+                )
+                .is_some()
         }
         _ => true,
     }

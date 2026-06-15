@@ -38,7 +38,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     rules: Vec<MapiRule>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     associated_configs: Vec<MapiAssociatedConfigMessage>,
-    associated_config_identity_ids: Vec<u64>,
+    associated_config_identity_ids: Vec<MapiAssociatedConfigIdentity>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     recoverable_items: Vec<MapiRecoverableItemMessage>,
@@ -195,6 +195,12 @@ pub(crate) struct MapiAssociatedConfigMessage {
     pub(crate) message_class: String,
     pub(crate) subject: String,
     pub(crate) properties_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiAssociatedConfigIdentity {
+    pub(crate) canonical_id: Uuid,
+    pub(crate) object_id: u64,
 }
 
 fn deduplicate_associated_config_messages(
@@ -424,6 +430,27 @@ pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedCon
         .into_iter()
         .find(|message| message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS)
         .expect("Inbox MessageListSettings default")
+}
+
+pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
+    canonical_id: Uuid,
+) -> Option<MapiAssociatedConfigMessage> {
+    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .chain(outlook_quick_step_associated_config_defaults(
+            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+        ))
+        .chain(
+            [
+                crate::mapi::identity::CONTACTS_FOLDER_ID,
+                crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+                crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+                crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+            ]
+            .into_iter()
+            .flat_map(outlook_contact_associated_config_defaults),
+        )
+        .find(|message| message.canonical_id == canonical_id)
 }
 
 fn outlook_inbox_persisted_associated_config_defaults(
@@ -1236,7 +1263,10 @@ impl MapiMailStoreSnapshot {
         self
     }
 
-    pub(crate) fn with_associated_config_identity_ids(mut self, ids: Vec<u64>) -> Self {
+    pub(crate) fn with_associated_config_identity_ids(
+        mut self,
+        ids: Vec<MapiAssociatedConfigIdentity>,
+    ) -> Self {
         self.associated_config_identity_ids = ids;
         self
     }
@@ -2025,6 +2055,33 @@ impl MapiMailStoreSnapshot {
             })
     }
 
+    pub(crate) fn associated_config_message_for_identity_id(
+        &self,
+        item_id: u64,
+    ) -> Option<MapiAssociatedConfigMessage> {
+        let canonical_id = self
+            .associated_config_identity_ids
+            .iter()
+            .find(|identity| identity.object_id == item_id)
+            .map(|identity| identity.canonical_id)?;
+        self.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+            .into_iter()
+            .chain(outlook_quick_step_associated_config_defaults(
+                crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
+            ))
+            .chain(
+                [
+                    crate::mapi::identity::CONTACTS_FOLDER_ID,
+                    crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+                    crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+                    crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+                ]
+                .into_iter()
+                .flat_map(outlook_contact_associated_config_defaults),
+            )
+            .find(|message| message.canonical_id == canonical_id)
+    }
+
     pub(crate) fn associated_config_message_for_folder_and_source_key_id(
         &self,
         folder_id: u64,
@@ -2048,6 +2105,7 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> bool {
         self.associated_config_message_for_id(item_id)
+            .or_else(|| self.associated_config_message_for_identity_id(item_id))
             .is_some_and(|message| message.folder_id == folder_id)
     }
 
@@ -4089,8 +4147,12 @@ mod tests {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 901,
         );
-        let snapshot =
-            MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![object_id]);
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![
+            MapiAssociatedConfigIdentity {
+                canonical_id: Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000001),
+                object_id,
+            },
+        ]);
 
         assert!(!snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::INBOX_FOLDER_ID,
@@ -4098,6 +4160,31 @@ mod tests {
         ));
         assert!(!snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            object_id
+        ));
+    }
+
+    #[test]
+    fn modeled_virtual_associated_config_identity_opens_via_dynamic_id() {
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 902,
+        );
+        let default = outlook_inbox_message_list_settings_default();
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![
+            MapiAssociatedConfigIdentity {
+                canonical_id: default.canonical_id,
+                object_id,
+            },
+        ]);
+
+        assert_eq!(
+            snapshot
+                .associated_config_message_for_identity_id(object_id)
+                .map(|message| (message.folder_id, message.message_class)),
+            Some((default.folder_id, default.message_class))
+        );
+        assert!(snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::INBOX_FOLDER_ID,
             object_id
         ));
     }
