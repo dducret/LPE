@@ -1623,7 +1623,18 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    matches!(container_class, "IPF.Note")
+    matches!(
+        container_class,
+        "IPF.Note"
+            | "IPF.Appointment"
+            | "IPF.Contact"
+            | "IPF.Contact.MOC.QuickContacts"
+            | "IPF.Contact.MOC.ImContactList"
+            | "IPF.Task"
+            | "IPF.StickyNote"
+            | "IPF.Journal"
+            | "Outlook.Reminder"
+    ) || container_class.starts_with("IPF.Note.")
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(

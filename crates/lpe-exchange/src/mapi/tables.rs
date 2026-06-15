@@ -10565,28 +10565,23 @@ mod tests {
     #[test]
     fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
-        for folder_id in [INBOX_FOLDER_ID, SENT_FOLDER_ID, FREEBUSY_DATA_FOLDER_ID] {
+        for folder_id in [
+            INBOX_FOLDER_ID,
+            SENT_FOLDER_ID,
+            FREEBUSY_DATA_FOLDER_ID,
+            CALENDAR_FOLDER_ID,
+            CONTACTS_FOLDER_ID,
+            JOURNAL_FOLDER_ID,
+            NOTES_FOLDER_ID,
+            TASKS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+        ] {
             assert!(matches!(
                 special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
                 Some(MapiValue::Binary(value)) if !value.is_empty()
             ));
         }
-        assert_eq!(
-            special_folder_property_value(
-                CALENDAR_FOLDER_ID,
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-                account_id
-            ),
-            None
-        );
-        assert_eq!(
-            special_folder_property_value(
-                CONTACTS_FOLDER_ID,
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-                account_id
-            ),
-            None
-        );
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
             Some(MapiValue::U32(0))
