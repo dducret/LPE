@@ -6837,7 +6837,7 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
 }
 
 #[tokio::test]
-async fn mapi_over_http_delete_non_tombstoned_special_folder_is_denied() {
+async fn mapi_over_http_delete_contact_virtual_folder_is_noop_acknowledged() {
     let mut rops = Vec::new();
     append_rop_open_folder(
         &mut rops,
@@ -6856,10 +6856,8 @@ async fn mapi_over_http_delete_non_tombstoned_special_folder_is_denied() {
 
     assert_eq!(delete[0], 0x1D);
     assert_eq!(delete[1], 0x01);
-    assert_eq!(
-        u32::from_le_bytes(delete[2..6].try_into().unwrap()),
-        0x8007_0005
-    );
+    assert_eq!(u32::from_le_bytes(delete[2..6].try_into().unwrap()), 0);
+    assert_eq!(delete[6], 0);
 }
 
 #[tokio::test]

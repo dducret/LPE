@@ -67,6 +67,16 @@ fn advertised_special_folder_delete_uses_session_tombstone(folder_id: u64) -> bo
     folder_id == QUICK_STEP_SETTINGS_FOLDER_ID
 }
 
+fn advertised_special_folder_delete_is_noop(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CONTACTS_FOLDER_ID
+            | SUGGESTED_CONTACTS_FOLDER_ID
+            | QUICK_CONTACTS_FOLDER_ID
+            | IM_CONTACT_LIST_FOLDER_ID
+    )
+}
+
 fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
     matches!(
         folder_id,
@@ -13664,6 +13674,26 @@ where
                     }
                 } else if is_advertised_special_folder(folder_id) {
                     if !advertised_special_folder_delete_uses_session_tombstone(folder_id) {
+                        if advertised_special_folder_delete_is_noop(folder_id) {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = principal.email.as_str(),
+                                request_type = "Execute",
+                                request_rop_id = "0x1d",
+                                parent_folder_id = %format!("{_parent_folder_id:#018x}"),
+                                folder_id = %format!("{folder_id:#018x}"),
+                                partial_completion = false,
+                                message = "rca debug mapi delete advertised special folder no-op acknowledged",
+                            );
+                            responses.extend_from_slice(&rop_partial_completion_response(
+                                0x1D,
+                                request.response_handle_index(),
+                                false,
+                            ));
+                            continue;
+                        }
                         tracing::info!(
                             rca_debug = true,
                             adapter = "mapi",
@@ -22304,7 +22334,7 @@ mod tests {
     }
 
     #[test]
-    fn advertised_contact_folders_do_not_use_session_delete_tombstones() {
+    fn advertised_contact_folders_use_noop_delete_acknowledgement() {
         for folder_id in [
             CONTACTS_FOLDER_ID,
             SUGGESTED_CONTACTS_FOLDER_ID,
@@ -22317,9 +22347,16 @@ mod tests {
             );
             assert!(
                 !advertised_special_folder_delete_uses_session_tombstone(folder_id),
-                "contact folder delete must be denied instead of hidden in session {folder_id:#018x}"
+                "contact folder delete must not hide the folder in session {folder_id:#018x}"
+            );
+            assert!(
+                advertised_special_folder_delete_is_noop(folder_id),
+                "contact folder delete should be acknowledged as non-destructive no-op {folder_id:#018x}"
             );
         }
+        assert!(!advertised_special_folder_delete_is_noop(
+            QUICK_STEP_SETTINGS_FOLDER_ID
+        ));
         assert!(advertised_special_folder_delete_uses_session_tombstone(
             QUICK_STEP_SETTINGS_FOLDER_ID
         ));
