@@ -1633,6 +1633,7 @@ pub(in crate::mapi) fn default_view_supported_container_class(container_class: &
             | "IPF.Task"
             | "IPF.StickyNote"
             | "IPF.Journal"
+            | "IPF.Configuration"
             | "Outlook.Reminder"
     ) || container_class.starts_with("IPF.Note.")
 }

@@ -10576,6 +10576,7 @@ mod tests {
             TASKS_FOLDER_ID,
             QUICK_CONTACTS_FOLDER_ID,
             IM_CONTACT_LIST_FOLDER_ID,
+            QUICK_STEP_SETTINGS_FOLDER_ID,
         ] {
             assert!(matches!(
                 special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
