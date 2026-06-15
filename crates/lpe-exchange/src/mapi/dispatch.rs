@@ -215,6 +215,16 @@ fn fallback_open_message_folder_id(
     }
 }
 
+fn open_message_folder_id(request: &RopRequest, message_id: u64) -> u64 {
+    request.folder_id().unwrap_or_else(|| {
+        if crate::mapi_store::is_outlook_local_freebusy_message_id(message_id) {
+            FREEBUSY_DATA_FOLDER_ID
+        } else {
+            INBOX_FOLDER_ID
+        }
+    })
+}
+
 fn unique_message_for_id<'a>(message_id: u64, emails: &'a [JmapEmail]) -> Option<&'a JmapEmail> {
     let mut matches = emails
         .iter()
@@ -10134,8 +10144,8 @@ where
                 output_handles.push(handle);
             }
             Some(RopId::OpenMessage) => {
-                let folder_id = request.folder_id().unwrap_or(INBOX_FOLDER_ID);
                 let message_id = request.message_id().unwrap_or(0);
+                let folder_id = open_message_folder_id(&request, message_id);
                 if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,

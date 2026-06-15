@@ -225,6 +225,115 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
 }
 
 #[tokio::test]
+async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults_once() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..FakeStore::default()
+    };
+
+    let first = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let second = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let persisted = store
+        .fetch_mapi_associated_configs(account.account_id)
+        .await
+        .unwrap();
+
+    for class in [
+        "IPM.Configuration.UMOLK.UserOptions",
+        "IPM.RuleOrganizer",
+        "IPM.Microsoft.FolderDesign.NamedView",
+    ] {
+        assert_eq!(
+            persisted
+                .iter()
+                .filter(|config| config.message_class == class)
+                .count(),
+            1
+        );
+        assert_eq!(
+            first
+                .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+                .iter()
+                .filter(|message| message.message_class == class)
+                .count(),
+            1
+        );
+        assert_eq!(
+            second
+                .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+                .iter()
+                .filter(|message| message.message_class == class)
+                .count(),
+            1
+        );
+    }
+    for class in [
+        "IPM.Configuration.EAS",
+        "IPM.Configuration.ELC",
+        "IPM.Sharing.Configuration",
+        "IPM.Sharing.Index",
+    ] {
+        assert_eq!(
+            persisted
+                .iter()
+                .filter(|config| config.message_class == class)
+                .count(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row() {
+    let account = FakeStore::account();
+    let existing_id = Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000099);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: existing_id,
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.RuleOrganizer".to_string(),
+            subject: "Client Rule Organizer".to_string(),
+            properties_json: serde_json::json!({"0x68020102":{"type":"binary","value":"0102"}}),
+        }])),
+        ..FakeStore::default()
+    };
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let persisted = store
+        .fetch_mapi_associated_configs(account.account_id)
+        .await
+        .unwrap();
+    let rule_rows = persisted
+        .iter()
+        .filter(|config| config.message_class == "IPM.RuleOrganizer")
+        .collect::<Vec<_>>();
+
+    assert_eq!(rule_rows.len(), 1);
+    assert_eq!(rule_rows[0].id, existing_id);
+    assert_eq!(rule_rows[0].subject, "Client Rule Organizer");
+    assert_eq!(
+        snapshot
+            .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+            .iter()
+            .find(|message| message.message_class == "IPM.RuleOrganizer")
+            .map(|message| message.subject.as_str()),
+        Some("Client Rule Organizer")
+    );
+}
+
+#[tokio::test]
 async fn mapi_associated_config_storage_is_account_scoped() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;
@@ -5181,6 +5290,57 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(configs) })
+    }
+
+    fn ensure_mapi_associated_configs<'a>(
+        &'a self,
+        inputs: Vec<crate::store::UpsertMapiAssociatedConfigInput>,
+    ) -> StoreFuture<'a, Vec<crate::store::MapiAssociatedConfigRecord>> {
+        let configs = self.associated_configs.clone();
+        let changes = self.mapi_sync_changes.clone();
+        Box::pin(async move {
+            let mut configs = configs.lock().unwrap();
+            let mut inserted = Vec::new();
+            for input in inputs {
+                let id = input.id.unwrap_or_else(Uuid::new_v4);
+                let logical_exists = configs.iter().any(|config| {
+                    config.account_id == input.account_id
+                        && config.folder_id == input.folder_id
+                        && config.message_class == input.message_class
+                });
+                let id_exists = configs
+                    .iter()
+                    .any(|config| config.account_id == input.account_id && config.id == id);
+                if logical_exists || id_exists {
+                    continue;
+                }
+                let record = crate::store::MapiAssociatedConfigRecord {
+                    id,
+                    account_id: input.account_id,
+                    folder_id: input.folder_id,
+                    message_class: input.message_class,
+                    subject: input.subject,
+                    properties_json: input.properties_json,
+                };
+                configs.push(record.clone());
+                inserted.push(record);
+            }
+            if !inserted.is_empty() {
+                let mut changes = changes.lock().unwrap();
+                for record in &inserted {
+                    changes.current_change_sequence =
+                        changes.current_change_sequence.saturating_add(1);
+                    changes.current_modseq = changes.current_modseq.saturating_add(1);
+                    changes.changed_associated_config_ids.push(
+                        crate::store::MapiAssociatedConfigChange {
+                            folder_id: record.folder_id,
+                            config_id: record.id,
+                        },
+                    );
+                }
+            }
+            Ok(inserted)
+        })
     }
 
     fn upsert_mapi_associated_config<'a>(

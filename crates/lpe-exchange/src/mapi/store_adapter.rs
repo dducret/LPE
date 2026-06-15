@@ -1156,6 +1156,9 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_default_conversation_action_id(object_id) {
         return "virtual_conversation_action";
     }
+    if mapi_store::is_outlook_local_freebusy_message_id(object_id) {
+        return "virtual_local_freebusy_message";
+    }
     if crate::mapi::identity::global_counter_from_store_id(object_id).is_some() {
         "unallocated_store_object"
     } else {
@@ -1171,6 +1174,7 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
+        || mapi_store::is_outlook_local_freebusy_message_id(object_id)
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {

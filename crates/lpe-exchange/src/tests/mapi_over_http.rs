@@ -5484,6 +5484,61 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
 }
 
 #[tokio::test]
+async fn mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let mut rops = Vec::new();
+    append_rop_open_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+        local_freebusy_id,
+    );
+    rops[6..14].fill(0);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x001A_001F]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_010Fu32.to_le_bytes()
+    ));
+    assert!(
+        contains_bytes(&response_rops, &utf16z("LocalFreebusy")),
+        "{response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(
+            &response_rops,
+            &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
+        ),
+        "{response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_freebusy_messages() {
     let delegate_message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
     let freebusy_message_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
