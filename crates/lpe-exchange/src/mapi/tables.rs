@@ -3799,7 +3799,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
         return matches!(
             message.message_class.as_str(),
-            "IPM.Configuration.ELC" | "IPM.Sharing.Configuration"
+            "IPM.Configuration.ELC" | "IPM.Sharing.Configuration" | "IPM.Aggregation"
         ) && restriction.is_some_and(|restriction| {
             message_class_restriction_matches_exact(restriction, &message.message_class)
         });
@@ -8975,7 +8975,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_no_match_returns_success_without_row_data() {
+    fn inbox_associated_find_row_returns_outlook_aggregation_config() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -9033,8 +9033,8 @@ mod tests {
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
-        assert_eq!(table_position(&table), Some(0));
+        assert_eq!(response[7], 1);
+        assert_response_contains_utf16(&response, "IPM.Aggregation");
     }
 
     #[test]

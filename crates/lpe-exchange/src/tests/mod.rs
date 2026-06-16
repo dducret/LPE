@@ -279,6 +279,7 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
         "IPM.RuleOrganizer",
         "IPM.Sharing.Configuration",
         "IPM.Sharing.Index",
+        "IPM.Aggregation",
     ] {
         assert_eq!(
             persisted

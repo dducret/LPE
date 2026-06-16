@@ -250,6 +250,8 @@ const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
 const OUTLOOK_INBOX_SHARING_INDEX_CLASS: &str = "IPM.Sharing.Index";
 const OUTLOOK_INBOX_SHARING_INDEX_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF3);
+const OUTLOOK_INBOX_AGGREGATION_CLASS: &str = "IPM.Aggregation";
+const OUTLOOK_INBOX_AGGREGATION_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE3);
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
@@ -289,6 +291,7 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
             | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
             | OUTLOOK_INBOX_SHARING_INDEX_ID
+            | OUTLOOK_INBOX_AGGREGATION_ID
     )
 }
 
@@ -299,6 +302,7 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
             | OUTLOOK_INBOX_SHARING_INDEX_ID
+            | OUTLOOK_INBOX_AGGREGATION_ID
     )
 }
 
@@ -422,6 +426,14 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             subject: OUTLOOK_INBOX_SHARING_INDEX_CLASS.to_string(),
             properties_json: serde_json::json!({}),
         },
+        MapiAssociatedConfigMessage {
+            id: OUTLOOK_INBOX_AGGREGATION_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_6167_6772_8000_000000000001),
+            message_class: OUTLOOK_INBOX_AGGREGATION_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_AGGREGATION_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
     ]
 }
 
@@ -524,6 +536,7 @@ fn log_outlook_inbox_associated_config_bootstrap(
         OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
         OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS,
         OUTLOOK_INBOX_SHARING_INDEX_CLASS,
+        OUTLOOK_INBOX_AGGREGATION_CLASS,
     ];
     tracing::info!(
         rca_debug = true,
@@ -3609,6 +3622,10 @@ mod tests {
                 OUTLOOK_INBOX_SHARING_INDEX_CLASS,
                 OUTLOOK_INBOX_SHARING_INDEX_ID,
             ),
+            (
+                OUTLOOK_INBOX_AGGREGATION_CLASS,
+                OUTLOOK_INBOX_AGGREGATION_ID,
+            ),
         ] {
             assert_eq!(
                 messages
@@ -3718,6 +3735,7 @@ mod tests {
         assert!(!classes.contains(OUTLOOK_INBOX_ELC_CONFIG_CLASS));
         assert!(!classes.contains(OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS));
         assert!(!classes.contains(OUTLOOK_INBOX_SHARING_INDEX_CLASS));
+        assert!(!classes.contains(OUTLOOK_INBOX_AGGREGATION_CLASS));
     }
 
     #[test]
