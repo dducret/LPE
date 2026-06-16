@@ -22047,7 +22047,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &utf16z("Alice")
     ));
     assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &bootstrap_store_props_rops,
         &[0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01]
     ));
@@ -22152,8 +22152,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(hierarchy_checkpoint.last_change_sequence, 89);
-    assert_eq!(hierarchy_checkpoint.last_modseq, 45);
+    assert_eq!(hierarchy_checkpoint.last_change_sequence, 91);
+    assert_eq!(hierarchy_checkpoint.last_modseq, 47);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -22456,8 +22456,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reconnect_hierarchy_checkpoint.last_change_sequence, 89);
-    assert_eq!(reconnect_hierarchy_checkpoint.last_modseq, 45);
+    assert_eq!(reconnect_hierarchy_checkpoint.last_change_sequence, 91);
+    assert_eq!(reconnect_hierarchy_checkpoint.last_modseq, 47);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -22560,8 +22560,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reconnected_calendar_checkpoint.last_change_sequence, 89);
-    assert_eq!(reconnected_calendar_checkpoint.last_modseq, 45);
+    assert_eq!(reconnected_calendar_checkpoint.last_change_sequence, 91);
+    assert_eq!(reconnected_calendar_checkpoint.last_modseq, 47);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

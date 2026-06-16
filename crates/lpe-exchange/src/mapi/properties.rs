@@ -894,7 +894,7 @@ pub(in crate::mapi) fn logon_property_value(
         )),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
         PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
-            Some(MapiValue::Binary(outlook_store_icon_ico()))
+            Some(MapiValue::Binary(Vec::new()))
         }
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
@@ -911,35 +911,6 @@ pub(in crate::mapi) fn logon_property_value(
         PID_TAG_PST_PATH_W => Some(MapiValue::String(String::new())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
-}
-
-fn outlook_store_icon_ico() -> Vec<u8> {
-    vec![
-        0x00, 0x00, // reserved
-        0x01, 0x00, // icon
-        0x01, 0x00, // image count
-        0x01, // width
-        0x01, // height
-        0x00, // color count
-        0x00, // reserved
-        0x01, 0x00, // planes
-        0x20, 0x00, // bit count
-        0x30, 0x00, 0x00, 0x00, // image size
-        0x16, 0x00, 0x00, 0x00, // image offset
-        0x28, 0x00, 0x00, 0x00, // BITMAPINFOHEADER size
-        0x01, 0x00, 0x00, 0x00, // width
-        0x02, 0x00, 0x00, 0x00, // height includes XOR and AND masks
-        0x01, 0x00, // planes
-        0x20, 0x00, // bit count
-        0x00, 0x00, 0x00, 0x00, // BI_RGB
-        0x04, 0x00, 0x00, 0x00, // XOR bitmap size
-        0x00, 0x00, 0x00, 0x00, // horizontal ppm
-        0x00, 0x00, 0x00, 0x00, // vertical ppm
-        0x00, 0x00, 0x00, 0x00, // colors used
-        0x00, 0x00, 0x00, 0x00, // important colors
-        0x2D, 0x79, 0xE6, 0xFF, // BGRA pixel
-        0x00, 0x00, 0x00, 0x00, // AND mask row
-    ]
 }
 
 pub(in crate::mapi) fn special_folder_identification_property_value(
@@ -10401,7 +10372,7 @@ mod tests {
     }
 
     #[test]
-    fn logon_projects_server_icon_payloads() {
+    fn logon_projects_empty_optional_server_icon_payloads() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -10412,11 +10383,10 @@ mod tests {
         };
 
         for tag in [PID_TAG_SERVER_CONNECTED_ICON, PID_TAG_SERVER_ACCOUNT_ICON] {
-            let Some(MapiValue::Binary(bytes)) = logon_property_value(&principal, tag) else {
-                panic!("server icon property should be a binary ICO payload");
-            };
-            assert_eq!(&bytes[..4], &[0x00, 0x00, 0x01, 0x00]);
-            assert_eq!(bytes.len(), 70);
+            assert_eq!(
+                logon_property_value(&principal, tag),
+                Some(MapiValue::Binary(Vec::new()))
+            );
         }
     }
 

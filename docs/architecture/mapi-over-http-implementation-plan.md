@@ -415,7 +415,8 @@ not by itself authorize broad client publication.
   advertises for the documented store-level mask surface, including Finder /
   Search.
 - Outlook store bootstrap metadata includes the private-store marker, store
-  state, mailbox owner, user GUID, server icons, and max submit message size.
+  state, mailbox owner, user GUID, empty optional server icon placeholders, and
+  max submit message size.
 - Profile settings needed for cached-mode reuse are canonical account settings,
   not session-only state. Outlook's IPM subtree OST identity value
   (`0x7C04_0102` in the current bounded profile path) is persisted in
@@ -527,7 +528,7 @@ not by itself authorize broad client publication.
 
 | Setting area | Canonical storage today | Profile behavior |
 | --- | --- | --- |
-| Server/bootstrap defaults | `server_settings`, request host/proxy headers, and computed MAPI logon/store properties | Used for URLs, store display metadata, private-store marker, mailbox owner, max submit size, and icons. No per-profile copy is stored. |
+| Server/bootstrap defaults | `server_settings`, request host/proxy headers, and computed MAPI logon/store properties | Used for URLs, store display metadata, private-store marker, mailbox owner, max submit size, and empty optional icon placeholders. No per-profile copy is stored. |
 | Send identities | `account_identities` and authenticated account state | Projected through JMAP/EWS/MAPI identity and submission paths; MAPI does not own a separate identity store. |
 | Folder identity and hierarchy | `mailboxes`, built-in projected folder IDs, `search_folders`, and `mapi_object_identities` | Stable FIDs/source keys/change keys are reused across cached-mode sessions. Default-folder EntryIDs remain computed canonical projections. |
 | Custom/shared collaboration folders | `contact_books`, `calendars`, `task_lists`, grants, and `mapi_object_identities` | Non-reserved Outlook-visible collaboration folders use kind-scoped deterministic canonical identity keys and durable store-allocated MAPI object IDs. LPE must not derive folder IDs from raw collection text, owner UUID suffixes, or fallback counters. |
