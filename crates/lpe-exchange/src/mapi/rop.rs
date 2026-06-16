@@ -2842,6 +2842,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE => "PidTagViewDescriptorFolderType",
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => "PidTagViewDescriptorViewMode",
         PID_TAG_VIEW_DESCRIPTOR_BINARY => "PidTagViewDescriptorBinary",
+        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => "PidTagViewDescriptorStrings",
+        PID_TAG_VIEW_DESCRIPTOR_NAME_W => "PidTagViewDescriptorName",
+        PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL => "PidTagViewDescriptorVersionCanonical",
         PID_TAG_WLINK_GROUP_HEADER_ID => "PidTagWlinkGroupHeaderId",
         PID_TAG_WLINK_SAVE_STAMP => "PidTagWlinkSaveStamp",
         PID_TAG_WLINK_TYPE => "PidTagWlinkType",
@@ -2994,6 +2997,15 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         }
         tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_VERSION) => {
             "PidTagViewDescriptorVersion"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL) => {
+            "PidTagViewDescriptorVersionCanonical"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_NAME_W) => {
+            "PidTagViewDescriptorName"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W) => {
+            "PidTagViewDescriptorStrings"
         }
         tag if debug_property_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) => {
             "PidTagViewDescriptorFolderType"
@@ -7512,6 +7524,18 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_BINARY),
             "PidTagViewDescriptorBinary"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+            "PidTagViewDescriptorStrings"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_NAME_W),
+            "PidTagViewDescriptorName"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
+            "PidTagViewDescriptorVersionCanonical"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_WLINK_GROUP_HEADER_ID),

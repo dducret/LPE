@@ -10277,6 +10277,18 @@ mod tests {
             Some(MapiValue::U32(8))
         );
         assert_eq!(
+            associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
+            Some(MapiValue::U32(8))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_NAME_W),
+            Some(MapiValue::String("Compact".to_string()))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
             Some(MapiValue::U32(0))
         );
@@ -11621,11 +11633,23 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             {
                 Some(MapiValue::U32(14_745_605))
             }
-            PID_TAG_VIEW_DESCRIPTOR_VERSION
+            PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
                 Some(MapiValue::U32(8))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_NAME_W
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::String(message.subject.clone()))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::String(String::new()))
             }
             PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
                 if message.message_class

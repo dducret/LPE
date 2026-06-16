@@ -455,6 +455,9 @@ pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE: u32 = 0x6841_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_BINARY: u32 = 0x7001_0102;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_STRINGS_W: u32 = 0x7002_001F;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_NAME_W: u32 = 0x7006_001F;
+pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL: u32 = 0x7007_0003;
 pub(in crate::mapi) const PID_NAME_CONTENT_CLASS_W_TAG: u32 = 0x801F_001F;
 pub(in crate::mapi) const PID_NAME_CONTENT_TYPE_W_TAG: u32 = 0x836B_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
@@ -2182,7 +2185,11 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => {
             Some(MapiValue::Binary(minimal_view_descriptor_binary()))
         }
-        PID_TAG_VIEW_DESCRIPTOR_VERSION => Some(MapiValue::U32(message.view_type)),
+        PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL => {
+            Some(MapiValue::U32(message.view_type))
+        }
+        PID_TAG_VIEW_DESCRIPTOR_NAME_W => Some(MapiValue::String(message.name.clone())),
+        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => Some(MapiValue::String(String::new())),
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => {
             Some(MapiValue::Binary(minimal_view_descriptor_binary()))
@@ -10576,6 +10583,30 @@ mod tests {
         assert_eq!(&descriptor[72..76], &0x28u32.to_le_bytes());
         assert_eq!(&descriptor[88..92], &0u32.to_le_bytes());
         assert_eq!(&descriptor[92..96], &4u32.to_le_bytes());
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+            ),
+            Some(MapiValue::U32(8))
+        );
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                PID_TAG_VIEW_DESCRIPTOR_NAME_W
+            ),
+            Some(MapiValue::String("Messages".to_string()))
+        );
+        assert_eq!(
+            common_view_named_view_property_value(
+                &view,
+                account_id,
+                PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+            ),
+            Some(MapiValue::String(String::new()))
+        );
         assert_eq!(
             common_view_named_view_property_value(
                 &view,
