@@ -4112,7 +4112,34 @@ pub(in crate::mapi) fn rop_find_row_response(
                         restriction_matches_associated_config(Some(&restriction), message)
                     })
                 {
-                    *position = index;
+                    let exact_virtual_row_probe = *folder_id == INBOX_FOLDER_ID
+                        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
+                            message.id,
+                        )
+                        && !associated_config_visible_in_table(
+                            *folder_id,
+                            table_restriction.as_ref(),
+                            message,
+                        );
+                    if exact_virtual_row_probe {
+                        *table_restriction = Some(restriction.clone());
+                        *position = 0;
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            request_type = "Execute",
+                            request_rop_id = "0x4f",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                            associated = true,
+                            matched_row_index = index,
+                            matched_message_class = %message.message_class,
+                            "rca debug outlook associated config exact virtual find row followup query restricted"
+                        );
+                    } else {
+                        *position = index;
+                    }
                     if broad_outlook_configuration_probe {
                         *table_restriction = Some(outlook_configuration_prefix_restriction());
                         tracing::info!(
@@ -8971,6 +8998,78 @@ mod tests {
     #[test]
     fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
         assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
+    }
+
+    #[test]
+    fn inbox_associated_exact_virtual_find_row_restricts_followup_query_rows() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Content as u8];
+        restriction.extend_from_slice(&0u32.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Sharing.Configuration");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let find_request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let find_response = rop_find_row_response(
+            &find_request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(find_response[0], RopId::FindRow.as_u8());
+        assert_eq!(find_response[7], 1);
+        assert_eq!(table_position(&table), Some(0));
+
+        let query_request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+        let query_response = rop_query_rows_response(
+            &query_request,
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+        assert_eq!(
+            u16::from_le_bytes([query_response[7], query_response[8]]),
+            1
+        );
+        assert_response_contains_utf16(&query_response, "IPM.Sharing.Configuration");
     }
 
     #[test]
