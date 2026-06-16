@@ -39119,6 +39119,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
 
     for request_type in [
         "CompareMIds",
+        "DNToEPH",
         "DNToMId",
         "GetMatches",
         "GetPropList",
@@ -39301,7 +39302,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 offset += 8;
                 assert_eq!(body[offset], 0, "{request_type}");
             }
-            "DNToMId" => {
+            "DNToEPH" | "DNToMId" => {
                 assert_eq!(body[8], 1, "{request_type}");
                 assert_eq!(
                     u32::from_le_bytes(body[9..13].try_into().unwrap()),
@@ -39404,6 +39405,35 @@ async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_princ
     assert_ne!(matched_id, 0);
     assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
     assert_ne!(matched_id, 0xaaaa_aaaa);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+}
+
+#[tokio::test]
+async fn mapi_over_http_dn_to_eph_resolves_outlook_legacy_dn_to_principal() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = b"\0\0\0\0\xff\x01\0\0\0/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test\0\0\0\0\0";
+    let headers = nspi_bound_headers(&service, "DNToEPH").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "DNToEPH");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(body[8], 1);
+    assert_eq!(u32::from_le_bytes(body[9..13].try_into().unwrap()), 1);
+    let matched_id = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_ne!(matched_id, 0);
+    assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
 }
 

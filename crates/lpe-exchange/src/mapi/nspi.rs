@@ -30,8 +30,11 @@ where
             disconnect_response(MapiEndpoint::Nspi, principal, headers, request_id, "Unbind")
         }
         MapiRequestType::CompareMids => nspi_u32_result_response("CompareMIds", request_id, 0),
+        MapiRequestType::DnToEph => {
+            nspi_dn_to_mid_response(store, principal, request, "DNToEPH", request_id).await
+        }
         MapiRequestType::DnToMid => {
-            nspi_dn_to_mid_response(store, principal, request, request_id).await
+            nspi_dn_to_mid_response(store, principal, request, "DNToMId", request_id).await
         }
         MapiRequestType::GetMatches => {
             nspi_matches_response(store, principal, request, request_id).await
@@ -218,6 +221,7 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
     MapiRequestType::Bind,
     MapiRequestType::Unbind,
     MapiRequestType::CompareMids,
+    MapiRequestType::DnToEph,
     MapiRequestType::DnToMid,
     MapiRequestType::GetMatches,
     MapiRequestType::GetPropList,
@@ -478,6 +482,7 @@ pub(in crate::mapi) async fn nspi_dn_to_mid_response<S>(
     store: &S,
     principal: &AccountPrincipal,
     request: &[u8],
+    request_type: &str,
     request_id: &str,
 ) -> Response
 where
@@ -487,7 +492,7 @@ where
         Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
-                "DNToMId",
+                request_type,
                 request_id,
                 4,
                 &format!("failed to load address book entries: {error}"),
@@ -496,7 +501,7 @@ where
     };
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
-            "DNToMId",
+            request_type,
             request_id,
             4,
             &format!("failed to project address book identifiers: {error}"),
@@ -504,7 +509,7 @@ where
     }
     if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
         return mapi_diagnostic_response(
-            "DNToMId",
+            request_type,
             request_id,
             4,
             &format!("failed to project authenticated address book identifier: {error}"),
@@ -512,7 +517,14 @@ where
     }
     let values = resolve_names_requested_values(request);
     let matched = nspi_dn_to_mid_match(principal, &entries, &values);
-    log_nspi_dn_to_mid_debug(principal, request_id, request, &values, &matched);
+    log_nspi_dn_to_mid_debug(
+        principal,
+        request_type,
+        request_id,
+        request,
+        &values,
+        &matched,
+    );
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -520,7 +532,7 @@ where
     write_u32(&mut body, 1);
     write_u32(&mut body, matched.mid.unwrap_or(0));
     write_u32(&mut body, 0);
-    mapi_response("DNToMId", request_id, 0, body, None)
+    mapi_response(request_type, request_id, 0, body, None)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -574,6 +586,7 @@ fn nspi_dn_to_mid_match(
 
 fn log_nspi_dn_to_mid_debug(
     principal: &AccountPrincipal,
+    request_type: &str,
     request_id: &str,
     request: &[u8],
     values: &[String],
@@ -586,7 +599,7 @@ fn log_nspi_dn_to_mid_debug(
         tenant_id = %principal.tenant_id,
         account_id = %principal.account_id,
         mailbox = %principal.email,
-        request_type = "DNToMId",
+        request_type = request_type,
         mapi_request_id = request_id,
         request_body_bytes = request.len(),
         requested_value_count = values.len(),

@@ -1609,6 +1609,7 @@ pub(in crate::mapi) fn request_type(headers: &HeaderMap) -> Result<MapiRequestTy
         "bind" => MapiRequestType::Bind,
         "unbind" => MapiRequestType::Unbind,
         "comparemids" => MapiRequestType::CompareMids,
+        "dntoeph" => MapiRequestType::DnToEph,
         "dntomid" => MapiRequestType::DnToMid,
         "getmatches" => MapiRequestType::GetMatches,
         "getproplist" => MapiRequestType::GetPropList,

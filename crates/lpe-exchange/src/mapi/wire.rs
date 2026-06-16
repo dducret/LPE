@@ -7,6 +7,7 @@ pub(in crate::mapi) enum MapiHttpRequestType {
     Bind,
     Unbind,
     CompareMids,
+    DnToEph,
     DnToMid,
     GetMatches,
     GetPropList,
@@ -37,6 +38,7 @@ impl MapiHttpRequestType {
         ("Bind", Self::Bind),
         ("Unbind", Self::Unbind),
         ("CompareMIds", Self::CompareMids),
+        ("DNToEPH", Self::DnToEph),
         ("DNToMId", Self::DnToMid),
         ("GetMatches", Self::GetMatches),
         ("GetPropList", Self::GetPropList),
@@ -65,6 +67,7 @@ impl MapiHttpRequestType {
             Self::Bind => "Bind",
             Self::Unbind => "Unbind",
             Self::CompareMids => "CompareMIds",
+            Self::DnToEph => "DNToEPH",
             Self::DnToMid => "DNToMId",
             Self::GetMatches => "GetMatches",
             Self::GetPropList => "GetPropList",
@@ -90,6 +93,7 @@ impl MapiHttpRequestType {
         matches!(
             self,
             Self::CompareMids
+                | Self::DnToEph
                 | Self::GetMatches
                 | Self::GetPropList
                 | Self::GetProps
