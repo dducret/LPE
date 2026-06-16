@@ -3797,10 +3797,12 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         return true;
     }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
-        return message.message_class == "IPM.Sharing.Configuration"
-            && restriction.is_some_and(|restriction| {
-                message_class_restriction_matches_exact(restriction, &message.message_class)
-            });
+        return matches!(
+            message.message_class.as_str(),
+            "IPM.Configuration.ELC" | "IPM.Sharing.Configuration"
+        ) && restriction.is_some_and(|restriction| {
+            message_class_restriction_matches_exact(restriction, &message.message_class)
+        });
     }
     !is_empty_inbox_configuration_placeholder(message)
 }
@@ -8951,8 +8953,8 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_suppresses_outlook_elc_config() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
+    fn inbox_associated_find_row_returns_outlook_elc_config() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
     }
 
     #[test]
