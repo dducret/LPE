@@ -948,6 +948,96 @@ async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
 }
 
 #[tokio::test]
+async fn mapi_identity_allocator_ignores_high_reserved_counters() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let tenant_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let high_counter = crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER - 1;
+    let high_identity_id = Uuid::parse_str("21000000-0000-0000-0000-000000000001").unwrap();
+    let (high_object_id, source_key, change_key, instance_key) =
+        crate::mapi::identity::persisted_identity_material(high_counter);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
+            mapi_object_id, source_key, change_key, instance_key
+        )
+        VALUES ($1, $2, 'associated_config', $3, $4, $5, $6, $7, $8)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(high_identity_id)
+    .bind(high_counter as i64)
+    .bind(high_object_id as i64)
+    .bind(source_key)
+    .bind(change_key)
+    .bind(instance_key)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE mapi_mailbox_replicas
+        SET next_global_counter = $3
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind((crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1) as i64)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+
+    let allocated = storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Contact,
+                canonical_id: Uuid::parse_str("21000000-0000-0000-0000-000000000002").unwrap(),
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    let allocated_counter =
+        crate::mapi::identity::global_counter_from_store_id(allocated.object_id).unwrap();
+    let next_counter = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT next_global_counter
+        FROM mapi_mailbox_replicas
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap() as u64;
+
+    assert!(allocated_counter < crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER);
+    assert!(next_counter < crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER);
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

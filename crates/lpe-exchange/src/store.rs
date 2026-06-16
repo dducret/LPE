@@ -7019,20 +7019,25 @@ async fn advance_mapi_replica_counter_past_allocated(
         FROM mapi_object_identities
         WHERE tenant_id = $1
           AND account_id = $2
+          AND mapi_global_counter < $4
         "#,
     )
     .bind(tenant_id)
     .bind(account_id)
     .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+    .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
     .fetch_one(&mut **tx)
     .await?;
 
     sqlx::query(
         r#"
         UPDATE mapi_mailbox_replicas
-        SET next_global_counter = GREATEST(next_global_counter, $3),
+        SET next_global_counter = CASE
+                WHEN next_global_counter < $3 OR next_global_counter >= $4 THEN $3
+                ELSE GREATEST(next_global_counter, $3)
+            END,
             updated_at = CASE
-                WHEN next_global_counter < $3 THEN NOW()
+                WHEN next_global_counter < $3 OR next_global_counter >= $4 THEN NOW()
                 ELSE updated_at
             END
         WHERE tenant_id = $1
@@ -7042,6 +7047,7 @@ async fn advance_mapi_replica_counter_past_allocated(
     .bind(tenant_id)
     .bind(account_id)
     .bind(next_counter)
+    .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
     .execute(&mut **tx)
     .await?;
 
@@ -7216,6 +7222,10 @@ async fn allocate_next_mapi_global_counter(
     .bind(account_id)
     .fetch_one(&mut **tx)
     .await?;
+
+    if next as u64 >= crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER {
+        anyhow::bail!("MAPI dynamic global counter space exhausted");
+    }
 
     Ok(next as u64)
 }
