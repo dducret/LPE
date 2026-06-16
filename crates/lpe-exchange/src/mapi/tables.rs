@@ -3799,7 +3799,10 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
         return matches!(
             message.message_class.as_str(),
-            "IPM.Configuration.ELC" | "IPM.Sharing.Configuration" | "IPM.Aggregation"
+            "IPM.Configuration.ELC"
+                | "IPM.RuleOrganizer"
+                | "IPM.Sharing.Configuration"
+                | "IPM.Aggregation"
         ) && restriction.is_some_and(|restriction| {
             message_class_restriction_matches_exact(restriction, &message.message_class)
         });
@@ -8970,6 +8973,11 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_find_row_returns_outlook_rule_organizer() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.RuleOrganizer");
+    }
+
+    #[test]
     fn inbox_associated_find_row_suppresses_outlook_sharing_index() {
         assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
     }
@@ -9684,7 +9692,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_query_rows_does_not_return_empty_rule_organizer_default() {
+    fn inbox_associated_query_rows_returns_exact_rule_organizer_default() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -9724,8 +9732,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
-        assert!(utf16_position(&response, "IPM.RuleOrganizer").is_none());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
     }
 
     #[test]
