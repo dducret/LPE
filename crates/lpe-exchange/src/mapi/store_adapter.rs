@@ -68,7 +68,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         let Ok(request) = read_rop_request(&mut cursor) else {
             return MapiAccessPlan::full();
         };
-        if rop_requires_full_snapshot(request.rop_id) {
+        if rop_requires_full_snapshot(request.rop_id)
+            && !rop_uses_session_state_only(&simulated_handles, &handle_slots, &request)
+        {
             return MapiAccessPlan::full();
         }
         if let Some(folder_id) = request.folder_id() {
@@ -1343,6 +1345,19 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
     )
 }
 
+fn rop_uses_session_state_only(
+    handles: &HashMap<u32, MapiObject>,
+    handle_slots: &[u32],
+    request: &RopRequest,
+) -> bool {
+    match request.rop_id {
+        0x4E => input_handle(handle_slots, request)
+            .and_then(|handle| handles.get(&handle))
+            .is_some_and(|object| matches!(object, MapiObject::SynchronizationSource { .. })),
+        _ => false,
+    }
+}
+
 fn simulate_table_access(
     plan: &mut MapiAccessPlan,
     session: &MapiSession,
@@ -1627,6 +1642,49 @@ fn simulate_table_access(
                     sql_sort_orders,
                 );
             }
+        }
+        0x82 => {
+            let Some((
+                folder_id,
+                mailbox_id,
+                checkpoint_kind,
+                checkpoint_change_sequence,
+                checkpoint_modseq,
+                checkpoint_store_allowed,
+                checkpoint_skip_reason,
+                sync_type,
+                state,
+            )) = input_handle(handle_slots, request)
+                .and_then(|handle| handles.get(&handle))
+                .and_then(|object| synchronization_context_state(Some(object)))
+            else {
+                return;
+            };
+            let handle = simulate_allocate_handle(
+                handles,
+                next_handle,
+                request.output_handle_index,
+                MapiObject::SynchronizationSource {
+                    folder_id,
+                    mailbox_id,
+                    checkpoint_kind,
+                    checkpoint_change_sequence,
+                    checkpoint_modseq,
+                    checkpoint_store_allowed,
+                    checkpoint_skip_reason,
+                    sync_type,
+                    initial_state: state.clone(),
+                    state: state.clone(),
+                    state_upload_property_tag: None,
+                    state_upload_buffer: Vec::new(),
+                    client_state_uploaded_bytes: 0,
+                    client_state_uploaded_marker_mask: 0,
+                    incremental_transfer_buffer: None,
+                    transfer_buffer: state,
+                    transfer_position: 0,
+                },
+            );
+            set_handle_slot(handle_slots, request.output_handle_index, handle);
         }
         0x4F => {
             let Some(object) =
@@ -2208,6 +2266,58 @@ mod tests {
         assert!(
             !plan.requires_associated_contents,
             "normal Common Views contents should not preload associated rows: {plan:?}"
+        );
+    }
+
+    #[test]
+    fn access_plan_cached_mode_transfer_state_get_buffer_uses_session_state() {
+        let mut session = empty_session();
+        session.handles.insert(
+            0x38,
+            MapiObject::SynchronizationSource {
+                folder_id: INBOX_FOLDER_ID,
+                mailbox_id: None,
+                checkpoint_kind: crate::store::MapiCheckpointKind::Content,
+                checkpoint_change_sequence: 88,
+                checkpoint_modseq: 44,
+                checkpoint_store_allowed: true,
+                checkpoint_skip_reason: "",
+                sync_type: 0x01,
+                initial_state: vec![0x01, 0x02],
+                state: vec![0x03, 0x04],
+                state_upload_property_tag: None,
+                state_upload_buffer: Vec::new(),
+                client_state_uploaded_bytes: 0,
+                client_state_uploaded_marker_mask: 0,
+                incremental_transfer_buffer: None,
+                transfer_buffer: vec![0xaa],
+                transfer_position: 1,
+            },
+        );
+        session.handles.insert(
+            0x39,
+            MapiObject::Folder {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        session.next_handle = 0x3a;
+        let mut rops = vec![
+            0x01, 0x00, 0x00, // Release handle slot 0.
+            0x82, 0x00, 0x01, 0x02, // SynchronizationGetTransferState slot 1 -> slot 2.
+            0x4e, 0x00, 0x02, // FastTransferSourceGetBuffer from slot 2.
+        ];
+        rops.extend_from_slice(&4096u16.to_le_bytes());
+
+        let plan = plan_mapi_store_access(&session, &rop_buffer(&rops, &[0x39, 0x38, u32::MAX]));
+
+        assert!(
+            !plan.requires_full_snapshot,
+            "cached-mode transfer state should not force a full snapshot: {plan:?}"
+        );
+        assert_eq!(
+            plan.object_ids,
+            vec![COMMON_VIEWS_FOLDER_ID, INBOX_FOLDER_ID]
         );
     }
 
