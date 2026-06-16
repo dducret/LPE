@@ -2213,7 +2213,9 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         }
         PID_TAG_VIEW_DESCRIPTOR_VERSION => Some(MapiValue::U32(message.view_type)),
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
-        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => {
+            Some(MapiValue::Binary(minimal_view_descriptor_binary()))
+        }
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => Some(
             wlink_guid_property_value(requested_property_tag, *message.canonical_id.as_bytes()),
         ),
@@ -10610,7 +10612,7 @@ mod tests {
                 account_id,
                 OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
             ),
-            Some(MapiValue::Binary(Vec::new()))
+            Some(MapiValue::Binary(descriptor.clone()))
         );
         assert_eq!(
             common_view_named_view_property_value(&view, account_id, PID_TAG_PARENT_ENTRY_ID),

@@ -10190,6 +10190,10 @@ mod tests {
             Some(MapiValue::Binary(value)) if !value.is_empty()
         ));
         assert_eq!(
+            associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+            associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
+        );
+        assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_CLSID),
             Some(MapiValue::Guid(*message.canonical_id.as_bytes()))
         );
@@ -11533,6 +11537,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_VIEW_DESCRIPTOR_BINARY
             | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
             | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
