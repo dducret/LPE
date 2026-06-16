@@ -598,7 +598,11 @@ pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_GUID: u32 = 0x0000_8903;
 pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL: u32 = 0x0000_8904;
 pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_XML: u32 = 0x0000_8905;
 pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION: u32 = 0x0000_8906;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_REMOTE_NAME: u32 = 0x0000_8A07;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_REMOTE_UID: u32 = 0x0000_8A08;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_LOCAL_TYPE: u32 = 0x0000_8A1C;
 pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8AA6: u32 = 0x0000_8AA6;
+pub(in crate::mapi) const PID_NAME_SHARING_SEND_AS_STATE_TAG: u32 = 0x81ED_0003;
 
 pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
@@ -669,6 +673,10 @@ pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_GUID_W_TAG: u32 = 0x8903_001F;
 pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL_W_TAG: u32 = 0x8904_001F;
 pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_XML_W_TAG: u32 = 0x8905_001F;
 pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION_W_TAG: u32 = 0x8906_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG: u32 = 0x8A07_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_REMOTE_UID_TAG: u32 = 0x8A08_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_LOCAL_TYPE_TAG: u32 = 0x8A1C_0048;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8AA6_TAG: u32 = 0x8AA6_0003;
 
 pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
     well_known_named_properties()
@@ -785,6 +793,10 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_POST_RSS_CHANNEL, PSETID_POST_RSS_GUID),
             (PID_LID_POST_RSS_ITEM_XML, PSETID_POST_RSS_GUID),
             (PID_LID_POST_RSS_SUBSCRIPTION, PSETID_POST_RSS_GUID),
+            (PID_LID_OUTLOOK_SHARING_REMOTE_NAME, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_SHARING_REMOTE_UID, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_SHARING_LOCAL_TYPE, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_SHARING_8AA6, PSETID_COMMON_GUID),
             (PID_LID_OUTLOOK_SHARING_8AA6, PSETID_SHARING_GUID),
         ]
         .into_iter()
@@ -809,6 +821,13 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             kind: MapiNamedPropertyKind::Name(
                 "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
             ),
+        },
+    )))
+    .chain(std::iter::once((
+        MapiPropertyTag::new(PID_NAME_SHARING_SEND_AS_STATE_TAG).property_id(),
+        MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Name("SharingSendAsState".to_string()),
         },
     )))
     .chain(std::iter::once((
@@ -10802,6 +10821,45 @@ mod tests {
                 ),
             }),
             Some(0x8010)
+        );
+    }
+
+    #[test]
+    fn outlook_common_sharing_probe_named_properties_map_to_stable_ids() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_SHARING_REMOTE_NAME),
+            }),
+            Some(PID_LID_OUTLOOK_SHARING_REMOTE_NAME as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_SHARING_REMOTE_UID),
+            }),
+            Some(PID_LID_OUTLOOK_SHARING_REMOTE_UID as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_SHARING_LOCAL_TYPE),
+            }),
+            Some(PID_LID_OUTLOOK_SHARING_LOCAL_TYPE as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Name("SharingSendAsState".to_string()),
+            }),
+            Some(0x81ED)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_SHARING_8AA6),
+            }),
+            Some(PID_LID_OUTLOOK_SHARING_8AA6 as u16)
         );
     }
 
