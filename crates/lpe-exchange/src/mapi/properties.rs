@@ -450,7 +450,6 @@ pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835: u32 = 0x6835_0102;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C: u32 = 0x683C_0102;
-#[cfg(test)]
 pub(in crate::mapi) const OUTLOOK_RULE_ORGANIZER_BINARY_6802: u32 = 0x6802_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
@@ -3777,7 +3776,20 @@ fn property_stream_data(
         return None;
     }
     let object = session.handles.get(&input_handle)?;
-    let allow_empty_missing_stream = !matches!(object, MapiObject::AssociatedConfig { .. });
+    let allow_empty_missing_stream = match object {
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+            saved_message,
+        } => is_empty_virtual_rule_organizer_stream(
+            snapshot,
+            *folder_id,
+            *config_id,
+            saved_message.as_ref(),
+            property_tag,
+        ),
+        _ => true,
+    };
     let value = match object {
         MapiObject::Folder {
             folder_id,
@@ -3827,6 +3839,27 @@ fn property_stream_data(
         None => return None,
     };
     Some((stream, None))
+}
+
+fn is_empty_virtual_rule_organizer_stream(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    config_id: u64,
+    saved_message: Option<&MapiAssociatedConfigMessage>,
+    property_tag: u32,
+) -> bool {
+    property_tag == OUTLOOK_RULE_ORGANIZER_BINARY_6802
+        && snapshot
+            .associated_config_message_for_id(config_id)
+            .or_else(|| saved_message.cloned())
+            .is_some_and(|message| {
+                message.folder_id == folder_id
+                    && message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+                    && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
+                        message.id,
+                    )
+            })
 }
 
 fn mapi_value_stream_bytes(property_tag: u32, value: MapiValue) -> Option<Vec<u8>> {
@@ -10710,7 +10743,7 @@ mod tests {
             &snapshot
         )
         .is_none());
-        assert!(property_stream_data(
+        let (rule_organizer_stream, writable_target) = property_stream_data(
             &session,
             2,
             OUTLOOK_RULE_ORGANIZER_BINARY_6802,
@@ -10719,7 +10752,9 @@ mod tests {
             account_id,
             &snapshot,
         )
-        .is_none());
+        .expect("virtual RuleOrganizer stream");
+        assert!(rule_organizer_stream.is_empty());
+        assert!(writable_target.is_none());
         let (modeled_stream, writable_target) = property_stream_data(
             &session,
             1,
