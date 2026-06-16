@@ -1483,6 +1483,9 @@ fn log_get_properties_specific_debug(
         format_folder_type_getprops_contract(object, principal, columns, mailboxes, snapshot);
     let message_body_getprops_contract =
         format_message_body_getprops_contract(object, columns, mailboxes, emails, snapshot);
+    let default_view_entry_id_decoding = format_default_view_entry_id_decoding(
+        object, principal, columns, mailboxes, emails, snapshot,
+    );
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1531,6 +1534,7 @@ fn log_get_properties_specific_debug(
         ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
         folder_type_getprops_contract = %folder_type_getprops_contract,
         message_body_getprops_contract = %message_body_getprops_contract,
+        default_view_entry_id_decoding = %default_view_entry_id_decoding,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
         outlook_bootstrap_estimated_rop_payload_bytes =
             outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
@@ -1549,6 +1553,59 @@ fn log_get_properties_specific_debug(
         snapshot,
         &flagged_error_tags,
     );
+}
+
+fn format_default_view_entry_id_decoding(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    columns
+        .iter()
+        .filter(|tag| canonical_property_storage_tag(**tag) == PID_TAG_DEFAULT_VIEW_ENTRY_ID)
+        .map(|tag| {
+            let encoded =
+                serialize_object_property(object, principal, mailboxes, emails, snapshot, *tag);
+            let mut cursor = Cursor::new(&encoded);
+            match parse_mapi_property_value(&mut cursor, *tag) {
+                Ok(MapiValue::Binary(entry_id)) => {
+                    match default_view_message_entry_id_target(&entry_id) {
+                        Some((folder_id, message_id)) => format!(
+                            "{tag:#010x}:bytes={}:folder_id={folder_id:#018x};message_id={message_id:#018x}",
+                            entry_id.len()
+                        ),
+                        None => format!(
+                            "{tag:#010x}:bytes={}:decode=not_message_entry_id",
+                            entry_id.len()
+                        ),
+                    }
+                }
+                Ok(value) => format!("{tag:#010x}:unexpected_value={value:?}"),
+                Err(error) => format!("{tag:#010x}:decode_error={error}"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn default_view_message_entry_id_target(entry_id: &[u8]) -> Option<(u64, u64)> {
+    if entry_id.len() != 70
+        || entry_id[0..4] != [0, 0, 0, 0]
+        || entry_id[20..22] != 0x0007u16.to_le_bytes()
+        || entry_id[44..46] != [0, 0]
+        || entry_id[68..70] != [0, 0]
+    {
+        return None;
+    }
+    let folder_counter = crate::mapi::identity::global_counter_from_globcnt(&entry_id[38..44])?;
+    let message_counter = crate::mapi::identity::global_counter_from_globcnt(&entry_id[62..68])?;
+    Some((
+        crate::mapi::identity::mapi_store_id(folder_counter),
+        crate::mapi::identity::mapi_store_id(message_counter),
+    ))
 }
 
 fn format_message_body_getprops_contract(
@@ -8976,6 +9033,25 @@ mod tests {
         );
 
         assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), FOLDER_SEARCH);
+    }
+
+    #[test]
+    fn default_view_entry_id_debug_decodes_message_target_ids() {
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            INBOX_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
+        )
+        .unwrap();
+
+        assert_eq!(
+            default_view_message_entry_id_target(&entry_id),
+            Some((
+                INBOX_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
+            ))
+        );
+        assert_eq!(default_view_message_entry_id_target(&entry_id[..46]), None);
     }
 
     #[test]

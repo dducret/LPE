@@ -9,7 +9,8 @@ Don't assume. Don't hide confusion. Surface tradeoffs.
    If a simpler approach exists, say so. Push back when warranted.
    If something is unclear, stop. Name what's confusing. Ask.
 
-Minimum code that solvesNo features beyond what was asked.
+Minimum code that solves.
+   No features beyond what was asked.
    No abstractions for single-use code.
    No "flexibility" or "configurability" that wasn't requested.
    No error handling for impossible scenarios.
