@@ -3802,6 +3802,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
             "IPM.Configuration.ELC"
                 | "IPM.RuleOrganizer"
                 | "IPM.Sharing.Configuration"
+                | "IPM.Sharing.Index"
                 | "IPM.Aggregation"
         ) && restriction.is_some_and(|restriction| {
             message_class_restriction_matches_exact(restriction, &message.message_class)
@@ -8978,8 +8979,8 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_suppresses_outlook_sharing_index() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
+    fn inbox_associated_find_row_returns_outlook_sharing_index() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
     }
 
     #[test]
@@ -9067,6 +9068,31 @@ mod tests {
         );
         assert_eq!(
             associated_config_property_value(&aggregation, PID_LID_OUTLOOK_SHARING_8AA6_TAG),
+            Some(MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn inbox_associated_find_row_returns_sharing_index_private_defaults() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let sharing_index = snapshot
+            .associated_config_messages_for_folder(INBOX_FOLDER_ID)
+            .into_iter()
+            .find(|message| message.message_class == "IPM.Sharing.Index")
+            .expect("virtual Outlook sharing index config");
+
+        assert_eq!(
+            associated_config_property_value(
+                &sharing_index,
+                PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
+            ),
+            Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &sharing_index,
+                PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
+            ),
             Some(MapiValue::U32(0))
         );
     }
@@ -11539,6 +11565,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     default_wlink_group_guid(),
                 ))
             }
+            PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+            }
             PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG
                 if is_outlook_virtual_sharing_state_config(message) =>
             {
@@ -11555,6 +11586,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 Some(MapiValue::Guid(Uuid::nil().into_bytes()))
             }
             PID_NAME_SHARING_SEND_AS_STATE_TAG | PID_LID_OUTLOOK_SHARING_8AA6_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::U32(0))
+            }
+            PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
                 if is_outlook_virtual_sharing_state_config(message) =>
             {
                 Some(MapiValue::U32(0))
