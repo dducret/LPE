@@ -2221,6 +2221,8 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_OUTLOOK_STORE_STATE
                 | PID_TAG_RESOURCE_FLAGS
                 | PID_TAG_PST_PATH_W
+                | PID_TAG_SERVER_CONNECTED_ICON
+                | PID_TAG_SERVER_ACCOUNT_ICON
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::AssociatedConfig { .. }) => {
