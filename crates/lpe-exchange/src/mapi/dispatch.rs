@@ -3418,6 +3418,42 @@ fn log_get_properties_default_folder_response_debug(
     );
 }
 
+fn log_get_properties_specific_response_debug(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_response: &[u8],
+) {
+    let property_tags = request.property_tags();
+    let probe = GetPropertiesSpecificProbeRequest {
+        input_handle_index: request.input_handle_index().unwrap_or(0),
+        property_tags,
+    };
+    let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
+    let response_values =
+        get_properties_specific_response_values_for_debug(&probe.property_tags, property_response);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        property_tag_count = probe.property_tags.len(),
+        property_tags = %format_debug_property_tags(&probe.property_tags),
+        property_names = %format_set_property_names_for_debug(&probe.property_tags),
+        response_shape = %response_shape,
+        response_values = %response_values,
+        "rca debug mapi getprops specific response"
+    );
+}
+
 fn log_set_properties_default_folder_response_debug(
     principal: &AccountPrincipal,
     request_id: &str,
@@ -3483,6 +3519,12 @@ fn format_set_property_names_for_debug(tags: &[u32]) -> String {
 }
 
 fn set_property_debug_name(tag: u32) -> &'static str {
+    if is_default_folder_identification_property_tag(tag) {
+        let name = default_folder_entry_id_property_name(tag);
+        if name != "unknown" {
+            return name;
+        }
+    }
     match canonical_property_storage_tag(tag) {
         PID_TAG_MESSAGE_CLASS_W => "PidTagMessageClass",
         PID_TAG_SUBJECT_W => "PidTagSubject",
@@ -3515,6 +3557,59 @@ fn set_property_debug_name(tag: u32) -> &'static str {
         0x685D_0003 => "OutlookConfigurationStamp",
         _ => "unknown",
     }
+}
+
+fn get_properties_specific_response_values_for_debug(
+    property_tags: &[u32],
+    response: &[u8],
+) -> String {
+    if response.get(6).copied() != Some(0) {
+        return "not-standard-row".to_string();
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut values = Vec::new();
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        match parse_property_value_for_tag(&mut cursor, *tag) {
+            Ok(value) => values.push(get_properties_specific_value_for_debug(storage_tag, &value)),
+            Err(error) => {
+                values.push(format!(
+                    "{storage_tag:#010x}:{}:parse_error={error}",
+                    set_property_debug_name(storage_tag)
+                ));
+                break;
+            }
+        }
+    }
+    values.join(",")
+}
+
+fn get_properties_specific_value_for_debug(tag: u32, value: &MapiValue) -> String {
+    let storage_tag = canonical_property_storage_tag(tag);
+    if is_default_folder_identification_property_tag(storage_tag) {
+        return default_folder_getprops_value_for_debug(storage_tag, value);
+    }
+    let decoded = match value {
+        MapiValue::Binary(bytes) => {
+            let decoded_folder_id =
+                crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes);
+            match decoded_folder_id {
+                Some(folder_id) => format!(
+                    ";decoded_folder_id=0x{folder_id:016x};decoded_name={}",
+                    post_hierarchy_probe_folder_name(folder_id)
+                ),
+                None => format!(";preview={}", hex_preview(bytes, 32)),
+            }
+        }
+        MapiValue::Guid(bytes) => format!(";guid={}", bytes_to_hex(bytes)),
+        _ => String::new(),
+    };
+    format!(
+        "{storage_tag:#010x}:{}:{}{}",
+        set_property_debug_name(storage_tag),
+        mapi_value_debug_shape(value),
+        decoded
+    )
 }
 
 fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> String {
@@ -11206,6 +11301,13 @@ where
                     emails_for_request,
                     snapshot,
                     property_response.len(),
+                );
+                log_get_properties_specific_response_debug(
+                    principal,
+                    request_id,
+                    &request,
+                    object,
+                    &property_response,
                 );
                 log_get_properties_default_folder_response_debug(
                     principal,
@@ -24217,6 +24319,14 @@ mod tests {
         assert_eq!(
             set_property_debug_name(PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID),
             "PidTagWlinkAddressBookStoreEid"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_IPM_APPOINTMENT_ENTRY_ID),
+            "PidTagIpmAppointmentEntryId"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_REM_ONLINE_ENTRY_ID),
+            "PidTagRemOnlineEntryId"
         );
     }
 
