@@ -177,6 +177,7 @@ const PID_TAG_DEPTH: u32 = 0x3005_0003;
 const PID_TAG_ADDRESS_BOOK_CONTAINER_ID: u32 = 0xFFFD_0003;
 const PID_TAG_ADDRESS_BOOK_IS_MASTER: u32 = 0xFFFB_000B;
 const AB_RECIPIENTS: u32 = 0x0000_0001;
+const AB_SUBCONTAINERS: u32 = 0x0000_0002;
 const AB_UNMODIFIABLE: u32 = 0x0000_0008;
 const DT_CONTAINER: u32 = 0x0000_0100;
 const NSPI_ADDRESS_CREATION_TEMPLATES_FLAG: u32 = 0x0000_0002;
@@ -187,6 +188,7 @@ struct NspiSpecialTableContainer {
     dn: &'static str,
     container_id: u32,
     depth: u32,
+    flags: u32,
     is_master: bool,
 }
 
@@ -196,13 +198,15 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
         dn: "/",
         container_id: 0,
         depth: 0,
-        is_master: false,
+        flags: AB_SUBCONTAINERS | AB_UNMODIFIABLE,
+        is_master: true,
     },
     NspiSpecialTableContainer {
         display_name: "All Users",
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f11",
         container_id: 2,
         depth: 1,
+        flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,
     },
     NspiSpecialTableContainer {
@@ -210,6 +214,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f12",
         container_id: 3,
         depth: 1,
+        flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,
     },
     NspiSpecialTableContainer {
@@ -217,6 +222,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f13",
         container_id: 4,
         depth: 1,
+        flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,
     },
 ];
@@ -1479,7 +1485,7 @@ fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     write_address_book_tagged_property_value(
         &mut table_row,
         PID_TAG_CONTAINER_FLAGS,
-        &NspiValue::U32(AB_RECIPIENTS | AB_UNMODIFIABLE),
+        &NspiValue::U32(container.flags),
     );
     write_address_book_tagged_property_value(
         &mut table_row,
@@ -1527,7 +1533,7 @@ fn format_nspi_special_table_containers_for_debug(
                 container.depth,
                 container.container_id,
                 nspi_container_entry_id(container.dn).len(),
-                AB_RECIPIENTS | AB_UNMODIFIABLE,
+                container.flags,
                 DT_CONTAINER,
                 container.is_master
             )

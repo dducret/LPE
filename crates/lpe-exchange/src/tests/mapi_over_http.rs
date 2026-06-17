@@ -39247,13 +39247,21 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     "{request_type}"
                 );
                 let mut offset = 22usize;
-                for (name, dn, depth, container_id, is_master) in [
-                    ("Global Address List", b"/\0".as_slice(), 0u32, 0u32, 0u8),
+                for (name, dn, depth, container_id, flags, is_master) in [
+                    (
+                        "Global Address List",
+                        b"/\0".as_slice(),
+                        0u32,
+                        0u32,
+                        0x0000_000A,
+                        1u8,
+                    ),
                     (
                         "All Users",
                         b"/guid=741f6fd38e1a654f9d422dfb451c8f11\0".as_slice(),
                         1,
                         2,
+                        0x0000_0009,
                         0,
                     ),
                     (
@@ -39261,6 +39269,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         b"/guid=741f6fd38e1a654f9d422dfb451c8f12\0".as_slice(),
                         1,
                         3,
+                        0x0000_0009,
                         0,
                     ),
                     (
@@ -39268,6 +39277,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         b"/guid=741f6fd38e1a654f9d422dfb451c8f13\0".as_slice(),
                         1,
                         4,
+                        0x0000_0009,
                         0,
                     ),
                 ] {
@@ -39308,7 +39318,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     offset += 8;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        0x0000_0009,
+                        flags,
                         "{request_type}: {name}"
                     );
                     offset += 4;
