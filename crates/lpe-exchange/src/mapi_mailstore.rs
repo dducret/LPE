@@ -1152,6 +1152,61 @@ pub(crate) fn hierarchy_transfer_close_summary(
     )
 }
 
+pub(crate) fn default_folder_hierarchy_membership_summary(
+    sync_type: u8,
+    sync_root_folder_id: u64,
+    transfer_buffer: &[u8],
+) -> String {
+    if sync_type != SYNC_TYPE_HIERARCHY {
+        return String::new();
+    }
+    let Ok(summary) = decode_hierarchy_transfer_debug_summary(transfer_buffer) else {
+        return "hierarchy_debug=parse_error".to_string();
+    };
+    default_folder_hierarchy_membership_specs()
+        .iter()
+        .map(|(name, folder_id)| {
+            let source_counter = crate::mapi::identity::global_counter_from_store_id(*folder_id)
+                .unwrap_or_else(|| change_number_for_store_id(*folder_id));
+            let change_counter = change_number_for_store_id(*folder_id);
+            let row = summary
+                .rows
+                .iter()
+                .find(|row| row.folder_id == Some(*folder_id));
+            let row_present = row.is_some();
+            let row_index = row.map(|row| row.row_index).unwrap_or_default();
+            let parent_folder_matches = row
+                .and_then(|row| row.parent_folder_id)
+                .is_some_and(|parent| parent == sync_root_folder_id);
+            let parent_source_key_expected =
+                row.is_some_and(|row| row.parent_source_key_len == 0);
+            let source_key_len = row.map(|row| row.source_key_len).unwrap_or_default();
+            let parent_source_key_len = row.map(|row| row.parent_source_key_len).unwrap_or_default();
+            let idset_present = summary.final_state_idset_given_counters.contains(&source_counter);
+            let cnset_present = summary.final_state_cnset_seen_counters.contains(&change_counter);
+            format!(
+                "{name}:fid=0x{folder_id:016x};row_present={row_present};row_index={row_index};parent_folder_matches={parent_folder_matches};parent_source_key_expected={parent_source_key_expected};source_key_len={source_key_len};parent_source_key_len={parent_source_key_len};idset_present={idset_present};cnset_present={cnset_present}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn default_folder_hierarchy_membership_specs() -> [(&'static str, u64); 10] {
+    [
+        ("inbox", crate::mapi::identity::INBOX_FOLDER_ID),
+        ("drafts", crate::mapi::identity::DRAFTS_FOLDER_ID),
+        ("outbox", crate::mapi::identity::OUTBOX_FOLDER_ID),
+        ("sent", crate::mapi::identity::SENT_FOLDER_ID),
+        ("trash", crate::mapi::identity::TRASH_FOLDER_ID),
+        ("calendar", crate::mapi::identity::CALENDAR_FOLDER_ID),
+        ("contacts", crate::mapi::identity::CONTACTS_FOLDER_ID),
+        ("journal", crate::mapi::identity::JOURNAL_FOLDER_ID),
+        ("notes", crate::mapi::identity::NOTES_FOLDER_ID),
+        ("tasks", crate::mapi::identity::TASKS_FOLDER_ID),
+    ]
+}
+
 fn log_hierarchy_semantic_validation(
     sync_type: u8,
     folder_id: u64,
@@ -4716,6 +4771,61 @@ mod tests {
         assert!(validation
             .top_level_row_names
             .contains("Conversation History"));
+    }
+
+    #[test]
+    fn default_folder_hierarchy_membership_summary_tracks_top_level_ipm_folders() {
+        let folder_ids = [
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            crate::mapi::identity::DRAFTS_FOLDER_ID,
+            crate::mapi::identity::OUTBOX_FOLDER_ID,
+            crate::mapi::identity::SENT_FOLDER_ID,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            crate::mapi::identity::JOURNAL_FOLDER_ID,
+            crate::mapi::identity::NOTES_FOLDER_ID,
+            crate::mapi::identity::TASKS_FOLDER_ID,
+        ];
+        let mailboxes = folder_ids
+            .into_iter()
+            .map(|folder_id| virtual_special_mailbox(folder_id).expect("virtual folder"))
+            .collect::<Vec<_>>();
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = default_folder_hierarchy_membership_summary(
+            SYNC_TYPE_HIERARCHY,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &buffer,
+        );
+
+        assert!(summary.contains(&format!(
+            "inbox:fid=0x{:016x};row_present=true",
+            crate::mapi::identity::INBOX_FOLDER_ID
+        )));
+        assert!(summary.contains(&format!(
+            "calendar:fid=0x{:016x};row_present=true",
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )));
+        assert!(summary.contains(&format!(
+            "contacts:fid=0x{:016x};row_present=true",
+            crate::mapi::identity::CONTACTS_FOLDER_ID
+        )));
+        assert!(summary.contains("parent_source_key_expected=true"));
+        assert!(summary.contains("parent_source_key_len=0"));
+        assert!(summary.contains("idset_present=true"));
+        assert!(summary.contains("cnset_present=true"));
     }
 
     #[test]

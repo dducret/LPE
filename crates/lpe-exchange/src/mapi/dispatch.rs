@@ -16966,11 +16966,27 @@ where
                 });
                 let checkpoint_delta_mailbox_count = delta_sync_mailboxes.len();
                 let checkpoint_delta_email_count = delta_sync_emails.len();
+                let checkpoint_delta_special_object_count = delta_special_sync_objects.len();
                 let checkpoint_deleted_message_count = deleted_message_ids.len();
                 let incremental_transfer_buffer_bytes = incremental_transfer_buffer
                     .as_ref()
                     .map(|buffer| buffer.len())
                     .unwrap_or_default();
+                let checkpoint_delta_total_count = checkpoint_delta_mailbox_count
+                    + checkpoint_delta_email_count
+                    + checkpoint_delta_special_object_count
+                    + checkpoint_deleted_message_count;
+                let checkpoint_zero_delta =
+                    checkpoint.is_some() && checkpoint_delta_total_count == 0;
+                let checkpoint_incremental_response_candidate =
+                    checkpoint.is_some() && incremental_transfer_buffer.is_some();
+                let initial_transfer_selection = if checkpoint_incremental_response_candidate {
+                    "full_until_upload_state_delta_anchor"
+                } else if checkpoint.is_some() {
+                    "full_checkpoint_without_incremental_candidate"
+                } else {
+                    "full_no_checkpoint"
+                };
                 let scope_flags_present = sync_type != 0x01 || sync_flags & 0x0030 != 0;
                 let default_fai_scope_requested = all_sync_emails.is_empty()
                     && all_special_sync_objects
@@ -17080,7 +17096,12 @@ where
                     checkpoint_skip_reason,
                     checkpoint_delta_mailbox_count,
                     checkpoint_delta_email_count,
-                    checkpoint_delta_special_object_count = delta_special_sync_objects.len(),
+                    checkpoint_delta_special_object_count,
+                    checkpoint_delta_total_count,
+                    checkpoint_zero_delta,
+                    checkpoint_incremental_response_candidate,
+                    checkpoint_delta_selection_gate = "upload_state_delta_anchor",
+                    initial_transfer_selection,
                     checkpoint_changed_contact_count = changes.changed_contact_ids.len(),
                     checkpoint_changed_calendar_event_count =
                         changes.changed_calendar_event_ids.len(),
@@ -17091,6 +17112,8 @@ where
                     checkpoint_deleted_task_count = changes.deleted_task_ids.len(),
                     checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
+                    initial_sync_state_bytes = initial_state.len(),
+                    generated_sync_state_bytes = state.len(),
                     generated_sync_state_summary =
                         %mapi_mailstore::final_sync_state_debug_summary(&state),
                     transfer_buffer_bytes = transfer_buffer.len(),
@@ -17347,6 +17370,26 @@ where
                         let previous_transfer_position = *transfer_position;
                         let empty_content_sync_state_only = *sync_type == 0x01
                             && transfer_buffer.len() == state.len().saturating_add(4);
+                        let upload_state_has_delta_anchor =
+                            uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask);
+                        let checkpoint_delta_available_before_get_buffer =
+                            incremental_transfer_buffer.is_some();
+                        let checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor =
+                            checkpoint_delta_available_before_get_buffer
+                                && !upload_state_has_delta_anchor;
+                        let active_transfer_selection =
+                            if checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor
+                            {
+                                "full_pending_upload_state_delta_anchor"
+                            } else if upload_state_has_delta_anchor
+                                && !checkpoint_delta_available_before_get_buffer
+                            {
+                                "checkpoint_delta_or_full_after_delta_anchor"
+                            } else if checkpoint_delta_available_before_get_buffer {
+                                "full_with_checkpoint_delta_available"
+                            } else {
+                                "full_or_static"
+                            };
                         let response = rop_fast_transfer_source_get_buffer_response(
                             &request,
                             transfer_buffer,
@@ -17362,10 +17405,16 @@ where
                                     *folder_id,
                                     transfer_buffer,
                                 );
+                            let default_folder_hierarchy_membership_summary =
+                                mapi_mailstore::default_folder_hierarchy_membership_summary(
+                                    *sync_type,
+                                    *folder_id,
+                                    transfer_buffer,
+                                );
                             completed_hierarchy_sync = Some((
                                 *folder_id,
                                 format!(
-                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
+                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};upload_delta_anchor={};incremental={};delta_blocked_no_anchor={};selection={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
                                     *folder_id,
                                     checkpoint_kind.as_str(),
                                     (*mailbox_id).map(|id| id.to_string()).unwrap_or_default(),
@@ -17375,7 +17424,10 @@ where
                                     mapi_mailstore::final_sync_state_debug_summary(state),
                                     state_upload_buffer.len(),
                                     *client_state_uploaded_bytes,
+                                    upload_state_has_delta_anchor,
                                     incremental_transfer_buffer.is_some(),
+                                    checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor,
+                                    active_transfer_selection,
                                     requested_buffer_bytes,
                                     response.len(),
                                     response_debug.transfer_payload_bytes,
@@ -17385,6 +17437,7 @@ where
                                     transfer_buffer.len(),
                                     hierarchy_close_summary
                                 ),
+                                default_folder_hierarchy_membership_summary,
                             ));
                         }
                         tracing::info!(
@@ -17415,12 +17468,16 @@ where
                             upload_state_markers =
                                 %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
                             upload_state_has_delta_anchor =
-                                uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask),
+                                upload_state_has_delta_anchor,
                             incremental_transfer_available = incremental_transfer_buffer.is_some(),
                             incremental_transfer_buffer_bytes = incremental_transfer_buffer
                                 .as_ref()
                                 .map(|buffer| buffer.len())
                                 .unwrap_or_default(),
+                            checkpoint_delta_selection_gate = "upload_state_delta_anchor",
+                            checkpoint_delta_available_before_get_buffer,
+                            checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor,
+                            active_transfer_selection,
                             requested_buffer_bytes,
                             transfer_position_before = previous_transfer_position,
                             transfer_position_after = *transfer_position,
@@ -17909,6 +17966,8 @@ where
                             *checkpoint_skip_reason = "";
                         }
                         let mut selected_checkpoint_delta = false;
+                        let checkpoint_delta_available_before_upload_state =
+                            incremental_transfer_buffer.is_some();
                         if has_delta_anchor {
                             if let Some(buffer) = incremental_transfer_buffer.take() {
                                 *transfer_buffer = buffer;
@@ -17947,7 +18006,18 @@ where
                             upload_state_markers =
                                 %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
                             upload_state_has_delta_anchor = has_delta_anchor,
+                            checkpoint_delta_available_before_upload_state,
                             upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
+                            checkpoint_delta_selection_gate = "upload_state_delta_anchor",
+                            checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor =
+                                checkpoint_delta_available_before_upload_state && !has_delta_anchor,
+                            active_transfer_selection = if selected_checkpoint_delta {
+                                "checkpoint_delta_after_upload_state_delta_anchor"
+                            } else if checkpoint_delta_available_before_upload_state {
+                                "full_pending_upload_state_delta_anchor"
+                            } else {
+                                "full_or_static"
+                            },
                             transfer_buffer_bytes = transfer_buffer.len(),
                             transfer_position = *transfer_position,
                             "rca debug mapi sync upload state end"
@@ -20198,8 +20268,17 @@ where
                 break;
             }
         }
-        if let Some((sync_root_folder_id, get_buffer_summary)) = completed_hierarchy_sync {
-            session.record_completed_hierarchy_sync(sync_root_folder_id, get_buffer_summary);
+        if let Some((
+            sync_root_folder_id,
+            get_buffer_summary,
+            default_folder_hierarchy_membership_summary,
+        )) = completed_hierarchy_sync
+        {
+            session.record_completed_hierarchy_sync(
+                sync_root_folder_id,
+                get_buffer_summary,
+                default_folder_hierarchy_membership_summary,
+            );
         }
         if content_sync_configure_observed {
             session.record_content_sync_configure();

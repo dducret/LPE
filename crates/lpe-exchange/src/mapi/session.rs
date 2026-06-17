@@ -69,6 +69,7 @@ pub(in crate::mapi) struct CachedExecuteResponse {
 pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_completed_hierarchy_sync_root: Option<u64>,
     pub(in crate::mapi) last_successful_hierarchy_get_buffer_summary: String,
+    pub(in crate::mapi) last_default_folder_hierarchy_membership_summary: String,
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: Vec<u8>,
     pub(in crate::mapi) opened_folder_ids: Vec<u64>,
@@ -1077,11 +1078,14 @@ impl MapiSession {
         &mut self,
         sync_root_folder_id: u64,
         get_buffer_summary: String,
+        default_folder_membership_summary: String,
     ) {
         self.post_hierarchy_actions
             .last_completed_hierarchy_sync_root = Some(sync_root_folder_id);
         self.post_hierarchy_actions
             .last_successful_hierarchy_get_buffer_summary = get_buffer_summary;
+        self.post_hierarchy_actions
+            .last_default_folder_hierarchy_membership_summary = default_folder_membership_summary;
     }
 
     pub(in crate::mapi) fn record_content_sync_configure(&mut self) {
