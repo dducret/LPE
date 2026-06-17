@@ -19760,14 +19760,14 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .folder_changes
             .first()
             .map(|folder| folder.display_name.as_str()),
-        Some("Inbox")
+        Some("Top of Information Store")
     );
     assert_eq!(
         decoded
             .folder_changes
             .first()
             .and_then(|folder| folder.folder_id),
-        Some(test_mapi_folder_id(5))
+        Some(test_mapi_folder_id(4))
     );
     assert!(decoded
         .folder_changes
@@ -19775,6 +19775,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .all(|folder| folder.folder_id.is_some()));
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
+            "Top of Information Store" => test_mapi_folder_id(1),
             "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
             _ => test_mapi_folder_id(4),
         };
@@ -22983,7 +22984,7 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
-    assert_eq!(inbox.folder_id, None);
+    assert_eq!(inbox.folder_id, Some(crate::mapi::identity::INBOX_FOLDER_ID));
     assert_eq!(
         inbox.parent_folder_id,
         Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
@@ -23190,8 +23191,8 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(checkpoint.last_change_sequence, 42);
-    assert_eq!(checkpoint.last_modseq, 7);
+    assert_eq!(checkpoint.last_change_sequence, 44);
+    assert_eq!(checkpoint.last_modseq, 9);
     assert_eq!(
         checkpoint
             .cursor_json

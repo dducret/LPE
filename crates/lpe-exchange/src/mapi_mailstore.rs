@@ -493,7 +493,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         });
         for mailbox in folders {
             let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            if folder_id == sync_root_folder_id {
+            if folder_id == sync_root_folder_id
+                && !hierarchy_sync_emits_root_folder(sync_root_folder_id)
+            {
                 continue;
             }
             let parent_folder_id =
@@ -3200,13 +3202,15 @@ fn content_sync_includes_associated(
 }
 
 fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
-    if mailbox.role == "__mapi_ipm_subtree" {
-        0
-    } else if mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_") {
+    if mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_") {
         2
     } else {
         1
     }
+}
+
+fn hierarchy_sync_emits_root_folder(folder_id: u64) -> bool {
+    folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
 }
 
 fn local_commit_time_max(
@@ -3239,7 +3243,9 @@ fn sync_state_object_ids(
         mailboxes
             .iter()
             .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
-            .filter(|object_id| *object_id != folder_id)
+            .filter(|object_id| {
+                *object_id != folder_id || hierarchy_sync_emits_root_folder(folder_id)
+            })
             .collect()
     } else {
         emails
@@ -3260,7 +3266,8 @@ fn sync_state_change_numbers(
         let mut change_numbers = BTreeSet::new();
         change_numbers.extend(mailboxes.iter().filter_map(|mailbox| {
             let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            (object_id != folder_id).then(|| canonical_hierarchy_change_number(folder_id, mailbox))
+            (object_id != folder_id || hierarchy_sync_emits_root_folder(folder_id))
+                .then(|| canonical_hierarchy_change_number(folder_id, mailbox))
         }));
         change_numbers.into_iter().collect()
     } else {
