@@ -736,10 +736,15 @@ as implementation evidence only, not a publication-gate pass.
 
 Calendar troubleshooting diagnostics log the Calendar default folder contract,
 projected canonical calendar counts, and hierarchy-sync `PidTagParentSourceKey`
-role for each folder row. The hierarchy diagnostic follows the Microsoft ICS
-rule that a folder directly below the configured hierarchy sync root is
-represented by a zero-length `PidTagParentSourceKey`; this is expected for
-Calendar when Outlook syncs the IPM subtree root. Receive-folder table rows must
+role for each folder row. For a strict hierarchy sync stream that does not
+include the configured sync root as a `folderChange`, a folder directly below
+that sync root is represented by a zero-length `PidTagParentSourceKey` as
+defined by Microsoft ICS. LPE's Outlook cached-mode bootstrap stream
+intentionally emits the IPM subtree root row before its children; in that
+emitted-root stream, direct children such as Inbox, Calendar, Contacts, and Sync
+Issues use the emitted IPM subtree row's `PidTagSourceKey` as
+`PidTagParentSourceKey` so Outlook can resolve the hierarchy from the row it just
+received. Receive-folder table rows must
 keep the fixed FolderId, MessageClass, and LastModificationTime property-row
 wire shape, advertise `IPM.Appointment` before the generic `IPM` row, encode
 MessageClass as String8, and derive LastModificationTime from canonical folder

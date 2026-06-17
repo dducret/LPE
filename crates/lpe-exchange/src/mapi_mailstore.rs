@@ -491,6 +491,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             .then(left.name.cmp(&right.name))
             .then(left.id.cmp(&right.id))
         });
+        let stream_emits_sync_root_folder = hierarchy_sync_emits_root_folder(sync_root_folder_id)
+            && folders.iter().any(|mailbox| {
+                mapi_folder_id_for_mailbox(mailbox, folder_id) == sync_root_folder_id
+            });
         for mailbox in folders {
             let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
             if folder_id == sync_root_folder_id
@@ -505,6 +509,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             let parent_source_key = if folder_id == sync_root_folder_id
                 && hierarchy_sync_emits_root_folder(sync_root_folder_id)
             {
+                source_key_for_store_id(parent_folder_id)
+            } else if parent_folder_id == sync_root_folder_id && stream_emits_sync_root_folder {
                 source_key_for_store_id(parent_folder_id)
             } else if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
                 || parent_folder_id == sync_root_folder_id
@@ -971,7 +977,7 @@ fn hierarchy_parent_source_key_role(
         if parent_source_key_empty {
             "sync_root_child_zero_length"
         } else {
-            "unexpected_nonzero_sync_root_child"
+            "emitted_sync_root_child_source_key"
         }
     } else if parent_source_key_empty {
         "unexpected_zero_parent_source_key"
@@ -1512,11 +1518,6 @@ fn hierarchy_semantic_validation(
         .iter()
         .filter_map(|row| row.change_counter)
         .collect::<Vec<_>>();
-    let top_level_rows = summary
-        .rows
-        .iter()
-        .filter(|row| row.parent_source_key_len == 0)
-        .collect::<Vec<_>>();
     let rows_missing_core_properties = summary
         .rows
         .iter()
@@ -1526,6 +1527,19 @@ fn hierarchy_semantic_validation(
         .rows
         .iter()
         .find(|row| row.source_counter == Some(sync_root_source_counter));
+    let sync_root_source_key_hex = format_debug_hex(&source_key_for_store_id(sync_root_folder_id));
+    let top_level_rows = summary
+        .rows
+        .iter()
+        .filter(|row| {
+            row.parent_folder_id == Some(sync_root_folder_id)
+                || if sync_root_row.is_some() {
+                    row.parent_source_key_hex == sync_root_source_key_hex
+                } else {
+                    row.parent_source_key_len == 0
+                }
+        })
+        .collect::<Vec<_>>();
     let first_row = summary.rows.first();
 
     let idset_missing_source_counters = counter_difference(

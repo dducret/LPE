@@ -19795,8 +19795,11 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x65E1_0102u32.to_le_bytes()
     ));
+    let parent_source_key =
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
     let mut ipm_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    ipm_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
+    ipm_child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
+    ipm_child_parent_source_key.extend_from_slice(&parent_source_key);
     assert!(contains_bytes(&response_rops, &ipm_child_parent_source_key));
     let source_key_offset = tag_position(0x65E0_0102);
     assert_eq!(
@@ -20007,7 +20010,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         .iter()
         .find(|folder| folder.display_name == "Sync Issues")
         .expect("Sync Issues folderChange");
-    assert_eq!(sync_issues.parent_source_key, Vec::<u8>::new());
+    assert_eq!(
+        sync_issues.parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     let sync_issues_source_key = sync_issues.source_key.clone();
     for name in ["Conflicts", "Local Failures", "Server Failures"] {
         let folder = decoded
@@ -20469,7 +20475,10 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_s
             crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID
         )
     );
-    assert_eq!(conversation_history[0].parent_source_key, Vec::<u8>::new());
+    assert_eq!(
+        conversation_history[0].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     assert_eq!(
         conversation_history[0].container_class.as_deref(),
         Some("IPF.Note")
@@ -22891,7 +22900,7 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
         .expect("custom Archive folderChange");
     assert_eq!(
         decoded.folder_changes[projects].parent_source_key,
-        Vec::<u8>::new()
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
     );
     assert!(decoded.folder_changes[archive]
         .parent_source_key
