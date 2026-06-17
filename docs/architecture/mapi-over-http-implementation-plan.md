@@ -758,8 +758,9 @@ subtree rows must also project decodeable `PidTagEntryId` and
 `PidTagInstanceKey` values so any cached hierarchy identity Outlook captures
 during that walk can be reopened later. IPM subtree FastTransfer hierarchy sync
 must emit the IPM subtree root row before child folders, with the same generic
-folder type used by table/property projections, so cached-mode Outlook can
-anchor child default-folder EntryIDs under a present OST hierarchy parent.
+folder type used by table/property projections and Root's source key as its
+parent source key, so cached-mode Outlook can anchor child default-folder
+EntryIDs under a present OST hierarchy parent.
 Restricted hierarchy searches over those
 rows must match the same display names and identity values that unrestricted
 hierarchy `QueryRows` returns, including `"Top of Information Store"` for the

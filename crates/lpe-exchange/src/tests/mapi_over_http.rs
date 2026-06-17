@@ -19769,6 +19769,13 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .and_then(|folder| folder.folder_id),
         Some(test_mapi_folder_id(4))
     );
+    assert_eq!(
+        decoded
+            .folder_changes
+            .first()
+            .map(|folder| folder.parent_source_key.as_slice()),
+        Some(mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(1)).as_slice())
+    );
     assert!(decoded
         .folder_changes
         .iter()
