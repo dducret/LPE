@@ -22064,9 +22064,13 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &utf16z("Alice")
     ));
     assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &bootstrap_store_props_rops,
         &[0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01]
+    ));
+    assert!(contains_bytes(
+        &bootstrap_store_props_rops,
+        &[0x30, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]
     ));
 
     let mut trace_store_props_headers = mapi_headers("Execute");
@@ -23000,7 +23004,10 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
-    assert_eq!(inbox.folder_id, Some(crate::mapi::identity::INBOX_FOLDER_ID));
+    assert_eq!(
+        inbox.folder_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+    );
     assert_eq!(
         inbox.parent_folder_id,
         Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)

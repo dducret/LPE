@@ -428,6 +428,24 @@ pub(in crate::mapi) const PID_TAG_PST_PATH_W: u32 = 0x6700_001F;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_SENT_MAIL_SVR_EID: u32 = 0x6740_00FB;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
+
+const OUTLOOK_STORE_ICON_ICO: &[u8] = &[
+    0x00, 0x00, 0x01, 0x00, 0x01, 0x00, // ICO header: one icon image.
+    0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x30, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00,
+    0x00, // Directory entry: 1x1, 32-bit, 48-byte DIB at offset 22.
+    0x28, 0x00, 0x00, 0x00, // BITMAPINFOHEADER.
+    0x01, 0x00, 0x00, 0x00, // Width.
+    0x02, 0x00, 0x00, 0x00, // Height includes XOR and AND masks for ICO DIBs.
+    0x01, 0x00, 0x20, 0x00, // Planes and 32-bit color depth.
+    0x00, 0x00, 0x00, 0x00, // BI_RGB.
+    0x04, 0x00, 0x00, 0x00, // One BGRA pixel.
+    0x00, 0x00, 0x00, 0x00, // Horizontal resolution.
+    0x00, 0x00, 0x00, 0x00, // Vertical resolution.
+    0x00, 0x00, 0x00, 0x00, // Palette colors.
+    0x00, 0x00, 0x00, 0x00, // Important colors.
+    0x2A, 0x8C, 0xD6, 0xFF, // Opaque pixel.
+    0x00, 0x00, 0x00, 0x00, // Empty AND mask.
+];
 pub(in crate::mapi) const PID_TAG_INST_ID: u32 = 0x674D_0014;
 pub(in crate::mapi) const PID_TAG_INSTANCE_NUM: u32 = 0x674E_0003;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
@@ -897,7 +915,7 @@ pub(in crate::mapi) fn logon_property_value(
         )),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
         PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
-            Some(MapiValue::Binary(Vec::new()))
+            Some(MapiValue::Binary(OUTLOOK_STORE_ICON_ICO.to_vec()))
         }
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
@@ -10520,7 +10538,7 @@ mod tests {
     }
 
     #[test]
-    fn logon_projects_empty_optional_server_icon_payloads() {
+    fn logon_projects_valid_server_icon_payloads() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -10533,7 +10551,7 @@ mod tests {
         for tag in [PID_TAG_SERVER_CONNECTED_ICON, PID_TAG_SERVER_ACCOUNT_ICON] {
             assert_eq!(
                 logon_property_value(&principal, tag),
-                Some(MapiValue::Binary(Vec::new()))
+                Some(MapiValue::Binary(OUTLOOK_STORE_ICON_ICO.to_vec()))
             );
         }
     }
