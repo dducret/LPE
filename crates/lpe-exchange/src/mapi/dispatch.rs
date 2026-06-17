@@ -3328,6 +3328,7 @@ fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeReque
 
 fn log_set_properties_specific_debug(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     probe: &SetPropertiesProbeRequest,
@@ -3355,6 +3356,7 @@ fn log_set_properties_specific_debug(
         endpoint = "emsmdb",
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = request_id,
         request_rop_id = %rop_id_hex(request.rop_id),
         input_handle_index = request.input_handle_index().unwrap_or(0),
         response_handle_index = request.response_handle_index(),
@@ -3370,6 +3372,87 @@ fn log_set_properties_specific_debug(
         default_folder_entry_id_storage_mode = default_folder_entry_id_storage_mode,
         parse_error = %probe.parse_error,
         "rca debug mapi set properties specific"
+    );
+}
+
+fn log_get_properties_default_folder_response_debug(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_response: &[u8],
+) {
+    let property_tags = request.property_tags();
+    if !property_tags
+        .iter()
+        .copied()
+        .any(is_default_folder_identification_property_tag)
+    {
+        return;
+    }
+    let probe = GetPropertiesSpecificProbeRequest {
+        input_handle_index: request.input_handle_index().unwrap_or(0),
+        property_tags,
+    };
+    let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
+    let decoded_values =
+        default_folder_getprops_response_values_for_debug(&probe.property_tags, property_response);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        property_tag_count = probe.property_tags.len(),
+        property_tags = %format_debug_property_tags(&probe.property_tags),
+        property_names = %format_set_property_names_for_debug(&probe.property_tags),
+        response_shape = %response_shape,
+        default_folder_entry_id_values = %decoded_values,
+        "rca debug mapi default folder getprops response"
+    );
+}
+
+fn log_set_properties_default_folder_response_debug(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    probe: &SetPropertiesProbeRequest,
+    response: &[u8],
+) {
+    if !probe
+        .property_tags
+        .iter()
+        .copied()
+        .any(is_default_folder_identification_property_tag)
+    {
+        return;
+    }
+    let property_problem_details = set_properties_problem_details_for_debug(response);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = %rop_id_hex(request.rop_id),
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        property_tags = %format_debug_property_tags(&probe.property_tags),
+        property_names = %format_set_property_names_for_debug(&probe.property_tags),
+        request_default_folder_entry_id_values = %probe.default_folder_entry_id_values,
+        response = %summarize_set_properties_probe_response(response, 0, probe),
+        property_problem_details = %property_problem_details,
+        "rca debug mapi default folder setprops response"
     );
 }
 
@@ -4099,6 +4182,59 @@ fn summarize_get_properties_probe_response_values(
     values.join(",")
 }
 
+fn default_folder_getprops_response_values_for_debug(
+    property_tags: &[u32],
+    response: &[u8],
+) -> String {
+    if response.get(6).copied() != Some(0) {
+        return "not-standard-row".to_string();
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut values = Vec::new();
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        let parsed = parse_property_value_for_tag(&mut cursor, *tag);
+        if !is_default_folder_identification_property_tag(storage_tag) {
+            if let Ok(value) = parsed {
+                values.push(format!(
+                    "{storage_tag:#010x}:{}:{}",
+                    set_property_debug_name(storage_tag),
+                    mapi_value_debug_shape(&value)
+                ));
+            }
+            continue;
+        }
+        match parsed {
+            Ok(value) => values.push(default_folder_getprops_value_for_debug(storage_tag, &value)),
+            Err(error) => values.push(format!(
+                "{storage_tag:#010x}:{}:parse_error={error}",
+                default_folder_entry_id_property_name(storage_tag)
+            )),
+        }
+    }
+    values.join(",")
+}
+
+fn default_folder_getprops_value_for_debug(tag: u32, value: &MapiValue) -> String {
+    let storage_tag = canonical_property_storage_tag(tag);
+    if storage_tag == PID_TAG_VALID_FOLDER_MASK {
+        return format!(
+            "{storage_tag:#010x}:PidTagValidFolderMask:{}",
+            mapi_value_debug_u32_from_value(value)
+        );
+    }
+    let decoded = default_folder_entry_id_values_for_debug(&[(storage_tag, value.clone())]);
+    if decoded.is_empty() {
+        format!(
+            "{storage_tag:#010x}:{}:{}",
+            default_folder_entry_id_property_name(storage_tag),
+            mapi_value_debug_shape(value)
+        )
+    } else {
+        decoded
+    }
+}
+
 fn summarize_set_properties_probe_response(
     responses: &[u8],
     offset: usize,
@@ -4118,6 +4254,35 @@ fn summarize_set_properties_probe_response(
         request.input_handle_index,
         format_debug_property_tags(&request.property_tags)
     )
+}
+
+fn set_properties_problem_details_for_debug(response: &[u8]) -> String {
+    let mut cursor = Cursor::new(response.get(6..).unwrap_or_default());
+    let Ok(problem_count) = cursor.read_u16() else {
+        return "truncated".to_string();
+    };
+    let mut details = Vec::new();
+    for _ in 0..problem_count {
+        let Ok(index) = cursor.read_u16() else {
+            details.push("truncated_index".to_string());
+            break;
+        };
+        let Ok(property_tag) = cursor.read_u32() else {
+            details.push(format!("index={index}:truncated_tag"));
+            break;
+        };
+        let Ok(error_code) = cursor.read_u32() else {
+            details.push(format!(
+                "index={index}:tag={property_tag:#010x}:truncated_error"
+            ));
+            break;
+        };
+        details.push(format!(
+            "index={index}:tag={property_tag:#010x}:name={}:error={error_code:#010x}",
+            set_property_debug_name(property_tag)
+        ));
+    }
+    details.join(",")
 }
 
 fn mapi_value_debug_shape(value: &MapiValue) -> String {
@@ -11042,6 +11207,13 @@ where
                     snapshot,
                     property_response.len(),
                 );
+                log_get_properties_default_folder_response_debug(
+                    principal,
+                    request_id,
+                    &request,
+                    object,
+                    &property_response,
+                );
                 responses.extend_from_slice(&property_response);
                 if is_inbox_folder_type_probe {
                     if let Some(context) = inbox_folder_type_getprops_context {
@@ -11093,6 +11265,7 @@ where
                 let set_properties_probe = set_properties_probe_request(&request);
                 log_set_properties_specific_debug(
                     principal,
+                    request_id,
                     &request,
                     set_properties_object.as_ref(),
                     &set_properties_probe,
@@ -11126,7 +11299,7 @@ where
                     ) {
                     result
                 } else {
-                    match set_properties_object {
+                    match set_properties_object.clone() {
                         Some(
                             object @ (MapiObject::Message { .. }
                             | MapiObject::Contact { .. }
@@ -11150,9 +11323,17 @@ where
                             let problems =
                                 folder_set_property_problems(object.as_ref(), mailboxes, &values);
                             if !problems.is_empty() {
-                                responses.extend_from_slice(&rop_set_properties_problem_response(
-                                    &request, &problems,
-                                ));
+                                let response =
+                                    rop_set_properties_problem_response(&request, &problems);
+                                log_set_properties_default_folder_response_debug(
+                                    principal,
+                                    request_id,
+                                    &request,
+                                    object.as_ref(),
+                                    &set_properties_probe,
+                                    &response,
+                                );
+                                responses.extend_from_slice(&response);
                                 continue;
                             }
                             record_default_folder_entry_id_aliases(
@@ -11199,12 +11380,34 @@ where
                     }
                 };
                 match set_result {
-                    Ok(()) => responses.extend_from_slice(&rop_set_properties_response(&request)),
-                    Err(_) => responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
+                    Ok(()) => {
+                        let response = rop_set_properties_response(&request);
+                        log_set_properties_default_folder_response_debug(
+                            principal,
+                            request_id,
+                            &request,
+                            set_properties_object.as_ref(),
+                            &set_properties_probe,
+                            &response,
+                        );
+                        responses.extend_from_slice(&response);
+                    }
+                    Err(_) => {
+                        let response = rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        );
+                        log_set_properties_default_folder_response_debug(
+                            principal,
+                            request_id,
+                            &request,
+                            set_properties_object.as_ref(),
+                            &set_properties_probe,
+                            &response,
+                        );
+                        responses.extend_from_slice(&response);
+                    }
                 }
             }
             Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
