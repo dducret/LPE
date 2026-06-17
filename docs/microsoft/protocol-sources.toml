@@ -1,0 +1,154 @@
+# Microsoft protocol sources used by LPE.
+#
+# Keep full Microsoft documents in docs/microsoft/cache/ only. Do not commit
+# cached PDFs/DOCX files or extracted full-text copies.
+
+[[protocol]]
+id = "MS-OXNSPI"
+title = "Exchange Server Name Service Provider Interface (NSPI) Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxnspi/63662a26-c8fc-4493-a41a-fbcbb7e43136"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXNSPI/%5bMS-OXNSPI%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXNSPI-20250520.pdf"
+sha256 = ""
+used_for = [
+  "NSPI Bind, DNToMId, GetProps, GetMatches, QueryRows, and GetSpecialTable behavior",
+  "PropertyRowSet_r and PropertyValue_r wire layout",
+  "Outlook address book bootstrap and hierarchy debugging",
+]
+sections = [
+  "2.2.1.12 NspiGetSpecialTable Flags",
+  "2.2.3 PropertyRow_r Structure",
+  "2.2.4 PropertyRowSet_r Structure",
+  "3.1.4.1.3 NspiGetSpecialTable",
+]
+
+[[protocol]]
+id = "MS-OXOABK"
+title = "Address Book Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoabk/f4cf9b4c-9232-4506-9e71-2270de217614"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOABK/%5bMS-OXOABK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOABK-20250520.pdf"
+sha256 = ""
+used_for = [
+  "Address book hierarchy container properties",
+  "Address book distinguished name formats used inside NSPI PermanentEntryID values",
+  "PidTagContainerFlags, PidTagAddressBookContainerId, and PidTagAddressBookIsMaster semantics",
+]
+sections = [
+  "2.2.1.1 Distinguished Names for Objects",
+  "2.2.2 Properties that Apply to Containers in the Address Book Hierarchy Table",
+  "2.2.2.1 PidTagContainerFlags",
+  "2.2.2.3 PidTagAddressBookContainerId",
+  "2.2.2.4 PidTagAddressBookIsMaster",
+]
+
+[[protocol]]
+id = "MS-OXCMAPIHTTP"
+title = "Messaging Application Programming Interface (MAPI) Extensions for HTTP"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCMAPIHTTP/%5bMS-OXCMAPIHTTP%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCMAPIHTTP.pdf"
+sha256 = ""
+used_for = [
+  "MAPI over HTTP request and response framing",
+  "EMSMDB and NSPI endpoint transport behavior",
+  "Bind, Execute, Connect, Disconnect, and session cookie interoperability",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXCROPS"
+title = "Remote Operations (ROP) List and Encoding Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCROPS/%5bMS-OXCROPS%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCROPS.pdf"
+sha256 = ""
+used_for = [
+  "ROP request and response encoding",
+  "Mailbox logon, folder open, property, table, and synchronization ROP behavior",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXCDATA"
+title = "Data Structures"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCDATA/%5bMS-OXCDATA%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCDATA.pdf"
+sha256 = ""
+used_for = [
+  "Common MAPI data structures and property value encodings",
+  "Property tags, typed values, EntryIDs, GUIDs, and FILETIME values",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXPROPS"
+title = "Exchange Server Protocols Master Property List"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxprops/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPROPS/%5bMS-OXPROPS%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXPROPS.pdf"
+sha256 = ""
+used_for = [
+  "Canonical property tag definitions used by EWS, MAPI, ROP, NSPI, ICS, and FastTransfer projections",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXCFXICS"
+title = "ICS and Fast Transfer Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCFXICS/%5bMS-OXCFXICS%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCFXICS.pdf"
+sha256 = ""
+used_for = [
+  "Outlook cached-mode hierarchy and content synchronization",
+  "ICS state, FastTransfer streams, and sync progress behavior",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXCTABL"
+title = "Table Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxctabl/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCTABL/%5bMS-OXCTABL%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCTABL.pdf"
+sha256 = ""
+used_for = [
+  "Folder hierarchy, contents table, sort, restriction, and row semantics",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXCFOLD"
+title = "Folder Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfold/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCFOLD/%5bMS-OXCFOLD%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXCFOLD.pdf"
+sha256 = ""
+used_for = [
+  "Mailbox folder properties, special folders, receive folders, and folder hierarchy behavior",
+]
+sections = []
+
+[[protocol]]
+id = "MS-OXDISCO"
+title = "Autodiscover Publishing and Lookup Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxdisco/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXDISCO/%5bMS-OXDISCO%5d.pdf"
+published_version = ""
+local_cache = "docs/microsoft/cache/MS-OXDISCO.pdf"
+sha256 = ""
+used_for = [
+  "Outlook Autodiscover behavior and Exchange account profile bootstrap",
+]
+sections = []
