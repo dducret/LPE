@@ -171,7 +171,6 @@ pub(in crate::mapi) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
 ];
 
-const NSPI_GAL_CONTAINER_DN: &str = "/guid=741f6fd3-8e1a-654f-9d42-2dfb451c8f10";
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_CONTAINER_FLAGS: u32 = 0x3600_0003;
 const PID_TAG_DEPTH: u32 = 0x3005_0003;
@@ -182,6 +181,45 @@ const AB_UNMODIFIABLE: u32 = 0x0000_0008;
 const DT_CONTAINER: u32 = 0x0000_0100;
 const NSPI_ADDRESS_CREATION_TEMPLATES_FLAG: u32 = 0x0000_0002;
 const NSPI_UNICODE_STRINGS_FLAG: u32 = 0x0000_0004;
+
+struct NspiSpecialTableContainer {
+    display_name: &'static str,
+    dn: &'static str,
+    container_id: u32,
+    depth: u32,
+    is_master: bool,
+}
+
+const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
+    NspiSpecialTableContainer {
+        display_name: "Global Address List",
+        dn: "/",
+        container_id: 0,
+        depth: 0,
+        is_master: false,
+    },
+    NspiSpecialTableContainer {
+        display_name: "All Users",
+        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f11",
+        container_id: 2,
+        depth: 1,
+        is_master: false,
+    },
+    NspiSpecialTableContainer {
+        display_name: "All Groups",
+        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f12",
+        container_id: 3,
+        depth: 1,
+        is_master: false,
+    },
+    NspiSpecialTableContainer {
+        display_name: "All Contacts",
+        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f13",
+        container_id: 4,
+        depth: 1,
+        is_master: false,
+    },
+];
 
 const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x0FFF_0102, // PidTagEntryId
@@ -1380,7 +1418,6 @@ pub(in crate::mapi) fn nspi_special_table_response(
         flags.is_some_and(|value| value & NSPI_UNICODE_STRINGS_FLAG != 0),
         flags.is_some_and(|value| value & NSPI_ADDRESS_CREATION_TEMPLATES_FLAG != 0)
     );
-    let mut table_row = Vec::new();
     let property_tags = [
         PID_TAG_ENTRY_ID,
         PID_TAG_CONTAINER_FLAGS,
@@ -1389,33 +1426,10 @@ pub(in crate::mapi) fn nspi_special_table_response(
         0x3001_001F,
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
     ];
-    write_u32(&mut table_row, 6);
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        PID_TAG_ENTRY_ID,
-        &NspiValue::OwnedBinary(nspi_gal_container_entry_id()),
-    );
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        PID_TAG_CONTAINER_FLAGS,
-        &NspiValue::U32(AB_RECIPIENTS | AB_UNMODIFIABLE),
-    );
-    write_address_book_tagged_property_value(&mut table_row, PID_TAG_DEPTH, &NspiValue::U32(0));
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
-        &NspiValue::U32(0),
-    );
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        0x3001_001F,
-        &NspiValue::String("Global Address List"),
-    );
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        PID_TAG_ADDRESS_BOOK_IS_MASTER,
-        &NspiValue::Bool(false),
-    );
+    let rows = NSPI_SPECIAL_TABLE_CONTAINERS
+        .iter()
+        .map(nspi_special_table_row)
+        .collect::<Vec<_>>();
 
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -1424,9 +1438,15 @@ pub(in crate::mapi) fn nspi_special_table_response(
     body.push(1);
     write_u32(&mut body, 1);
     body.push(1);
-    write_u32(&mut body, 1);
-    body.extend_from_slice(&table_row);
+    write_u32(&mut body, rows.len().min(u32::MAX as usize) as u32);
+    for row in &rows {
+        body.extend_from_slice(row);
+    }
     write_u32(&mut body, 0);
+    let context = format!(
+        "{context};containers={}",
+        format_nspi_special_table_containers_for_debug(NSPI_SPECIAL_TABLE_CONTAINERS)
+    );
     log_nspi_response_contract(
         principal,
         "GetSpecialTable",
@@ -1434,7 +1454,7 @@ pub(in crate::mapi) fn nspi_special_table_response(
         0,
         &body,
         true,
-        1,
+        rows.len(),
         &property_tags,
         &context,
     );
@@ -1448,15 +1468,72 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
         .map(u32::from_le_bytes)
 }
 
-fn nspi_gal_container_entry_id() -> Vec<u8> {
-    let mut value = Vec::with_capacity(28 + NSPI_GAL_CONTAINER_DN.len() + 1);
+fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
+    let mut table_row = Vec::new();
+    write_u32(&mut table_row, 6);
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ENTRY_ID,
+        &NspiValue::OwnedBinary(nspi_container_entry_id(container.dn)),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_CONTAINER_FLAGS,
+        &NspiValue::U32(AB_RECIPIENTS | AB_UNMODIFIABLE),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_DEPTH,
+        &NspiValue::U32(container.depth),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
+        &NspiValue::U32(container.container_id),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        0x3001_001F,
+        &NspiValue::String(container.display_name),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ADDRESS_BOOK_IS_MASTER,
+        &NspiValue::Bool(container.is_master),
+    );
+    table_row
+}
+
+fn nspi_container_entry_id(dn: &str) -> Vec<u8> {
+    let mut value = Vec::with_capacity(28 + dn.len() + 1);
     value.extend_from_slice(&[0, 0, 0, 0]);
     value.extend_from_slice(&NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);
     value.extend_from_slice(&1u32.to_le_bytes());
     value.extend_from_slice(&DT_CONTAINER.to_le_bytes());
-    value.extend_from_slice(NSPI_GAL_CONTAINER_DN.as_bytes());
+    value.extend_from_slice(dn.as_bytes());
     value.push(0);
     value
+}
+
+fn format_nspi_special_table_containers_for_debug(
+    containers: &[NspiSpecialTableContainer],
+) -> String {
+    containers
+        .iter()
+        .map(|container| {
+            format!(
+                "{}:depth={}:container_id={:#010x}:entryid_len={}:flags={:#010x}:display_type={:#010x}:selectable=true:browsable=true:is_master={}",
+                container.display_name,
+                container.depth,
+                container.container_id,
+                nspi_container_entry_id(container.dn).len(),
+                AB_RECIPIENTS | AB_UNMODIFIABLE,
+                DT_CONTAINER,
+                container.is_master
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 pub(in crate::mapi) async fn nspi_template_info_response<S>(

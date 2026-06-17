@@ -39238,90 +39238,125 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
             "GetSpecialTable" => {
                 assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
                 assert!(contains_bytes(&body, &utf16z("Global Address List")));
+                assert!(contains_bytes(&body, &utf16z("All Users")));
+                assert!(contains_bytes(&body, &utf16z("All Groups")));
+                assert!(contains_bytes(&body, &utf16z("All Contacts")));
+                assert_eq!(
+                    u32::from_le_bytes(body[18..22].try_into().unwrap()),
+                    4,
+                    "{request_type}"
+                );
                 let mut offset = 22usize;
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    6,
-                    "{request_type}"
-                );
-                offset += 4;
+                for (name, dn, depth, container_id, is_master) in [
+                    ("Global Address List", b"/\0".as_slice(), 0u32, 0u32, 0u8),
+                    (
+                        "All Users",
+                        b"/guid=741f6fd38e1a654f9d422dfb451c8f11\0".as_slice(),
+                        1,
+                        2,
+                        0,
+                    ),
+                    (
+                        "All Groups",
+                        b"/guid=741f6fd38e1a654f9d422dfb451c8f12\0".as_slice(),
+                        1,
+                        3,
+                        0,
+                    ),
+                    (
+                        "All Contacts",
+                        b"/guid=741f6fd38e1a654f9d422dfb451c8f13\0".as_slice(),
+                        1,
+                        4,
+                        0,
+                    ),
+                ] {
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        6,
+                        "{request_type}: {name}"
+                    );
+                    offset += 4;
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0x0FFF_0102,
-                    "{request_type}"
-                );
-                offset += 8;
-                let entry_id_len =
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
-                offset += 4;
-                assert!(entry_id_len > 28, "{request_type}");
-                assert_eq!(
-                    &body[offset + 24..offset + 28],
-                    &0x0000_0100u32.to_le_bytes(),
-                    "{request_type}"
-                );
-                assert!(
-                    body[offset..offset + entry_id_len].ends_with(b"\0"),
-                    "{request_type}"
-                );
-                offset += entry_id_len;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0x0FFF_0102,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    let entry_id_len =
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+                    offset += 4;
+                    assert_eq!(entry_id_len, 28 + dn.len(), "{request_type}: {name}");
+                    assert_eq!(
+                        &body[offset + 24..offset + 28],
+                        &0x0000_0100u32.to_le_bytes(),
+                        "{request_type}: {name}"
+                    );
+                    assert_eq!(
+                        &body[offset + 28..offset + entry_id_len],
+                        dn,
+                        "{request_type}: {name}"
+                    );
+                    offset += entry_id_len;
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0x3600_0003,
-                    "{request_type}"
-                );
-                offset += 8;
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0x0000_0009,
-                    "{request_type}"
-                );
-                offset += 4;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0x3600_0003,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0x0000_0009,
+                        "{request_type}: {name}"
+                    );
+                    offset += 4;
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0x3005_0003,
-                    "{request_type}"
-                );
-                offset += 8;
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0,
-                    "{request_type}"
-                );
-                offset += 4;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0x3005_0003,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        depth,
+                        "{request_type}: {name}"
+                    );
+                    offset += 4;
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0xFFFD_0003,
-                    "{request_type}"
-                );
-                offset += 8;
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0,
-                    "{request_type}"
-                );
-                offset += 4;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0xFFFD_0003,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        container_id,
+                        "{request_type}: {name}"
+                    );
+                    offset += 4;
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0x3001_001F,
-                    "{request_type}"
-                );
-                offset += 8;
-                assert_eq!(body[offset], 0xFF, "{request_type}");
-                offset += 1 + utf16z("Global Address List").len();
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0x3001_001F,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    assert_eq!(body[offset], 0xFF, "{request_type}: {name}");
+                    offset += 1 + utf16z(name).len();
 
-                assert_eq!(
-                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                    0xFFFB_000B,
-                    "{request_type}"
-                );
-                offset += 8;
-                assert_eq!(body[offset], 0, "{request_type}");
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0xFFFB_000B,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    assert_eq!(body[offset], is_master, "{request_type}: {name}");
+                    offset += 1;
+                }
             }
             "DNToEPH" | "DNToMId" => {
                 assert_eq!(body[8], 1, "{request_type}");
