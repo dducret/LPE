@@ -635,6 +635,7 @@ fn log_mapi_session_disconnect(
                 checkpoint_kind,
                 checkpoint_change_sequence,
                 checkpoint_modseq,
+                checkpoint_zero_delta,
                 sync_type,
                 state,
                 state_upload_buffer,
@@ -645,7 +646,7 @@ fn log_mapi_session_disconnect(
                 transfer_position,
                 ..
             } => Some(format!(
-                "handle={handle};folder=0x{folder_id:016x};sync=0x{sync_type:02x};kind={};mailbox={};seq={checkpoint_change_sequence};modseq={checkpoint_modseq};state={};client_state={};marker_mask=0x{:02x};upload_buffer={};transfer={}/{};incremental={}",
+                "handle={handle};folder=0x{folder_id:016x};sync=0x{sync_type:02x};kind={};mailbox={};seq={checkpoint_change_sequence};modseq={checkpoint_modseq};zero_delta={checkpoint_zero_delta};state={};client_state={};marker_mask=0x{:02x};upload_buffer={};transfer={}/{};incremental={}",
                 checkpoint_kind.as_str(),
                 mailbox_id.map(|id| id.to_string()).unwrap_or_default(),
                 state.len(),
@@ -1057,6 +1058,12 @@ fn log_mapi_session_disconnect(
                 %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
             post_hierarchy_default_folder_membership =
                 %post_hierarchy_summary.last_default_folder_hierarchy_membership_summary,
+            post_hierarchy_last_getprops_request_contract =
+                %post_hierarchy_summary.last_getprops_request_contract,
+            post_hierarchy_last_setprops_request_contract =
+                %post_hierarchy_summary.last_setprops_request_contract,
+            post_hierarchy_last_request_contract =
+                %post_hierarchy_summary.request_contract_sequence,
             sync_source_summaries = %sync_source_summaries,
             live_handle_summaries = %live_handle_summaries,
             "rca debug mapi post hierarchy disconnect before content sync"
@@ -1223,6 +1230,9 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) last_completed_hierarchy_sync_root: String,
     pub(in crate::mapi) last_successful_hierarchy_get_buffer_summary: String,
     pub(in crate::mapi) last_default_folder_hierarchy_membership_summary: String,
+    pub(in crate::mapi) last_getprops_request_contract: String,
+    pub(in crate::mapi) last_setprops_request_contract: String,
+    pub(in crate::mapi) request_contract_sequence: String,
 }
 
 pub(in crate::mapi) fn post_hierarchy_action_summary(
@@ -1249,6 +1259,15 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
         last_default_folder_hierarchy_membership_summary: actions
             .last_default_folder_hierarchy_membership_summary
             .clone(),
+        last_getprops_request_contract: actions.last_getprops_request_contract.clone(),
+        last_setprops_request_contract: actions.last_setprops_request_contract.clone(),
+        request_contract_sequence: actions
+            .request_contract_sequence
+            .iter()
+            .enumerate()
+            .map(|(index, contract)| format!("{}:{contract}", index + 1))
+            .collect::<Vec<_>>()
+            .join("|"),
     }
 }
 
@@ -2636,6 +2655,44 @@ mod tests {
         assert_eq!(
             summary.last_default_folder_hierarchy_membership_summary,
             "calendar:row_present=true"
+        );
+    }
+
+    #[test]
+    fn post_hierarchy_action_summary_records_last_request_contracts() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_completed_hierarchy_sync(
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "folder=0x0000000000040001;status=0x0003".to_string(),
+            "calendar:row_present=true".to_string(),
+        );
+        session.record_post_hierarchy_request_contract(
+            "GetReceiveFolder(message_class=IPM;folder=0x0000000000060001)->ok".to_string(),
+        );
+        session.record_post_hierarchy_getprops_contract(
+            "GetPropertiesSpecific(kind=folder;folder=0x0000000000100001;probe=calendar_probe;tags=0x3613001f;returned_tags=0x3613001f)".to_string(),
+        );
+        session.record_post_hierarchy_request_contract(
+            "GetPropertiesSpecific(calendar props)->ok".to_string(),
+        );
+        session.record_post_hierarchy_setprops_contract(
+            "SetProperties(kind=folder;folder=0x0000000000010001;probe=root_default_folder_bootstrap;tags=0x36d00102;write_mode=ignored_canonical_projection)".to_string(),
+        );
+        session
+            .record_post_hierarchy_request_contract("SetProperties(root defaults)->ok".to_string());
+
+        let summary = post_hierarchy_action_summary(&session, true);
+
+        assert!(summary
+            .last_getprops_request_contract
+            .contains("probe=calendar_probe"));
+        assert!(summary
+            .last_setprops_request_contract
+            .contains("write_mode=ignored_canonical_projection"));
+        assert_eq!(
+            summary.request_contract_sequence,
+            "1:GetReceiveFolder(message_class=IPM;folder=0x0000000000060001)->ok|2:GetPropertiesSpecific(calendar props)->ok|3:SetProperties(root defaults)->ok"
         );
     }
 

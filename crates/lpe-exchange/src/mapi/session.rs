@@ -10,6 +10,7 @@ use crate::mapi_store::MapiAssociatedConfigMessage;
 use lpe_storage::{JmapEmail, SearchFolderDefinition};
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
+const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiSession {
@@ -75,6 +76,9 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) opened_folder_ids: Vec<u64>,
     pub(in crate::mapi) bootstrap_probe_observed: bool,
     pub(in crate::mapi) set_properties_probe_observed: bool,
+    pub(in crate::mapi) last_getprops_request_contract: String,
+    pub(in crate::mapi) last_setprops_request_contract: String,
+    pub(in crate::mapi) request_contract_sequence: Vec<String>,
     pub(in crate::mapi) content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
@@ -353,6 +357,7 @@ pub(in crate::mapi) enum MapiObject {
         checkpoint_modseq: u64,
         checkpoint_store_allowed: bool,
         checkpoint_skip_reason: &'static str,
+        checkpoint_zero_delta: bool,
         sync_type: u8,
         initial_state: Vec<u8>,
         state: Vec<u8>,
@@ -939,6 +944,45 @@ impl MapiSession {
         self.post_hierarchy_actions
             .recent_probe_actions
             .push(action);
+    }
+
+    pub(in crate::mapi) fn record_post_hierarchy_request_contract(&mut self, contract: String) {
+        if !self.hierarchy_sync_completed()
+            || self.post_hierarchy_actions.content_sync_configure_observed
+            || contract.is_empty()
+        {
+            return;
+        }
+        if self.post_hierarchy_actions.request_contract_sequence.len()
+            >= MAX_POST_HIERARCHY_REQUEST_CONTRACTS
+        {
+            self.post_hierarchy_actions
+                .request_contract_sequence
+                .remove(0);
+        }
+        self.post_hierarchy_actions
+            .request_contract_sequence
+            .push(contract);
+    }
+
+    pub(in crate::mapi) fn record_post_hierarchy_getprops_contract(&mut self, contract: String) {
+        if !self.hierarchy_sync_completed()
+            || self.post_hierarchy_actions.content_sync_configure_observed
+            || contract.is_empty()
+        {
+            return;
+        }
+        self.post_hierarchy_actions.last_getprops_request_contract = contract;
+    }
+
+    pub(in crate::mapi) fn record_post_hierarchy_setprops_contract(&mut self, contract: String) {
+        if !self.hierarchy_sync_completed()
+            || self.post_hierarchy_actions.content_sync_configure_observed
+            || contract.is_empty()
+        {
+            return;
+        }
+        self.post_hierarchy_actions.last_setprops_request_contract = contract;
     }
 
     pub(in crate::mapi) fn record_special_folder_alias(&mut self, alias_id: u64, folder_id: u64) {

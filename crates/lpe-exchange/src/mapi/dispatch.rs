@@ -3454,6 +3454,325 @@ fn log_get_properties_specific_response_debug(
     );
 }
 
+fn post_hierarchy_getprops_contract(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_response: &[u8],
+) -> String {
+    let property_tags = request.property_tags();
+    let response = getprops_contract_response_summary(&property_tags, property_response);
+    format!(
+        "GetPropertiesSpecific({};probe={};in={};tags={};names={};returned_tags={};problem_tags={};zero_default_tags={};value_shapes={};response={})",
+        post_hierarchy_object_contract(object),
+        post_hierarchy_getprops_probe_kind(object, &property_tags),
+        request.input_handle_index().unwrap_or(0),
+        format_debug_property_tags(&property_tags),
+        format_set_property_names_for_debug(&property_tags),
+        response.returned_tags,
+        response.problem_tags,
+        response.zero_default_tags,
+        response.value_shapes,
+        response.result
+    )
+}
+
+fn post_hierarchy_setprops_contract(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    probe: &SetPropertiesProbeRequest,
+    response: &[u8],
+) -> String {
+    let default_folder_identification_values_stripped =
+        default_folder_identification_values_stripped_by_safe_values(object, &probe.property_tags);
+    let response_result = read_response_error_code(response, 0).unwrap_or(0xffff_ffff);
+    let problem_count = set_properties_problem_count(response);
+    let problem_tags = set_properties_problem_details_for_debug(response);
+    format!(
+        "{}({};probe={};in={};tags={};names={};values={};decoded_values={};problem_count={problem_count};problem_tags={};default_folder_entry_ids_touched={};write_mode={};response={response_result:#010x})",
+        if request.rop_id == RopId::SetPropertiesNoReplicate.as_u8() {
+            "SetPropertiesNoReplicate"
+        } else {
+            "SetProperties"
+        },
+        post_hierarchy_object_contract(object),
+        post_hierarchy_setprops_probe_kind(object, &probe.property_tags),
+        request.input_handle_index().unwrap_or(0),
+        format_debug_property_tags(&probe.property_tags),
+        format_set_property_names_for_debug(&probe.property_tags),
+        probe.property_value_shapes,
+        debug_context_or_none(&probe.default_folder_entry_id_values),
+        debug_context_or_none(&problem_tags),
+        probe
+            .property_tags
+            .iter()
+            .copied()
+            .any(is_default_folder_identification_property_tag),
+        post_hierarchy_setprops_write_mode(
+            object,
+            response_result == 0,
+            problem_count,
+            default_folder_identification_values_stripped
+        )
+    )
+}
+
+fn post_hierarchy_open_folder_contract(folder_id: u64, result: &str) -> String {
+    format!(
+        "OpenFolder(folder=0x{folder_id:016x};role={};container={};probe={})->{}",
+        debug_role_for_folder_id(folder_id),
+        debug_container_class_for_folder_id(folder_id),
+        post_hierarchy_folder_probe_kind(folder_id),
+        result
+    )
+}
+
+fn post_hierarchy_get_receive_folder_contract(message_class: &str, folder_id: u64) -> String {
+    format!(
+        "GetReceiveFolder(message_class={message_class};folder=0x{folder_id:016x};role={};container={};probe=receive_folder_probe)->ok",
+        debug_role_for_folder_id(folder_id),
+        debug_container_class_for_folder_id(folder_id)
+    )
+}
+
+#[derive(Default)]
+struct GetPropsContractResponseSummary {
+    result: String,
+    returned_tags: String,
+    problem_tags: String,
+    zero_default_tags: String,
+    value_shapes: String,
+}
+
+fn getprops_contract_response_summary(
+    property_tags: &[u32],
+    response: &[u8],
+) -> GetPropsContractResponseSummary {
+    let result_code = read_response_error_code(response, 0);
+    let mut summary = GetPropsContractResponseSummary {
+        result: result_code
+            .map(|code| format!("{code:#010x}"))
+            .unwrap_or_else(|| "truncated".to_string()),
+        value_shapes: get_properties_specific_response_values_for_debug(property_tags, response),
+        ..GetPropsContractResponseSummary::default()
+    };
+    if result_code != Some(0) {
+        return summary;
+    }
+    let row_shape = response.get(6).copied();
+    if row_shape != Some(0) && row_shape != Some(1) {
+        return summary;
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut returned_tags = Vec::new();
+    let mut problem_tags = Vec::new();
+    let mut zero_default_tags = Vec::new();
+    let mut value_shapes = Vec::new();
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if row_shape == Some(1) {
+            let Ok(flag) = cursor.read_u8() else {
+                problem_tags.push(format!(
+                    "{storage_tag:#010x}:{}:truncated_flag",
+                    set_property_debug_name(storage_tag)
+                ));
+                break;
+            };
+            if flag == 0x0A {
+                let Ok(error) = cursor.read_u32() else {
+                    problem_tags.push(format!(
+                        "{storage_tag:#010x}:{}:truncated_error",
+                        set_property_debug_name(storage_tag)
+                    ));
+                    break;
+                };
+                problem_tags.push(format!(
+                    "{storage_tag:#010x}:{}:{error:#010x}",
+                    set_property_debug_name(storage_tag)
+                ));
+                value_shapes.push(format!("{storage_tag:#010x}:error:{error:#010x}"));
+                continue;
+            }
+        }
+        match parse_property_value_for_tag(&mut cursor, *tag) {
+            Ok(MapiValue::Error(error)) => {
+                problem_tags.push(format!(
+                    "{storage_tag:#010x}:{}:{error:#010x}",
+                    set_property_debug_name(storage_tag)
+                ));
+                value_shapes.push(format!("{storage_tag:#010x}:error:{error:#010x}"));
+            }
+            Ok(value) => {
+                returned_tags.push(format!("{storage_tag:#010x}"));
+                if mapi_value_is_zero_or_default(&value) {
+                    zero_default_tags.push(format!("{storage_tag:#010x}"));
+                }
+                value_shapes.push(format!(
+                    "{storage_tag:#010x}:{}",
+                    mapi_value_debug_shape(&value)
+                ));
+            }
+            Err(error) => {
+                problem_tags.push(format!(
+                    "{storage_tag:#010x}:{}:parse_error={error}",
+                    set_property_debug_name(storage_tag)
+                ));
+                break;
+            }
+        }
+    }
+    summary.returned_tags = returned_tags.join(",");
+    summary.problem_tags = problem_tags.join(",");
+    summary.zero_default_tags = zero_default_tags.join(",");
+    if row_shape == Some(1) {
+        summary.value_shapes = value_shapes.join(",");
+    }
+    summary
+}
+
+fn set_properties_problem_count(response: &[u8]) -> usize {
+    response
+        .get(6..8)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .map(usize::from)
+        .unwrap_or(0)
+}
+
+fn post_hierarchy_object_contract(object: Option<&MapiObject>) -> String {
+    match object {
+        Some(MapiObject::Folder { folder_id, .. }) => format!(
+            "kind=folder;folder=0x{folder_id:016x};role={};container={}",
+            debug_role_for_folder_id(*folder_id),
+            debug_container_class_for_folder_id(*folder_id)
+        ),
+        Some(object) => object
+            .folder_id()
+            .map(|folder_id| {
+                format!(
+                    "kind={};folder=0x{folder_id:016x};role={};container={}",
+                    mapi_object_debug_kind(Some(object)),
+                    debug_role_for_folder_id(folder_id),
+                    debug_container_class_for_folder_id(folder_id)
+                )
+            })
+            .unwrap_or_else(|| {
+                format!("kind={};folder=none", mapi_object_debug_kind(Some(object)))
+            }),
+        None => "kind=none;folder=none".to_string(),
+    }
+}
+
+fn post_hierarchy_getprops_probe_kind(
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+) -> &'static str {
+    if property_tags
+        .iter()
+        .copied()
+        .any(is_default_folder_identification_property_tag)
+        && matches!(
+            object,
+            Some(MapiObject::Logon)
+                | Some(MapiObject::Folder {
+                    folder_id: ROOT_FOLDER_ID,
+                    ..
+                })
+        )
+    {
+        return "root_default_folder_bootstrap";
+    }
+    object
+        .and_then(MapiObject::folder_id)
+        .map(post_hierarchy_folder_probe_kind)
+        .unwrap_or("generic_probe")
+}
+
+fn post_hierarchy_setprops_probe_kind(
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+) -> &'static str {
+    if property_tags
+        .iter()
+        .copied()
+        .any(is_default_folder_identification_property_tag)
+        && matches!(
+            object,
+            Some(MapiObject::Folder {
+                folder_id: ROOT_FOLDER_ID,
+                ..
+            })
+        )
+    {
+        return "root_default_folder_bootstrap";
+    }
+    object
+        .and_then(MapiObject::folder_id)
+        .map(post_hierarchy_folder_probe_kind)
+        .unwrap_or("generic_probe")
+}
+
+fn post_hierarchy_folder_probe_kind(folder_id: u64) -> &'static str {
+    match folder_id {
+        CALENDAR_FOLDER_ID => "calendar_probe",
+        INBOX_FOLDER_ID => "receive_folder_probe",
+        ROOT_FOLDER_ID => "root_default_folder_bootstrap",
+        _ => "generic_probe",
+    }
+}
+
+fn post_hierarchy_setprops_write_mode(
+    object: Option<&MapiObject>,
+    response_ok: bool,
+    problem_count: usize,
+    default_folder_identification_values_stripped: bool,
+) -> &'static str {
+    if !response_ok || problem_count > 0 {
+        return "rejected";
+    }
+    if default_folder_identification_values_stripped {
+        return "ignored_canonical_projection";
+    }
+    match object {
+        Some(MapiObject::Folder { .. })
+        | Some(MapiObject::Message { .. })
+        | Some(MapiObject::Contact { .. })
+        | Some(MapiObject::Event { .. })
+        | Some(MapiObject::Task { .. })
+        | Some(MapiObject::Note { .. })
+        | Some(MapiObject::JournalEntry { .. })
+        | Some(MapiObject::ConversationAction { .. })
+        | Some(MapiObject::NavigationShortcut { .. })
+        | Some(MapiObject::AssociatedConfig { .. })
+        | Some(MapiObject::DelegateFreeBusyMessage { .. })
+        | Some(MapiObject::PublicFolderItem { .. })
+        | Some(MapiObject::Attachment { .. }) => "persisted",
+        Some(_) => "session_only",
+        None => "missing_handle",
+    }
+}
+
+fn mapi_value_is_zero_or_default(value: &MapiValue) -> bool {
+    match value {
+        MapiValue::Bool(value) => !*value,
+        MapiValue::I16(value) => *value == 0,
+        MapiValue::I32(value) => *value == 0,
+        MapiValue::I64(value) => *value == 0,
+        MapiValue::U32(value) => *value == 0,
+        MapiValue::U64(value) => *value == 0,
+        MapiValue::F64(value) => *value == 0,
+        MapiValue::String(value) => value.is_empty(),
+        MapiValue::Binary(value) => value.is_empty(),
+        MapiValue::Guid(value) => value.iter().all(|byte| *byte == 0),
+        MapiValue::MultiI16(value) => value.is_empty(),
+        MapiValue::MultiI32(value) => value.is_empty(),
+        MapiValue::MultiI64(value) => value.is_empty(),
+        MapiValue::MultiString(value) => value.is_empty(),
+        MapiValue::MultiBinary(value) => value.is_empty(),
+        MapiValue::MultiGuid(value) => value.is_empty(),
+        MapiValue::Error(_) => false,
+    }
+}
+
 fn log_set_properties_default_folder_response_debug(
     principal: &AccountPrincipal,
     request_id: &str,
@@ -10287,6 +10606,9 @@ where
                     && inbox_post_fai_reopen_stall_observed(&session.post_hierarchy_actions)
                     && !session.post_hierarchy_actions.post_inbox_fai_reopen_logged;
                 responses.extend_from_slice(&open_folder_response);
+                session.record_post_hierarchy_request_contract(
+                    post_hierarchy_open_folder_contract(folder_id, "ok"),
+                );
                 if folder_id == INBOX_FOLDER_ID {
                     if post_fai_reopen_stall {
                         tracing::warn!(
@@ -11316,6 +11638,12 @@ where
                     object,
                     &property_response,
                 );
+                let post_hierarchy_contract =
+                    post_hierarchy_getprops_contract(&request, object, &property_response);
+                session.record_post_hierarchy_getprops_contract(post_hierarchy_contract.clone());
+                session.record_post_hierarchy_request_contract(format!(
+                    "{post_hierarchy_contract}->ok"
+                ));
                 responses.extend_from_slice(&property_response);
                 if is_inbox_folder_type_probe {
                     if let Some(context) = inbox_folder_type_getprops_context {
@@ -11383,11 +11711,24 @@ where
                 let values = match request.property_values() {
                     Ok(values) => values,
                     Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
+                        let response = rop_error_response(
                             request.rop_id,
                             request.response_handle_index(),
                             0x8004_0102,
+                        );
+                        let post_hierarchy_contract = post_hierarchy_setprops_contract(
+                            &request,
+                            set_properties_object.as_ref(),
+                            &set_properties_probe,
+                            &response,
+                        );
+                        session.record_post_hierarchy_setprops_contract(
+                            post_hierarchy_contract.clone(),
+                        );
+                        session.record_post_hierarchy_request_contract(format!(
+                            "{post_hierarchy_contract}->error"
                         ));
+                        responses.extend_from_slice(&response);
                         break;
                     }
                 };
@@ -11435,6 +11776,18 @@ where
                                     &set_properties_probe,
                                     &response,
                                 );
+                                let post_hierarchy_contract = post_hierarchy_setprops_contract(
+                                    &request,
+                                    object.as_ref(),
+                                    &set_properties_probe,
+                                    &response,
+                                );
+                                session.record_post_hierarchy_setprops_contract(
+                                    post_hierarchy_contract.clone(),
+                                );
+                                session.record_post_hierarchy_request_contract(format!(
+                                    "{post_hierarchy_contract}->problems"
+                                ));
                                 responses.extend_from_slice(&response);
                                 continue;
                             }
@@ -11492,6 +11845,18 @@ where
                             &set_properties_probe,
                             &response,
                         );
+                        let post_hierarchy_contract = post_hierarchy_setprops_contract(
+                            &request,
+                            set_properties_object.as_ref(),
+                            &set_properties_probe,
+                            &response,
+                        );
+                        session.record_post_hierarchy_setprops_contract(
+                            post_hierarchy_contract.clone(),
+                        );
+                        session.record_post_hierarchy_request_contract(format!(
+                            "{post_hierarchy_contract}->ok"
+                        ));
                         responses.extend_from_slice(&response);
                     }
                     Err(_) => {
@@ -11508,6 +11873,18 @@ where
                             &set_properties_probe,
                             &response,
                         );
+                        let post_hierarchy_contract = post_hierarchy_setprops_contract(
+                            &request,
+                            set_properties_object.as_ref(),
+                            &set_properties_probe,
+                            &response,
+                        );
+                        session.record_post_hierarchy_setprops_contract(
+                            post_hierarchy_contract.clone(),
+                        );
+                        session.record_post_hierarchy_request_contract(format!(
+                            "{post_hierarchy_contract}->error"
+                        ));
                         responses.extend_from_slice(&response);
                     }
                 }
@@ -16554,6 +16931,9 @@ where
                     response_folder_id,
                     explicit_receive_folder_message_class(message_class),
                 ));
+                session.record_post_hierarchy_request_contract(
+                    post_hierarchy_get_receive_folder_contract(message_class, response_folder_id),
+                );
             }
             Some(RopId::SetReadFlags) => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
@@ -16980,7 +17360,13 @@ where
                     checkpoint.is_some() && checkpoint_delta_total_count == 0;
                 let checkpoint_incremental_response_candidate =
                     checkpoint.is_some() && incremental_transfer_buffer.is_some();
-                let initial_transfer_selection = if checkpoint_incremental_response_candidate {
+                let initial_checkpoint_delta_selected = checkpoint_kind
+                    == MapiCheckpointKind::Hierarchy
+                    && checkpoint_zero_delta
+                    && checkpoint_incremental_response_candidate;
+                let initial_transfer_selection = if initial_checkpoint_delta_selected {
+                    "checkpoint_delta_zero_delta_initial"
+                } else if checkpoint_incremental_response_candidate {
                     "full_until_upload_state_delta_anchor"
                 } else if checkpoint.is_some() {
                     "full_checkpoint_without_incremental_candidate"
@@ -17100,6 +17486,7 @@ where
                     checkpoint_delta_total_count,
                     checkpoint_zero_delta,
                     checkpoint_incremental_response_candidate,
+                    initial_checkpoint_delta_selected,
                     checkpoint_delta_selection_gate = "upload_state_delta_anchor",
                     initial_transfer_selection,
                     checkpoint_changed_contact_count = changes.changed_contact_ids.len(),
@@ -17120,6 +17507,19 @@ where
                     incremental_transfer_buffer_bytes,
                     "rca debug mapi sync configure"
                 );
+                let active_transfer_buffer = if initial_checkpoint_delta_selected {
+                    incremental_transfer_buffer
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| transfer_buffer.clone())
+                } else {
+                    transfer_buffer
+                };
+                let deferred_incremental_transfer_buffer = if initial_checkpoint_delta_selected {
+                    None
+                } else {
+                    incremental_transfer_buffer
+                };
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
@@ -17130,6 +17530,7 @@ where
                         checkpoint_modseq: changes.current_modseq,
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
+                        checkpoint_zero_delta,
                         sync_type,
                         initial_state,
                         state,
@@ -17137,8 +17538,8 @@ where
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
                         client_state_uploaded_marker_mask: 0,
-                        incremental_transfer_buffer,
-                        transfer_buffer,
+                        incremental_transfer_buffer: deferred_incremental_transfer_buffer,
+                        transfer_buffer: active_transfer_buffer,
                         transfer_position: 0,
                     },
                 );
@@ -17184,6 +17585,7 @@ where
                         checkpoint_modseq: 1,
                         checkpoint_store_allowed: true,
                         checkpoint_skip_reason: "",
+                        checkpoint_zero_delta: false,
                         sync_type: 0,
                         initial_state: Vec::new(),
                         state: Vec::new(),
@@ -17330,6 +17732,7 @@ where
                         checkpoint_modseq: 1,
                         checkpoint_store_allowed: true,
                         checkpoint_skip_reason: "",
+                        checkpoint_zero_delta: false,
                         sync_type: 0,
                         initial_state: Vec::new(),
                         state: Vec::new(),
@@ -17356,6 +17759,7 @@ where
                         checkpoint_modseq,
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
+                        checkpoint_zero_delta,
                         sync_type,
                         state,
                         state_upload_buffer,
@@ -17378,7 +17782,10 @@ where
                             checkpoint_delta_available_before_get_buffer
                                 && !upload_state_has_delta_anchor;
                         let active_transfer_selection =
-                            if checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor
+                            if *checkpoint_zero_delta && !checkpoint_delta_available_before_get_buffer
+                            {
+                                "checkpoint_delta_zero_delta_initial"
+                            } else if checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor
                             {
                                 "full_pending_upload_state_delta_anchor"
                             } else if upload_state_has_delta_anchor
@@ -17453,6 +17860,7 @@ where
                             folder_container_class = debug_container_class_for_folder_id(*folder_id),
                             sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_zero_delta = *checkpoint_zero_delta,
                             checkpoint_mailbox_id = (*mailbox_id)
                                 .map(|id| id.to_string())
                                 .unwrap_or_default(),
@@ -17916,6 +18324,7 @@ where
                         checkpoint_kind,
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
+                        checkpoint_zero_delta,
                         sync_type,
                         initial_state,
                         state,
@@ -17989,6 +18398,7 @@ where
                             folder_container_class = debug_container_class_for_folder_id(*folder_id),
                             sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_zero_delta = *checkpoint_zero_delta,
                             checkpoint_mailbox_id = (*mailbox_id)
                                 .map(|id| id.to_string())
                                 .unwrap_or_default(),
@@ -18013,6 +18423,10 @@ where
                                 checkpoint_delta_available_before_upload_state && !has_delta_anchor,
                             active_transfer_selection = if selected_checkpoint_delta {
                                 "checkpoint_delta_after_upload_state_delta_anchor"
+                            } else if *checkpoint_zero_delta
+                                && !checkpoint_delta_available_before_upload_state
+                            {
+                                "checkpoint_delta_zero_delta_initial"
                             } else if checkpoint_delta_available_before_upload_state {
                                 "full_pending_upload_state_delta_anchor"
                             } else {
@@ -18206,6 +18620,7 @@ where
                         checkpoint_modseq,
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
+                        checkpoint_zero_delta: false,
                         sync_type,
                         initial_state: transfer_buffer.clone(),
                         state: transfer_buffer.clone(),
