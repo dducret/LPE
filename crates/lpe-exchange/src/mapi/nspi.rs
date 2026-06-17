@@ -198,8 +198,8 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
         dn: "/",
         container_id: 0,
         depth: 0,
-        flags: AB_SUBCONTAINERS | AB_UNMODIFIABLE,
-        is_master: true,
+        flags: AB_RECIPIENTS | AB_SUBCONTAINERS | AB_UNMODIFIABLE,
+        is_master: false,
     },
     NspiSpecialTableContainer {
         display_name: "All Users",

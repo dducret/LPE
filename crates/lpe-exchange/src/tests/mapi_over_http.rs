@@ -39253,8 +39253,8 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         b"/\0".as_slice(),
                         0u32,
                         0u32,
-                        0x0000_000A,
-                        1u8,
+                        0x0000_000B,
+                        0u8,
                     ),
                     (
                         "All Users",
