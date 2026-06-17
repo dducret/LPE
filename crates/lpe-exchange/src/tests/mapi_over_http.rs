@@ -15340,7 +15340,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob() {
         .unwrap()
         .to_string();
 
-    let client_blob = [0x44; 20];
+    let client_blob = vec![0x44; 1040];
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x7C04_0102, &client_blob);
 
@@ -15372,7 +15372,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let mut overridden = 20u16.to_le_bytes().to_vec();
+    let mut overridden = 1040u16.to_le_bytes().to_vec();
     overridden.extend_from_slice(&client_blob);
     assert!(contains_bytes(&response_rops, &overridden));
 
@@ -15476,7 +15476,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_survives_reconnect() {
         .unwrap()
         .to_string();
 
-    let client_blob = [0x55; 20];
+    let client_blob = vec![0x55; 1040];
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x7C04_0102, &client_blob);
 
@@ -15538,7 +15538,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_survives_reconnect() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let mut persisted = 20u16.to_le_bytes().to_vec();
+    let mut persisted = 1040u16.to_le_bytes().to_vec();
     persisted.extend_from_slice(&client_blob);
     assert!(contains_bytes(&response_rops, &persisted));
 

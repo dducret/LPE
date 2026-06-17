@@ -190,6 +190,25 @@ ALTER TABLE public.mapi_object_identities
     CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'));
 
 DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    FOR constraint_name IN
+        SELECT conname
+        FROM pg_constraint
+        WHERE conrelid = 'public.mapi_profile_settings'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%ipm_subtree_ost_id%'
+    LOOP
+        EXECUTE format('ALTER TABLE public.mapi_profile_settings DROP CONSTRAINT %I', constraint_name);
+    END LOOP;
+END $$;
+
+ALTER TABLE public.mapi_profile_settings
+    ADD CONSTRAINT mapi_profile_settings_ipm_subtree_ost_id_check
+    CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 2048));
+
+DO $$
 BEGIN
     IF EXISTS (
         SELECT 1
@@ -1574,6 +1593,11 @@ mapi_shortcut_group_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -t
 mapi_shortcut_target_nullable="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")"
 if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected mapi_navigation_shortcuts shape." >&2
+  exit 1
+fi
+mapi_profile_ost_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_profile_settings'::regclass AND conname = 'mapi_profile_settings_ipm_subtree_ost_id_check' AND pg_get_constraintdef(oid) LIKE '%<= 2048%';")"
+if [[ "${mapi_profile_ost_constraint_count}" != "1" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_profile_settings OST identity shape." >&2
   exit 1
 fi
 mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"

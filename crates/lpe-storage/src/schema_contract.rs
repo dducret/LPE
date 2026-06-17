@@ -782,7 +782,7 @@ fn mapi_profile_settings_are_canonical_account_settings() {
     let profile = table_definition("mapi_profile_settings");
     for required in [
         "account_id UUID NOT NULL",
-        "ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 1024))",
+        "ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 2048))",
         "PRIMARY KEY (tenant_id, account_id)",
         "REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
     ] {
@@ -1008,6 +1008,8 @@ fn update_script_rejects_non_current_schema_without_mutating_it() {
             "EXPECTED_SCHEMA_VERSION",
             "requires an empty database initialized with init-schema.sh",
             "Applying LPE 0.4 schema compatibility updates",
+            "mapi_profile_settings_ipm_subtree_ost_id_check",
+            "<= 2048",
         ],
     );
 }

@@ -326,8 +326,10 @@ Protocol adapters store only cursor rows:
 - `mapi_profile_settings` stores only bounded account-scoped Outlook profile
   settings required for cached-mode reuse. The initial setting is
   `ipm_subtree_ost_id`, the client-written IPM subtree OST identity reloaded
-  when Outlook reopens the store. Default-folder EntryID properties remain
-  computed canonical folder projections and must not be stored here.
+  when Outlook reopens the store. It is bounded to 2048 bytes so observed
+  Outlook cached-mode identity blobs can be persisted without turning the table
+  into a general OST/profile blob store. Default-folder EntryID properties
+  remain computed canonical folder projections and must not be stored here.
 - The read-only Outlook profile summary exposed through
   `/api/mail/outlook-profile` and private JMAP `OutlookProfile/*` is derived
   from these canonical tables. It must not become a separate Exchange profile

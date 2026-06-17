@@ -2134,7 +2134,7 @@ CREATE UNIQUE INDEX mapi_sync_checkpoints_hierarchy_idx
 CREATE TABLE mapi_profile_settings (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 1024)),
+    ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 2048)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id),

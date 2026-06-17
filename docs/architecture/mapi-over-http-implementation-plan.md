@@ -421,10 +421,12 @@ not by itself authorize broad client publication.
   not session-only state. Outlook's IPM subtree OST identity value
   (`0x7C04_0102` in the current bounded profile path) is persisted in
   `mapi_profile_settings.ipm_subtree_ost_id` when Outlook writes it to the IPM
-  subtree and is reloaded when the folder is opened in a later session. If the
-  persistence path is unavailable, the accepted write remains visible in the
-  current session so Outlook bootstrap can continue, and installation checks
-  must report the missing canonical schema state.
+  subtree and is reloaded when the folder is opened in a later session. The
+  stored value remains a bounded profile setting, with a 2048-byte limit that
+  covers observed Outlook cached-mode values without becoming a general OST
+  profile store. If the persistence path is unavailable, the accepted write
+  remains visible in the current session so Outlook bootstrap can continue, and
+  installation checks must report the missing canonical schema state.
 - `RopGetReceiveFolder` and `RopGetReceiveFolderTable` use the same primed
   receive-folder table: `IPM` and `IPM.Note` resolve to Inbox and
   `IPM.Appointment` resolves to the canonical Calendar folder. Empty or

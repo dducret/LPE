@@ -964,7 +964,7 @@ impl Storage {
         account_id: Uuid,
         ost_id: &[u8],
     ) -> Result<()> {
-        if ost_id.is_empty() || ost_id.len() > 1024 {
+        if ost_id.is_empty() || ost_id.len() > 2048 {
             bail!("invalid MAPI IPM subtree OST identity");
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
