@@ -1937,6 +1937,41 @@ mod tests {
     }
 
     #[test]
+    fn common_view_named_view_sync_projects_canonical_descriptor_properties() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let message = crate::mapi_store::MapiCommonViewNamedViewMessage {
+            id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
+            name: "Compact".to_string(),
+            view_flags: 14_745_605,
+            view_type: 8,
+        };
+
+        let sync = common_view_named_view_sync_object(&message, account_id);
+        let property = |tag| {
+            sync.named_properties
+                .iter()
+                .find_map(|(property_tag, value)| (*property_tag == tag).then_some(value))
+                .expect("sync property")
+        };
+
+        assert_eq!(
+            property(PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
+            &mapi_mailstore::SpecialMessagePropertyValue::U32(8)
+        );
+        assert!(matches!(
+            property(PID_TAG_VIEW_DESCRIPTOR_BINARY),
+            mapi_mailstore::SpecialMessagePropertyValue::Binary(value) if !value.is_empty()
+        ));
+        assert!(matches!(
+            property(PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+            mapi_mailstore::SpecialMessagePropertyValue::String(value)
+                if value.contains("From") && value.contains("Received")
+        ));
+    }
+
+    #[test]
     fn fast_transfer_manifest_rejects_associated_config_default_from_wrong_folder() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let object = MapiObject::AssociatedConfig {

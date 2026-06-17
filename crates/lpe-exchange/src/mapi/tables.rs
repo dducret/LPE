@@ -10286,7 +10286,9 @@ mod tests {
         );
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
-            Some(MapiValue::String(String::new()))
+            Some(MapiValue::String(
+                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
+            ))
         );
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
@@ -11649,7 +11651,14 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
-                Some(MapiValue::String(String::new()))
+                let definition = outlook_mail_view_definition(&message.subject);
+                log_view_definition_diagnostics(
+                    message.folder_id,
+                    message.id,
+                    &message.subject,
+                    &definition,
+                );
+                Some(MapiValue::String(view_descriptor_strings(&definition)))
             }
             PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
                 if message.message_class
@@ -11664,7 +11673,14 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
-                Some(MapiValue::Binary(minimal_view_descriptor_binary()))
+                let definition = outlook_mail_view_definition(&message.subject);
+                log_view_definition_diagnostics(
+                    message.folder_id,
+                    message.id,
+                    &message.subject,
+                    &definition,
+                );
+                Some(MapiValue::Binary(view_descriptor_binary(&definition)))
             }
             tag if message.message_class
                 == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS

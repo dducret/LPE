@@ -2183,16 +2183,39 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         PID_TAG_VIEW_DESCRIPTOR_BINARY
         | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
         | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => {
-            Some(MapiValue::Binary(minimal_view_descriptor_binary()))
+            let definition = outlook_mail_view_definition(&message.name);
+            log_view_definition_diagnostics(
+                message.folder_id,
+                message.id,
+                &message.name,
+                &definition,
+            );
+            Some(MapiValue::Binary(view_descriptor_binary(&definition)))
         }
         PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL => {
             Some(MapiValue::U32(message.view_type))
         }
         PID_TAG_VIEW_DESCRIPTOR_NAME_W => Some(MapiValue::String(message.name.clone())),
-        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => Some(MapiValue::String(String::new())),
+        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => {
+            let definition = outlook_mail_view_definition(&message.name);
+            log_view_definition_diagnostics(
+                message.folder_id,
+                message.id,
+                &message.name,
+                &definition,
+            );
+            Some(MapiValue::String(view_descriptor_strings(&definition)))
+        }
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => {
-            Some(MapiValue::Binary(minimal_view_descriptor_binary()))
+            let definition = outlook_mail_view_definition(&message.name);
+            log_view_definition_diagnostics(
+                message.folder_id,
+                message.id,
+                &message.name,
+                &definition,
+            );
+            Some(MapiValue::Binary(view_descriptor_binary(&definition)))
         }
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => Some(
             wlink_guid_property_value(requested_property_tag, *message.canonical_id.as_bytes()),
@@ -2210,26 +2233,152 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
     }
 }
 
-pub(in crate::mapi) fn minimal_view_descriptor_binary() -> Vec<u8> {
-    let mut value = Vec::with_capacity(96);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::mapi) enum ViewDefinitionKind {
+    MailCompact,
+    MailSentTo,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::mapi) struct ViewColumn {
+    pub(in crate::mapi) property_tag: u32,
+    pub(in crate::mapi) width: u32,
+    pub(in crate::mapi) flags: u32,
+    pub(in crate::mapi) header: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::mapi) struct ViewDefinition {
+    pub(in crate::mapi) kind: ViewDefinitionKind,
+    pub(in crate::mapi) columns: Vec<ViewColumn>,
+    pub(in crate::mapi) sort_column: usize,
+    pub(in crate::mapi) sort_descending: bool,
+}
+
+pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefinition {
+    if view_name.eq_ignore_ascii_case("Sent To") {
+        return ViewDefinition {
+            kind: ViewDefinitionKind::MailSentTo,
+            columns: vec![
+                view_column(PID_TAG_HAS_ATTACHMENTS, 18, "Attachment"),
+                view_column(PID_TAG_DISPLAY_TO_W, 160, "To"),
+                view_column(PID_TAG_SUBJECT_W, 260, "Subject"),
+                view_column(PID_TAG_CLIENT_SUBMIT_TIME, 140, "Sent"),
+                view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
+                view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
+            ],
+            sort_column: 4,
+            sort_descending: true,
+        };
+    }
+
+    ViewDefinition {
+        kind: ViewDefinitionKind::MailCompact,
+        columns: vec![
+            view_column(PID_TAG_HAS_ATTACHMENTS, 18, "Attachment"),
+            view_column(PID_TAG_SENDER_NAME_W, 160, "From"),
+            view_column(PID_TAG_SUBJECT_W, 280, "Subject"),
+            view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 140, "Received"),
+            view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
+        ],
+        sort_column: 4,
+        sort_descending: true,
+    }
+}
+
+fn view_column(property_tag: u32, width: u32, header: &'static str) -> ViewColumn {
+    ViewColumn {
+        property_tag,
+        width,
+        flags: 0,
+        header,
+    }
+}
+
+pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Vec<u8> {
+    let column_count = definition.columns.len() + 1;
+    let mut value = Vec::with_capacity(60 + column_count * 36);
     value.extend_from_slice(&[0; 8]);
     value.extend_from_slice(&8u32.to_le_bytes());
+    value.extend_from_slice(
+        &(if definition.sort_descending {
+            0x0000_0002u32
+        } else {
+            0
+        })
+        .to_le_bytes(),
+    );
     value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&1u32.to_le_bytes());
-    value.extend_from_slice(&u32::MAX.to_le_bytes());
+    value.extend_from_slice(&(column_count as u32).to_le_bytes());
+    value.extend_from_slice(&(definition.sort_column as u32).to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&[0; 24]);
-    value.extend_from_slice(&1u16.to_le_bytes());
-    value.extend_from_slice(&4u16.to_le_bytes());
-    value.extend_from_slice(&7u32.to_le_bytes());
+
+    write_view_column_packet(&mut value, 0x0004_0001, 7, 0x28, 4);
+    for (index, column) in definition.columns.iter().enumerate() {
+        write_view_column_packet(
+            &mut value,
+            column.property_tag,
+            column.width,
+            column.flags,
+            (index + 1) as u32,
+        );
+    }
+
+    value
+}
+
+fn write_view_column_packet(
+    value: &mut Vec<u8>,
+    property_tag: u32,
+    width: u32,
+    flags: u32,
+    column_id: u32,
+) {
+    value.extend_from_slice(&(property_tag_type(property_tag) as u16).to_le_bytes());
+    value.extend_from_slice(&((property_tag >> 16) as u16).to_le_bytes());
+    value.extend_from_slice(&width.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&0x28u32.to_le_bytes());
+    value.extend_from_slice(&flags.to_le_bytes());
     value.extend_from_slice(&[0; 12]);
     value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&4u32.to_le_bytes());
-    value
+    value.extend_from_slice(&column_id.to_le_bytes());
+}
+
+pub(in crate::mapi) fn view_descriptor_strings(definition: &ViewDefinition) -> String {
+    let mut strings = String::new();
+    strings.push('\n');
+    for column in &definition.columns {
+        strings.push_str(column.header);
+        strings.push('\n');
+    }
+    strings
+}
+
+pub(in crate::mapi) fn log_view_definition_diagnostics(
+    folder_id: u64,
+    view_id: u64,
+    view_name: &str,
+    definition: &ViewDefinition,
+) {
+    let descriptor_len = 60 + (definition.columns.len() + 1) * 36;
+    let descriptor_strings_len = view_descriptor_strings(definition).encode_utf16().count() * 2;
+    tracing::info!(
+        folder_id = format_args!("0x{folder_id:016x}"),
+        view_message_id = format_args!("0x{view_id:016x}"),
+        view_name,
+        canonical_version = 8u32,
+        descriptor_binary_len = descriptor_len,
+        descriptor_strings_len,
+        column_count = definition.columns.len() + 1,
+        sort_count = 1usize,
+        static_default = true,
+        persisted = false,
+        view_kind = ?definition.kind,
+        "mapi named view descriptor"
+    );
 }
 
 fn property_tag_id(property_tag: u32) -> u32 {
@@ -10538,6 +10687,21 @@ mod tests {
         );
     }
 
+    fn descriptor_column_property_tags(descriptor: &[u8]) -> Vec<u32> {
+        let column_count = u32::from_le_bytes(descriptor[20..24].try_into().unwrap()) as usize;
+        (0..column_count)
+            .map(|index| {
+                let offset = 60 + index * 36;
+                let property_type =
+                    u16::from_le_bytes(descriptor[offset..offset + 2].try_into().unwrap()) as u32;
+                let property_id =
+                    u16::from_le_bytes(descriptor[offset + 2..offset + 4].try_into().unwrap())
+                        as u32;
+                (property_id << 16) | property_type
+            })
+            .collect()
+    }
+
     #[test]
     fn common_view_named_view_projects_descriptor_properties_for_outlook() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
@@ -10573,10 +10737,23 @@ mod tests {
             ),
             Some(MapiValue::Binary(descriptor.clone()))
         );
-        assert_eq!(descriptor.len(), 96);
+        assert_eq!(descriptor.len(), 312);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
-        assert_eq!(&descriptor[20..24], &1u32.to_le_bytes());
-        assert_eq!(&descriptor[24..28], &u32::MAX.to_le_bytes());
+        assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &7u32.to_le_bytes());
+        assert_eq!(&descriptor[24..28], &4u32.to_le_bytes());
+        assert_eq!(
+            descriptor_column_property_tags(&descriptor),
+            vec![
+                0x0004_0001,
+                PID_TAG_HAS_ATTACHMENTS,
+                PID_TAG_SENDER_NAME_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_MESSAGE_DELIVERY_TIME,
+                PID_TAG_MESSAGE_SIZE,
+                PID_TAG_MESSAGE_FLAGS,
+            ]
+        );
         assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
         assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
         assert_eq!(&descriptor[64..68], &7u32.to_le_bytes());
@@ -10605,7 +10782,9 @@ mod tests {
                 account_id,
                 PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
             ),
-            Some(MapiValue::String(String::new()))
+            Some(MapiValue::String(
+                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
+            ))
         );
         assert_eq!(
             common_view_named_view_property_value(
@@ -10622,6 +10801,32 @@ mod tests {
                 COMMON_VIEWS_FOLDER_ID
             )
             .map(MapiValue::Binary)
+        );
+    }
+
+    #[test]
+    fn common_view_sent_to_descriptor_uses_recipient_columns() {
+        let compact = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
+        let sent_to_definition = outlook_mail_view_definition("Sent To");
+        let sent_to = view_descriptor_binary(&sent_to_definition);
+
+        assert_ne!(sent_to, compact);
+        assert_eq!(sent_to_definition.kind, ViewDefinitionKind::MailSentTo);
+        assert_eq!(
+            descriptor_column_property_tags(&sent_to),
+            vec![
+                0x0004_0001,
+                PID_TAG_HAS_ATTACHMENTS,
+                PID_TAG_DISPLAY_TO_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_CLIENT_SUBMIT_TIME,
+                PID_TAG_MESSAGE_SIZE,
+                PID_TAG_MESSAGE_FLAGS,
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&sent_to_definition),
+            "\nAttachment\nTo\nSubject\nSent\nSize\nStatus\n"
         );
     }
 
@@ -10682,8 +10887,11 @@ mod tests {
         )
         .expect("common view descriptor stream");
 
-        assert_eq!(stream, minimal_view_descriptor_binary());
-        assert_eq!(stream.len(), 96);
+        assert_eq!(
+            stream,
+            view_descriptor_binary(&outlook_mail_view_definition("Compact"))
+        );
+        assert_eq!(stream.len(), 312);
         assert!(writable_target.is_none());
     }
 
