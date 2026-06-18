@@ -1274,6 +1274,9 @@ where
             &snapshot,
             validator,
             &execute.rop_buffer,
+            request_debug.all_release,
+            request_debug.handle_count,
+            &request_debug.handle_table_summary,
         )
         .await;
         let post_hierarchy_observation =
@@ -1397,6 +1400,9 @@ where
         &snapshot,
         validator,
         &execute.rop_buffer,
+        request_debug.all_release,
+        request_debug.handle_count,
+        &request_debug.handle_table_summary,
     )
     .await;
     let post_hierarchy_observation =
@@ -3124,6 +3130,35 @@ fn format_post_hierarchy_release_context(events: &[PostHierarchyReleaseDebugEven
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn post_sync_release_flags(events: &[PostHierarchyReleaseDebugEvent]) -> String {
+    let mut logon = 0usize;
+    let mut public_folder_logon = 0usize;
+    let mut folder = 0usize;
+    let mut message = 0usize;
+    let mut contents_table = 0usize;
+    let mut hierarchy_table = 0usize;
+    let mut synchronization_source = 0usize;
+    let mut synchronization_collector = 0usize;
+    let mut notification_subscription = 0usize;
+    for event in events {
+        match event.object_kind.as_str() {
+            "logon" => logon += 1,
+            "public_folder_logon" => public_folder_logon += 1,
+            "folder" => folder += 1,
+            "message" => message += 1,
+            "contents_table" => contents_table += 1,
+            "hierarchy_table" => hierarchy_table += 1,
+            "synchronization_source" => synchronization_source += 1,
+            "synchronization_collector" => synchronization_collector += 1,
+            "notification_subscription" => notification_subscription += 1,
+            _ => {}
+        }
+    }
+    format!(
+        "logon={logon};public_folder_logon={public_folder_logon};folder={folder};message={message};contents_table={contents_table};hierarchy_table={hierarchy_table};synchronization_source={synchronization_source};synchronization_collector={synchronization_collector};notification_subscription={notification_subscription}"
+    )
 }
 
 async fn folder_properties_for_open<S>(
@@ -10260,6 +10295,9 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     snapshot: &MapiMailStoreSnapshot,
     validator: &Validator<V>,
     rop_buffer: &[u8],
+    request_all_rops_are_release: bool,
+    request_handle_count: usize,
+    request_handle_table_summary: &str,
 ) -> Vec<u8>
 where
     S: ExchangeStore,
@@ -20840,6 +20878,48 @@ where
     }
     if !post_hierarchy_release_events.is_empty() {
         let post_hierarchy = post_hierarchy_action_summary(session, false);
+        if request_all_rops_are_release && post_hierarchy.content_sync_configure_observed {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                tenant_id = %principal.tenant_id,
+                account_id = %principal.account_id,
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_all_rops_are_release = request_all_rops_are_release,
+                request_handle_count = request_handle_count,
+                input_handle_table_summary = %request_handle_table_summary,
+                release_rops_have_no_response_rows = true,
+                response_rop_payload_bytes_before_handle_table = responses.len(),
+                response_rop_payload_empty_is_expected = responses.is_empty(),
+                last_completed_hierarchy_sync_root =
+                    %post_hierarchy.last_completed_hierarchy_sync_root,
+                content_sync_started_after_hierarchy =
+                    post_hierarchy.content_sync_configure_observed,
+                post_hierarchy_execute_count_before_record =
+                    post_hierarchy.execute_count,
+                released_handle_count = post_hierarchy_release_events.len(),
+                released_handle_kinds =
+                    %format_post_hierarchy_release_kinds(&post_hierarchy_release_events),
+                released_handle_role_counts =
+                    %post_sync_release_flags(&post_hierarchy_release_events),
+                released_logon_after_content_sync = post_hierarchy_release_events
+                    .iter()
+                    .any(|event| matches!(
+                        event.object_kind.as_str(),
+                        "logon" | "public_folder_logon"
+                    )),
+                release_closes_all_live_handles = session.handles.is_empty(),
+                remaining_live_handle_count = session.handles.len(),
+                remaining_live_handles = %format_live_handle_debug_summary(session),
+                release_context =
+                    %format_post_hierarchy_release_context(&post_hierarchy_release_events),
+                next_expected_client_step = "disconnect_or_reconnect_after_release_only_execute",
+                "rca debug mapi post sync release-only execute"
+            );
+        }
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -24042,6 +24122,56 @@ mod tests {
             format!("{}:OpenFolder", MAX_ROP_DEBUG_ENTRIES)
         );
         assert!(request_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn post_sync_release_flags_counts_outlook_close_handles() {
+        let events = vec![
+            PostHierarchyReleaseDebugEvent {
+                input_handle_index: 0,
+                handle: "1".to_string(),
+                object_kind: "synchronization_source".to_string(),
+                folder_id: "0x0000000000050001".to_string(),
+                remaining_before: 4,
+                remaining_after: 3,
+                logon_before_content_sync: false,
+            },
+            PostHierarchyReleaseDebugEvent {
+                input_handle_index: 1,
+                handle: "2".to_string(),
+                object_kind: "synchronization_collector".to_string(),
+                folder_id: "0x0000000000050001".to_string(),
+                remaining_before: 3,
+                remaining_after: 2,
+                logon_before_content_sync: false,
+            },
+            PostHierarchyReleaseDebugEvent {
+                input_handle_index: 2,
+                handle: "3".to_string(),
+                object_kind: "notification_subscription".to_string(),
+                folder_id: "none".to_string(),
+                remaining_before: 2,
+                remaining_after: 1,
+                logon_before_content_sync: false,
+            },
+            PostHierarchyReleaseDebugEvent {
+                input_handle_index: 3,
+                handle: "4".to_string(),
+                object_kind: "logon".to_string(),
+                folder_id: "none".to_string(),
+                remaining_before: 1,
+                remaining_after: 0,
+                logon_before_content_sync: false,
+            },
+        ];
+
+        let flags = post_sync_release_flags(&events);
+
+        assert!(flags.contains("logon=1"), "{flags}");
+        assert!(flags.contains("synchronization_source=1"), "{flags}");
+        assert!(flags.contains("synchronization_collector=1"), "{flags}");
+        assert!(flags.contains("notification_subscription=1"), "{flags}");
+        assert!(flags.contains("folder=0"), "{flags}");
     }
 
     #[test]

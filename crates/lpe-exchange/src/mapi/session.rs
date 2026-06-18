@@ -575,6 +575,9 @@ where
         &snapshot,
         validator,
         rop_buffer,
+        false,
+        0,
+        "rpc_http_request_not_summarized",
     )
     .await;
     store_session(session_id, session);
