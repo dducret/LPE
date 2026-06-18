@@ -1484,10 +1484,7 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
 fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     let mut table_row = Vec::new();
     write_u32(&mut table_row, 0);
-    write_u32(
-        &mut table_row,
-        if container.parent_dn.is_some() { 7 } else { 6 },
-    );
+    write_u32(&mut table_row, 7);
     write_address_book_tagged_property_value(
         &mut table_row,
         PID_TAG_ENTRY_ID,
@@ -1518,13 +1515,15 @@ fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
         &NspiValue::Bool(container.is_master),
     );
-    if let Some(parent_dn) = container.parent_dn {
-        write_address_book_tagged_property_value(
-            &mut table_row,
-            PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
-            &NspiValue::OwnedBinary(nspi_container_entry_id(parent_dn)),
-        );
-    }
+    let parent_entry_id = container
+        .parent_dn
+        .map(nspi_container_entry_id)
+        .unwrap_or_default();
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
+        &NspiValue::OwnedBinary(parent_entry_id),
+    );
     table_row
 }
 

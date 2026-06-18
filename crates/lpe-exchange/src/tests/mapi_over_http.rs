@@ -39268,7 +39268,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0u32,
                         0x0000_000B,
                         0u8,
-                        None,
+                        Some([].as_slice()),
                     ),
                     (
                         "All Users",
@@ -39309,7 +39309,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     offset += 4;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        if parent_entry_id.is_some() { 7 } else { 6 },
+                        7,
                         "{request_type}: {name}"
                     );
                     offset += 4;
@@ -39393,24 +39393,22 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     assert_eq!(body[offset], is_master, "{request_type}: {name}");
                     offset += 1;
 
-                    if let Some(parent_entry_id) = parent_entry_id {
-                        assert_eq!(
-                            u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                            0xFFFC_0102,
-                            "{request_type}: {name}"
-                        );
-                        offset += 8;
-                        let parent_entry_id_len =
-                            u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap())
-                                as usize;
-                        offset += 4;
-                        assert_eq!(
-                            &body[offset..offset + parent_entry_id_len],
-                            parent_entry_id,
-                            "{request_type}: {name}"
-                        );
-                        offset += parent_entry_id_len;
-                    }
+                    let parent_entry_id = parent_entry_id.unwrap();
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0xFFFC_0102,
+                        "{request_type}: {name}"
+                    );
+                    offset += 8;
+                    let parent_entry_id_len =
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+                    offset += 4;
+                    assert_eq!(
+                        &body[offset..offset + parent_entry_id_len],
+                        parent_entry_id,
+                        "{request_type}: {name}"
+                    );
+                    offset += parent_entry_id_len;
                 }
             }
             "DNToEPH" | "DNToMId" => {
