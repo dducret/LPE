@@ -3886,6 +3886,9 @@ fn replguid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
 }
 
 fn replguid_idset_from_counters(counters: &[u64]) -> Vec<u8> {
+    if counters.is_empty() {
+        return Vec::new();
+    }
     let mut idset = STORE_REPLICA_GUID.to_vec();
     let mut counters = counters.to_vec();
     counters.sort_unstable();

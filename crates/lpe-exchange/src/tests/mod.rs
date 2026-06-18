@@ -7944,6 +7944,9 @@ fn strict_replguid_globset_contains_counter(value: &[u8], counter: &[u8]) -> Res
 }
 
 fn strict_replguid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String> {
+    if value.is_empty() {
+        return Ok(Vec::new());
+    }
     if value.len() < 17 || !value.starts_with(&mapi_mailstore::STORE_REPLICA_GUID) {
         return Err("REPLGUID-based IDSET/CNSET is missing the store replica GUID".into());
     }

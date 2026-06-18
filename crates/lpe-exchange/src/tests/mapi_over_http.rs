@@ -16153,6 +16153,28 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_sy
 }
 
 #[tokio::test]
+async fn mapi_over_http_empty_root_adjacent_special_content_sync_uses_zero_length_state_sets() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+
+    for folder_id in [
+        crate::mapi::identity::SHORTCUTS_FOLDER_ID,
+        crate::mapi::identity::VIEWS_FOLDER_ID,
+    ] {
+        let response_rops =
+            content_sync_response_rops_for_store(store.clone(), folder_id, &[]).await;
+        let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+        assert!(stream.message_changes.is_empty());
+        assert!(stream.idset_given.is_empty());
+        assert!(stream.cnset_seen.is_empty());
+        assert!(stream.cnset_seen_fai.is_empty());
+        assert!(stream.cnset_read.is_empty());
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persists() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -18794,12 +18816,12 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
     for value in [
         &final_state.idset_given,
         &final_state.cnset_seen,
-        &final_state.cnset_seen_fai,
         &final_state.cnset_read,
     ] {
         strict_validate_replguid_globset(value).unwrap();
         assert!(strict_validate_replid_globset(value).is_err());
     }
+    assert!(final_state.cnset_seen_fai.is_empty());
     assert!(strict_replguid_globset_contains_counter(
         &final_state.idset_given,
         &globcnt_bytes(mapi_message_global_counter(&message_id))
@@ -18843,12 +18865,12 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
     for value in [
         &checkpoint_state.idset_given,
         &checkpoint_state.cnset_seen,
-        &checkpoint_state.cnset_seen_fai,
         &checkpoint_state.cnset_read,
     ] {
         strict_validate_replguid_globset(value).unwrap();
         assert!(strict_validate_replid_globset(value).is_err());
     }
+    assert!(checkpoint_state.cnset_seen_fai.is_empty());
 }
 
 #[tokio::test]
@@ -25795,6 +25817,10 @@ async fn mapi_over_http_content_sync_after_empty_folder_advances_empty_final_sta
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
+    assert!(stream.idset_given.is_empty());
+    assert!(stream.cnset_seen.is_empty());
+    assert!(stream.cnset_seen_fai.is_empty());
+    assert!(stream.cnset_read.is_empty());
     assert_content_final_state_includes(&response_rops, &[], &[]);
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
