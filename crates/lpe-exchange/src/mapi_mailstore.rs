@@ -832,6 +832,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     for object in &special_objects {
         let change_number = change_number_for_store_id(object.item_id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
+        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
             &mut buffer,
             PID_TAG_SOURCE_KEY,
@@ -865,7 +866,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_change_number(&mut buffer, change_number);
         }
-        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
             &mut buffer,
             PID_TAG_PARENT_SOURCE_KEY,
@@ -2541,7 +2541,6 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
 ) -> Result<ContentTransferFaiDebugSummary, String> {
     let mut offset = 0;
     let mut current_message: Option<ContentTransferMessageDebug> = None;
-    let mut in_message_body = false;
     let mut in_final_state = false;
     let mut summary = ContentTransferFaiDebugSummary::default();
 
@@ -2568,18 +2567,15 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                     );
                     current_message = Some(ContentTransferMessageDebug {
                         item_start_offset: offset,
-                        message_start_marker_offset: Some(offset),
-                        property_list_start_offset: Some(offset + 4),
                         ..ContentTransferMessageDebug::default()
                     });
-                    in_message_body = false;
                     in_final_state = false;
                 }
                 INCR_SYNC_MESSAGE => {
                     if let Some(message) = current_message.as_mut() {
                         message.message_start_marker_offset = Some(offset);
+                        message.property_list_start_offset = Some(offset + 4);
                     }
-                    in_message_body = true;
                     in_final_state = false;
                 }
                 INCR_SYNC_DEL | INCR_SYNC_READ => {
@@ -2590,7 +2586,6 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         bytes,
                         offset,
                     );
-                    in_message_body = false;
                     in_final_state = false;
                 }
                 INCR_SYNC_STATE_BEGIN => {
@@ -2601,7 +2596,6 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         bytes,
                         offset,
                     );
-                    in_message_body = false;
                     in_final_state = true;
                 }
                 INCR_SYNC_STATE_END => {
@@ -2627,6 +2621,7 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
             continue;
         }
 
+        let property_offset = offset;
         let property = parse_debug_fast_transfer_property(bytes, offset)?;
         offset = property.next_offset;
         if in_final_state {
@@ -2649,6 +2644,9 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
         let Some(message) = current_message.as_mut() else {
             continue;
         };
+        message
+            .property_list_start_offset
+            .get_or_insert(property_offset);
         message.property_tags.push(property.tag);
         if content_fai_debug_value_shape_property(property.tag) {
             message.property_value_shapes.push((
@@ -2656,45 +2654,41 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                 fast_transfer_value_shape(property.tag, &property.value),
             ));
         }
-        if in_message_body {
-            match property.tag {
-                PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = property.value,
-                PID_TAG_ENTRY_ID => message.entry_id_len = property.value.len(),
-                PID_TAG_RECORD_KEY => message.record_key_len = property.value.len(),
-                PID_TAG_SUBJECT_W => {
-                    message.subject = decode_debug_utf16z(&property.value).unwrap_or_default()
-                }
-                PID_TAG_NORMALIZED_SUBJECT_A => {
-                    message.subject = decode_debug_string8z(&property.value).unwrap_or_default()
-                }
-                PID_TAG_MESSAGE_CLASS_W => {
-                    message.message_class = decode_debug_utf16z(&property.value).unwrap_or_default()
-                }
-                _ => {}
+        match property.tag {
+            PID_TAG_SOURCE_KEY => {
+                message.global_counter = counter_from_xid(&property.value);
+                message.item_id =
+                    counter_from_xid(&property.value).map(crate::mapi::identity::mapi_store_id);
+                message.source_key = property.value.clone();
             }
-        } else {
-            match property.tag {
-                PID_TAG_SOURCE_KEY => {
-                    message.global_counter = counter_from_xid(&property.value);
-                    message.item_id =
-                        counter_from_xid(&property.value).map(crate::mapi::identity::mapi_store_id);
-                    message.source_key = property.value;
-                }
-                PID_TAG_CHANGE_KEY => {
-                    message.change_number = counter_from_xid(&property.value);
-                    message.change_key = property.value;
-                }
-                PID_TAG_PREDECESSOR_CHANGE_LIST => message.predecessor_change_list = property.value,
-                PID_TAG_ASSOCIATED => {
-                    message.associated_present = true;
-                    message.associated = decode_debug_bool(&property.value).unwrap_or_default()
-                }
-                PID_TAG_MID => message.item_id = decode_debug_object_id(&property.value),
-                PID_TAG_CHANGE_NUMBER => {
-                    message.change_number = decode_debug_change_number(&property.value)
-                }
-                _ => {}
+            PID_TAG_CHANGE_KEY => {
+                message.change_number = counter_from_xid(&property.value);
+                message.change_key = property.value.clone();
             }
+            PID_TAG_PREDECESSOR_CHANGE_LIST => {
+                message.predecessor_change_list = property.value.clone()
+            }
+            PID_TAG_ASSOCIATED => {
+                message.associated_present = true;
+                message.associated = decode_debug_bool(&property.value).unwrap_or_default()
+            }
+            PID_TAG_MID => message.item_id = decode_debug_object_id(&property.value),
+            PID_TAG_CHANGE_NUMBER => {
+                message.change_number = decode_debug_change_number(&property.value)
+            }
+            PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = property.value.clone(),
+            PID_TAG_ENTRY_ID => message.entry_id_len = property.value.len(),
+            PID_TAG_RECORD_KEY => message.record_key_len = property.value.len(),
+            PID_TAG_SUBJECT_W => {
+                message.subject = decode_debug_utf16z(&property.value).unwrap_or_default()
+            }
+            PID_TAG_NORMALIZED_SUBJECT_A => {
+                message.subject = decode_debug_string8z(&property.value).unwrap_or_default()
+            }
+            PID_TAG_MESSAGE_CLASS_W => {
+                message.message_class = decode_debug_utf16z(&property.value).unwrap_or_default()
+            }
+            _ => {}
         }
     }
 
@@ -6102,6 +6096,71 @@ mod tests {
         assert!(contains_bytes(&buffer, &utf16z("IPM.StickyNote")));
         assert!(contains_bytes(&buffer, &utf16z("Remember this")));
         assert!(contains_bytes(&buffer, &0x8B00_0003u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn content_sync_manifest_starts_fai_message_before_item_properties() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999997").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(97);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            item_id,
+            canonical_id,
+            associated: true,
+            subject: "Calendar".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 0,
+            read_state: None,
+            named_properties: Vec::new(),
+        };
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_FAI,
+            SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+            &[],
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            1,
+        );
+
+        assert_tag_order(
+            &buffer,
+            &[
+                INCR_SYNC_CHG,
+                INCR_SYNC_MESSAGE,
+                PID_TAG_SOURCE_KEY,
+                PID_TAG_PARENT_SOURCE_KEY,
+            ],
+        );
+        let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+        assert_eq!(summary.fai_items.len(), 1);
+        let item = &summary.fai_items[0];
+        let message_start = item.message_start_marker_offset.unwrap();
+        let property_start = item.property_list_start_offset.unwrap();
+        assert!(item.item_start_offset < message_start);
+        assert!(message_start < property_start);
+        assert!(property_start < item.item_end_offset);
+        assert_eq!(item.item_id, Some(item_id));
+        assert_eq!(item.associated, Some(true));
+        assert_eq!(item.subject, "Calendar");
+        assert_eq!(item.message_class, "IPM.Microsoft.WunderBar.Link");
+        assert!(item.source_key_len > 0);
+        assert!(item.parent_source_key_len > 0);
     }
 
     #[test]
