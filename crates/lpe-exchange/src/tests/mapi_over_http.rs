@@ -16141,8 +16141,12 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_sy
         .await
         .unwrap()
         .expect("Common Views content checkpoint");
-    assert_eq!(checkpoint.last_change_sequence, 26);
-    assert_eq!(checkpoint.last_modseq, 26);
+    let current_changes = store.mapi_sync_changes.lock().unwrap().clone();
+    assert_eq!(
+        checkpoint.last_change_sequence,
+        current_changes.current_change_sequence
+    );
+    assert_eq!(checkpoint.last_modseq, current_changes.current_modseq);
     assert_eq!(
         checkpoint
             .cursor_json
@@ -28093,8 +28097,13 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     assert!(imported_emails.lock().unwrap().is_empty());
     {
         let configs = associated_configs.lock().unwrap();
-        assert_eq!(configs.len(), 1);
-        let config = &configs[0];
+        let config = configs
+            .iter()
+            .find(|config| {
+                config.message_class == "IPM.Configuration"
+                    && config.subject == "Outlook Inbox view state"
+            })
+            .expect("imported associated config");
         assert_eq!(config.folder_id, crate::mapi::identity::INBOX_FOLDER_ID);
         assert_eq!(config.message_class, "IPM.Configuration");
         assert_eq!(config.subject, "Outlook Inbox view state");
