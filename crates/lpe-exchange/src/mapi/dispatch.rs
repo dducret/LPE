@@ -1277,6 +1277,9 @@ where
             request_debug.all_release,
             request_debug.handle_count,
             &request_debug.handle_table_summary,
+            &request_debug.ids_csv,
+            &request_debug.names_csv,
+            &request_debug.non_release_rops,
         )
         .await;
         let post_hierarchy_observation =
@@ -1403,6 +1406,9 @@ where
         request_debug.all_release,
         request_debug.handle_count,
         &request_debug.handle_table_summary,
+        &request_debug.ids_csv,
+        &request_debug.names_csv,
+        &request_debug.non_release_rops,
     )
     .await;
     let post_hierarchy_observation =
@@ -10298,6 +10304,9 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     request_all_rops_are_release: bool,
     request_handle_count: usize,
     request_handle_table_summary: &str,
+    request_rop_ids: &str,
+    request_rop_names: &str,
+    request_non_release_rops: &str,
 ) -> Vec<u8>
 where
     S: ExchangeStore,
@@ -20878,6 +20887,51 @@ where
     }
     if !post_hierarchy_release_events.is_empty() {
         let post_hierarchy = post_hierarchy_action_summary(session, false);
+        if post_hierarchy.content_sync_configure_observed {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                tenant_id = %principal.tenant_id,
+                account_id = %principal.account_id,
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_rop_ids = %request_rop_ids,
+                request_rop_names = %request_rop_names,
+                request_non_release_rops = %request_non_release_rops,
+                request_all_rops_are_release = request_all_rops_are_release,
+                request_handle_count = request_handle_count,
+                input_handle_table_summary = %request_handle_table_summary,
+                release_rops_have_no_response_rows = true,
+                response_rop_payload_bytes_before_handle_table = responses.len(),
+                response_rop_payload_empty_is_expected = responses.is_empty(),
+                last_completed_hierarchy_sync_root =
+                    %post_hierarchy.last_completed_hierarchy_sync_root,
+                content_sync_started_after_hierarchy =
+                    post_hierarchy.content_sync_configure_observed,
+                post_hierarchy_execute_count_before_record =
+                    post_hierarchy.execute_count,
+                released_handle_count = post_hierarchy_release_events.len(),
+                released_handle_kinds =
+                    %format_post_hierarchy_release_kinds(&post_hierarchy_release_events),
+                released_handle_role_counts =
+                    %post_sync_release_flags(&post_hierarchy_release_events),
+                released_logon_after_content_sync = post_hierarchy_release_events
+                    .iter()
+                    .any(|event| matches!(
+                        event.object_kind.as_str(),
+                        "logon" | "public_folder_logon"
+                    )),
+                release_closes_all_live_handles = session.handles.is_empty(),
+                remaining_live_handle_count = session.handles.len(),
+                remaining_live_handles = %format_live_handle_debug_summary(session),
+                release_context =
+                    %format_post_hierarchy_release_context(&post_hierarchy_release_events),
+                next_expected_client_step = "continue_mixed_sync_or_disconnect_after_release",
+                "rca debug mapi post sync release-containing execute"
+            );
+        }
         if request_all_rops_are_release && post_hierarchy.content_sync_configure_observed {
             tracing::info!(
                 rca_debug = true,

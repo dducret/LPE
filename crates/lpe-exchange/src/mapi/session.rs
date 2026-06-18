@@ -578,6 +578,9 @@ where
         false,
         0,
         "rpc_http_request_not_summarized",
+        "",
+        "",
+        "rpc_http_request_not_summarized",
     )
     .await;
     store_session(session_id, session);
