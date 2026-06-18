@@ -1087,11 +1087,25 @@ fn associated_config_sync_object(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut named_properties = Vec::new();
-    for (tag, value) in mapi_properties_from_json(&message.properties_json) {
+    let stored_properties = mapi_properties_from_json(&message.properties_json);
+    for (tag, value) in stored_properties.clone() {
         if associated_config_standard_sync_tag(tag) {
             continue;
         }
         if let Some(value) = special_message_property_value(value) {
+            named_properties.push((tag, value));
+        }
+    }
+    for &tag in associated_config_default_sync_tags(message) {
+        let canonical_tag = canonical_property_storage_tag(tag);
+        if associated_config_standard_sync_tag(canonical_tag)
+            || stored_properties.contains_key(&canonical_tag)
+        {
+            continue;
+        }
+        if let Some(value) =
+            associated_config_property_value(message, tag).and_then(special_message_property_value)
+        {
             named_properties.push((tag, value));
         }
     }
@@ -1115,6 +1129,35 @@ fn associated_config_sync_object(
         message_size,
         read_state: None,
         named_properties,
+    }
+}
+
+fn associated_config_default_sync_tags(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> &'static [u32] {
+    if message.message_class.starts_with("IPM.Configuration.") {
+        &[
+            PID_TAG_ROAMING_DATATYPES,
+            PID_TAG_ROAMING_DICTIONARY,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            PID_NAME_CONTENT_CLASS_W_TAG,
+            PID_NAME_CONTENT_TYPE_W_TAG,
+        ]
+    } else if message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS {
+        &[
+            PID_TAG_VIEW_DESCRIPTOR_CLSID,
+            PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+            PID_TAG_VIEW_DESCRIPTOR_VERSION,
+            PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+            PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+            PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+            PID_TAG_VIEW_DESCRIPTOR_BINARY,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+        ]
+    } else {
+        &[]
     }
 }
 
@@ -1973,7 +2016,37 @@ mod tests {
     #[test]
     fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let umolk_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000201);
+        let named_view_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000201);
+        crate::mapi::identity::remember_mapi_identity(
+            umolk_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 201,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            named_view_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 202,
+            ),
+        );
         let persisted = [
+            (
+                umolk_id.as_u128(),
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 201,
+                ),
+                "IPM.Configuration.UMOLK.UserOptions",
+                "IPM.Configuration.UMOLK.UserOptions",
+            ),
+            (
+                named_view_id.as_u128(),
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 202,
+                ),
+                "IPM.Microsoft.FolderDesign.NamedView",
+                "Compact",
+            ),
             (
                 0x6d617069_6163_6350_8000_000000000101,
                 crate::mapi::identity::mapi_store_id(0x7900),
@@ -2029,61 +2102,7 @@ mod tests {
         })
         .collect::<Vec<_>>();
         let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(persisted);
-        let mut objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
-        objects.extend([
-            mapi_mailstore::SpecialMessageSyncFact {
-                folder_id: INBOX_FOLDER_ID,
-                item_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
-                canonical_id: Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001),
-                associated: true,
-                subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
-                body_text: String::new(),
-                message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
-                last_modified_filetime: mapi_mailstore::filetime_from_change_number(
-                    mapi_mailstore::change_number_for_store_id(
-                        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
-                    ),
-                ),
-                message_size: 128,
-                read_state: None,
-                named_properties: vec![
-                    (
-                        PID_TAG_ROAMING_DATATYPES,
-                        mapi_mailstore::SpecialMessagePropertyValue::U32(4),
-                    ),
-                    (
-                        PID_TAG_ROAMING_DICTIONARY,
-                        mapi_mailstore::SpecialMessagePropertyValue::Binary(b"9-0".to_vec()),
-                    ),
-                ],
-            },
-            mapi_mailstore::SpecialMessageSyncFact {
-                folder_id: INBOX_FOLDER_ID,
-                item_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
-                canonical_id: Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000001),
-                associated: true,
-                subject: "Compact".to_string(),
-                body_text: String::new(),
-                message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
-                last_modified_filetime: mapi_mailstore::filetime_from_change_number(
-                    mapi_mailstore::change_number_for_store_id(
-                        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
-                    ),
-                ),
-                message_size: 128,
-                read_state: None,
-                named_properties: vec![
-                    (
-                        PID_TAG_ROAMING_DATATYPES,
-                        mapi_mailstore::SpecialMessagePropertyValue::U32(4),
-                    ),
-                    (
-                        PID_TAG_ROAMING_DICTIONARY,
-                        mapi_mailstore::SpecialMessagePropertyValue::Binary(b"9-0".to_vec()),
-                    ),
-                ],
-            },
-        ]);
+        let objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
         let buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
             account_id,
             0x01,
@@ -2113,12 +2132,16 @@ mod tests {
         }
         let expected = [
             (
-                crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 202,
+                ),
                 "IPM.Microsoft.FolderDesign.NamedView",
                 "Compact",
             ),
             (
-                crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 201,
+                ),
                 "IPM.Configuration.UMOLK.UserOptions",
                 "IPM.Configuration.UMOLK.UserOptions",
             ),
@@ -2132,6 +2155,36 @@ mod tests {
             assert_eq!(item.message_class, message_class);
             assert_eq!(item.subject, subject);
         }
+        assert!(!summary.fai_items.iter().any(|item| {
+            item.item_id == Some(crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6))
+                || item.item_id == Some(crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA))
+        }));
+        let named_view = summary
+            .fai_items
+            .iter()
+            .find(|item| item.message_class == "IPM.Microsoft.FolderDesign.NamedView")
+            .expect("persisted Inbox named view");
+        assert_has_tags(
+            named_view,
+            &[
+                PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+                PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+                PID_TAG_VIEW_DESCRIPTOR_BINARY,
+            ],
+        );
+        let umolk = summary
+            .fai_items
+            .iter()
+            .find(|item| item.message_class == "IPM.Configuration.UMOLK.UserOptions")
+            .expect("persisted UMOLK user options");
+        assert_has_tags(
+            umolk,
+            &[
+                PID_TAG_ROAMING_DATATYPES,
+                PID_TAG_ROAMING_DICTIONARY,
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            ],
+        );
         for class in [
             "IPM.Configuration.AccountPrefs",
             "IPM.Configuration.ConversationPrefs",

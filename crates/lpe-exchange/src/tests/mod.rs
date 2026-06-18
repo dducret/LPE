@@ -272,6 +272,16 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
                 .count(),
             1
         );
+        let first_message = first
+            .associated_config_sync_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+            .into_iter()
+            .find(|message| message.message_class == class)
+            .expect("bootstrapped associated config sync row");
+        assert!(
+            !crate::mapi_store::is_outlook_inbox_default_associated_config_id(first_message.id),
+            "bootstrapped persisted {class} row reused synthetic fallback id 0x{:016x}",
+            first_message.id
+        );
     }
     for class in [
         "IPM.Configuration.EAS",

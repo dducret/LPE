@@ -500,20 +500,6 @@ fn outlook_inbox_persisted_associated_config_defaults(
         .collect()
 }
 
-fn outlook_inbox_default_associated_config_reserved_counter(
-    config: &MapiAssociatedConfigRecord,
-) -> Option<u64> {
-    if config.folder_id != crate::mapi::identity::INBOX_FOLDER_ID {
-        return None;
-    }
-    outlook_inbox_associated_config_defaults(config.folder_id)
-        .into_iter()
-        .find(|message| {
-            message.canonical_id == config.id && message.message_class == config.message_class
-        })
-        .and_then(|message| crate::mapi::identity::global_counter_from_store_id(message.id))
-}
-
 fn format_associated_config_classes(configs: &[MapiAssociatedConfigRecord]) -> String {
     let mut classes = configs
         .iter()
@@ -1966,13 +1952,7 @@ impl MapiMailStoreSnapshot {
         &self,
         folder_id: u64,
     ) -> Vec<MapiAssociatedConfigMessage> {
-        deduplicate_associated_config_messages(
-            self.associated_configs
-                .iter()
-                .filter(|message| message.folder_id == folder_id)
-                .cloned()
-                .collect(),
-        )
+        self.associated_config_messages_for_folder(folder_id)
     }
 
     pub(crate) fn navigation_shortcut_message_for_id(
@@ -2756,7 +2736,7 @@ fn mapi_identity_requests(
     requests.extend(associated_configs.iter().map(|config| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::AssociatedConfig,
         canonical_id: config.id,
-        reserved_global_counter: outlook_inbox_default_associated_config_reserved_counter(config),
+        reserved_global_counter: None,
         source_key: None,
     }));
     requests.extend(
@@ -3768,7 +3748,7 @@ mod tests {
     }
 
     #[test]
-    fn associated_config_sync_messages_are_persisted_only() {
+    fn associated_config_sync_messages_use_persisted_rows_before_defaults() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000002);
         crate::mapi::identity::remember_mapi_identity(
@@ -3793,42 +3773,19 @@ mod tests {
         let sync_messages = snapshot
             .associated_config_sync_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
 
-        assert!(table_messages.len() > sync_messages.len());
-        assert_eq!(sync_messages.len(), 1);
-        assert_eq!(sync_messages[0].canonical_id, persisted_id);
-        assert!(!sync_messages
+        assert_eq!(sync_messages, table_messages);
+        assert_eq!(
+            sync_messages
+                .iter()
+                .find(|message| {
+                    message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
+                })
+                .map(|message| message.canonical_id),
+            Some(persisted_id)
+        );
+        assert!(sync_messages
             .iter()
             .any(|message| is_outlook_inbox_virtual_only_associated_config_id(message.id)));
-    }
-
-    #[test]
-    fn persisted_inbox_associated_config_defaults_keep_reserved_object_ids() {
-        for default in
-            outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-                .into_iter()
-                .filter(|message| {
-                    matches!(
-                        message.message_class.as_str(),
-                        OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                            | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                    )
-                })
-        {
-            let record = crate::store::MapiAssociatedConfigRecord {
-                id: default.canonical_id,
-                account_id: Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376),
-                folder_id: default.folder_id,
-                message_class: default.message_class,
-                subject: default.subject,
-                properties_json: default.properties_json,
-            };
-
-            assert_eq!(
-                outlook_inbox_default_associated_config_reserved_counter(&record)
-                    .map(crate::mapi::identity::mapi_store_id),
-                Some(default.id)
-            );
-        }
     }
 
     #[test]
