@@ -3380,6 +3380,9 @@ fn log_get_properties_default_folder_response_debug(
     request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
     property_response: &[u8],
 ) {
     let property_tags = request.property_tags();
@@ -3397,6 +3400,8 @@ fn log_get_properties_default_folder_response_debug(
     let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
     let decoded_values =
         default_folder_getprops_response_values_for_debug(&probe.property_tags, property_response);
+    let default_folder_projection =
+        default_folder_hierarchy_projection_for_debug(principal, mailboxes, emails, snapshot);
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -3414,6 +3419,7 @@ fn log_get_properties_default_folder_response_debug(
         property_names = %format_set_property_names_for_debug(&probe.property_tags),
         response_shape = %response_shape,
         default_folder_entry_id_values = %decoded_values,
+        default_folder_hierarchy_projection = %default_folder_projection,
         "rca debug mapi default folder getprops response"
     );
 }
@@ -7013,6 +7019,106 @@ fn default_folder_identification_contract_for_debug(principal: &AccountPrincipal
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn log_default_folder_discovery_contract(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    stage: &str,
+    request_rop_id: &str,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id,
+        stage,
+        default_folder_identification_contract =
+            %default_folder_identification_contract_for_debug(principal),
+        default_folder_hierarchy_projection =
+            %default_folder_hierarchy_projection_for_debug(
+                principal,
+                mailboxes,
+                emails,
+                snapshot
+            ),
+        message = "rca debug mapi default folder discovery contract"
+    );
+}
+
+fn default_folder_hierarchy_projection_for_debug(
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    default_folder_discovery_specs()
+        .iter()
+        .map(|(name, tag, folder_id)| {
+            let entry_id = special_folder_identification_property_value(principal.account_id, *tag)
+                .and_then(|value| match value {
+                    MapiValue::Binary(bytes) => Some(bytes),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let entry_id_decoded =
+                crate::mapi::identity::object_id_from_folder_entry_id(&entry_id);
+            let source_key = mapi_mailstore::source_key_for_store_id(*folder_id);
+            let source_key_decoded = crate::mapi::identity::object_id_from_source_key(&source_key);
+            let parent_folder_id = expected_special_folder_parent_id(*folder_id);
+            let parent_source_key = mapi_mailstore::source_key_for_store_id(parent_folder_id);
+            let parent_source_key_decoded =
+                crate::mapi::identity::object_id_from_source_key(&parent_source_key);
+            let mailbox_row_present = folder_row_for_id(*folder_id, mailboxes).is_some()
+                || mapi_mailstore::virtual_special_mailbox(*folder_id).is_some();
+            let collaboration_row_present =
+                snapshot.collaboration_folder_for_id(*folder_id).is_some();
+            format!(
+                "{name}:tag=0x{tag:08x};folder=0x{folder_id:016x};entry_id_bytes={};entry_id_decoded={};entry_id_matches={};source_key_len={};source_key_decoded={};source_key_matches={};parent=0x{parent_folder_id:016x};parent_source_key_decoded={};parent_matches={};container={};mailbox_row_present={};collaboration_row_present={};projected_content_count={}",
+                entry_id.len(),
+                format_optional_folder_id(entry_id_decoded),
+                entry_id_decoded == Some(*folder_id),
+                source_key.len(),
+                format_optional_folder_id(source_key_decoded),
+                source_key_decoded == Some(*folder_id),
+                format_optional_folder_id(parent_source_key_decoded),
+                parent_source_key_decoded == Some(parent_folder_id),
+                expected_special_folder_container_class(*folder_id),
+                mailbox_row_present,
+                collaboration_row_present,
+                folder_message_count(*folder_id, mailboxes, emails, snapshot)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn default_folder_discovery_specs() -> [(&'static str, u32, u64); 8] {
+    [
+        ("drafts", PID_TAG_IPM_DRAFTS_ENTRY_ID, DRAFTS_FOLDER_ID),
+        ("contacts", PID_TAG_IPM_CONTACT_ENTRY_ID, CONTACTS_FOLDER_ID),
+        (
+            "calendar",
+            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+            CALENDAR_FOLDER_ID,
+        ),
+        ("journal", PID_TAG_IPM_JOURNAL_ENTRY_ID, JOURNAL_FOLDER_ID),
+        ("notes", PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
+        ("tasks", PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
+        (
+            "reminders",
+            PID_TAG_REM_ONLINE_ENTRY_ID,
+            REMINDERS_FOLDER_ID,
+        ),
+        ("outbox", PID_TAG_IPM_OUTBOX_ENTRY_ID, OUTBOX_FOLDER_ID),
+    ]
 }
 
 fn mapi_value_debug_u32_from_value(value: &MapiValue) -> String {
@@ -11636,6 +11742,9 @@ where
                     request_id,
                     &request,
                     object,
+                    mailboxes,
+                    emails_for_request,
+                    snapshot,
                     &property_response,
                 );
                 let post_hierarchy_contract =
@@ -20671,6 +20780,15 @@ where
                 });
                 if is_private_logon {
                     responses.extend_from_slice(&rop_logon_response_body(principal, &request));
+                    log_default_folder_discovery_contract(
+                        principal,
+                        request_id,
+                        "private_logon_response",
+                        "0xfe",
+                        mailboxes,
+                        emails,
+                        snapshot,
+                    );
                 } else {
                     responses.extend_from_slice(&rop_public_folder_logon_response_body(
                         principal, &request,
@@ -25125,6 +25243,25 @@ mod tests {
         )));
         assert!(contract.contains("PidTagAdditionalRenEntryIds:count=5"));
         assert!(contract.contains("PidTagFreeBusyEntryIds:count=4"));
+    }
+
+    #[test]
+    fn default_folder_hierarchy_projection_reports_calendar_and_contacts_identity() {
+        let projection = default_folder_hierarchy_projection_for_debug(
+            &test_principal(),
+            &[],
+            &[],
+            &empty_snapshot(),
+        );
+
+        assert!(projection.contains(&format!(
+            "calendar:tag=0x{PID_TAG_IPM_APPOINTMENT_ENTRY_ID:08x};folder=0x{CALENDAR_FOLDER_ID:016x}"
+        )));
+        assert!(projection.contains(&format!(
+            "contacts:tag=0x{PID_TAG_IPM_CONTACT_ENTRY_ID:08x};folder=0x{CONTACTS_FOLDER_ID:016x}"
+        )));
+        assert!(projection.contains("entry_id_matches=true"));
+        assert!(projection.contains("source_key_matches=true"));
     }
 
     #[test]
