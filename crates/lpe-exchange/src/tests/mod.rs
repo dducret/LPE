@@ -225,7 +225,7 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
 }
 
 #[tokio::test]
-async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults_once() {
+async fn mapi_inbox_associated_config_bootstrap_inserts_no_defaults() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -248,42 +248,6 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
     for class in [
         "IPM.Configuration.UMOLK.UserOptions",
         "IPM.Microsoft.FolderDesign.NamedView",
-    ] {
-        assert_eq!(
-            persisted
-                .iter()
-                .filter(|config| config.message_class == class)
-                .count(),
-            1
-        );
-        assert_eq!(
-            first
-                .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
-                .iter()
-                .filter(|message| message.message_class == class)
-                .count(),
-            1
-        );
-        assert_eq!(
-            second
-                .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
-                .iter()
-                .filter(|message| message.message_class == class)
-                .count(),
-            1
-        );
-        let first_message = first
-            .associated_config_sync_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
-            .into_iter()
-            .find(|message| message.message_class == class)
-            .expect("bootstrapped associated config sync row");
-        assert!(
-            !crate::mapi_store::is_outlook_inbox_default_associated_config_id(first_message.id),
-            "bootstrapped persisted {class} row reused synthetic fallback id 0x{:016x}",
-            first_message.id
-        );
-    }
-    for class in [
         "IPM.Configuration.EAS",
         "IPM.Configuration.ELC",
         "IPM.RuleOrganizer",
@@ -295,6 +259,22 @@ async fn mapi_inbox_associated_config_bootstrap_inserts_missing_modeled_defaults
             persisted
                 .iter()
                 .filter(|config| config.message_class == class)
+                .count(),
+            0
+        );
+        assert_eq!(
+            first
+                .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+                .iter()
+                .filter(|message| message.message_class == class)
+                .count(),
+            0
+        );
+        assert_eq!(
+            second
+                .associated_config_sync_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+                .iter()
+                .filter(|message| message.message_class == class)
                 .count(),
             0
         );
@@ -5407,57 +5387,6 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(configs) })
-    }
-
-    fn ensure_mapi_associated_configs<'a>(
-        &'a self,
-        inputs: Vec<crate::store::UpsertMapiAssociatedConfigInput>,
-    ) -> StoreFuture<'a, Vec<crate::store::MapiAssociatedConfigRecord>> {
-        let configs = self.associated_configs.clone();
-        let changes = self.mapi_sync_changes.clone();
-        Box::pin(async move {
-            let mut configs = configs.lock().unwrap();
-            let mut inserted = Vec::new();
-            for input in inputs {
-                let id = input.id.unwrap_or_else(Uuid::new_v4);
-                let logical_exists = configs.iter().any(|config| {
-                    config.account_id == input.account_id
-                        && config.folder_id == input.folder_id
-                        && config.message_class == input.message_class
-                });
-                let id_exists = configs
-                    .iter()
-                    .any(|config| config.account_id == input.account_id && config.id == id);
-                if logical_exists || id_exists {
-                    continue;
-                }
-                let record = crate::store::MapiAssociatedConfigRecord {
-                    id,
-                    account_id: input.account_id,
-                    folder_id: input.folder_id,
-                    message_class: input.message_class,
-                    subject: input.subject,
-                    properties_json: input.properties_json,
-                };
-                configs.push(record.clone());
-                inserted.push(record);
-            }
-            if !inserted.is_empty() {
-                let mut changes = changes.lock().unwrap();
-                for record in &inserted {
-                    changes.current_change_sequence =
-                        changes.current_change_sequence.saturating_add(1);
-                    changes.current_modseq = changes.current_modseq.saturating_add(1);
-                    changes.changed_associated_config_ids.push(
-                        crate::store::MapiAssociatedConfigChange {
-                            folder_id: record.folder_id,
-                            config_id: record.id,
-                        },
-                    );
-                }
-            }
-            Ok(inserted)
-        })
     }
 
     fn upsert_mapi_associated_config<'a>(

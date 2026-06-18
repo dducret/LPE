@@ -1424,11 +1424,6 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<MapiAssociatedConfigRecord>>;
 
-    fn ensure_mapi_associated_configs<'a>(
-        &'a self,
-        inputs: Vec<UpsertMapiAssociatedConfigInput>,
-    ) -> StoreFuture<'a, Vec<MapiAssociatedConfigRecord>>;
-
     fn upsert_mapi_associated_config<'a>(
         &'a self,
         input: UpsertMapiAssociatedConfigInput,
@@ -6362,63 +6357,6 @@ impl ExchangeStore for Storage {
             tx.commit().await?;
 
             Ok(saved)
-        })
-    }
-
-    fn ensure_mapi_associated_configs<'a>(
-        &'a self,
-        inputs: Vec<UpsertMapiAssociatedConfigInput>,
-    ) -> StoreFuture<'a, Vec<MapiAssociatedConfigRecord>> {
-        Box::pin(async move {
-            let Some(first) = inputs.first() else {
-                return Ok(Vec::new());
-            };
-            let account_id = first.account_id;
-            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
-            let mut tx = self.pool().begin().await?;
-            let mut inserted = Vec::new();
-            for input in inputs {
-                if input.account_id != account_id {
-                    return Err(anyhow::anyhow!(
-                        "MAPI associated config bootstrap inputs must target one account"
-                    ));
-                }
-                let id = input.id.unwrap_or_else(Uuid::new_v4);
-                let row = sqlx::query(
-                    r#"
-                    INSERT INTO mapi_associated_config_messages (
-                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT DO NOTHING
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(id)
-                .bind(input.account_id)
-                .bind(input.folder_id as i64)
-                .bind(input.message_class)
-                .bind(input.subject)
-                .bind(input.properties_json)
-                .fetch_optional(&mut *tx)
-                .await?;
-                if let Some(row) = row {
-                    let saved = mapi_associated_config_from_row(row)?;
-                    insert_mapi_associated_config_change(
-                        &mut tx,
-                        tenant_id,
-                        account_id,
-                        saved.id,
-                        "created",
-                        saved.folder_id,
-                    )
-                    .await?;
-                    inserted.push(saved);
-                }
-            }
-            tx.commit().await?;
-            Ok(inserted)
         })
     }
 

@@ -452,16 +452,8 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
 fn outlook_inbox_associated_config_sync_defaults(
     folder_id: u64,
 ) -> Vec<MapiAssociatedConfigMessage> {
-    outlook_inbox_associated_config_defaults(folder_id)
-        .into_iter()
-        .filter(|message| {
-            matches!(
-                message.message_class.as_str(),
-                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                    | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-            )
-        })
-        .collect()
+    let _ = folder_id;
+    Vec::new()
 }
 
 pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedConfigMessage {
@@ -490,29 +482,6 @@ pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
             .flat_map(outlook_contact_associated_config_defaults),
         )
         .find(|message| message.canonical_id == canonical_id)
-}
-
-fn outlook_inbox_persisted_associated_config_defaults(
-    account_id: Uuid,
-) -> Vec<UpsertMapiAssociatedConfigInput> {
-    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-        .into_iter()
-        .filter(|message| {
-            matches!(
-                message.message_class.as_str(),
-                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                    | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-            )
-        })
-        .map(|message| UpsertMapiAssociatedConfigInput {
-            id: Some(message.canonical_id),
-            account_id,
-            folder_id: message.folder_id,
-            message_class: message.message_class,
-            subject: message.subject,
-            properties_json: message.properties_json,
-        })
-        .collect()
 }
 
 fn format_associated_config_classes(configs: &[MapiAssociatedConfigRecord]) -> String {
@@ -562,6 +531,26 @@ fn log_outlook_inbox_associated_config_bootstrap(
         virtual_only_defaults = %virtual_only_defaults.join(","),
         "rca debug mapi inbox associated config bootstrap"
     );
+}
+
+fn is_empty_synthetic_inbox_associated_config(config: &MapiAssociatedConfigRecord) -> bool {
+    if config.folder_id != crate::mapi::identity::INBOX_FOLDER_ID {
+        return false;
+    }
+    if !config
+        .properties_json
+        .as_object()
+        .is_some_and(|object| object.is_empty())
+    {
+        return false;
+    }
+    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .any(|default| {
+            config.id == default.canonical_id
+                && config.message_class == default.message_class
+                && config.subject == default.subject
+        })
 }
 
 fn is_empty_outlook_rule_organizer_placeholder(config: &MapiAssociatedConfigRecord) -> bool {
@@ -1201,8 +1190,13 @@ impl MapiMailStoreSnapshot {
             .first()
             .map(|shortcut| shortcut.account_id);
         let persisted_shortcut_count = navigation_shortcuts.len();
+        let dropped_synthetic_group_header_count = navigation_shortcuts
+            .iter()
+            .filter(|shortcut| is_synthetic_common_views_group_header(shortcut))
+            .count();
         let persisted_navigation_shortcuts = navigation_shortcuts
             .into_iter()
+            .filter(|shortcut| !is_synthetic_common_views_group_header(shortcut))
             .map(|shortcut| MapiNavigationShortcutMessage {
                 id: mapi_item_id(&shortcut.id),
                 folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
@@ -1251,6 +1245,7 @@ impl MapiMailStoreSnapshot {
             deduped_navigation_shortcut_count = deduped_shortcuts.len(),
             common_views_table_shortcut_count = table_shortcut_count,
             common_views_default_table_shortcut_count = default_table_shortcut_count,
+            dropped_synthetic_group_header_count,
             common_views_named_view_count = table_messages.len().saturating_sub(table_shortcut_count),
             persisted_navigation_shortcuts =
                 %persisted_navigation_shortcut_summary,
@@ -1274,6 +1269,7 @@ impl MapiMailStoreSnapshot {
                 .into_iter()
                 .filter(|config| {
                     !is_transient_outlook_migration_associated_config_class(&config.message_class)
+                        && !is_empty_synthetic_inbox_associated_config(config)
                 })
                 .map(|config| MapiAssociatedConfigMessage {
                     id: mapi_item_id(&config.id),
@@ -1984,11 +1980,6 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> Option<MapiNavigationShortcutMessage> {
         self.navigation_shortcut_message_for_id(item_id)
-            .or_else(|| {
-                outlook_common_views_default_navigation_shortcuts()
-                    .into_iter()
-                    .find(|message| message.id == item_id)
-            })
     }
 
     pub(crate) fn common_view_named_view_message_for_id(
@@ -2463,6 +2454,22 @@ impl<T: ExchangeStore> MapiStore for T {
             let rules = self.list_mailbox_rules(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
             let mut associated_configs = self.fetch_mapi_associated_configs(account_id).await?;
+            let dropped_empty_synthetic_inbox_configs = associated_configs
+                .iter()
+                .filter(|config| is_empty_synthetic_inbox_associated_config(config))
+                .count();
+            if dropped_empty_synthetic_inbox_configs > 0 {
+                associated_configs
+                    .retain(|config| !is_empty_synthetic_inbox_associated_config(config));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    account_id = %account_id,
+                    folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
+                    dropped_empty_synthetic_inbox_configs,
+                    "rca debug mapi dropped empty synthetic inbox associated configs"
+                );
+            }
             let dropped_empty_rule_organizer_configs = associated_configs
                 .iter()
                 .filter(|config| is_empty_outlook_rule_organizer_placeholder(config))
@@ -2481,30 +2488,11 @@ impl<T: ExchangeStore> MapiStore for T {
                     "rca debug mapi dropped empty inbox rule organizer associated config"
                 );
             }
-            let required_inbox_configs =
-                outlook_inbox_persisted_associated_config_defaults(account_id);
-            let missing_inbox_configs = required_inbox_configs
-                .iter()
-                .filter(|required| {
-                    !associated_configs.iter().any(|config| {
-                        config.account_id == account_id
-                            && config.folder_id == required.folder_id
-                            && config.message_class == required.message_class
-                    })
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            let inserted_inbox_configs = self
-                .ensure_mapi_associated_configs(missing_inbox_configs)
-                .await?;
-            if !inserted_inbox_configs.is_empty() {
-                associated_configs = self.fetch_mapi_associated_configs(account_id).await?;
-            }
             log_outlook_inbox_associated_config_bootstrap(
                 account_id,
                 &associated_configs,
-                &inserted_inbox_configs,
-                &required_inbox_configs,
+                &[],
+                &[],
             );
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
@@ -3050,6 +3038,16 @@ fn deduplicate_navigation_shortcuts(
             }
         })
         .collect()
+}
+
+fn is_synthetic_common_views_group_header(shortcut: &MapiNavigationShortcutRecord) -> bool {
+    let outlook_calendar_group_id =
+        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").expect("valid Outlook GUID");
+    shortcut.target_folder_id.is_none()
+        && shortcut.shortcut_type == 4
+        && shortcut.subject == "My Calendars"
+        && shortcut.group_name == "My Calendars"
+        && shortcut.group_header_id == Some(outlook_calendar_group_id)
 }
 
 fn materialize_default_mail_group_header(shortcuts: &mut Vec<MapiNavigationShortcutMessage>) {
@@ -3612,68 +3610,19 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_configs_emit_narrow_defaults_without_virtual_only_rows() {
+    fn inbox_associated_configs_do_not_emit_synthetic_defaults() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let messages =
             snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
 
-        for (message_class, message_id) in [
-            (
-                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS,
-                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
-            ),
-            (
-                OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
-                OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-            ),
-        ] {
-            assert_eq!(
-                messages
-                    .iter()
-                    .filter(|message| message.message_class == message_class)
-                    .count(),
-                1
-            );
-            assert_eq!(
-                messages
-                    .iter()
-                    .find(|message| message.message_class == message_class)
-                    .map(|message| message.id),
-                Some(message_id)
-            );
-            assert_eq!(
-                snapshot
-                    .associated_config_message_for_id(message_id)
-                    .map(|message| message.message_class),
-                Some(message_class.to_string())
-            );
-            assert_eq!(
-                snapshot
-                    .associated_config_message_for_folder_and_source_key_id(
-                        crate::mapi::identity::INBOX_FOLDER_ID,
-                        message_id,
-                    )
-                    .map(|message| message.message_class),
-                Some(message_class.to_string())
-            );
-            assert!(snapshot.associated_config_identity_matches_folder(
-                crate::mapi::identity::INBOX_FOLDER_ID,
-                message_id
-            ));
-            assert!(!snapshot.associated_config_identity_matches_folder(
-                crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                message_id
-            ));
-        }
-        assert_eq!(messages.len(), 2);
-        assert!(!messages
-            .iter()
-            .any(|message| is_outlook_inbox_virtual_only_associated_config_id(message.id)));
+        assert!(messages.is_empty());
         for suppressed_id in [
             OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
             OUTLOOK_INBOX_EAS_CONFIG_ID,
             OUTLOOK_INBOX_ELC_CONFIG_ID,
             OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
+            OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
+            OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
             OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
             OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
             OUTLOOK_INBOX_SHARING_INDEX_ID,
@@ -3741,23 +3690,9 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_config_bootstrap_persists_only_modeled_outlook_defaults() {
+    fn inbox_associated_config_bootstrap_persists_no_outlook_defaults() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-        let defaults = outlook_inbox_persisted_associated_config_defaults(account_id);
-        let classes = defaults
-            .iter()
-            .map(|input| input.message_class.as_str())
-            .collect::<HashSet<_>>();
-
-        assert_eq!(defaults.len(), 2);
-        assert!(classes.contains(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS));
-        assert!(classes.contains(OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_EAS_CONFIG_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_ELC_CONFIG_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_SHARING_INDEX_CLASS));
-        assert!(!classes.contains(OUTLOOK_INBOX_AGGREGATION_CLASS));
+        log_outlook_inbox_associated_config_bootstrap(account_id, &[], &[], &[]);
     }
 
     #[test]
@@ -4261,25 +4196,33 @@ mod tests {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 902,
         );
-        let default =
-            outlook_inbox_associated_config_sync_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-                .into_iter()
-                .find(|message| {
-                    message.message_class == OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-                })
-                .expect("retained UMOLK default");
-        let snapshot = MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![
-            MapiAssociatedConfigIdentity {
-                canonical_id: default.canonical_id,
+        let canonical_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000902);
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_associated_config_identity_ids(vec![MapiAssociatedConfigIdentity {
+                canonical_id,
                 object_id,
-            },
-        ]);
+            }])
+            .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+                id: canonical_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+                subject: "Persisted UMOLK".to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c060003": {"type": "u32", "value": 4}
+                }),
+            }]);
 
         assert_eq!(
             snapshot
                 .associated_config_message_for_identity_id(object_id)
                 .map(|message| (message.folder_id, message.message_class)),
-            Some((default.folder_id, default.message_class))
+            Some((
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string()
+            ))
         );
         assert!(snapshot.associated_config_identity_matches_folder(
             crate::mapi::identity::INBOX_FOLDER_ID,
@@ -4394,17 +4337,17 @@ mod tests {
             .navigation_shortcut_table_message_for_id(
                 OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
             )
-            .is_some());
+            .is_none());
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(
                 OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
             )
-            .is_some());
+            .is_none());
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(
                 OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
             )
-            .is_some());
+            .is_none());
         for named_view in named_views {
             assert!(snapshot
                 .common_view_named_view_message_for_id(named_view.id)
@@ -4451,7 +4394,7 @@ mod tests {
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
-        assert_eq!(messages.len(), 5);
+        assert_eq!(messages.len(), 7);
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
             .is_none());

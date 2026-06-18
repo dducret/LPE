@@ -5744,9 +5744,7 @@ mod tests {
             1,
         );
 
-        assert_eq!(summaries.len(), 1);
-        assert!(summaries[0].contains("kind=inbox_associated"));
-        assert!(summaries[0].contains("entry_id=present:70:00000000067073bc1344b949"));
+        assert!(summaries.is_empty());
     }
 
     #[test]
@@ -8187,7 +8185,7 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            4
+            6
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
@@ -8206,9 +8204,6 @@ mod tests {
         for code_unit in "IPM.Microsoft.FolderDesign.NamedView".encode_utf16() {
             named_view_class.extend_from_slice(&code_unit.to_le_bytes());
         }
-        assert!(response
-            .windows(named_view_class.len())
-            .any(|window| window == named_view_class.as_slice()));
         assert!(response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
@@ -8985,19 +8980,19 @@ mod tests {
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_elc_config() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_named_view_config() {
-        assert_inbox_associated_find_row_returns_message_class(
+        assert_inbox_associated_find_row_no_match_for_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
         );
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Configuration");
     }
 
     #[test]
@@ -9046,7 +9041,7 @@ mod tests {
         );
 
         assert_eq!(find_response[0], RopId::FindRow.as_u8());
-        assert_eq!(find_response[7], 1);
+        assert_eq!(find_response[7], 0);
         assert_eq!(table_position(&table), Some(0));
 
         let query_request = RopRequest {
@@ -9067,19 +9062,18 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            1
+            0
         );
-        assert_response_contains_utf16(&query_response, "IPM.Sharing.Configuration");
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_rule_organizer() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.RuleOrganizer");
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.RuleOrganizer");
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_sharing_index() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
     }
 
     #[test]
@@ -9141,59 +9135,16 @@ mod tests {
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[6], 0);
-        assert_eq!(response[7], 1);
-        assert_response_contains_utf16(&response, "IPM.Aggregation");
-
-        let aggregation = snapshot
-            .associated_config_messages_for_folder(INBOX_FOLDER_ID)
-            .into_iter()
-            .find(|message| message.message_class == "IPM.Aggregation")
-            .expect("virtual Outlook aggregation config");
-        assert_eq!(
-            associated_config_property_value(&aggregation, PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG),
-            Some(MapiValue::String(String::new()))
-        );
-        assert_eq!(
-            associated_config_property_value(&aggregation, PID_LID_OUTLOOK_SHARING_REMOTE_UID_TAG),
-            Some(MapiValue::String(String::new()))
-        );
-        assert_eq!(
-            associated_config_property_value(&aggregation, PID_LID_OUTLOOK_SHARING_LOCAL_TYPE_TAG),
-            Some(MapiValue::Guid(Uuid::nil().into_bytes()))
-        );
-        assert_eq!(
-            associated_config_property_value(&aggregation, PID_NAME_SHARING_SEND_AS_STATE_TAG),
-            Some(MapiValue::U32(0))
-        );
-        assert_eq!(
-            associated_config_property_value(&aggregation, PID_LID_OUTLOOK_SHARING_8AA6_TAG),
-            Some(MapiValue::U32(0))
-        );
+        assert_eq!(response[7], 0);
     }
 
     #[test]
     fn inbox_associated_find_row_returns_sharing_index_private_defaults() {
         let snapshot = MapiMailStoreSnapshot::empty();
-        let sharing_index = snapshot
+        assert!(snapshot
             .associated_config_messages_for_folder(INBOX_FOLDER_ID)
             .into_iter()
-            .find(|message| message.message_class == "IPM.Sharing.Index")
-            .expect("virtual Outlook sharing index config");
-
-        assert_eq!(
-            associated_config_property_value(
-                &sharing_index,
-                PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
-            ),
-            Some(MapiValue::Guid(Uuid::nil().into_bytes()))
-        );
-        assert_eq!(
-            associated_config_property_value(
-                &sharing_index,
-                PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
-            ),
-            Some(MapiValue::U32(0))
-        );
+            .all(|message| message.message_class != "IPM.Sharing.Index"));
     }
 
     #[test]
@@ -9645,7 +9596,7 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            1
+            0
         );
         assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
@@ -9686,18 +9637,14 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(response[9], 0);
-        let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
-        let user_options =
-            utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").unwrap();
-        let compact_view =
-            utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").unwrap();
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+        assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
         assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
-        assert!(account_prefs < user_options);
-        assert!(user_options < compact_view);
     }
 
     #[test]
@@ -9838,8 +9785,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-        assert_response_contains_utf16(&response, "IPM.Configuration.UMOLK.UserOptions");
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     }
 
     #[test]
@@ -9883,8 +9830,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.RuleOrganizer").is_none());
     }
 
     #[test]
@@ -10353,18 +10300,6 @@ mod tests {
             parse_mapi_property_value(&mut row_cursor, column).unwrap();
         }
         assert!(row_cursor.remaining_is_zero_padding());
-    }
-
-    fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
-        let response = inbox_associated_find_row_response_for_message_class(message_class);
-
-        assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(response[7], 1);
-        let mut encoded_message_class = Vec::new();
-        write_utf16z(&mut encoded_message_class, message_class);
-        assert!(response
-            .windows(encoded_message_class.len())
-            .any(|window| window == encoded_message_class.as_slice()));
     }
 
     fn assert_inbox_associated_find_row_no_match_for_message_class(message_class: &str) {
