@@ -30,6 +30,8 @@ const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
+const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
@@ -853,6 +855,34 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
             }
         }
+        if object.associated
+            && content_property_in_scope(
+                sync_type,
+                sync_flags,
+                sync_property_tags,
+                PID_TAG_RECORD_KEY,
+            )
+        {
+            write_binary_property(
+                &mut buffer,
+                PID_TAG_RECORD_KEY,
+                &source_key_for_store_id(object.item_id),
+            );
+        }
+        if object.associated
+            && content_property_in_scope(
+                sync_type,
+                sync_flags,
+                sync_property_tags,
+                PID_TAG_SEARCH_KEY,
+            )
+        {
+            write_binary_property(
+                &mut buffer,
+                PID_TAG_SEARCH_KEY,
+                &source_key_for_store_id(object.item_id),
+            );
+        }
         if content_property_in_scope(
             sync_type,
             sync_flags,
@@ -1058,7 +1088,7 @@ pub(crate) fn log_hierarchy_transfer_debug(
     }
 }
 
-pub(crate) fn log_inbox_fai_content_sync_debug(
+pub(crate) fn log_fai_content_sync_debug(
     sync_type: u8,
     folder_id: u64,
     mailbox_guid: Uuid,
@@ -1066,12 +1096,19 @@ pub(crate) fn log_inbox_fai_content_sync_debug(
     transfer_buffer: &[u8],
 ) {
     if sync_type != SYNC_TYPE_CONTENTS
-        || folder_id != crate::mapi::identity::INBOX_FOLDER_ID
+        || !matches!(
+            folder_id,
+            crate::mapi::identity::INBOX_FOLDER_ID | crate::mapi::identity::COMMON_VIEWS_FOLDER_ID
+        )
         || !tracing::enabled!(tracing::Level::INFO)
     {
         return;
     }
-
+    let folder_role = match folder_id {
+        crate::mapi::identity::INBOX_FOLDER_ID => "inbox",
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => "__mapi_common_views",
+        _ => "",
+    };
     match decode_content_transfer_fai_debug_summary(transfer_buffer) {
         Ok(summary) => {
             for item in summary.fai_items {
@@ -1090,54 +1127,142 @@ pub(crate) fn log_inbox_fai_content_sync_debug(
                     )
                     .map(|entry_id| entry_id.len())
                     .unwrap_or_default();
+                if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        request_rop_id = "0x70",
+                        folder_id = format_args!("0x{folder_id:016x}"),
+                        folder_role,
+                        item_id = format_args!("0x{item_id:016x}"),
+                        global_counter = item.global_counter.unwrap_or_default(),
+                        canonical_id,
+                        message_class = %item.message_class,
+                        subject = %item.subject,
+                        source_key_hex = %item.source_key_hex,
+                        source_key_len = item.source_key_len,
+                        parent_source_key_hex = %item.parent_source_key_hex,
+                        parent_source_key_len = item.parent_source_key_len,
+                        entry_id_len = item.entry_id_len,
+                        expected_entry_id_len,
+                        persisted = special_object.is_some()
+                            && !crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
+                            && !crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
+                        default = crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
+                            || crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
+                        virtual_only = false,
+                        classification = fai_debug_item_classification(folder_id, special_object, item_id),
+                        change_number = item.change_number.unwrap_or_default(),
+                        change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
+                        final_cnset_fai = %summary.final_cnset_seen_fai_summary,
+                        final_idset_given = %summary.final_idset_given_summary,
+                        emitted_property_tags = %format_property_tags(&item.property_tags),
+                        emitted_property_names = %format_property_tag_names(&item.property_tags),
+                        value_shapes = %format_property_value_shapes(&item.property_value_shapes),
+                        "rca debug mapi common views fai content sync item"
+                    );
+                } else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        request_rop_id = "0x70",
+                        folder_id = format_args!("0x{folder_id:016x}"),
+                        folder_role,
+                        item_id = format_args!("0x{item_id:016x}"),
+                        global_counter = item.global_counter.unwrap_or_default(),
+                        canonical_id,
+                        message_class = %item.message_class,
+                        subject = %item.subject,
+                        source_key_hex = %item.source_key_hex,
+                        source_key_len = item.source_key_len,
+                        parent_source_key_hex = %item.parent_source_key_hex,
+                        parent_source_key_len = item.parent_source_key_len,
+                        entry_id_len = item.entry_id_len,
+                        expected_entry_id_len,
+                        persisted = special_object.is_some()
+                            && !crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                                item_id
+                            ),
+                        default = crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                            item_id
+                        ),
+                        virtual_only =
+                            crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
+                                item_id
+                            ),
+                        classification = fai_debug_item_classification(folder_id, special_object, item_id),
+                        change_number = item.change_number.unwrap_or_default(),
+                        change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
+                        final_cnset_fai = %summary.final_cnset_seen_fai_summary,
+                        final_idset_given = %summary.final_idset_given_summary,
+                        emitted_property_tags = %format_property_tags(&item.property_tags),
+                        emitted_property_names = %format_property_tag_names(&item.property_tags),
+                        value_shapes = %format_property_value_shapes(&item.property_value_shapes),
+                        "rca debug mapi inbox fai content sync item"
+                    );
+                }
+            }
+        }
+        Err(error) => {
+            if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
                     request_rop_id = "0x70",
                     folder_id = format_args!("0x{folder_id:016x}"),
-                    item_id = format_args!("0x{item_id:016x}"),
-                    global_counter = item.global_counter.unwrap_or_default(),
-                    canonical_id,
-                    message_class = %item.message_class,
-                    subject = %item.subject,
-                    source_key_hex = %item.source_key_hex,
-                    source_key_len = item.source_key_len,
-                    parent_source_key_hex = %item.parent_source_key_hex,
-                    parent_source_key_len = item.parent_source_key_len,
-                    entry_id_len = item.entry_id_len,
-                    expected_entry_id_len,
-                    persisted = special_object.is_some()
-                        && !crate::mapi_store::is_outlook_inbox_default_associated_config_id(
-                            item_id
-                        ),
-                    default = crate::mapi_store::is_outlook_inbox_default_associated_config_id(
-                        item_id
-                    ),
-                    virtual_only =
-                        crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
-                            item_id
-                        ),
-                    change_number = item.change_number.unwrap_or_default(),
-                    change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
-                    final_cnset_fai = %summary.final_cnset_seen_fai_summary,
-                    final_idset_given = %summary.final_idset_given_summary,
-                    "rca debug mapi inbox fai content sync item"
+                    folder_role,
+                    transfer_buffer_bytes = transfer_buffer.len(),
+                    parse_error = %error,
+                    "rca debug mapi common views fai content sync parse error"
+                );
+            } else {
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    request_rop_id = "0x70",
+                    folder_id = format_args!("0x{folder_id:016x}"),
+                    folder_role,
+                    transfer_buffer_bytes = transfer_buffer.len(),
+                    parse_error = %error,
+                    "rca debug mapi inbox fai content sync parse error"
                 );
             }
         }
-        Err(error) => {
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                request_rop_id = "0x70",
-                folder_id = format_args!("0x{folder_id:016x}"),
-                transfer_buffer_bytes = transfer_buffer.len(),
-                parse_error = %error,
-                "rca debug mapi inbox fai content sync parse error"
-            );
+    }
+}
+
+fn fai_debug_item_classification(
+    folder_id: u64,
+    special_object: Option<&SpecialMessageSyncFact>,
+    item_id: u64,
+) -> &'static str {
+    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+        if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(item_id) {
+            "virtual_only"
+        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id) {
+            "default"
+        } else if special_object.is_some() {
+            "persisted"
+        } else {
+            "unknown"
         }
+    } else if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+        if crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id) {
+            "default_named_view"
+        } else if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id)
+        {
+            "default_navigation_shortcut"
+        } else if special_object.is_some() {
+            "persisted_navigation_shortcut"
+        } else {
+            "unknown"
+        }
+    } else {
+        "unknown"
     }
 }
 
@@ -1949,33 +2074,36 @@ struct HierarchyTransferRowDebug {
     missing_core_property_tags: Vec<u32>,
 }
 
-struct FastTransferDebugProperty {
+pub(crate) struct FastTransferDebugProperty {
     tag: u32,
     value: Vec<u8>,
     next_offset: usize,
 }
 
 #[derive(Default)]
-struct ContentTransferFaiDebugSummary {
-    fai_items: Vec<ContentTransferFaiItemDebug>,
-    final_idset_given_summary: String,
-    final_cnset_seen_fai_summary: String,
+pub(crate) struct ContentTransferFaiDebugSummary {
+    pub(crate) fai_items: Vec<ContentTransferFaiItemDebug>,
+    pub(crate) final_idset_given_summary: String,
+    pub(crate) final_cnset_seen_fai_summary: String,
     final_cnset_seen_fai_counters: Vec<u64>,
 }
 
 #[derive(Default)]
-struct ContentTransferFaiItemDebug {
-    item_id: Option<u64>,
-    global_counter: Option<u64>,
-    change_number: Option<u64>,
-    subject: String,
-    message_class: String,
-    entry_id_len: usize,
-    source_key_len: usize,
-    parent_source_key_len: usize,
-    source_key_hex: String,
-    parent_source_key_hex: String,
-    change_number_in_final_cnset_fai: bool,
+pub(crate) struct ContentTransferFaiItemDebug {
+    pub(crate) item_id: Option<u64>,
+    pub(crate) global_counter: Option<u64>,
+    pub(crate) change_number: Option<u64>,
+    pub(crate) subject: String,
+    pub(crate) message_class: String,
+    pub(crate) entry_id_len: usize,
+    pub(crate) source_key_len: usize,
+    pub(crate) parent_source_key_len: usize,
+    pub(crate) source_key_hex: String,
+    pub(crate) parent_source_key_hex: String,
+    pub(crate) associated: Option<bool>,
+    pub(crate) property_tags: Vec<u32>,
+    pub(crate) property_value_shapes: Vec<(u32, String)>,
+    pub(crate) change_number_in_final_cnset_fai: bool,
 }
 
 #[derive(Default)]
@@ -1987,9 +2115,12 @@ struct ContentTransferMessageDebug {
     global_counter: Option<u64>,
     change_number: Option<u64>,
     associated: bool,
+    associated_present: bool,
     subject: String,
     message_class: String,
     entry_id_len: usize,
+    property_tags: Vec<u32>,
+    property_value_shapes: Vec<(u32, String)>,
 }
 
 fn decode_hierarchy_transfer_debug_summary(
@@ -2106,7 +2237,7 @@ fn decode_hierarchy_transfer_debug_summary(
     Ok(summary)
 }
 
-fn decode_content_transfer_fai_debug_summary(
+pub(crate) fn decode_content_transfer_fai_debug_summary(
     bytes: &[u8],
 ) -> Result<ContentTransferFaiDebugSummary, String> {
     let mut offset = 0;
@@ -2203,6 +2334,13 @@ fn decode_content_transfer_fai_debug_summary(
         let Some(message) = current_message.as_mut() else {
             continue;
         };
+        message.property_tags.push(property.tag);
+        if content_fai_debug_value_shape_property(property.tag) {
+            message.property_value_shapes.push((
+                property.tag,
+                fast_transfer_value_shape(property.tag, &property.value),
+            ));
+        }
         if in_message_body {
             match property.tag {
                 PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = property.value,
@@ -2231,6 +2369,7 @@ fn decode_content_transfer_fai_debug_summary(
                     message.change_key = property.value;
                 }
                 PID_TAG_ASSOCIATED => {
+                    message.associated_present = true;
                     message.associated = decode_debug_bool(&property.value).unwrap_or_default()
                 }
                 PID_TAG_MID => message.item_id = decode_debug_object_id(&property.value),
@@ -2279,7 +2418,103 @@ fn finish_content_fai_debug_message(
         entry_id_len: message.entry_id_len,
         source_key_len,
         parent_source_key_len,
+        associated: message.associated_present.then_some(message.associated),
+        property_tags: message.property_tags,
+        property_value_shapes: message.property_value_shapes,
     });
+}
+
+fn content_fai_debug_value_shape_property(tag: u32) -> bool {
+    matches!(
+        tag,
+        PID_TAG_SOURCE_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_RECORD_KEY
+            | PID_TAG_SEARCH_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_SUBJECT_W
+            | PID_TAG_ASSOCIATED
+            | PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_MESSAGE_SIZE
+            | PID_TAG_LAST_MODIFICATION_TIME
+    ) || content_fai_debug_configuration_property(tag)
+}
+
+fn content_fai_debug_configuration_property(tag: u32) -> bool {
+    matches!(
+        tag,
+        0x6841_0003
+            | 0x6842_0048
+            | 0x6842_0102
+            | 0x6847_0003
+            | 0x6849_0003
+            | 0x684A_0003
+            | 0x684B_0102
+            | 0x684C_0102
+            | 0x684D_0102
+            | 0x684E_0102
+            | 0x684F_0048
+            | 0x684F_0102
+            | 0x6850_0048
+            | 0x6850_0102
+            | 0x6851_001F
+            | 0x6852_0003
+            | 0x6891_0102
+            | 0x7C06_0003
+            | 0x7C07_0102
+            | 0x7C08_0102
+            | 0x7C09_0102
+    ) || matches!(
+        tag >> 16,
+        0x6802
+            | 0x6834
+            | 0x6835
+            | 0x6836
+            | 0x6837
+            | 0x6838
+            | 0x6839
+            | 0x683A
+            | 0x683B
+            | 0x683C
+            | 0x683D
+    )
+}
+
+fn fast_transfer_value_shape(tag: u32, value: &[u8]) -> String {
+    match tag & 0x0000_FFFF {
+        0x0002 => decode_debug_i16(value)
+            .map(|value| format!("i16={value}"))
+            .unwrap_or_else(|| format!("i16:invalid_bytes={}", value.len())),
+        0x0003 => decode_debug_i32(value)
+            .map(|value| format!("i32={value}"))
+            .unwrap_or_else(|| format!("i32:invalid_bytes={}", value.len())),
+        0x000B => decode_debug_bool(value)
+            .map(|value| format!("bool={value}"))
+            .unwrap_or_else(|| format!("bool:invalid_bytes={}", value.len())),
+        0x0014 => decode_debug_u64(value)
+            .map(|value| format!("i64={value}"))
+            .unwrap_or_else(|| format!("i64:invalid_bytes={}", value.len())),
+        0x0040 => decode_debug_u64(value)
+            .map(|value| format!("filetime={value}"))
+            .unwrap_or_else(|| format!("filetime:invalid_bytes={}", value.len())),
+        0x0048 => format!("guid={}", format_debug_hex(value)),
+        0x001E => decode_debug_string8z(value)
+            .map(|value| format!("string8:chars={}", value.chars().count()))
+            .unwrap_or_else(|| format!("string8:invalid_bytes={}", value.len())),
+        0x001F => decode_debug_utf16z(value)
+            .map(|value| format!("string:chars={}", value.chars().count()))
+            .unwrap_or_else(|| format!("string:invalid_bytes={}", value.len())),
+        0x0102 => format!(
+            "binary:bytes={};preview={}",
+            value.len(),
+            format_debug_hex_preview(value, 16)
+        ),
+        0x101E | 0x101F => format!("multistring:bytes={}", value.len()),
+        _ => format!("bytes={}", value.len()),
+    }
 }
 
 fn collect_final_state_debug_property(
@@ -2528,6 +2763,10 @@ fn decode_debug_i32(bytes: &[u8]) -> Option<i32> {
     (bytes.len() == 4).then(|| i32::from_le_bytes(bytes.try_into().unwrap()))
 }
 
+fn decode_debug_i16(bytes: &[u8]) -> Option<i16> {
+    (bytes.len() == 2).then(|| i16::from_le_bytes(bytes.try_into().unwrap()))
+}
+
 fn decode_debug_u64(bytes: &[u8]) -> Option<u64> {
     (bytes.len() == 8).then(|| u64::from_le_bytes(bytes.try_into().unwrap()))
 }
@@ -2573,6 +2812,10 @@ fn format_debug_hex(bytes: &[u8]) -> String {
         .join("")
 }
 
+fn format_debug_hex_preview(bytes: &[u8], max_len: usize) -> String {
+    format_debug_hex(&bytes[..bytes.len().min(max_len)])
+}
+
 fn format_u64_hex(value: u64) -> String {
     format!("0x{value:016x}")
 }
@@ -2594,6 +2837,14 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
         PID_TAG_MESSAGE_SIZE => "PidTagMessageSize",
+        PID_TAG_MESSAGE_CLASS_W => "PidTagMessageClass",
+        PID_TAG_SUBJECT_W => "PidTagSubject",
+        PID_TAG_NORMALIZED_SUBJECT_A => "PidTagNormalizedSubject",
+        PID_TAG_ENTRY_ID => "PidTagEntryId",
+        PID_TAG_RECORD_KEY => "PidTagRecordKey",
+        PID_TAG_SEARCH_KEY => "PidTagSearchKey",
+        PID_TAG_ASSOCIATED => "PidTagAssociated",
+        PID_TAG_MID => "PidTagMid",
         PID_TAG_LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
         PID_TAG_ACCESS => "PidTagAccess",
         PID_TAG_SOURCE_KEY => "PidTagSourceKey",
@@ -2611,6 +2862,41 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         META_TAG_CNSET_SEEN => "MetaTagCnsetSeen",
         META_TAG_CNSET_SEEN_FAI => "MetaTagCnsetSeenFAI",
         META_TAG_CNSET_READ => "MetaTagCnsetRead",
+        0x6841_0003 => "PidTagViewDescriptorViewMode",
+        0x6842_0048 | 0x6842_0102 => "PidTagWlinkGroupHeaderId",
+        0x6847_0003 => "PidTagWlinkSaveStamp",
+        0x6849_0003 => "PidTagWlinkType",
+        0x684A_0003 => "PidTagWlinkFlags",
+        0x684B_0102 => "PidTagWlinkOrdinal",
+        0x684C_0102 => "PidTagWlinkEntryId",
+        0x684D_0102 => "PidTagWlinkRecordKey",
+        0x684E_0102 => "PidTagWlinkStoreEntryId",
+        0x684F_0048 | 0x684F_0102 => "PidTagWlinkFolderType",
+        0x6850_0048 | 0x6850_0102 => "PidTagWlinkGroupClsid",
+        0x6851_001F => "PidTagWlinkGroupName",
+        0x6852_0003 => "PidTagWlinkSection",
+        0x6891_0102 => "PidTagWlinkAddressBookStoreEid",
+        0x7C06_0003 => "PidTagRoamingDatatypes",
+        0x7C07_0102 => "PidTagRoamingDictionary",
+        0x7C08_0102 => "PidTagRoamingXmlStream",
+        0x7C09_0102 => "PidTagRoamingBinary",
+        tag if matches!(
+            tag >> 16,
+            0x6802
+                | 0x6834
+                | 0x6835
+                | 0x6836
+                | 0x6837
+                | 0x6838
+                | 0x6839
+                | 0x683A
+                | 0x683B
+                | 0x683C
+                | 0x683D
+        ) =>
+        {
+            "CommonViewsOrConfigurationProperty"
+        }
         _ => "unknown",
     }
 }
@@ -2718,6 +3004,14 @@ fn format_usize_list(values: &[usize]) -> String {
 fn format_property_tags(tags: &[u32]) -> String {
     tags.iter()
         .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_property_value_shapes(shapes: &[(u32, String)]) -> String {
+    shapes
+        .iter()
+        .map(|(tag, shape)| format!("{}:{shape}", property_tag_debug_name(*tag)))
         .collect::<Vec<_>>()
         .join(",")
 }

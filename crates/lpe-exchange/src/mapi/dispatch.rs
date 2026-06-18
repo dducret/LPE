@@ -17321,7 +17321,7 @@ where
                     &sync_property_tags,
                     &transfer_buffer,
                 );
-                mapi_mailstore::log_inbox_fai_content_sync_debug(
+                mapi_mailstore::log_fai_content_sync_debug(
                     sync_type,
                     folder_id,
                     principal.account_id,

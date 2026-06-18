@@ -1532,6 +1532,43 @@ mod tests {
         }
     }
 
+    fn assert_associated_fai_core_payload(item: &mapi_mailstore::ContentTransferFaiItemDebug) {
+        assert_eq!(item.associated, Some(true));
+        assert_has_tags(
+            item,
+            &[
+                PID_TAG_SOURCE_KEY,
+                PID_TAG_PARENT_SOURCE_KEY,
+                PID_TAG_ENTRY_ID,
+                PID_TAG_RECORD_KEY,
+                PID_TAG_SEARCH_KEY,
+                PID_TAG_CHANGE_KEY,
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_ASSOCIATED,
+                PID_TAG_MESSAGE_FLAGS,
+                PID_TAG_MESSAGE_SIZE,
+                PID_TAG_LAST_MODIFICATION_TIME,
+            ],
+        );
+        assert!(item.source_key_len > 0);
+        assert!(item.parent_source_key_len > 0);
+        assert!(item.entry_id_len > 0);
+        assert!(item.change_number_in_final_cnset_fai);
+    }
+
+    fn assert_has_tags(item: &mapi_mailstore::ContentTransferFaiItemDebug, tags: &[u32]) {
+        for tag in tags {
+            assert!(
+                item.property_tags.contains(tag),
+                "missing 0x{tag:08x} on {} / {}",
+                item.message_class,
+                item.subject
+            );
+        }
+    }
+
     #[test]
     fn import_rop_success_responses_return_zero_object_ids() {
         let import_change = RopRequest {
@@ -1931,6 +1968,290 @@ mod tests {
         assert!(objects
             .iter()
             .all(|object| object.item_id != default_mail_header_id));
+    }
+
+    #[test]
+    fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let persisted = [
+            (
+                0x6d617069_6163_6350_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7900),
+                "IPM.Configuration.AccountPrefs",
+                "IPM.Configuration.AccountPrefs",
+            ),
+            (
+                0x6d617069_636f_6e76_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7901),
+                "IPM.Configuration.ConversationPrefs",
+                "IPM.Configuration.ConversationPrefs",
+            ),
+            (
+                0x6d617069_7463_5072_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7902),
+                "IPM.Configuration.TCPrefs",
+                "IPM.Configuration.TCPrefs",
+            ),
+            (
+                0x6d617069_7476_5072_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7903),
+                "IPM.Configuration.TableViewPreviewPrefs",
+                "IPM.Configuration.TableViewPreviewPrefs",
+            ),
+            (
+                0x6d617069_7273_7352_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7904),
+                "IPM.Configuration.RssRule",
+                "IPM.Configuration.RssRule",
+            ),
+            (
+                0x6d617069_6578_5275_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7905),
+                "IPM.ExtendedRule.Message",
+                "IPM.ExtendedRule.Message",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, item_id, class, subject)| {
+            let id = Uuid::from_u128(id);
+            crate::mapi::identity::remember_mapi_identity(id, item_id);
+            crate::store::MapiAssociatedConfigRecord {
+                id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: class.to_string(),
+                subject: subject.to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c060003": {"type": "u32", "value": 4},
+                    "0x7c070102": {"type": "binary", "value": "392d30"}
+                }),
+            }
+        })
+        .collect::<Vec<_>>();
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(persisted);
+        let mut objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
+        objects.extend([
+            mapi_mailstore::SpecialMessageSyncFact {
+                folder_id: INBOX_FOLDER_ID,
+                item_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
+                canonical_id: Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001),
+                associated: true,
+                subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+                body_text: String::new(),
+                message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+                last_modified_filetime: mapi_mailstore::filetime_from_change_number(
+                    mapi_mailstore::change_number_for_store_id(
+                        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
+                    ),
+                ),
+                message_size: 128,
+                read_state: None,
+                named_properties: vec![
+                    (
+                        PID_TAG_ROAMING_DATATYPES,
+                        mapi_mailstore::SpecialMessagePropertyValue::U32(4),
+                    ),
+                    (
+                        PID_TAG_ROAMING_DICTIONARY,
+                        mapi_mailstore::SpecialMessagePropertyValue::Binary(b"9-0".to_vec()),
+                    ),
+                ],
+            },
+            mapi_mailstore::SpecialMessageSyncFact {
+                folder_id: INBOX_FOLDER_ID,
+                item_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
+                canonical_id: Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000001),
+                associated: true,
+                subject: "Compact".to_string(),
+                body_text: String::new(),
+                message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+                last_modified_filetime: mapi_mailstore::filetime_from_change_number(
+                    mapi_mailstore::change_number_for_store_id(
+                        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
+                    ),
+                ),
+                message_size: 128,
+                read_state: None,
+                named_properties: vec![
+                    (
+                        PID_TAG_ROAMING_DATATYPES,
+                        mapi_mailstore::SpecialMessagePropertyValue::U32(4),
+                    ),
+                    (
+                        PID_TAG_ROAMING_DICTIONARY,
+                        mapi_mailstore::SpecialMessagePropertyValue::Binary(b"9-0".to_vec()),
+                    ),
+                ],
+            },
+        ]);
+        let buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+            account_id,
+            0x01,
+            0x0010,
+            0x0000_0001 | 0x0000_0004 | 0x0000_0008,
+            &[],
+            INBOX_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            &objects,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &objects,
+            &[],
+            &[],
+            1,
+        );
+        let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+
+        assert!(summary.fai_items.len() >= 8);
+        for item in &summary.fai_items {
+            assert_associated_fai_core_payload(item);
+        }
+        let expected = [
+            (
+                crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6),
+                "IPM.Microsoft.FolderDesign.NamedView",
+                "Compact",
+            ),
+            (
+                crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA),
+                "IPM.Configuration.UMOLK.UserOptions",
+                "IPM.Configuration.UMOLK.UserOptions",
+            ),
+        ];
+        for (item_id, message_class, subject) in expected {
+            let item = summary
+                .fai_items
+                .iter()
+                .find(|item| item.item_id == Some(item_id))
+                .expect("expected Inbox FAI item");
+            assert_eq!(item.message_class, message_class);
+            assert_eq!(item.subject, subject);
+        }
+        for class in [
+            "IPM.Configuration.AccountPrefs",
+            "IPM.Configuration.ConversationPrefs",
+            "IPM.Configuration.TCPrefs",
+            "IPM.Configuration.TableViewPreviewPrefs",
+            "IPM.Configuration.RssRule",
+            "IPM.ExtendedRule.Message",
+        ] {
+            assert!(
+                summary
+                    .fai_items
+                    .iter()
+                    .any(|item| item.message_class == class),
+                "missing persisted class {class}"
+            );
+        }
+    }
+
+    #[test]
+    fn common_views_associated_content_sync_payload_emits_view_and_wunderbar_properties() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000120);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 120,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+        let mut objects =
+            special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+        objects.push(common_view_named_view_sync_object(
+            &crate::mapi_store::MapiCommonViewNamedViewMessage {
+                id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7),
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
+                name: "Compact".to_string(),
+                view_flags: 14_745_605,
+                view_type: 8,
+            },
+            account_id,
+        ));
+        let buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+            account_id,
+            0x01,
+            0x0010,
+            0x0000_0001 | 0x0000_0004 | 0x0000_0008,
+            &[],
+            COMMON_VIEWS_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            &objects,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &objects,
+            &[],
+            &[],
+            1,
+        );
+        let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+
+        assert!(!summary.fai_items.is_empty());
+        for item in &summary.fai_items {
+            assert_associated_fai_core_payload(item);
+        }
+        let named_view = summary
+            .fai_items
+            .iter()
+            .find(|item| {
+                item.message_class == "IPM.Microsoft.FolderDesign.NamedView"
+                    && item.subject == "Compact"
+            })
+            .expect("Compact named view");
+        assert_has_tags(
+            named_view,
+            &[
+                PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+                PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+                PID_TAG_VIEW_DESCRIPTOR_BINARY,
+                PID_TAG_WLINK_GROUP_HEADER_ID,
+            ],
+        );
+        let shortcut = summary
+            .fai_items
+            .iter()
+            .find(|item| {
+                item.message_class == "IPM.Microsoft.WunderBar.Link" && item.subject == "Inbox"
+            })
+            .expect("Inbox WunderBar shortcut");
+        assert_has_tags(
+            shortcut,
+            &[
+                PID_TAG_WLINK_TYPE,
+                PID_TAG_WLINK_FLAGS,
+                PID_TAG_WLINK_SAVE_STAMP,
+                PID_TAG_WLINK_ENTRY_ID,
+                PID_TAG_WLINK_RECORD_KEY,
+                PID_TAG_WLINK_STORE_ENTRY_ID,
+                PID_TAG_WLINK_GROUP_CLSID,
+                PID_TAG_WLINK_SECTION,
+                PID_TAG_WLINK_ORDINAL,
+            ],
+        );
     }
 
     #[test]
