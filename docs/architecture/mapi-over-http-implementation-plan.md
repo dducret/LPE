@@ -265,7 +265,10 @@ non-canonical LPE state.
   LPE-synthesized minimal Inbox `IPM.Configuration.*` compatibility rows, LPE
   emits only the dictionary default `OLPrefsVersion = 0`, encoded as `9-0`, so
   Outlook can choose its local/default settings and rewrite the row without LPE
-  fabricating unsupported Exchange preference data.
+  fabricating unsupported Exchange preference data. Inbox associated-content
+  sync does not emit broad synthetic or virtual-only rows such as aggregation,
+  sharing, EAS, ELC, rule organizer, account preferences, or message-list
+  settings unless Outlook has persisted a backed row with a valid payload.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`

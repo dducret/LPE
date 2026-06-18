@@ -449,6 +449,21 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
     ]
 }
 
+fn outlook_inbox_associated_config_sync_defaults(
+    folder_id: u64,
+) -> Vec<MapiAssociatedConfigMessage> {
+    outlook_inbox_associated_config_defaults(folder_id)
+        .into_iter()
+        .filter(|message| {
+            matches!(
+                message.message_class.as_str(),
+                OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+                    | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedConfigMessage {
     outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
         .into_iter()
@@ -459,7 +474,7 @@ pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedCon
 pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
     canonical_id: Uuid,
 ) -> Option<MapiAssociatedConfigMessage> {
-    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+    outlook_inbox_associated_config_sync_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
         .into_iter()
         .chain(outlook_quick_step_associated_config_defaults(
             crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -1996,7 +2011,7 @@ impl MapiMailStoreSnapshot {
             .cloned()
             .collect::<Vec<_>>();
         if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
-            for default_message in outlook_inbox_associated_config_defaults(folder_id) {
+            for default_message in outlook_inbox_associated_config_sync_defaults(folder_id) {
                 if !messages
                     .iter()
                     .any(|message| message.message_class == default_message.message_class)
@@ -2035,9 +2050,11 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
             .cloned()
             .or_else(|| {
-                outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-                    .into_iter()
-                    .find(|message| message.id == item_id)
+                outlook_inbox_associated_config_sync_defaults(
+                    crate::mapi::identity::INBOX_FOLDER_ID,
+                )
+                .into_iter()
+                .find(|message| message.id == item_id)
             })
             .or_else(|| {
                 outlook_quick_step_associated_config_defaults(
@@ -3595,45 +3612,19 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_configs_include_outlook_defaults_without_duplicate() {
+    fn inbox_associated_configs_emit_narrow_defaults_without_virtual_only_rows() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let messages =
             snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
 
         for (message_class, message_id) in [
             (
-                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS,
-                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
-            ),
-            (OUTLOOK_INBOX_EAS_CONFIG_CLASS, OUTLOOK_INBOX_EAS_CONFIG_ID),
-            (OUTLOOK_INBOX_ELC_CONFIG_CLASS, OUTLOOK_INBOX_ELC_CONFIG_ID),
-            (
-                OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS,
-                OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
-            ),
-            (
                 OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS,
                 OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
             ),
             (
-                OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
-                OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
-            ),
-            (
                 OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
                 OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-            ),
-            (
-                OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS,
-                OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
-            ),
-            (
-                OUTLOOK_INBOX_SHARING_INDEX_CLASS,
-                OUTLOOK_INBOX_SHARING_INDEX_ID,
-            ),
-            (
-                OUTLOOK_INBOX_AGGREGATION_CLASS,
-                OUTLOOK_INBOX_AGGREGATION_ID,
             ),
         ] {
             assert_eq!(
@@ -3672,6 +3663,28 @@ mod tests {
             assert!(!snapshot.associated_config_identity_matches_folder(
                 crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
                 message_id
+            ));
+        }
+        assert_eq!(messages.len(), 2);
+        assert!(!messages
+            .iter()
+            .any(|message| is_outlook_inbox_virtual_only_associated_config_id(message.id)));
+        for suppressed_id in [
+            OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
+            OUTLOOK_INBOX_EAS_CONFIG_ID,
+            OUTLOOK_INBOX_ELC_CONFIG_ID,
+            OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
+            OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
+            OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
+            OUTLOOK_INBOX_SHARING_INDEX_ID,
+            OUTLOOK_INBOX_AGGREGATION_ID,
+        ] {
+            assert!(snapshot
+                .associated_config_message_for_id(suppressed_id)
+                .is_none());
+            assert!(!snapshot.associated_config_identity_matches_folder(
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                suppressed_id
             ));
         }
 
@@ -3748,22 +3761,49 @@ mod tests {
     }
 
     #[test]
-    fn associated_config_sync_messages_use_persisted_rows_before_defaults() {
+    fn associated_config_sync_messages_use_persisted_rows_before_narrow_defaults() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-        let persisted_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000002);
-        crate::mapi::identity::remember_mapi_identity(
-            persisted_id,
-            crate::mapi::identity::mapi_store_id(
-                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 132,
-            ),
-        );
+        let persisted_umolk_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000002);
+        let persisted_named_view_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000002);
+        let persisted_account_prefs_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000002);
+        for (offset, id) in [
+            persisted_umolk_id,
+            persisted_named_view_id,
+            persisted_account_prefs_id,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            crate::mapi::identity::remember_mapi_identity(
+                id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 132 + offset as u64,
+                ),
+            );
+        }
         let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
             crate::store::MapiAssociatedConfigRecord {
-                id: persisted_id,
+                id: persisted_umolk_id,
                 account_id,
                 folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
-                message_class: OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS.to_string(),
-                subject: "Persisted MessageListSettings".to_string(),
+                message_class: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+                subject: "Persisted UMOLK".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_named_view_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
+                subject: "Persisted Compact".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_account_prefs_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS.to_string(),
+                subject: "Persisted AccountPrefs".to_string(),
                 properties_json: serde_json::json!({}),
             },
         ]);
@@ -3778,12 +3818,26 @@ mod tests {
             sync_messages
                 .iter()
                 .find(|message| {
-                    message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
+                    message.message_class == OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
                 })
                 .map(|message| message.canonical_id),
-            Some(persisted_id)
+            Some(persisted_umolk_id)
         );
-        assert!(sync_messages
+        assert_eq!(
+            sync_messages
+                .iter()
+                .find(|message| message.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+                .map(|message| message.canonical_id),
+            Some(persisted_named_view_id)
+        );
+        assert_eq!(
+            sync_messages
+                .iter()
+                .find(|message| message.message_class == OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS)
+                .map(|message| message.canonical_id),
+            Some(persisted_account_prefs_id)
+        );
+        assert!(!sync_messages
             .iter()
             .any(|message| is_outlook_inbox_virtual_only_associated_config_id(message.id)));
     }
@@ -4207,7 +4261,13 @@ mod tests {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 902,
         );
-        let default = outlook_inbox_message_list_settings_default();
+        let default =
+            outlook_inbox_associated_config_sync_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+                .into_iter()
+                .find(|message| {
+                    message.message_class == OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+                })
+                .expect("retained UMOLK default");
         let snapshot = MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![
             MapiAssociatedConfigIdentity {
                 canonical_id: default.canonical_id,

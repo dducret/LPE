@@ -28291,10 +28291,24 @@ async fn mapi_over_http_inbox_fai_sync_exports_identity_and_final_state() {
         counters.push(strict_globcnt_to_u64(&message.source_key[16..22]).unwrap());
     }
 
-    for expected_counter in [0x7FFF_FFFF_FFF6, 0x7FFF_FFFF_FFFA] {
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.UMOLK.UserOptions")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Compact")));
+    for suppressed_counter in [
+        0x7FFF_FFFF_FFE3,
+        0x7FFF_FFFF_FFED,
+        0x7FFF_FFFF_FFF3,
+        0x7FFF_FFFF_FFF5,
+        0x7FFF_FFFF_FFF8,
+        0x7FFF_FFFF_FFFB,
+        0x7FFF_FFFF_FFFC,
+        0x7FFF_FFFF_FFFD,
+    ] {
         assert!(
-            counters.contains(&expected_counter),
-            "missing default Inbox FAI counter 0x{expected_counter:012x}"
+            !counters.contains(&suppressed_counter),
+            "suppressed Inbox FAI counter 0x{suppressed_counter:012x} was emitted"
         );
     }
 }

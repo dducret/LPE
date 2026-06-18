@@ -2071,8 +2071,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
             Some(wlink_guid_property_value(requested_property_tag, group_id))
         }
         property_tag
-            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_CLSID)
-                && message.shortcut_type != 4 =>
+            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_CLSID) =>
         {
             let group_id = message
                 .group_header_id
@@ -2080,9 +2079,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
                 .unwrap_or_else(default_wlink_group_guid);
             Some(wlink_guid_property_value(requested_property_tag, group_id))
         }
-        PID_TAG_WLINK_GROUP_NAME_W if message.shortcut_type != 4 => {
-            Some(MapiValue::String(wlink_group_name(message)))
-        }
+        PID_TAG_WLINK_GROUP_NAME_W => Some(MapiValue::String(wlink_group_name(message))),
         PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => message
             .target_folder_id
             .and_then(|folder_id| {
@@ -10607,6 +10604,26 @@ mod tests {
         assert_eq!(
             navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
             Some(MapiValue::Guid([0x33; 16]))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_CLSID),
+            Some(MapiValue::Guid([0x33; 16]))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_NAME_W),
+            Some(MapiValue::String("Projects".to_string()))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_ENTRY_ID),
+            None
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_RECORD_KEY),
+            None
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_STORE_ENTRY_ID),
+            None
         );
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_CLSID),

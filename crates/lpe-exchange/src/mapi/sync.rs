@@ -1420,7 +1420,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             folder_id,
             shortcut_id,
         } => {
-            let message = snapshot.navigation_shortcut_table_message_for_id(*shortcut_id)?;
+            let message = snapshot.navigation_shortcut_message_for_id(*shortcut_id)?;
             if message.folder_id != *folder_id {
                 return None;
             }
@@ -2011,6 +2011,71 @@ mod tests {
         assert!(objects
             .iter()
             .all(|object| object.item_id != default_mail_header_id));
+    }
+
+    #[test]
+    fn common_views_group_header_sync_includes_group_identity_without_target() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000101);
+        let group_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 113,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "My Calendars".to_string(),
+                target_folder_id: None,
+                shortcut_type: 4,
+                flags: 0,
+                section: 1,
+                ordinal: 0x80,
+                group_header_id: Some(group_id),
+                group_name: "My Calendars".to_string(),
+            },
+        ]);
+
+        let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+        let group_header = objects
+            .iter()
+            .find(|object| object.subject == "My Calendars")
+            .expect("persisted My Calendars group header");
+
+        let property = |tag| {
+            group_header
+                .named_properties
+                .iter()
+                .find_map(|(property_tag, value)| (*property_tag == tag).then_some(value))
+        };
+        assert_eq!(
+            property(PID_TAG_WLINK_TYPE),
+            Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::U32(4))
+        );
+        assert_eq!(
+            property(PID_TAG_WLINK_GROUP_HEADER_ID),
+            Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Guid(
+                *group_id.as_bytes()
+            ))
+        );
+        assert_eq!(
+            property(PID_TAG_WLINK_GROUP_CLSID),
+            Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Guid(
+                *group_id.as_bytes()
+            ))
+        );
+        assert_eq!(
+            property(PID_TAG_WLINK_GROUP_NAME_W),
+            Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::String(
+                "My Calendars".to_string()
+            ))
+        );
+        assert_eq!(property(PID_TAG_WLINK_ENTRY_ID), None);
+        assert_eq!(property(PID_TAG_WLINK_RECORD_KEY), None);
+        assert_eq!(property(PID_TAG_WLINK_STORE_ENTRY_ID), None);
     }
 
     #[test]
