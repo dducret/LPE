@@ -39283,6 +39283,12 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 ] {
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                        0,
+                        "{request_type}: {name}"
+                    );
+                    offset += 4;
+                    assert_eq!(
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         6,
                         "{request_type}: {name}"
                     );

@@ -1476,6 +1476,7 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
 
 fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     let mut table_row = Vec::new();
+    write_u32(&mut table_row, 0);
     write_u32(&mut table_row, 6);
     write_address_book_tagged_property_value(
         &mut table_row,
