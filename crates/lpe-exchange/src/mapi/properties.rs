@@ -1638,19 +1638,7 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    matches!(
-        container_class,
-        "IPF.Note"
-            | "IPF.Appointment"
-            | "IPF.Contact"
-            | "IPF.Contact.MOC.QuickContacts"
-            | "IPF.Contact.MOC.ImContactList"
-            | "IPF.Task"
-            | "IPF.StickyNote"
-            | "IPF.Journal"
-            | "IPF.Configuration"
-            | "Outlook.Reminder"
-    ) || container_class.starts_with("IPF.Note.")
+    container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
@@ -8121,6 +8109,40 @@ mod tests {
                 PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8
             ),
             Some(MapiValue::String("IPM.Contact".to_string()))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+            None
+        );
+    }
+
+    #[test]
+    fn collaboration_calendar_does_not_advertise_mail_default_view() {
+        let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
+        let collection = MapiCollaborationFolder {
+            id: CALENDAR_FOLDER_ID,
+            kind: MapiCollaborationFolderKind::Calendar,
+            collection: CollaborationCollection {
+                id: "calendar-default".to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+            },
+            item_count: 1,
+        };
+
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.Appointment".to_string()))
         );
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
