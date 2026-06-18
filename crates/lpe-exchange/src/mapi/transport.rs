@@ -646,7 +646,7 @@ fn log_mapi_session_disconnect(
                 transfer_position,
                 ..
             } => Some(format!(
-                "handle={handle};folder=0x{folder_id:016x};sync=0x{sync_type:02x};kind={};mailbox={};seq={checkpoint_change_sequence};modseq={checkpoint_modseq};zero_delta={checkpoint_zero_delta};state={};client_state={};marker_mask=0x{:02x};upload_buffer={};transfer={}/{};incremental={}",
+                "handle={handle};folder=0x{folder_id:016x};sync=0x{sync_type:02x};kind={};mailbox={};seq={checkpoint_change_sequence};modseq={checkpoint_modseq};zero_delta={checkpoint_zero_delta};state={};client_state={};marker_mask=0x{:02x};upload_buffer={};transfer={}/{};transfer_completed={};checkpoint_recorded={};incremental={}",
                 checkpoint_kind.as_str(),
                 mailbox_id.map(|id| id.to_string()).unwrap_or_default(),
                 state.len(),
@@ -655,6 +655,11 @@ fn log_mapi_session_disconnect(
                 state_upload_buffer.len(),
                 transfer_position,
                 transfer_buffer.len(),
+                *transfer_position >= transfer_buffer.len(),
+                session
+                    .post_hierarchy_actions
+                    .completed_sync_checkpoint_folder_ids
+                    .contains(folder_id),
                 incremental_transfer_buffer.is_some(),
             )),
             _ => None,
@@ -798,6 +803,58 @@ fn log_mapi_session_disconnect(
     } else {
         "client_next_request"
     };
+
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && (!session.handles.is_empty() || post_hierarchy_summary.content_sync_configure_observed)
+    {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            handle_count = session.handles.len(),
+            live_handle_summaries = %live_handle_summaries,
+            sync_source_count,
+            sync_collector_count,
+            notification_subscription_count,
+            completed_sync_source_count,
+            incomplete_sync_source_count,
+            all_live_sync_sources_completed = all_sync_sources_completed,
+            sync_source_summaries = %sync_source_summaries,
+            completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+            partial_scope_checkpoint_not_stored_count,
+            partial_scope_checkpoint_not_stored_expected,
+            total_transfer_buffer_bytes,
+            total_transfer_position_bytes,
+            clean_client_close_after_sync,
+            post_hierarchy_content_sync_configure_observed =
+                post_hierarchy_summary.content_sync_configure_observed,
+            post_hierarchy_last_completed_sync_root =
+                %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+            post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
+            outlook_profile_stage = %outlook_profile_stage,
+            next_expected_client_step = %next_expected_client_step,
+            recent_execute_summaries = %recent_execute_summaries,
+            next_debug_focus =
+                if clean_client_close_after_sync && !session.handles.is_empty() {
+                    "client_closed_cleanly_with_completed_live_handles"
+                } else if incomplete_sync_source_count > 0 {
+                    "disconnect_with_incomplete_live_sync_source"
+                } else if session.handles.is_empty() {
+                    "client_closed_after_releasing_all_handles"
+                } else {
+                    "disconnect_remaining_handle_review"
+                },
+            "rca debug mapi disconnect remaining handles"
+        );
+    }
 
     tracing::info!(
         rca_debug = true,
