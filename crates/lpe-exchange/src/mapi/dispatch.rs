@@ -17321,6 +17321,13 @@ where
                     &sync_property_tags,
                     &transfer_buffer,
                 );
+                mapi_mailstore::log_inbox_fai_content_sync_debug(
+                    sync_type,
+                    folder_id,
+                    principal.account_id,
+                    &all_special_sync_objects,
+                    &transfer_buffer,
+                );
                 let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
                         principal.account_id,

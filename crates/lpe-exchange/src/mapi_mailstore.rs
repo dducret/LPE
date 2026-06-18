@@ -1058,6 +1058,89 @@ pub(crate) fn log_hierarchy_transfer_debug(
     }
 }
 
+pub(crate) fn log_inbox_fai_content_sync_debug(
+    sync_type: u8,
+    folder_id: u64,
+    mailbox_guid: Uuid,
+    special_objects: &[SpecialMessageSyncFact],
+    transfer_buffer: &[u8],
+) {
+    if sync_type != SYNC_TYPE_CONTENTS
+        || folder_id != crate::mapi::identity::INBOX_FOLDER_ID
+        || !tracing::enabled!(tracing::Level::INFO)
+    {
+        return;
+    }
+
+    match decode_content_transfer_fai_debug_summary(transfer_buffer) {
+        Ok(summary) => {
+            for item in summary.fai_items {
+                let special_object = special_objects
+                    .iter()
+                    .find(|object| object.item_id == item.item_id.unwrap_or_default());
+                let canonical_id = special_object
+                    .map(|object| object.canonical_id.to_string())
+                    .unwrap_or_default();
+                let item_id = item.item_id.unwrap_or_default();
+                let expected_entry_id_len =
+                    crate::mapi::identity::message_entry_id_from_object_ids(
+                        mailbox_guid,
+                        folder_id,
+                        item_id,
+                    )
+                    .map(|entry_id| entry_id.len())
+                    .unwrap_or_default();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    request_rop_id = "0x70",
+                    folder_id = format_args!("0x{folder_id:016x}"),
+                    item_id = format_args!("0x{item_id:016x}"),
+                    global_counter = item.global_counter.unwrap_or_default(),
+                    canonical_id,
+                    message_class = %item.message_class,
+                    subject = %item.subject,
+                    source_key_hex = %item.source_key_hex,
+                    source_key_len = item.source_key_len,
+                    parent_source_key_hex = %item.parent_source_key_hex,
+                    parent_source_key_len = item.parent_source_key_len,
+                    entry_id_len = item.entry_id_len,
+                    expected_entry_id_len,
+                    persisted = special_object.is_some()
+                        && !crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                            item_id
+                        ),
+                    default = crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                        item_id
+                    ),
+                    virtual_only =
+                        crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
+                            item_id
+                        ),
+                    change_number = item.change_number.unwrap_or_default(),
+                    change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
+                    final_cnset_fai = %summary.final_cnset_seen_fai_summary,
+                    final_idset_given = %summary.final_idset_given_summary,
+                    "rca debug mapi inbox fai content sync item"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                request_rop_id = "0x70",
+                folder_id = format_args!("0x{folder_id:016x}"),
+                transfer_buffer_bytes = transfer_buffer.len(),
+                parse_error = %error,
+                "rca debug mapi inbox fai content sync parse error"
+            );
+        }
+    }
+}
+
 pub(crate) fn log_hierarchy_get_buffer_payload_summary(
     sync_type: u8,
     folder_id: u64,
@@ -1872,6 +1955,43 @@ struct FastTransferDebugProperty {
     next_offset: usize,
 }
 
+#[derive(Default)]
+struct ContentTransferFaiDebugSummary {
+    fai_items: Vec<ContentTransferFaiItemDebug>,
+    final_idset_given_summary: String,
+    final_cnset_seen_fai_summary: String,
+    final_cnset_seen_fai_counters: Vec<u64>,
+}
+
+#[derive(Default)]
+struct ContentTransferFaiItemDebug {
+    item_id: Option<u64>,
+    global_counter: Option<u64>,
+    change_number: Option<u64>,
+    subject: String,
+    message_class: String,
+    entry_id_len: usize,
+    source_key_len: usize,
+    parent_source_key_len: usize,
+    source_key_hex: String,
+    parent_source_key_hex: String,
+    change_number_in_final_cnset_fai: bool,
+}
+
+#[derive(Default)]
+struct ContentTransferMessageDebug {
+    source_key: Vec<u8>,
+    parent_source_key: Vec<u8>,
+    change_key: Vec<u8>,
+    item_id: Option<u64>,
+    global_counter: Option<u64>,
+    change_number: Option<u64>,
+    associated: bool,
+    subject: String,
+    message_class: String,
+    entry_id_len: usize,
+}
+
 fn decode_hierarchy_transfer_debug_summary(
     bytes: &[u8],
 ) -> Result<HierarchyTransferDebugSummary, String> {
@@ -1984,6 +2104,182 @@ fn decode_hierarchy_transfer_debug_summary(
     summary.emitted_property_tags = emitted_property_tags.into_iter().collect();
     finalize_hierarchy_debug_summary(&mut summary);
     Ok(summary)
+}
+
+fn decode_content_transfer_fai_debug_summary(
+    bytes: &[u8],
+) -> Result<ContentTransferFaiDebugSummary, String> {
+    let mut offset = 0;
+    let mut current_message: Option<ContentTransferMessageDebug> = None;
+    let mut in_message_body = false;
+    let mut in_final_state = false;
+    let mut summary = ContentTransferFaiDebugSummary::default();
+
+    while offset < bytes.len() {
+        if current_message.is_some()
+            && bytes
+                .get(offset..offset.saturating_add(4))
+                .is_some_and(|tail| tail == [0, 0, 0, 0])
+        {
+            offset += 4;
+            continue;
+        }
+
+        let tag = read_debug_u32(bytes, offset)?;
+        if content_debug_marker(tag) {
+            match tag {
+                INCR_SYNC_CHG => {
+                    finish_content_fai_debug_message(
+                        current_message.take(),
+                        &summary.final_cnset_seen_fai_counters,
+                        &mut summary.fai_items,
+                    );
+                    current_message = Some(ContentTransferMessageDebug::default());
+                    in_message_body = false;
+                    in_final_state = false;
+                }
+                INCR_SYNC_MESSAGE => {
+                    in_message_body = true;
+                    in_final_state = false;
+                }
+                INCR_SYNC_DEL | INCR_SYNC_READ => {
+                    finish_content_fai_debug_message(
+                        current_message.take(),
+                        &summary.final_cnset_seen_fai_counters,
+                        &mut summary.fai_items,
+                    );
+                    in_message_body = false;
+                    in_final_state = false;
+                }
+                INCR_SYNC_STATE_BEGIN => {
+                    finish_content_fai_debug_message(
+                        current_message.take(),
+                        &summary.final_cnset_seen_fai_counters,
+                        &mut summary.fai_items,
+                    );
+                    in_message_body = false;
+                    in_final_state = true;
+                }
+                INCR_SYNC_STATE_END => {
+                    in_final_state = false;
+                }
+                INCR_SYNC_END => {
+                    finish_content_fai_debug_message(
+                        current_message.take(),
+                        &summary.final_cnset_seen_fai_counters,
+                        &mut summary.fai_items,
+                    );
+                    offset += 4;
+                    if offset != bytes.len() {
+                        return Err("trailing bytes after IncrSyncEnd".into());
+                    }
+                    break;
+                }
+                _ => unreachable!(),
+            }
+            offset += 4;
+            continue;
+        }
+
+        let property = parse_debug_fast_transfer_property(bytes, offset)?;
+        offset = property.next_offset;
+        if in_final_state {
+            match property.tag {
+                META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => {
+                    summary.final_idset_given_summary =
+                        format_replguid_globset_debug(&property.value);
+                }
+                META_TAG_CNSET_SEEN_FAI => {
+                    summary.final_cnset_seen_fai_summary =
+                        format_replguid_globset_debug(&property.value);
+                    summary.final_cnset_seen_fai_counters =
+                        replguid_globset_counters(&property.value).unwrap_or_default();
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        let Some(message) = current_message.as_mut() else {
+            continue;
+        };
+        if in_message_body {
+            match property.tag {
+                PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = property.value,
+                PID_TAG_ENTRY_ID => message.entry_id_len = property.value.len(),
+                PID_TAG_SUBJECT_W => {
+                    message.subject = decode_debug_utf16z(&property.value).unwrap_or_default()
+                }
+                PID_TAG_NORMALIZED_SUBJECT_A => {
+                    message.subject = decode_debug_string8z(&property.value).unwrap_or_default()
+                }
+                PID_TAG_MESSAGE_CLASS_W => {
+                    message.message_class = decode_debug_utf16z(&property.value).unwrap_or_default()
+                }
+                _ => {}
+            }
+        } else {
+            match property.tag {
+                PID_TAG_SOURCE_KEY => {
+                    message.global_counter = counter_from_xid(&property.value);
+                    message.item_id =
+                        counter_from_xid(&property.value).map(crate::mapi::identity::mapi_store_id);
+                    message.source_key = property.value;
+                }
+                PID_TAG_CHANGE_KEY => {
+                    message.change_number = counter_from_xid(&property.value);
+                    message.change_key = property.value;
+                }
+                PID_TAG_ASSOCIATED => {
+                    message.associated = decode_debug_bool(&property.value).unwrap_or_default()
+                }
+                PID_TAG_MID => message.item_id = decode_debug_object_id(&property.value),
+                PID_TAG_CHANGE_NUMBER => {
+                    message.change_number = decode_debug_change_number(&property.value)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for item in &mut summary.fai_items {
+        item.change_number_in_final_cnset_fai = item.change_number.is_some_and(|change_number| {
+            summary
+                .final_cnset_seen_fai_counters
+                .contains(&change_number)
+        });
+    }
+    Ok(summary)
+}
+
+fn finish_content_fai_debug_message(
+    message: Option<ContentTransferMessageDebug>,
+    final_cnset_seen_fai_counters: &[u64],
+    fai_items: &mut Vec<ContentTransferFaiItemDebug>,
+) {
+    let Some(message) = message else {
+        return;
+    };
+    if !message.associated {
+        return;
+    }
+    let source_key_len = message.source_key.len();
+    let parent_source_key_len = message.parent_source_key.len();
+    fai_items.push(ContentTransferFaiItemDebug {
+        source_key_hex: format_debug_hex(&message.source_key),
+        parent_source_key_hex: format_debug_hex(&message.parent_source_key),
+        change_number_in_final_cnset_fai: message
+            .change_number
+            .is_some_and(|change_number| final_cnset_seen_fai_counters.contains(&change_number)),
+        item_id: message.item_id,
+        global_counter: message.global_counter,
+        change_number: message.change_number,
+        subject: message.subject,
+        message_class: message.message_class,
+        entry_id_len: message.entry_id_len,
+        source_key_len,
+        parent_source_key_len,
+    });
 }
 
 fn collect_final_state_debug_property(
@@ -2264,6 +2560,11 @@ fn decode_debug_utf16z(bytes: &[u8]) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
+fn decode_debug_string8z(bytes: &[u8]) -> Option<String> {
+    let value = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    String::from_utf8(value.to_vec()).ok()
+}
+
 fn format_debug_hex(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -2327,6 +2628,19 @@ fn hierarchy_debug_marker(tag: u32) -> bool {
     )
 }
 
+fn content_debug_marker(tag: u32) -> bool {
+    matches!(
+        tag,
+        INCR_SYNC_CHG
+            | INCR_SYNC_MESSAGE
+            | INCR_SYNC_DEL
+            | INCR_SYNC_READ
+            | INCR_SYNC_STATE_BEGIN
+            | INCR_SYNC_STATE_END
+            | INCR_SYNC_END
+    )
+}
+
 fn fast_transfer_marker_debug_name(tag: u32) -> &'static str {
     match tag {
         INCR_SYNC_CHG => "IncrSyncChg",
@@ -2353,9 +2667,20 @@ fn parse_debug_fast_transfer_property(
         0x0003 => (value_start, 4),
         0x000B => (value_start, 2),
         0x0014 | 0x0040 => (value_start, 8),
+        0x0048 => (value_start, 16),
         0x001E | 0x001F | 0x0102 => {
             let len = read_debug_u32(bytes, value_start)? as usize;
             (value_start + 4, len)
+        }
+        0x101E | 0x101F => {
+            let count = read_debug_u32(bytes, value_start)? as usize;
+            let mut end = value_start + 4;
+            for _ in 0..count {
+                let len = read_debug_u32(bytes, end)? as usize;
+                end = end.saturating_add(4).saturating_add(len);
+                let _ = read_debug_slice(bytes, end.saturating_sub(len), len)?;
+            }
+            (value_start, end.saturating_sub(value_start))
         }
         _ => {
             return Err(format!(

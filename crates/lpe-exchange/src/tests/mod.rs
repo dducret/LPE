@@ -8095,6 +8095,7 @@ struct StrictContentMessageChange {
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
+    entry_id: Vec<u8>,
     body_tags: Vec<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
@@ -8110,6 +8111,7 @@ struct StrictContentMessageBuilder {
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     predecessor_change_list: Option<Vec<u8>>,
+    entry_id: Option<Vec<u8>>,
     mid: Option<u64>,
     change_number: Option<u64>,
     associated: Option<bool>,
@@ -8433,6 +8435,7 @@ fn strict_record_content_body_property(
     message.body_tags.push(property.tag);
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
+        PID_TAG_ENTRY_ID => message.entry_id = Some(property.value),
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
         PID_TAG_NORMALIZED_SUBJECT_A => {
             message.subject = Some(strict_decode_string8z(&property.value)?)
@@ -8488,6 +8491,7 @@ fn strict_finish_content_message(
         parent_source_key,
         change_key,
         predecessor_change_list,
+        entry_id: message.entry_id.unwrap_or_default(),
         body_tags: message.body_tags,
         mid: message.mid,
         change_number: message.change_number,

@@ -28215,6 +28215,91 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
 }
 
 #[tokio::test]
+async fn mapi_over_http_inbox_fai_sync_exports_identity_and_final_state() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x10, 0x00, // content sync, FAI only
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&16384u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops)
+        .unwrap_or_else(|error| panic!("{error}: {response_rops:02x?}"));
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+
+    let mut counters = Vec::new();
+    for message in &stream.message_changes {
+        assert!(!message.source_key.is_empty(), "{}", message.subject);
+        assert!(!message.parent_source_key.is_empty(), "{}", message.subject);
+        assert!(!message.entry_id.is_empty(), "{}", message.subject);
+        assert_eq!(message.entry_id.len(), 70, "{}", message.subject);
+        assert_eq!(&message.entry_id[4..20], account.account_id.as_bytes());
+        assert!(contains_bytes(
+            &message.entry_id,
+            &message.source_key[16..22]
+        ));
+        assert!(strict_replguid_globset_contains_counter(
+            &stream.idset_given,
+            &message.source_key[16..22]
+        )
+        .unwrap());
+        let change_number = message.change_number.expect("FAI change number");
+        assert!(strict_replguid_globset_contains_counter(
+            &stream.cnset_seen_fai,
+            &globcnt_bytes(change_number)
+        )
+        .unwrap());
+        counters.push(strict_globcnt_to_u64(&message.source_key[16..22]).unwrap());
+    }
+
+    for expected_counter in [0x7FFF_FFFF_FFF6, 0x7FFF_FFFF_FFFA] {
+        assert!(
+            counters.contains(&expected_counter),
+            "missing default Inbox FAI counter 0x{expected_counter:012x}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,
