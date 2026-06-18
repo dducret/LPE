@@ -117,6 +117,31 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FaiContentSyncDebugContext<'a> {
+    pub(crate) mailbox: &'a str,
+    pub(crate) tenant: &'a str,
+    pub(crate) account: &'a str,
+    pub(crate) mapi_request_id: &'a str,
+    pub(crate) request_rop_id: &'a str,
+    pub(crate) checkpoint_kind: &'a str,
+    pub(crate) active_transfer_selection: &'a str,
+}
+
+impl Default for FaiContentSyncDebugContext<'_> {
+    fn default() -> Self {
+        Self {
+            mailbox: "",
+            tenant: "",
+            account: "",
+            mapi_request_id: "",
+            request_rop_id: "0x70",
+            checkpoint_kind: "",
+            active_transfer_selection: "",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SpecialMessagePropertyValue {
     Binary(Vec<u8>),
@@ -1094,6 +1119,7 @@ pub(crate) fn log_fai_content_sync_debug(
     mailbox_guid: Uuid,
     special_objects: &[SpecialMessageSyncFact],
     transfer_buffer: &[u8],
+    context: FaiContentSyncDebugContext<'_>,
 ) {
     if sync_type != SYNC_TYPE_CONTENTS
         || !matches!(
@@ -1111,7 +1137,75 @@ pub(crate) fn log_fai_content_sync_debug(
     };
     match decode_content_transfer_fai_debug_summary(transfer_buffer) {
         Ok(summary) => {
-            for item in summary.fai_items {
+            let item_count = summary.fai_items.len();
+            let total_property_count = summary
+                .fai_items
+                .iter()
+                .map(|item| item.property_tags.len())
+                .sum::<usize>();
+            let persisted_count = summary
+                .fai_items
+                .iter()
+                .filter(|item| {
+                    let item_id = item.item_id.unwrap_or_default();
+                    let special_object = special_objects
+                        .iter()
+                        .find(|object| object.item_id == item_id);
+                    fai_debug_state_origin(folder_id, special_object, item_id) == "sql_associated"
+                })
+                .count();
+            let virtual_count = summary
+                .fai_items
+                .iter()
+                .filter(|item| {
+                    let item_id = item.item_id.unwrap_or_default();
+                    fai_debug_state_origin(folder_id, None, item_id) == "mapi_virtual"
+                })
+                .count();
+            let synthetic_count = item_count
+                .saturating_sub(persisted_count)
+                .saturating_sub(virtual_count);
+            let item_order = format_fai_debug_item_order(&summary.fai_items);
+            let first_item = summary.fai_items.first();
+            let last_item = summary.fai_items.last();
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %context.mailbox,
+                tenant = %context.tenant,
+                account = %context.account,
+                mapi_request_id = %context.mapi_request_id,
+                request_rop_id = %context.request_rop_id,
+                folder_id = format_args!("0x{folder_id:016x}"),
+                folder_role,
+                folder_container_class = debug_container_class_for_fai_folder(folder_id),
+                sync_type = format_args!("0x{sync_type:02x}"),
+                checkpoint_kind = %context.checkpoint_kind,
+                item_count,
+                persisted_count,
+                synthetic_count,
+                virtual_count,
+                total_transfer_bytes = transfer_buffer.len(),
+                total_property_count,
+                first_item_id = %first_item
+                    .and_then(|item| item.item_id)
+                    .map(format_u64_hex)
+                    .unwrap_or_default(),
+                first_item_class = %first_item.map(|item| item.message_class.as_str()).unwrap_or_default(),
+                first_item_subject = %first_item.map(|item| item.subject.as_str()).unwrap_or_default(),
+                last_item_id = %last_item
+                    .and_then(|item| item.item_id)
+                    .map(format_u64_hex)
+                    .unwrap_or_default(),
+                last_item_class = %last_item.map(|item| item.message_class.as_str()).unwrap_or_default(),
+                last_item_subject = %last_item.map(|item| item.subject.as_str()).unwrap_or_default(),
+                item_order = %item_order,
+                final_cnset_fai = %summary.final_cnset_seen_fai_summary,
+                active_transfer_selection = %context.active_transfer_selection,
+                "rca debug mapi fai fasttransfer transfer summary"
+            );
+            for (index, item) in summary.fai_items.into_iter().enumerate() {
                 let special_object = special_objects
                     .iter()
                     .find(|object| object.item_id == item.item_id.unwrap_or_default());
@@ -1119,6 +1213,10 @@ pub(crate) fn log_fai_content_sync_debug(
                     .map(|object| object.canonical_id.to_string())
                     .unwrap_or_default();
                 let item_id = item.item_id.unwrap_or_default();
+                let classification =
+                    fai_debug_item_classification(folder_id, special_object, item_id);
+                let state_origin = fai_debug_state_origin(folder_id, special_object, item_id);
+                let source_repository = fai_debug_source_repository(folder_id, state_origin);
                 let expected_entry_id_len =
                     crate::mapi::identity::message_entry_id_from_object_ids(
                         mailbox_guid,
@@ -1127,12 +1225,92 @@ pub(crate) fn log_fai_content_sync_debug(
                     )
                     .map(|entry_id| entry_id.len())
                     .unwrap_or_default();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %context.mailbox,
+                    tenant = %context.tenant,
+                    account = %context.account,
+                    mapi_request_id = %context.mapi_request_id,
+                    request_rop_id = %context.request_rop_id,
+                    folder_id = format_args!("0x{folder_id:016x}"),
+                    folder_role,
+                    folder_container_class = debug_container_class_for_fai_folder(folder_id),
+                    sync_type = format_args!("0x{sync_type:02x}"),
+                    checkpoint_kind = %context.checkpoint_kind,
+                    item_index_in_transfer = index,
+                    item_count_in_transfer = item_count,
+                    item_id = format_args!("0x{item_id:016x}"),
+                    global_counter = item.global_counter.unwrap_or_default(),
+                    change_number = item.change_number.unwrap_or_default(),
+                    canonical_id,
+                    sql_row_id = if state_origin == "sql_associated" { canonical_id.as_str() } else { "" },
+                    jmap_id = "",
+                    folder_canonical_id = "",
+                    source_repository,
+                    message_class = %item.message_class,
+                    subject = %item.subject,
+                    associated = item.associated.unwrap_or_default(),
+                    classification,
+                    state_origin,
+                    source_key_hex = %item.source_key_hex,
+                    source_key_len = item.source_key_len,
+                    parent_source_key_hex = %item.parent_source_key_hex,
+                    parent_source_key_len = item.parent_source_key_len,
+                    entry_id_len = item.entry_id_len,
+                    expected_entry_id_len,
+                    record_key_len = item.record_key_len,
+                    change_key_len = item.change_key_len,
+                    predecessor_change_list_len = item.predecessor_change_list_len,
+                    emitted_property_count = item.property_tags.len(),
+                    emitted_property_tags = %format_property_tags(&item.property_tags),
+                    emitted_property_names = %format_property_tag_names(&item.property_tags),
+                    emitted_value_shapes = %format_property_value_shapes(&item.property_value_shapes),
+                    final_cnset_fai = %summary.final_cnset_seen_fai_summary,
+                    change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
+                    transfer_item_start_offset = item.item_start_offset,
+                    transfer_item_end_offset = item.item_end_offset,
+                    transfer_item_byte_length = item.item_byte_len,
+                    cumulative_transfer_bytes_before_item = item.item_start_offset,
+                    cumulative_transfer_bytes_after_item = item.item_end_offset,
+                    current_transfer_buffer_total_length = transfer_buffer.len(),
+                    first_fai_item = index == 0,
+                    last_fai_item = index + 1 == item_count,
+                    message_start_marker_offset = item
+                        .message_start_marker_offset
+                        .map(|offset| offset.to_string())
+                        .unwrap_or_default(),
+                    message_end_marker_offset = item
+                        .message_end_marker_offset
+                        .map(|offset| offset.to_string())
+                        .unwrap_or_default(),
+                    property_list_start_offset = item
+                        .property_list_start_offset
+                        .map(|offset| offset.to_string())
+                        .unwrap_or_default(),
+                    property_list_end_offset = item
+                        .property_list_end_offset
+                        .map(|offset| offset.to_string())
+                        .unwrap_or_default(),
+                    attachment_marker_count = item.attachment_marker_count,
+                    recipient_marker_count = item.recipient_marker_count,
+                    fasttransfer_marker_summary =
+                        %format_fai_fasttransfer_marker_summary(&item),
+                    item_payload_preview_hex = %item.payload_preview_hex,
+                    item_payload_tail_hex = %item.payload_tail_hex,
+                    "rca debug mapi fai fasttransfer item boundary"
+                );
                 if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
                         endpoint = "emsmdb",
-                        request_rop_id = "0x70",
+                        mailbox = %context.mailbox,
+                        tenant = %context.tenant,
+                        account = %context.account,
+                        mapi_request_id = %context.mapi_request_id,
+                        request_rop_id = %context.request_rop_id,
                         folder_id = format_args!("0x{folder_id:016x}"),
                         folder_role,
                         item_id = format_args!("0x{item_id:016x}"),
@@ -1154,7 +1332,8 @@ pub(crate) fn log_fai_content_sync_debug(
                         default = crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
                             || crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
                         virtual_only = false,
-                        classification = fai_debug_item_classification(folder_id, special_object, item_id),
+                        classification,
+                        state_origin,
                         change_number = item.change_number.unwrap_or_default(),
                         change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
                         final_cnset_fai = %summary.final_cnset_seen_fai_summary,
@@ -1169,7 +1348,11 @@ pub(crate) fn log_fai_content_sync_debug(
                         rca_debug = true,
                         adapter = "mapi",
                         endpoint = "emsmdb",
-                        request_rop_id = "0x70",
+                        mailbox = %context.mailbox,
+                        tenant = %context.tenant,
+                        account = %context.account,
+                        mapi_request_id = %context.mapi_request_id,
+                        request_rop_id = %context.request_rop_id,
                         folder_id = format_args!("0x{folder_id:016x}"),
                         folder_role,
                         item_id = format_args!("0x{item_id:016x}"),
@@ -1196,7 +1379,8 @@ pub(crate) fn log_fai_content_sync_debug(
                             crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
                                 item_id
                             ),
-                        classification = fai_debug_item_classification(folder_id, special_object, item_id),
+                        classification,
+                        state_origin,
                         change_number = item.change_number.unwrap_or_default(),
                         change_number_in_final_cnset_fai = item.change_number_in_final_cnset_fai,
                         final_cnset_fai = %summary.final_cnset_seen_fai_summary,
@@ -1268,6 +1452,97 @@ fn fai_debug_item_classification(
     } else {
         "unknown"
     }
+}
+
+pub(crate) fn fai_debug_state_origin(
+    folder_id: u64,
+    special_object: Option<&SpecialMessageSyncFact>,
+    item_id: u64,
+) -> &'static str {
+    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+        if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(item_id) {
+            "mapi_virtual"
+        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id) {
+            "mapi_synthetic_default"
+        } else if special_object.is_some() {
+            "sql_associated"
+        } else {
+            "unknown"
+        }
+    } else if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+        if crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
+            || crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id)
+        {
+            "mapi_synthetic_default"
+        } else if special_object.is_some() {
+            "sql_associated"
+        } else {
+            "unknown"
+        }
+    } else {
+        "unknown"
+    }
+}
+
+fn fai_debug_source_repository(folder_id: u64, state_origin: &str) -> &'static str {
+    match (folder_id, state_origin) {
+        (crate::mapi::identity::COMMON_VIEWS_FOLDER_ID, "sql_associated") => {
+            "mapi_navigation_shortcuts"
+        }
+        (crate::mapi::identity::INBOX_FOLDER_ID, "sql_associated") => {
+            "mapi_associated_config_messages"
+        }
+        (_, "mapi_synthetic_default") | (_, "mapi_virtual") => "mapi_store_projection",
+        _ => "",
+    }
+}
+
+fn debug_container_class_for_fai_folder(folder_id: u64) -> &'static str {
+    match folder_id {
+        crate::mapi::identity::INBOX_FOLDER_ID => "IPF.Note",
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => "IPF.Note",
+        _ => "",
+    }
+}
+
+fn format_fai_fasttransfer_marker_summary(item: &ContentTransferFaiItemDebug) -> String {
+    format!(
+        "item_start={};message_start={};message_end={};property_start={};property_end={};recipients={};attachments={}",
+        item.item_start_offset,
+        item.message_start_marker_offset
+            .map(|offset| offset.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        item.message_end_marker_offset
+            .map(|offset| offset.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        item.property_list_start_offset
+            .map(|offset| offset.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        item.property_list_end_offset
+            .map(|offset| offset.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        item.recipient_marker_count,
+        item.attachment_marker_count
+    )
+}
+
+fn format_fai_debug_item_order(items: &[ContentTransferFaiItemDebug]) -> String {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                index,
+                item.item_id.map(format_u64_hex).unwrap_or_default(),
+                item.message_class,
+                item.subject,
+                item.item_start_offset,
+                item.item_byte_len
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 pub(crate) fn log_hierarchy_get_buffer_payload_summary(
@@ -2100,6 +2375,9 @@ pub(crate) struct ContentTransferFaiItemDebug {
     pub(crate) subject: String,
     pub(crate) message_class: String,
     pub(crate) entry_id_len: usize,
+    pub(crate) record_key_len: usize,
+    pub(crate) change_key_len: usize,
+    pub(crate) predecessor_change_list_len: usize,
     pub(crate) source_key_len: usize,
     pub(crate) parent_source_key_len: usize,
     pub(crate) source_key_hex: String,
@@ -2108,6 +2386,17 @@ pub(crate) struct ContentTransferFaiItemDebug {
     pub(crate) property_tags: Vec<u32>,
     pub(crate) property_value_shapes: Vec<(u32, String)>,
     pub(crate) change_number_in_final_cnset_fai: bool,
+    pub(crate) item_start_offset: usize,
+    pub(crate) item_end_offset: usize,
+    pub(crate) item_byte_len: usize,
+    pub(crate) message_start_marker_offset: Option<usize>,
+    pub(crate) message_end_marker_offset: Option<usize>,
+    pub(crate) property_list_start_offset: Option<usize>,
+    pub(crate) property_list_end_offset: Option<usize>,
+    pub(crate) attachment_marker_count: usize,
+    pub(crate) recipient_marker_count: usize,
+    pub(crate) payload_preview_hex: String,
+    pub(crate) payload_tail_hex: String,
 }
 
 #[derive(Default)]
@@ -2115,6 +2404,8 @@ struct ContentTransferMessageDebug {
     source_key: Vec<u8>,
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
+    predecessor_change_list: Vec<u8>,
+    record_key_len: usize,
     item_id: Option<u64>,
     global_counter: Option<u64>,
     change_number: Option<u64>,
@@ -2125,6 +2416,10 @@ struct ContentTransferMessageDebug {
     entry_id_len: usize,
     property_tags: Vec<u32>,
     property_value_shapes: Vec<(u32, String)>,
+    item_start_offset: usize,
+    message_start_marker_offset: Option<usize>,
+    property_list_start_offset: Option<usize>,
+    property_list_end_offset: Option<usize>,
 }
 
 fn decode_hierarchy_transfer_debug_summary(
@@ -2268,12 +2563,22 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         current_message.take(),
                         &summary.final_cnset_seen_fai_counters,
                         &mut summary.fai_items,
+                        bytes,
+                        offset,
                     );
-                    current_message = Some(ContentTransferMessageDebug::default());
+                    current_message = Some(ContentTransferMessageDebug {
+                        item_start_offset: offset,
+                        message_start_marker_offset: Some(offset),
+                        property_list_start_offset: Some(offset + 4),
+                        ..ContentTransferMessageDebug::default()
+                    });
                     in_message_body = false;
                     in_final_state = false;
                 }
                 INCR_SYNC_MESSAGE => {
+                    if let Some(message) = current_message.as_mut() {
+                        message.message_start_marker_offset = Some(offset);
+                    }
                     in_message_body = true;
                     in_final_state = false;
                 }
@@ -2282,6 +2587,8 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         current_message.take(),
                         &summary.final_cnset_seen_fai_counters,
                         &mut summary.fai_items,
+                        bytes,
+                        offset,
                     );
                     in_message_body = false;
                     in_final_state = false;
@@ -2291,6 +2598,8 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         current_message.take(),
                         &summary.final_cnset_seen_fai_counters,
                         &mut summary.fai_items,
+                        bytes,
+                        offset,
                     );
                     in_message_body = false;
                     in_final_state = true;
@@ -2303,6 +2612,8 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                         current_message.take(),
                         &summary.final_cnset_seen_fai_counters,
                         &mut summary.fai_items,
+                        bytes,
+                        offset,
                     );
                     offset += 4;
                     if offset != bytes.len() {
@@ -2349,6 +2660,7 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
             match property.tag {
                 PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = property.value,
                 PID_TAG_ENTRY_ID => message.entry_id_len = property.value.len(),
+                PID_TAG_RECORD_KEY => message.record_key_len = property.value.len(),
                 PID_TAG_SUBJECT_W => {
                     message.subject = decode_debug_utf16z(&property.value).unwrap_or_default()
                 }
@@ -2372,6 +2684,7 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                     message.change_number = counter_from_xid(&property.value);
                     message.change_key = property.value;
                 }
+                PID_TAG_PREDECESSOR_CHANGE_LIST => message.predecessor_change_list = property.value,
                 PID_TAG_ASSOCIATED => {
                     message.associated_present = true;
                     message.associated = decode_debug_bool(&property.value).unwrap_or_default()
@@ -2399,6 +2712,8 @@ fn finish_content_fai_debug_message(
     message: Option<ContentTransferMessageDebug>,
     final_cnset_seen_fai_counters: &[u64],
     fai_items: &mut Vec<ContentTransferFaiItemDebug>,
+    bytes: &[u8],
+    item_end_offset: usize,
 ) {
     let Some(message) = message else {
         return;
@@ -2408,6 +2723,9 @@ fn finish_content_fai_debug_message(
     }
     let source_key_len = message.source_key.len();
     let parent_source_key_len = message.parent_source_key.len();
+    let item_start_offset = message.item_start_offset.min(bytes.len());
+    let item_end_offset = item_end_offset.min(bytes.len()).max(item_start_offset);
+    let item_payload = &bytes[item_start_offset..item_end_offset];
     fai_items.push(ContentTransferFaiItemDebug {
         source_key_hex: format_debug_hex(&message.source_key),
         parent_source_key_hex: format_debug_hex(&message.parent_source_key),
@@ -2420,11 +2738,25 @@ fn finish_content_fai_debug_message(
         subject: message.subject,
         message_class: message.message_class,
         entry_id_len: message.entry_id_len,
+        record_key_len: message.record_key_len,
+        change_key_len: message.change_key.len(),
+        predecessor_change_list_len: message.predecessor_change_list.len(),
         source_key_len,
         parent_source_key_len,
         associated: message.associated_present.then_some(message.associated),
         property_tags: message.property_tags,
         property_value_shapes: message.property_value_shapes,
+        item_start_offset,
+        item_end_offset,
+        item_byte_len: item_end_offset.saturating_sub(item_start_offset),
+        message_start_marker_offset: message.message_start_marker_offset,
+        message_end_marker_offset: Some(item_end_offset),
+        property_list_start_offset: message.property_list_start_offset,
+        property_list_end_offset: message.property_list_end_offset.or(Some(item_end_offset)),
+        attachment_marker_count: 0,
+        recipient_marker_count: 0,
+        payload_preview_hex: format_debug_hex_preview(item_payload, 32),
+        payload_tail_hex: format_debug_hex_tail(item_payload, 32),
     });
 }
 
@@ -2818,6 +3150,11 @@ fn format_debug_hex(bytes: &[u8]) -> String {
 
 fn format_debug_hex_preview(bytes: &[u8], max_len: usize) -> String {
     format_debug_hex(&bytes[..bytes.len().min(max_len)])
+}
+
+fn format_debug_hex_tail(bytes: &[u8], max_len: usize) -> String {
+    let start = bytes.len().saturating_sub(max_len);
+    format_debug_hex(&bytes[start..])
 }
 
 fn format_u64_hex(value: u64) -> String {

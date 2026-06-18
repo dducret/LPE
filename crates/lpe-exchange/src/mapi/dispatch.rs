@@ -17321,12 +17321,23 @@ where
                     &sync_property_tags,
                     &transfer_buffer,
                 );
+                let tenant_id_debug = principal.tenant_id.to_string();
+                let account_id_debug = principal.account_id.to_string();
                 mapi_mailstore::log_fai_content_sync_debug(
                     sync_type,
                     folder_id,
                     principal.account_id,
                     &all_special_sync_objects,
                     &transfer_buffer,
+                    mapi_mailstore::FaiContentSyncDebugContext {
+                        mailbox: principal.email.as_str(),
+                        tenant: tenant_id_debug.as_str(),
+                        account: account_id_debug.as_str(),
+                        mapi_request_id: request_id,
+                        request_rop_id: "0x70",
+                        checkpoint_kind: checkpoint_kind.as_str(),
+                        active_transfer_selection: "initial_full_candidate",
+                    },
                 );
                 let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(

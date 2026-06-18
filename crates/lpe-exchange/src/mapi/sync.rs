@@ -1612,6 +1612,238 @@ mod tests {
         }
     }
 
+    fn associated_content_sync_buffer(
+        account_id: Uuid,
+        folder_id: u64,
+        objects: &[mapi_mailstore::SpecialMessageSyncFact],
+    ) -> Vec<u8> {
+        mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+            account_id,
+            0x01,
+            0x0010,
+            0x0000_0001 | 0x0000_0004 | 0x0000_0008,
+            &[],
+            folder_id,
+            &[],
+            &[],
+            &[],
+            objects,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            objects,
+            &[],
+            &[],
+            1,
+        )
+    }
+
+    fn assert_fai_boundary_summary(
+        buffer: &[u8],
+        summary: &mapi_mailstore::ContentTransferFaiDebugSummary,
+        expected_count: usize,
+    ) {
+        assert_eq!(summary.fai_items.len(), expected_count);
+        let mut previous_end = 0usize;
+        let mut total_item_bytes = 0usize;
+        for item in &summary.fai_items {
+            assert!(item.item_start_offset >= previous_end);
+            assert!(item.item_end_offset > item.item_start_offset);
+            assert_eq!(
+                item.item_byte_len,
+                item.item_end_offset - item.item_start_offset
+            );
+            assert!(item.item_end_offset <= buffer.len());
+            assert!(!item.payload_preview_hex.is_empty());
+            assert!(!item.payload_tail_hex.is_empty());
+            assert!(item.source_key_len > 0);
+            assert!(item.parent_source_key_len > 0);
+            assert!(item.entry_id_len > 0);
+            assert!(item.record_key_len > 0);
+            assert!(item.change_key_len > 0);
+            assert!(item.predecessor_change_list_len > 0);
+            assert!(item.property_tags.contains(&PID_TAG_SOURCE_KEY));
+            assert!(item.property_tags.contains(&PID_TAG_PARENT_SOURCE_KEY));
+            assert!(item.property_tags.contains(&PID_TAG_MESSAGE_CLASS_W));
+            assert!(item.property_tags.contains(&PID_TAG_SUBJECT_W));
+            total_item_bytes += item.item_byte_len;
+            previous_end = item.item_end_offset;
+        }
+        assert!(total_item_bytes > 0);
+        assert!(buffer.len() >= total_item_bytes);
+    }
+
+    fn persisted_inbox_associated_configs(
+        account_id: Uuid,
+    ) -> Vec<crate::store::MapiAssociatedConfigRecord> {
+        [
+            (
+                0x6d617069_6163_6350_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7900),
+                "IPM.Configuration.AccountPrefs",
+            ),
+            (
+                0x6d617069_636f_6e76_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7901),
+                "IPM.Configuration.ConversationPrefs",
+            ),
+            (
+                0x6d617069_7273_7352_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7904),
+                "IPM.Configuration.RssRule",
+            ),
+            (
+                0x6d617069_7476_5072_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7903),
+                "IPM.Configuration.TableViewPreviewPrefs",
+            ),
+            (
+                0x6d617069_7463_5072_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7902),
+                "IPM.Configuration.TCPrefs",
+            ),
+            (
+                0x6d617069_6578_5275_8000_000000000101,
+                crate::mapi::identity::mapi_store_id(0x7905),
+                "IPM.ExtendedRule.Message",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, item_id, class)| {
+            let id = Uuid::from_u128(id);
+            crate::mapi::identity::remember_mapi_identity(id, item_id);
+            crate::store::MapiAssociatedConfigRecord {
+                id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: class.to_string(),
+                subject: class.to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c060003": {"type": "u32", "value": 4},
+                    "0x7c070102": {"type": "binary", "value": "392d30"}
+                }),
+            }
+        })
+        .collect()
+    }
+
+    fn persisted_common_views_shortcuts(
+        account_id: Uuid,
+    ) -> Vec<crate::store::MapiNavigationShortcutRecord> {
+        [
+            (
+                0x6d617069_776c_496e_8000_000000000120,
+                crate::mapi::identity::mapi_store_id(0x7800),
+                "Inbox",
+                INBOX_FOLDER_ID,
+                127,
+            ),
+            (
+                0x6d617069_776c_5365_8000_000000000120,
+                crate::mapi::identity::mapi_store_id(0x7801),
+                "Sent",
+                SENT_FOLDER_ID,
+                128,
+            ),
+            (
+                0x6d617069_776c_5472_8000_000000000120,
+                crate::mapi::identity::mapi_store_id(0x7802),
+                "Trash",
+                TRASH_FOLDER_ID,
+                129,
+            ),
+            (
+                0x6d617069_776c_4361_8000_000000000120,
+                crate::mapi::identity::mapi_store_id(0x7803),
+                "Calendar",
+                CALENDAR_FOLDER_ID,
+                130,
+            ),
+        ]
+        .into_iter()
+        .map(|(id, item_id, subject, target_folder_id, ordinal)| {
+            let id = Uuid::from_u128(id);
+            crate::mapi::identity::remember_mapi_identity(id, item_id);
+            crate::store::MapiNavigationShortcutRecord {
+                id,
+                account_id,
+                subject: subject.to_string(),
+                target_folder_id: Some(target_folder_id),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal,
+                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            }
+        })
+        .collect()
+    }
+
+    #[test]
+    fn common_views_fai_fasttransfer_boundaries_cover_four_items() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
+        let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+        let buffer = associated_content_sync_buffer(account_id, COMMON_VIEWS_FOLDER_ID, &objects);
+
+        let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+
+        assert_fai_boundary_summary(&buffer, &summary, 4);
+        assert!(summary
+            .fai_items
+            .iter()
+            .all(|item| item.message_class == "IPM.Microsoft.WunderBar.Link"));
+        let summary_property_count = summary
+            .fai_items
+            .iter()
+            .map(|item| item.property_tags.len())
+            .sum::<usize>();
+        assert!(summary_property_count >= summary.fai_items.len());
+        for item in &summary.fai_items {
+            let item_id = item.item_id.unwrap();
+            let special_object = objects.iter().find(|object| object.item_id == item_id);
+            assert_eq!(
+                mapi_mailstore::fai_debug_state_origin(
+                    COMMON_VIEWS_FOLDER_ID,
+                    special_object,
+                    item_id
+                ),
+                "sql_associated"
+            );
+        }
+    }
+
+    #[test]
+    fn inbox_fai_fasttransfer_boundaries_cover_six_persisted_items() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_associated_configs(persisted_inbox_associated_configs(account_id));
+        let objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
+        let buffer = associated_content_sync_buffer(account_id, INBOX_FOLDER_ID, &objects);
+
+        let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+
+        assert_fai_boundary_summary(&buffer, &summary, 6);
+        let summary_property_count = summary
+            .fai_items
+            .iter()
+            .map(|item| item.property_tags.len())
+            .sum::<usize>();
+        assert!(summary_property_count >= summary.fai_items.len());
+        for item in &summary.fai_items {
+            let item_id = item.item_id.unwrap();
+            let special_object = objects.iter().find(|object| object.item_id == item_id);
+            assert_eq!(
+                mapi_mailstore::fai_debug_state_origin(INBOX_FOLDER_ID, special_object, item_id),
+                "sql_associated"
+            );
+        }
+    }
+
     #[test]
     fn import_rop_success_responses_return_zero_object_ids() {
         let import_change = RopRequest {
