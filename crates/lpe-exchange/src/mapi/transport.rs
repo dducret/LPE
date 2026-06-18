@@ -767,6 +767,8 @@ fn log_mapi_session_disconnect(
     let logon_identity = session.logon_identity.clone().unwrap_or_default();
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
     let special_folder_contract_summary = special_folder_contract_summary(session);
+    let required_default_folder_coverage =
+        required_default_folder_disconnect_coverage_summary(session);
     let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
     let partial_scope_checkpoint_not_stored_count =
         partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions);
@@ -829,6 +831,7 @@ fn log_mapi_session_disconnect(
             all_live_sync_sources_completed = all_sync_sources_completed,
             sync_source_summaries = %sync_source_summaries,
             completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+            required_default_folder_coverage = %required_default_folder_coverage,
             partial_scope_checkpoint_not_stored_count,
             partial_scope_checkpoint_not_stored_expected,
             total_transfer_buffer_bytes,
@@ -853,6 +856,34 @@ fn log_mapi_session_disconnect(
                     "disconnect_remaining_handle_review"
                 },
             "rca debug mapi disconnect remaining handles"
+        );
+    }
+
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && post_hierarchy_summary.content_sync_configure_observed
+    {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            required_default_folder_coverage = %required_default_folder_coverage,
+            completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+            special_folder_contract_summary = %special_folder_contract_summary,
+            recent_execute_summaries = %recent_execute_summaries,
+            clean_client_close_after_sync,
+            all_sync_sources_completed,
+            outlook_profile_stage = %outlook_profile_stage,
+            next_expected_client_step = %next_expected_client_step,
+            next_debug_focus = "outlook_default_folder_content_coverage",
+            "rca debug mapi default folder disconnect coverage"
         );
     }
 
@@ -930,6 +961,7 @@ fn log_mapi_session_disconnect(
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
+        required_default_folder_coverage = %required_default_folder_coverage,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
@@ -997,6 +1029,7 @@ fn log_mapi_session_disconnect(
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         special_folder_contract_summary = %special_folder_contract_summary,
+        required_default_folder_coverage = %required_default_folder_coverage,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
@@ -1046,6 +1079,7 @@ fn log_mapi_session_disconnect(
             },
         recent_execute_summaries = %recent_execute_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
+        required_default_folder_coverage = %required_default_folder_coverage,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
@@ -1226,6 +1260,89 @@ fn special_folder_contract_summary(session: &MapiSession) -> String {
                 .is_some_and(|root_id| root_id == *folder_id);
             format!(
                 "{role}=0x{folder_id:016x};source={source};opened={opened};checkpointed={checkpointed};hierarchy_root={hierarchy_root}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn required_default_folder_disconnect_coverage_summary(session: &MapiSession) -> String {
+    const REQUIRED_DEFAULT_FOLDERS: &[(&str, u64, &str, u64)] = &[
+        ("inbox", INBOX_FOLDER_ID, "logon", IPM_SUBTREE_FOLDER_ID),
+        ("outbox", OUTBOX_FOLDER_ID, "logon", IPM_SUBTREE_FOLDER_ID),
+        ("sent", SENT_FOLDER_ID, "logon", IPM_SUBTREE_FOLDER_ID),
+        ("trash", TRASH_FOLDER_ID, "logon", IPM_SUBTREE_FOLDER_ID),
+        (
+            "drafts",
+            DRAFTS_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+        (
+            "contacts",
+            CONTACTS_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+        (
+            "calendar",
+            CALENDAR_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+        (
+            "journal",
+            JOURNAL_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+        (
+            "notes",
+            NOTES_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+        (
+            "tasks",
+            TASKS_FOLDER_ID,
+            "default_ipm",
+            IPM_SUBTREE_FOLDER_ID,
+        ),
+    ];
+    let request_contracts = session
+        .post_hierarchy_actions
+        .request_contract_sequence
+        .join("|");
+    let last_hierarchy_root = session
+        .post_hierarchy_actions
+        .last_completed_hierarchy_sync_root;
+
+    REQUIRED_DEFAULT_FOLDERS
+        .iter()
+        .map(|(role, folder_id, advertised_source, parent_folder_id)| {
+            let opened = session
+                .post_hierarchy_actions
+                .opened_folder_ids
+                .contains(folder_id);
+            let content_checkpointed = session
+                .post_hierarchy_actions
+                .completed_sync_checkpoint_folder_ids
+                .contains(folder_id);
+            let hierarchy_row_expected_present = last_hierarchy_root.is_some_and(|root_id| {
+                root_id == ROOT_FOLDER_ID
+                    || root_id == *parent_folder_id
+                    || root_id == *folder_id
+            });
+            let folder_hex = format!("0x{folder_id:016x}");
+            let pre_content_contract_seen =
+                request_contracts.contains(role) || request_contracts.contains(&folder_hex);
+            let live_handle_count = session
+                .handles
+                .values()
+                .filter(|object| object.folder_id() == Some(*folder_id))
+                .count();
+            format!(
+                "{role}:folder={folder_hex};advertised_source={advertised_source};parent=0x{parent_folder_id:016x};hierarchy_row_expected_present={hierarchy_row_expected_present};opened={opened};pre_content_contract_seen={pre_content_contract_seen};content_checkpointed={content_checkpointed};live_handle_count={live_handle_count}"
             )
         })
         .collect::<Vec<_>>()
@@ -2787,6 +2904,45 @@ mod tests {
 
         assert!(summary.contains("conversation_history=0x0000000000250001;source=additional_ren"));
         assert!(summary.contains("archive=0x0000000000230001;source=additional_ren"));
+    }
+
+    #[test]
+    fn required_default_folder_disconnect_coverage_reports_calendar_contacts_gap() {
+        let mut handles = HashMap::new();
+        handles.insert(
+            5,
+            MapiObject::Folder {
+                folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        let mut session = test_session(handles);
+        session.record_completed_hierarchy_sync(
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "folder=0x0000000000040001;status=0x0003".to_string(),
+            "calendar:row_present=true;contacts:row_present=true".to_string(),
+        );
+        session.record_opened_folder(crate::mapi::identity::CALENDAR_FOLDER_ID);
+        session.record_post_hierarchy_request_contract(
+            "GetPropertiesSpecific(kind=folder;folder=0x0000000000100001;role=calendar)->ok"
+                .to_string(),
+        );
+        session.record_completed_sync_checkpoint(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            "inbox",
+            "IPF.Note",
+            "content",
+            0x01,
+            "ok",
+        );
+
+        let coverage = required_default_folder_disconnect_coverage_summary(&session);
+
+        assert!(coverage.contains("calendar:folder=0x0000000000100001"));
+        assert!(coverage.contains("calendar:folder=0x0000000000100001;advertised_source=default_ipm;parent=0x0000000000040001;hierarchy_row_expected_present=true;opened=true;pre_content_contract_seen=true;content_checkpointed=false;live_handle_count=1"));
+        assert!(coverage.contains("contacts:folder=0x00000000000f0001;advertised_source=default_ipm;parent=0x0000000000040001;hierarchy_row_expected_present=true;opened=false;pre_content_contract_seen=false;content_checkpointed=false;live_handle_count=0"));
+        assert!(coverage.contains("inbox:folder=0x0000000000050001"));
+        assert!(coverage.contains("content_checkpointed=true"));
     }
 
     #[test]
