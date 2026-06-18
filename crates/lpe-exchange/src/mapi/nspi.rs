@@ -174,6 +174,7 @@ pub(in crate::mapi) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_CONTAINER_FLAGS: u32 = 0x3600_0003;
 const PID_TAG_DEPTH: u32 = 0x3005_0003;
+const PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID: u32 = 0xFFFC_0102;
 const PID_TAG_ADDRESS_BOOK_CONTAINER_ID: u32 = 0xFFFD_0003;
 const PID_TAG_ADDRESS_BOOK_IS_MASTER: u32 = 0xFFFB_000B;
 const AB_RECIPIENTS: u32 = 0x0000_0001;
@@ -186,6 +187,7 @@ const NSPI_UNICODE_STRINGS_FLAG: u32 = 0x0000_0004;
 struct NspiSpecialTableContainer {
     display_name: &'static str,
     dn: &'static str,
+    parent_dn: Option<&'static str>,
     container_id: u32,
     depth: u32,
     flags: u32,
@@ -196,6 +198,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "Global Address List",
         dn: "/",
+        parent_dn: None,
         container_id: 0,
         depth: 0,
         flags: AB_RECIPIENTS | AB_SUBCONTAINERS | AB_UNMODIFIABLE,
@@ -204,6 +207,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Users",
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f11",
+        parent_dn: Some("/"),
         container_id: 2,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -212,6 +216,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Groups",
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f12",
+        parent_dn: Some("/"),
         container_id: 3,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -220,6 +225,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Contacts",
         dn: "/guid=741f6fd38e1a654f9d422dfb451c8f13",
+        parent_dn: Some("/"),
         container_id: 4,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -1431,6 +1437,7 @@ pub(in crate::mapi) fn nspi_special_table_response(
         PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
         0x3001_001F,
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
+        PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
     ];
     let rows = NSPI_SPECIAL_TABLE_CONTAINERS
         .iter()
@@ -1477,7 +1484,10 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
 fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     let mut table_row = Vec::new();
     write_u32(&mut table_row, 0);
-    write_u32(&mut table_row, 6);
+    write_u32(
+        &mut table_row,
+        if container.parent_dn.is_some() { 7 } else { 6 },
+    );
     write_address_book_tagged_property_value(
         &mut table_row,
         PID_TAG_ENTRY_ID,
@@ -1508,6 +1518,13 @@ fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
         &NspiValue::Bool(container.is_master),
     );
+    if let Some(parent_dn) = container.parent_dn {
+        write_address_book_tagged_property_value(
+            &mut table_row,
+            PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
+            &NspiValue::OwnedBinary(nspi_container_entry_id(parent_dn)),
+        );
+    }
     table_row
 }
 
