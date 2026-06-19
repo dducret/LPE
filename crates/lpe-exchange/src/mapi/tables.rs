@@ -1145,7 +1145,7 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if default_view_supported_container_class(message_class) => {
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if special_folder_projects_default_view(folder_id) => {
             default_folder_view_entry_id(mailbox_guid, folder_id)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
@@ -5400,6 +5400,20 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         PUBLIC_FOLDERS_ROOT_FOLDER_ID => ("Public Folders", 0, "IPF.Note", true),
         _ => ("Root", 0, "", true),
     }
+}
+
+fn special_folder_projects_default_view(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        INBOX_FOLDER_ID
+            | OUTBOX_FOLDER_ID
+            | SENT_FOLDER_ID
+            | TRASH_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | JUNK_FOLDER_ID
+            | ARCHIVE_FOLDER_ID
+            | CONVERSATION_HISTORY_FOLDER_ID
+    )
 }
 
 fn special_folder_type(folder_id: u64) -> u32 {
@@ -10701,9 +10715,29 @@ mod tests {
         let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
         for folder_id in [
             INBOX_FOLDER_ID,
-            DEFERRED_ACTION_FOLDER_ID,
+            OUTBOX_FOLDER_ID,
             SENT_FOLDER_ID,
+            TRASH_FOLDER_ID,
+            DRAFTS_FOLDER_ID,
+            JUNK_FOLDER_ID,
+            ARCHIVE_FOLDER_ID,
+            CONVERSATION_HISTORY_FOLDER_ID,
+        ] {
+            assert!(matches!(
+                special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
+                Some(MapiValue::Binary(value)) if !value.is_empty()
+            ));
+        }
+        for folder_id in [
+            IPM_SUBTREE_FOLDER_ID,
+            DEFERRED_ACTION_FOLDER_ID,
             FREEBUSY_DATA_FOLDER_ID,
+            SYNC_ISSUES_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+            RSS_FEEDS_FOLDER_ID,
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
             CALENDAR_FOLDER_ID,
             CONTACTS_FOLDER_ID,
             JOURNAL_FOLDER_ID,
@@ -10713,10 +10747,10 @@ mod tests {
             IM_CONTACT_LIST_FOLDER_ID,
             QUICK_STEP_SETTINGS_FOLDER_ID,
         ] {
-            assert!(matches!(
+            assert_eq!(
                 special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
-                Some(MapiValue::Binary(value)) if !value.is_empty()
-            ));
+                None
+            );
         }
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
