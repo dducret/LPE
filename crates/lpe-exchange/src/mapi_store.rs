@@ -553,6 +553,16 @@ fn is_empty_synthetic_inbox_associated_config(config: &MapiAssociatedConfigRecor
         })
 }
 
+fn is_empty_outlook_inbox_named_view_placeholder(config: &MapiAssociatedConfigRecord) -> bool {
+    config.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+        && config.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+        && config.subject == "Compact"
+        && config
+            .properties_json
+            .as_object()
+            .is_some_and(|object| object.is_empty())
+}
+
 fn is_empty_outlook_rule_organizer_placeholder(config: &MapiAssociatedConfigRecord) -> bool {
     config.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
         && config.message_class == OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
@@ -1270,6 +1280,7 @@ impl MapiMailStoreSnapshot {
                 .filter(|config| {
                     !is_transient_outlook_migration_associated_config_class(&config.message_class)
                         && !is_empty_synthetic_inbox_associated_config(config)
+                        && !is_empty_outlook_inbox_named_view_placeholder(config)
                 })
                 .map(|config| MapiAssociatedConfigMessage {
                     id: mapi_item_id(&config.id),
@@ -2472,6 +2483,23 @@ impl<T: ExchangeStore> MapiStore for T {
                     folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
                     dropped_empty_synthetic_inbox_configs,
                     "rca debug mapi dropped empty synthetic inbox associated configs"
+                );
+            }
+            let dropped_empty_named_view_configs = associated_configs
+                .iter()
+                .filter(|config| is_empty_outlook_inbox_named_view_placeholder(config))
+                .count();
+            if dropped_empty_named_view_configs > 0 {
+                associated_configs
+                    .retain(|config| !is_empty_outlook_inbox_named_view_placeholder(config));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    account_id = %account_id,
+                    folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
+                    dropped_empty_named_view_configs,
+                    message_class = OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
+                    "rca debug mapi dropped empty inbox named view associated config"
                 );
             }
             let dropped_empty_rule_organizer_configs = associated_configs
@@ -3714,6 +3742,40 @@ mod tests {
     fn inbox_associated_config_bootstrap_persists_no_outlook_defaults() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         log_outlook_inbox_associated_config_bootstrap(account_id, &[], &[], &[]);
+    }
+
+    #[test]
+    fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let stale_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000077);
+        crate::mapi::identity::remember_mapi_identity(
+            stale_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 77,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: stale_id,
+                account_id,
+                folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                message_class: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
+                subject: "Compact".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+
+        let messages =
+            snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
+        assert!(messages
+            .iter()
+            .all(|message| { message.message_class != OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS }));
+        assert!(!snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 77,
+            )
+        ));
     }
 
     #[test]

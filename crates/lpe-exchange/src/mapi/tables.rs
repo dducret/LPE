@@ -3831,6 +3831,14 @@ fn message_class_restriction_matches_exact(
 }
 
 fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
+    if message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+        && message.subject == "Compact"
+    {
+        return message
+            .properties_json
+            .as_object()
+            .is_some_and(|object| object.is_empty());
+    }
     if !message.message_class.starts_with("IPM.Configuration.")
         || message.message_class == "IPM.Configuration.UMOLK.UserOptions"
     {
