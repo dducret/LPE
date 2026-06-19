@@ -22215,6 +22215,17 @@ where
         let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
         let reserved_global_counter =
             crate::mapi::identity::global_counter_from_store_id(default.id);
+        let persisted_properties = message_list_settings_placeholder_persisted_properties(&default);
+        let saved = store
+            .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+                id: Some(default.canonical_id),
+                account_id: principal.account_id,
+                folder_id: default.folder_id,
+                message_class: default.message_class.clone(),
+                subject: default.subject.clone(),
+                properties_json: mapi_properties_to_json(&persisted_properties),
+            })
+            .await?;
         let message_id = remember_created_mapi_identity(
             store,
             principal,
@@ -22229,9 +22240,9 @@ where
                 id: default.canonical_id,
                 account_id: principal.account_id,
                 folder_id: default.folder_id,
-                message_class: default.message_class,
-                subject: default.subject,
-                properties_json: default.properties_json,
+                message_class: saved.message_class,
+                subject: saved.subject,
+                properties_json: saved.properties_json,
             },
             message_id,
         ));
@@ -22256,6 +22267,31 @@ where
     )
     .await?;
     Ok((saved, message_id))
+}
+
+fn message_list_settings_placeholder_persisted_properties(
+    default: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> HashMap<u32, MapiValue> {
+    HashMap::from([
+        (
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String(default.message_class.clone()),
+        ),
+        (
+            PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
+            MapiValue::String(default.message_class.clone()),
+        ),
+        (PID_TAG_SUBJECT_W, MapiValue::String(default.subject.clone())),
+        (
+            PID_TAG_NORMALIZED_SUBJECT_W,
+            MapiValue::String(default.subject.clone()),
+        ),
+        (PID_TAG_ROAMING_DATATYPES, MapiValue::U32(0x0000_0004)),
+        (
+            PID_TAG_ROAMING_DICTIONARY,
+            MapiValue::Binary(minimal_roaming_dictionary_stream()),
+        ),
+    ])
 }
 
 fn is_empty_inbox_message_list_settings_placeholder(
@@ -24113,7 +24149,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_inbox_message_list_settings_save_is_transient() {
+    fn empty_inbox_message_list_settings_save_gets_persistable_stream_defaults() {
         let properties = HashMap::from([
             (
                 PID_TAG_MESSAGE_CLASS_W,
@@ -24142,6 +24178,25 @@ mod tests {
             INBOX_FOLDER_ID,
             "IPM.Configuration.MessageListSettings",
             &with_payload
+        ));
+
+        let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
+        let persisted = message_list_settings_placeholder_persisted_properties(&default);
+        assert_eq!(
+            persisted
+                .get(&PID_TAG_ROAMING_DATATYPES)
+                .cloned()
+                .and_then(MapiValue::into_u32),
+            Some(0x0000_0004)
+        );
+        assert!(matches!(
+            persisted.get(&PID_TAG_ROAMING_DICTIONARY),
+            Some(MapiValue::Binary(bytes)) if !bytes.is_empty()
+        ));
+        assert!(!is_empty_inbox_message_list_settings_placeholder(
+            INBOX_FOLDER_ID,
+            "IPM.Configuration.MessageListSettings",
+            &persisted
         ));
     }
 

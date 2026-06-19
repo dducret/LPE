@@ -11833,7 +11833,7 @@ fn configuration_roaming_datatypes(properties: &HashMap<u32, MapiValue>) -> u32 
     }
 }
 
-fn minimal_roaming_dictionary_stream() -> Vec<u8> {
+pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {
     br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
 }
 
