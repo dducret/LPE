@@ -131,15 +131,9 @@ pub(in crate::mapi) fn associated_folder_message_count(
             .delegate_freebusy_messages()
             .len()
             .min(u32::MAX as usize) as u32
-    } else if !snapshot
-        .associated_config_messages_for_folder(folder_id)
-        .is_empty()
-    {
-        snapshot
-            .associated_config_messages_for_folder(folder_id)
-            .into_iter()
-            .filter(|message| associated_config_visible_in_table(folder_id, None, message))
-            .count()
+    } else if has_associated_table_rows(folder_id, snapshot) {
+        associated_table_rows(folder_id, snapshot, None, Uuid::nil())
+            .len()
             .min(u32::MAX as usize) as u32
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
@@ -185,15 +179,62 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
             })
             .count()
     } else {
-        snapshot
-            .associated_config_messages_for_folder(folder_id)
-            .iter()
-            .filter(|message| {
-                restriction_matches_associated_config(restriction, message)
-                    && associated_config_visible_in_table(folder_id, restriction, message)
-            })
-            .count()
+        associated_table_rows(folder_id, snapshot, restriction, mailbox_guid).len()
     }
+}
+
+#[derive(Clone)]
+enum AssociatedTableRow {
+    Config(MapiAssociatedConfigMessage),
+    NamedView(MapiCommonViewNamedViewMessage),
+}
+
+fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
+    !snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .is_empty()
+        || default_folder_associated_named_view(snapshot, folder_id).is_some()
+}
+
+fn associated_table_rows(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> Vec<AssociatedTableRow> {
+    let mut rows = snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .into_iter()
+        .filter(|message| {
+            restriction_matches_associated_config(restriction, message)
+                && associated_config_visible_in_table(folder_id, restriction, message)
+        })
+        .map(AssociatedTableRow::Config)
+        .collect::<Vec<_>>();
+    if let Some(view) = default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(restriction, &view, mailbox_guid) {
+            rows.push(AssociatedTableRow::NamedView(view));
+        }
+    }
+    rows
+}
+
+fn default_folder_associated_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| role_for_folder_id(folder_id).map(|_| special_folder_metadata(folder_id).2))?;
+    default_view_supported_folder(folder_id, container_class)
+        .then(|| {
+            snapshot.default_folder_named_view_message(
+                folder_id,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+        })
+        .flatten()
 }
 
 pub(in crate::mapi) fn restriction_matches_common_views_message(
@@ -1537,11 +1578,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             }))
                 {
                     default_calendar_configuration_property_tags()
-                } else if *associated
-                    && !snapshot
-                        .associated_config_messages_for_folder(*folder_id)
-                        .is_empty()
-                {
+                } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
                     default_associated_config_columns()
                 } else {
                     default_contents_columns()
@@ -1631,27 +1668,17 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         })
                         .map(|message| serialize_conversation_action_row(message, &columns))
                         .collect::<Vec<_>>()
-                } else if !snapshot
-                    .associated_config_messages_for_folder(*folder_id)
-                    .is_empty()
-                {
-                    let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
-                    rows.retain(|message| {
-                        restriction_matches_associated_config(restriction.as_ref(), message)
-                            && associated_config_visible_in_table(
-                                *folder_id,
-                                restriction.as_ref(),
-                                message,
-                            )
-                    });
-                    sort_associated_config_messages(&mut rows, sort_orders);
+                } else if has_associated_table_rows(*folder_id, snapshot) {
+                    let mut rows = associated_table_rows(
+                        *folder_id,
+                        snapshot,
+                        restriction.as_ref(),
+                        mailbox_guid,
+                    );
+                    sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
                     rows.iter()
                         .map(|message| {
-                            serialize_associated_config_row_with_mailbox_guid(
-                                message,
-                                mailbox_guid,
-                                &columns,
-                            )
+                            serialize_associated_table_row(message, mailbox_guid, &columns)
                         })
                         .collect::<Vec<_>>()
                 } else if *folder_id == CALENDAR_FOLDER_ID
@@ -2047,11 +2074,7 @@ fn query_rows_response_columns(
                         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar))
             {
                 default_calendar_configuration_property_tags()
-            } else if *associated
-                && !snapshot
-                    .associated_config_messages_for_folder(*folder_id)
-                    .is_empty()
-            {
+            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
                 default_associated_config_columns()
             } else {
                 default_contents_columns()
@@ -2181,12 +2204,9 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             position,
             ..
         }) if *associated && *folder_id == INBOX_FOLDER_ID => {
-            let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
-            rows.retain(|message| {
-                restriction_matches_associated_config(restriction.as_ref(), message)
-                    && associated_config_visible_in_table(*folder_id, restriction.as_ref(), message)
-            });
-            sort_associated_config_messages(&mut rows, sort_orders);
+            let mut rows =
+                associated_table_rows(*folder_id, snapshot, restriction.as_ref(), mailbox_guid);
+            sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
                 .map(|index| {
@@ -2194,17 +2214,11 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                     classify_outlook_bootstrap_row_invariants(
                         index,
                         "inbox_associated",
-                        message.id,
+                        associated_table_row_id(message),
                         None,
                         None,
                         None,
-                        |tag| {
-                            associated_config_property_value_with_mailbox_guid(
-                                message,
-                                mailbox_guid,
-                                tag,
-                            )
-                        },
+                        |tag| associated_table_row_property_value(message, mailbox_guid, tag),
                     )
                 })
                 .collect()
@@ -2512,11 +2526,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
             {
                 default_calendar_configuration_property_tags()
-            } else if *associated
-                && !snapshot
-                    .associated_config_messages_for_folder(*folder_id)
-                    .is_empty()
-            {
+            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
                 default_associated_config_columns()
             } else {
                 match snapshot
@@ -2883,32 +2893,41 @@ pub(in crate::mapi) fn sort_mapi_messages(
     });
 }
 
-fn sort_associated_config_messages(
-    rows: &mut [MapiAssociatedConfigMessage],
+fn sort_associated_table_rows(
+    rows: &mut [AssociatedTableRow],
     sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
 ) {
     if sort_orders.is_empty() {
         return;
     }
     rows.sort_by(|left, right| {
         for sort_order in sort_orders {
-            let ordering = match sort_order.property_tag {
-                PID_TAG_MESSAGE_CLASS_W => {
-                    compare_case_insensitive(&left.message_class, &right.message_class)
-                }
-                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
-                    compare_case_insensitive(&left.subject, &right.subject)
-                }
-                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_MID => left.id.cmp(&right.id),
-                _ => Ordering::Equal,
-            };
+            let left_value =
+                associated_table_row_property_value(left, mailbox_guid, sort_order.property_tag);
+            let right_value =
+                associated_table_row_property_value(right, mailbox_guid, sort_order.property_tag);
+            let ordering = compare_optional_mapi_values(left_value, right_value);
             let ordering = apply_sort_direction(ordering, sort_order.order);
             if ordering != Ordering::Equal {
                 return ordering;
             }
         }
-        left.id.cmp(&right.id)
+        associated_table_row_id(left).cmp(&associated_table_row_id(right))
     });
+}
+
+fn compare_optional_mapi_values(left: Option<MapiValue>, right: Option<MapiValue>) -> Ordering {
+    match (left, right) {
+        (Some(MapiValue::String(left)), Some(MapiValue::String(right))) => {
+            compare_case_insensitive(&left, &right)
+        }
+        (Some(MapiValue::U64(left)), Some(MapiValue::U64(right))) => left.cmp(&right),
+        (Some(MapiValue::I64(left)), Some(MapiValue::I64(right))) => left.cmp(&right),
+        (Some(MapiValue::U32(left)), Some(MapiValue::U32(right))) => left.cmp(&right),
+        (Some(MapiValue::I32(left)), Some(MapiValue::I32(right))) => left.cmp(&right),
+        _ => Ordering::Equal,
+    }
 }
 
 pub(in crate::mapi) fn sort_common_views_messages(
@@ -3943,11 +3962,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
-                } else if *associated
-                    && !snapshot
-                        .associated_config_messages_for_folder(*folder_id)
-                        .is_empty()
-                {
+                } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
                     default_associated_config_columns()
                 } else {
                     default_contents_columns()
@@ -4070,20 +4085,15 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_find_row_no_match_response(request);
                 }
-            } else if *associated
-                && !snapshot
-                    .associated_config_messages_for_folder(*folder_id)
-                    .is_empty()
-            {
-                let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
-                rows.retain(|message| {
-                    associated_config_visible_in_table(*folder_id, Some(&restriction), message)
-                });
-                sort_associated_config_messages(&mut rows, sort_orders);
+            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+                let mut rows =
+                    associated_table_rows(*folder_id, snapshot, Some(&restriction), mailbox_guid);
+                sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
                 let broad_outlook_configuration_probe = *folder_id == INBOX_FOLDER_ID
                     && is_broad_outlook_configuration_find_row(&restriction);
                 let suppressed_virtual_default_count = if broad_outlook_configuration_probe {
                     rows.iter()
+                        .filter_map(associated_table_row_config)
                         .filter(|message| {
                             crate::mapi_store::is_outlook_inbox_default_associated_config_id(
                                 message.id,
@@ -4109,28 +4119,31 @@ pub(in crate::mapi) fn rop_find_row_response(
                         "rca debug outlook associated config broad find row virtual defaults suppressed"
                     );
                 }
-                let rows = rows.iter().collect::<Vec<_>>();
+                let row_refs = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
-                    find_row(rows.as_slice(), *position, request, |message| {
+                    find_row(row_refs.as_slice(), *position, request, |message| {
                         if broad_outlook_configuration_probe
-                            && crate::mapi_store::is_outlook_inbox_default_associated_config_id(
-                                message.id,
-                            )
+                            && associated_table_row_config(message).is_some_and(|config| {
+                                crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                                    config.id,
+                                )
+                            })
                         {
                             return false;
                         }
-                        restriction_matches_associated_config(Some(&restriction), message)
+                        associated_table_row_matches(message, Some(&restriction), mailbox_guid)
                     })
                 {
                     let exact_virtual_row_probe = *folder_id == INBOX_FOLDER_ID
-                        && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
-                            message.id,
-                        )
-                        && !associated_config_visible_in_table(
-                            *folder_id,
-                            table_restriction.as_ref(),
-                            message,
-                        );
+                        && associated_table_row_config(message).is_some_and(|config| {
+                            crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
+                                config.id,
+                            ) && !associated_config_visible_in_table(
+                                *folder_id,
+                                table_restriction.as_ref(),
+                                config,
+                            )
+                        });
                     if exact_virtual_row_probe {
                         *table_restriction = Some(restriction.clone());
                         *position = 0;
@@ -4144,7 +4157,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                             folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
                             associated = true,
                             matched_row_index = index,
-                            matched_message_class = %message.message_class,
+                            matched_message_class = %associated_table_row_message_class(message),
                             "rca debug outlook associated config exact virtual find row followup query restricted"
                         );
                     } else {
@@ -4162,18 +4175,14 @@ pub(in crate::mapi) fn rop_find_row_response(
                             folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
                             associated = true,
                             matched_row_index = index,
-                            matched_message_class = %message.message_class,
+                            matched_message_class = %associated_table_row_message_class(message),
                             "rca debug outlook associated config broad find row followup query restricted"
                         );
                     }
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_associated_config_row_with_mailbox_guid(
-                            message,
-                            mailbox_guid,
-                            &columns,
-                        ),
+                        &serialize_associated_table_row(message, mailbox_guid, &columns),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -8995,9 +9004,13 @@ mod tests {
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_named_view_config() {
-        assert_inbox_associated_find_row_no_match_for_message_class(
+        let response = inbox_associated_find_row_response_for_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
         );
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     }
 
     #[test]
@@ -9647,10 +9660,10 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
         assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
@@ -11469,6 +11482,74 @@ pub(in crate::mapi) fn serialize_associated_config_row_with_mailbox_guid(
         }
     }
     row
+}
+
+fn serialize_associated_table_row(
+    message: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+    }
+}
+
+fn associated_table_row_property_value(
+    message: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
+    }
+}
+
+fn associated_table_row_matches(
+    message: &AssociatedTableRow,
+    restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> bool {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            restriction_matches_associated_config(restriction, message)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            restriction_matches_common_view_named_view(restriction, message, mailbox_guid)
+        }
+    }
+}
+
+fn associated_table_row_config(
+    message: &AssociatedTableRow,
+) -> Option<&MapiAssociatedConfigMessage> {
+    match message {
+        AssociatedTableRow::Config(message) => Some(message),
+        AssociatedTableRow::NamedView(_) => None,
+    }
+}
+
+fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
+    match message {
+        AssociatedTableRow::Config(message) => message.id,
+        AssociatedTableRow::NamedView(message) => message.id,
+    }
+}
+
+fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
+    match message {
+        AssociatedTableRow::Config(message) => &message.message_class,
+        AssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
+    }
 }
 
 pub(in crate::mapi) fn associated_config_property_value(

@@ -243,7 +243,10 @@ non-canonical LPE state.
   named-view rows. Outlook-visible non-mail folders, including Calendar and
   Contacts, use folder-local synthetic `IPM.Microsoft.FolderDesign.NamedView`
   defaults so clients can open the advertised `PidTagDefaultViewEntryId` without
-  exposing non-mail view definitions as Common Views FAI rows.
+  exposing non-mail view definitions as Common Views FAI rows. Supported
+  Outlook-visible folders also expose their folder-local default named view
+  through associated-contents table discovery when clients restrict on
+  `IPM.Microsoft.FolderDesign.NamedView`.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
