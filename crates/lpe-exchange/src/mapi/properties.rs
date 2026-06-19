@@ -4,6 +4,10 @@ use super::sync::*;
 use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
+use crate::mapi::identity::{
+    RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID, RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
+    RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
+};
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
     MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
@@ -1454,7 +1458,10 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
-            if default_view_supported_container_class(folder_message_class(mailbox)) =>
+            if default_view_supported_folder(
+                mapi_folder_id(mailbox),
+                folder_message_class(mailbox),
+            ) =>
         {
             default_folder_view_entry_id(mailbox_guid, mapi_folder_id(mailbox))
         }
@@ -1639,6 +1646,55 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
     container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
+}
+
+pub(in crate::mapi) fn default_view_supported_folder(
+    folder_id: u64,
+    container_class: &str,
+) -> bool {
+    if !default_view_supported_container_class(container_class) {
+        return false;
+    }
+    if matches!(
+        folder_id,
+        INBOX_FOLDER_ID
+            | OUTBOX_FOLDER_ID
+            | SENT_FOLDER_ID
+            | TRASH_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | JUNK_FOLDER_ID
+            | ARCHIVE_FOLDER_ID
+            | CONVERSATION_HISTORY_FOLDER_ID
+    ) {
+        return true;
+    }
+    !matches!(
+        folder_id,
+        ROOT_FOLDER_ID
+            | DEFERRED_ACTION_FOLDER_ID
+            | SPOOLER_QUEUE_FOLDER_ID
+            | IPM_SUBTREE_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | SCHEDULE_FOLDER_ID
+            | SEARCH_FOLDER_ID
+            | VIEWS_FOLDER_ID
+            | SHORTCUTS_FOLDER_ID
+            | FREEBUSY_DATA_FOLDER_ID
+            | SYNC_ISSUES_FOLDER_ID
+            | CONFLICTS_FOLDER_ID
+            | LOCAL_FAILURES_FOLDER_ID
+            | SERVER_FAILURES_FOLDER_ID
+            | RSS_FEEDS_FOLDER_ID
+            | TRACKED_MAIL_PROCESSING_FOLDER_ID
+            | TODO_SEARCH_FOLDER_ID
+            | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+            | RECOVERABLE_ITEMS_ROOT_FOLDER_ID
+            | RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
+            | RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
+            | RECOVERABLE_ITEMS_PURGES_FOLDER_ID
+            | QUICK_STEP_SETTINGS_FOLDER_ID
+            | PUBLIC_FOLDERS_ROOT_FOLDER_ID
+    )
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
@@ -8072,6 +8128,27 @@ mod tests {
                 account_id,
             ),
             Some(MapiValue::Binary(expected_entry_id))
+        );
+    }
+
+    #[test]
+    fn mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
+        let mailbox = mailbox(
+            "57575757-5757-4757-9757-575757575757",
+            None,
+            "sync_issues",
+            "Sync Issues",
+        );
+
+        assert_eq!(
+            mailbox_property_value_with_context_for_account(
+                &mailbox,
+                &[],
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                account_id,
+            ),
+            None
         );
     }
 

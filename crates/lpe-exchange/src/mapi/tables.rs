@@ -1145,7 +1145,9 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if special_folder_projects_default_view(folder_id) => {
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            if default_view_supported_folder(folder_id, message_class) =>
+        {
             default_folder_view_entry_id(mailbox_guid, folder_id)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
@@ -5400,20 +5402,6 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         PUBLIC_FOLDERS_ROOT_FOLDER_ID => ("Public Folders", 0, "IPF.Note", true),
         _ => ("Root", 0, "", true),
     }
-}
-
-fn special_folder_projects_default_view(folder_id: u64) -> bool {
-    matches!(
-        folder_id,
-        INBOX_FOLDER_ID
-            | OUTBOX_FOLDER_ID
-            | SENT_FOLDER_ID
-            | TRASH_FOLDER_ID
-            | DRAFTS_FOLDER_ID
-            | JUNK_FOLDER_ID
-            | ARCHIVE_FOLDER_ID
-            | CONVERSATION_HISTORY_FOLDER_ID
-    )
 }
 
 fn special_folder_type(folder_id: u64) -> u32 {
