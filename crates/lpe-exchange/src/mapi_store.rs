@@ -249,6 +249,7 @@ const OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE6);
 const OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE5);
+const OUTLOOK_MAIL_FAVORITES_GROUP_NAME: &str = "Favorites";
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
 const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
@@ -620,14 +621,14 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
             id: OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID,
             folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
             canonical_id: crate::mapi::properties::default_wlink_group_uuid(),
-            subject: "Mail".to_string(),
+            subject: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
             target_folder_id: None,
             shortcut_type: 4,
             flags: 0,
             section: 1,
             ordinal: 0,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: "Mail".to_string(),
+            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
         },
         MapiNavigationShortcutMessage {
             id: OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID,
@@ -640,7 +641,7 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
             section: 1,
             ordinal: 127,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: "Mail".to_string(),
+            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
         },
         MapiNavigationShortcutMessage {
             id: OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID,
@@ -653,7 +654,7 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
             section: 1,
             ordinal: 128,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: "Mail".to_string(),
+            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
         },
         MapiNavigationShortcutMessage {
             id: OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID,
@@ -666,7 +667,7 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
             section: 1,
             ordinal: 129,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: "Mail".to_string(),
+            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
         },
     ]
 }
@@ -1213,22 +1214,29 @@ impl MapiMailStoreSnapshot {
         let persisted_navigation_shortcuts = navigation_shortcuts
             .into_iter()
             .filter(|shortcut| !is_synthetic_common_views_group_header(shortcut))
-            .map(|shortcut| MapiNavigationShortcutMessage {
-                id: mapi_item_id(&shortcut.id),
-                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                canonical_id: shortcut.id,
-                subject: shortcut.subject,
-                target_folder_id: shortcut.target_folder_id,
-                shortcut_type: shortcut.shortcut_type,
-                flags: shortcut.flags,
-                section: shortcut.section,
-                ordinal: shortcut.ordinal,
-                group_header_id: Some(
+            .map(|shortcut| {
+                let group_header_id = Some(
                     shortcut
                         .group_header_id
                         .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
-                ),
-                group_name: shortcut.group_name,
+                );
+                MapiNavigationShortcutMessage {
+                    id: mapi_item_id(&shortcut.id),
+                    folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                    canonical_id: shortcut.id,
+                    subject: shortcut.subject,
+                    target_folder_id: shortcut.target_folder_id,
+                    shortcut_type: shortcut.shortcut_type,
+                    flags: shortcut.flags,
+                    section: shortcut.section,
+                    ordinal: shortcut.ordinal,
+                    group_header_id,
+                    group_name: normalize_navigation_shortcut_group_name(
+                        shortcut.section,
+                        group_header_id,
+                        &shortcut.group_name,
+                    ),
+                }
             })
             .collect::<Vec<_>>();
         let persisted_navigation_shortcut_summary =
@@ -3096,7 +3104,7 @@ fn deduplicate_navigation_shortcuts(
 fn common_views_table_projects_navigation_shortcut(
     shortcut: &MapiNavigationShortcutMessage,
 ) -> bool {
-    if shortcut.section != 1 || shortcut.group_name != "Mail" {
+    if shortcut.section != 1 || shortcut.group_name != OUTLOOK_MAIL_FAVORITES_GROUP_NAME {
         return false;
     }
     if shortcut.shortcut_type == 4 {
@@ -3108,6 +3116,23 @@ fn common_views_table_projects_navigation_shortcut(
             | Some(crate::mapi::identity::SENT_FOLDER_ID)
             | Some(crate::mapi::identity::TRASH_FOLDER_ID)
     )
+}
+
+fn normalize_navigation_shortcut_group_name(
+    section: u32,
+    group_header_id: Option<Uuid>,
+    group_name: &str,
+) -> String {
+    if section == 1
+        && group_header_id == Some(crate::mapi::properties::default_wlink_group_uuid())
+        && (group_name.trim().is_empty()
+            || group_name.eq_ignore_ascii_case("Mail")
+            || group_name.eq_ignore_ascii_case(OUTLOOK_MAIL_FAVORITES_GROUP_NAME))
+    {
+        OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string()
+    } else {
+        group_name.to_string()
+    }
 }
 
 fn is_synthetic_common_views_group_header(shortcut: &MapiNavigationShortcutRecord) -> bool {
@@ -3126,19 +3151,22 @@ fn materialize_default_mail_group_header(shortcuts: &mut Vec<MapiNavigationShort
         shortcut.shortcut_type != 4
             && shortcut.section == 1
             && shortcut.group_header_id == Some(default_group_id)
-            && shortcut.group_name == "Mail"
+            && shortcut.group_name == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
     });
     let has_default_mail_header = shortcuts.iter().any(|shortcut| {
         shortcut.shortcut_type == 4
             && shortcut.section == 1
             && shortcut.group_header_id == Some(default_group_id)
-            && shortcut.group_name == "Mail"
+            && shortcut.group_name == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
     });
 
     if has_default_mail_link && !has_default_mail_header {
         if let Some(header) = outlook_common_views_default_navigation_shortcuts()
             .into_iter()
-            .find(|shortcut| shortcut.shortcut_type == 4 && shortcut.group_name == "Mail")
+            .find(|shortcut| {
+                shortcut.shortcut_type == 4
+                    && shortcut.group_name == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
+            })
         {
             shortcuts.push(header);
         }
@@ -4371,7 +4399,8 @@ mod tests {
             .iter()
             .find_map(|message| match message {
                 MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.subject == "Mail" && shortcut.shortcut_type == 4 =>
+                    if shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
+                        && shortcut.shortcut_type == 4 =>
                 {
                     Some(shortcut)
                 }
@@ -4379,7 +4408,7 @@ mod tests {
             })
             .expect("default mail navigation group header");
         assert_eq!(default_header.target_folder_id, None);
-        assert_eq!(default_header.group_name, "Mail");
+        assert_eq!(default_header.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
         assert_eq!(
             default_header.group_header_id,
             Some(default_wlink_group_uuid())
@@ -4400,7 +4429,10 @@ mod tests {
             default_shortcut.target_folder_id,
             Some(crate::mapi::identity::INBOX_FOLDER_ID)
         );
-        assert_eq!(default_shortcut.group_name, "Mail");
+        assert_eq!(
+            default_shortcut.group_name,
+            OUTLOOK_MAIL_FAVORITES_GROUP_NAME
+        );
         for (subject, target_folder_id) in [
             ("Sent", crate::mapi::identity::SENT_FOLDER_ID),
             ("Trash", crate::mapi::identity::TRASH_FOLDER_ID),
@@ -4417,7 +4449,7 @@ mod tests {
                 })
                 .expect("default mail navigation shortcut");
             assert_eq!(shortcut.target_folder_id, Some(target_folder_id));
-            assert_eq!(shortcut.group_name, "Mail");
+            assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
         }
         let named_views = messages
             .iter()
@@ -4498,6 +4530,7 @@ mod tests {
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
+        assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
         assert_eq!(messages.len(), 6);
         assert_eq!(
             messages
@@ -4505,7 +4538,8 @@ mod tests {
                 .filter(|message| matches!(
                     message,
                     MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                        if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                        if shortcut.shortcut_type == 4
+                            && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
                 ))
                 .count(),
             1
@@ -4627,20 +4661,22 @@ mod tests {
         assert!(!shortcuts.iter().any(|shortcut| {
             shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID
                 && shortcut.shortcut_type == 4
-                && shortcut.subject == "Mail"
+                && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
                 && shortcut.group_header_id == Some(group_uuid)
         }));
         assert!(!snapshot.common_views_messages().any(|message| matches!(
             message,
             MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                if shortcut.shortcut_type == 4
+                    && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
         )));
         assert!(snapshot
             .common_views_table_messages()
             .any(|message| matches!(
                 message,
                 MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                    if shortcut.shortcut_type == 4
+                        && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
             )));
         assert_eq!(
             snapshot
@@ -4648,7 +4684,8 @@ mod tests {
                 .filter(|message| matches!(
                     message,
                     MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                        if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                        if shortcut.shortcut_type == 4
+                            && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
                 ))
                 .count(),
             1

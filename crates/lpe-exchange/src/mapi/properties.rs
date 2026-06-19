@@ -2494,7 +2494,11 @@ pub(crate) fn default_wlink_group_uuid() -> Uuid {
 
 fn wlink_group_name(message: &MapiNavigationShortcutMessage) -> String {
     if message.group_name.trim().is_empty() {
-        "Mail".to_string()
+        if message.section == 1 {
+            "Favorites".to_string()
+        } else {
+            "Mail".to_string()
+        }
     } else {
         message.group_name.clone()
     }
