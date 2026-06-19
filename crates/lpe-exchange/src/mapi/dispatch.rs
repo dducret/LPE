@@ -2883,6 +2883,7 @@ fn format_inbox_associated_query_context(
         format_debug_property_tags(&selected_columns),
         format_debug_sort_orders(sort_orders),
         format_inbox_associated_query_row_window(
+            mailbox_guid,
             *position,
             request.query_forward_read(),
             requested_row_count,
@@ -2950,6 +2951,7 @@ fn format_inbox_associated_find_context(
         format_debug_sort_orders(sort_orders),
         format_debug_restriction(request_restriction_bytes(request)),
         format_inbox_associated_query_row_window(
+            mailbox_guid,
             *position,
             true,
             1,
@@ -8739,6 +8741,7 @@ fn format_outlook_query_row_window(
     }
     if folder_id == INBOX_FOLDER_ID {
         return format_inbox_associated_query_row_window(
+            account_id,
             position,
             forward_read,
             row_count,
@@ -8820,15 +8823,11 @@ fn format_outlook_query_row_values(
             .collect::<Vec<_>>()
             .join("|");
     }
-    let mut rows = snapshot.associated_config_messages_for_folder(folder_id);
+    let mut rows = debug_associated_table_rows(folder_id, snapshot, restriction, account_id);
     if rows.is_empty() {
         return String::new();
     }
-    rows.retain(|message| {
-        restriction_matches_associated_config(restriction, message)
-            && associated_config_visible_in_table(folder_id, restriction, message)
-    });
-    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    sort_debug_associated_table_rows(&mut rows, sort_orders, account_id);
     select_query_window(rows.len(), position, forward_read, row_count)
         .iter()
         .map(|index| {
@@ -8836,16 +8835,20 @@ fn format_outlook_query_row_values(
             let values = columns
                 .iter()
                 .map(|tag| {
-                    let value = associated_config_property_value_with_mailbox_guid(
-                        message, account_id, *tag,
-                    )
-                    .map(|value| format_debug_mapi_value(&value))
-                    .unwrap_or_else(|| "default".to_string());
+                    let value = debug_associated_row_property_value(message, account_id, *tag)
+                        .map(|value| format_debug_mapi_value(&value))
+                        .unwrap_or_else(|| "default".to_string());
                     format!("0x{tag:08x}={value}")
                 })
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("index={};id=0x{:016x};{}", index, message.id, values)
+            format!(
+                "index={};id=0x{:016x};class={};{}",
+                index,
+                debug_associated_row_id(message),
+                debug_associated_row_class(message),
+                values
+            )
         })
         .collect::<Vec<_>>()
         .join("|")
@@ -9108,15 +9111,11 @@ fn format_inbox_associated_wire_row_summary(
     if !associated || row_count == 0 || columns.is_empty() {
         return String::new();
     }
-    let mut rows = snapshot.associated_config_messages_for_folder(folder_id);
+    let mut rows = debug_associated_table_rows(folder_id, snapshot, restriction, mailbox_guid);
     if rows.is_empty() {
         return String::new();
     }
-    rows.retain(|message| {
-        restriction_matches_associated_config(restriction, message)
-            && associated_config_visible_in_table(folder_id, restriction, message)
-    });
-    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    sort_debug_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let column_shape = columns
         .iter()
@@ -9127,15 +9126,14 @@ fn format_inbox_associated_wire_row_summary(
         .iter()
         .map(|index| {
             let message = &rows[*index];
-            let values =
-                serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns);
+            let values = serialize_debug_associated_row(message, mailbox_guid, columns);
             let standard_row = standard_property_row_bytes(&values);
             let query_rows_row = query_rows_property_row_bytes(columns, &values);
             format!(
                 "index={};id=0x{:016x};class={};status=0x{:02x};value_len={};standard_len={};query_rows_len={};value_preview={};standard_preview={};query_rows_preview={}",
                 index,
-                message.id,
-                message.message_class,
+                debug_associated_row_id(message),
+                debug_associated_row_class(message),
                 standard_row.first().copied().unwrap_or(0xff),
                 values.len(),
                 standard_row.len(),
@@ -9355,7 +9353,142 @@ fn common_views_link_row_expected_default(property_tag: u32) -> bool {
     )
 }
 
+#[derive(Clone)]
+enum DebugAssociatedTableRow {
+    Config(crate::mapi_store::MapiAssociatedConfigMessage),
+    NamedView(crate::mapi_store::MapiCommonViewNamedViewMessage),
+}
+
+fn debug_associated_table_rows(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> Vec<DebugAssociatedTableRow> {
+    let mut rows = snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .into_iter()
+        .filter(|message| {
+            restriction_matches_associated_config(restriction, message)
+                && associated_config_visible_in_table(folder_id, restriction, message)
+        })
+        .map(DebugAssociatedTableRow::Config)
+        .collect::<Vec<_>>();
+    if let Some(view) = debug_default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(restriction, &view, mailbox_guid) {
+            rows.push(DebugAssociatedTableRow::NamedView(view));
+        }
+    }
+    rows
+}
+
+fn debug_default_folder_associated_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| advertised_special_folder_container_class(folder_id))?;
+    default_view_supported_folder(folder_id, container_class)
+        .then(|| {
+            snapshot.default_folder_named_view_message(
+                folder_id,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+        })
+        .flatten()
+}
+
+fn sort_debug_associated_table_rows(
+    rows: &mut [DebugAssociatedTableRow],
+    sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = compare_debug_mapi_values(
+                debug_associated_row_property_value(left, mailbox_guid, sort_order.property_tag),
+                debug_associated_row_property_value(right, mailbox_guid, sort_order.property_tag),
+            );
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        debug_associated_row_id(left).cmp(&debug_associated_row_id(right))
+    });
+}
+
+fn compare_debug_mapi_values(left: Option<MapiValue>, right: Option<MapiValue>) -> Ordering {
+    match (left, right) {
+        (Some(MapiValue::String(left)), Some(MapiValue::String(right))) => {
+            compare_case_insensitive(&left, &right)
+        }
+        (Some(MapiValue::U64(left)), Some(MapiValue::U64(right))) => left.cmp(&right),
+        (Some(MapiValue::I64(left)), Some(MapiValue::I64(right))) => left.cmp(&right),
+        (Some(MapiValue::U32(left)), Some(MapiValue::U32(right))) => left.cmp(&right),
+        (Some(MapiValue::I32(left)), Some(MapiValue::I32(right))) => left.cmp(&right),
+        _ => Ordering::Equal,
+    }
+}
+
+fn debug_associated_row_property_value(
+    message: &DebugAssociatedTableRow,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match message {
+        DebugAssociatedTableRow::Config(message) => {
+            associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
+        }
+        DebugAssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
+    }
+}
+
+fn debug_associated_row_id(message: &DebugAssociatedTableRow) -> u64 {
+    match message {
+        DebugAssociatedTableRow::Config(message) => message.id,
+        DebugAssociatedTableRow::NamedView(message) => message.id,
+    }
+}
+
+fn debug_associated_row_class(message: &DebugAssociatedTableRow) -> &str {
+    match message {
+        DebugAssociatedTableRow::Config(message) => &message.message_class,
+        DebugAssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
+    }
+}
+
+fn debug_associated_row_subject(message: &DebugAssociatedTableRow) -> &str {
+    match message {
+        DebugAssociatedTableRow::Config(message) => &message.subject,
+        DebugAssociatedTableRow::NamedView(message) => &message.name,
+    }
+}
+
+fn serialize_debug_associated_row(
+    message: &DebugAssociatedTableRow,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    match message {
+        DebugAssociatedTableRow::Config(message) => {
+            serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        DebugAssociatedTableRow::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+    }
+}
+
 fn format_inbox_associated_query_row_window(
+    account_id: Uuid,
     position: usize,
     forward_read: bool,
     row_count: usize,
@@ -9363,12 +9496,8 @@ fn format_inbox_associated_query_row_window(
     restriction: Option<&MapiRestriction>,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
-    rows.retain(|message| {
-        restriction_matches_associated_config(restriction, message)
-            && associated_config_visible_in_table(INBOX_FOLDER_ID, restriction, message)
-    });
-    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    let mut rows = debug_associated_table_rows(INBOX_FOLDER_ID, snapshot, restriction, account_id);
+    sort_debug_associated_table_rows(&mut rows, sort_orders, account_id);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
         .iter()
@@ -9376,7 +9505,10 @@ fn format_inbox_associated_query_row_window(
             let message = &rows[*index];
             format!(
                 "index={};id=0x{:016x};class={};subject={}",
-                index, message.id, message.message_class, message.subject
+                index,
+                debug_associated_row_id(message),
+                debug_associated_row_class(message),
+                debug_associated_row_subject(message)
             )
         })
         .collect::<Vec<_>>()
@@ -23819,6 +23951,7 @@ mod tests {
         };
 
         let window = format_inbox_associated_query_row_window(
+            account_id,
             0,
             true,
             2,
@@ -23867,6 +24000,88 @@ mod tests {
             "{wire}"
         );
         assert!(!wire.contains("IPM.Configuration.EAS"), "{wire}");
+    }
+
+    #[test]
+    fn inbox_associated_named_view_debug_summaries_include_synthetic_row() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let restriction = MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String("IPM.Microsoft.FolderDesign.NamedView".to_string()),
+        };
+        let columns = [
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_VIEW_DESCRIPTOR_VERSION,
+        ];
+
+        let window = format_inbox_associated_query_row_window(
+            account_id,
+            0,
+            true,
+            1,
+            &[],
+            Some(&restriction),
+            &snapshot,
+        );
+        let values = format_outlook_query_row_values(
+            account_id,
+            INBOX_FOLDER_ID,
+            true,
+            0,
+            true,
+            1,
+            &[],
+            Some(&restriction),
+            &columns,
+            &snapshot,
+        );
+        let wire = format_inbox_associated_wire_row_summary(
+            account_id,
+            INBOX_FOLDER_ID,
+            true,
+            0,
+            true,
+            1,
+            &[],
+            Some(&restriction),
+            &columns,
+            &snapshot,
+        );
+
+        assert!(window.contains("total=1"), "{window}");
+        assert!(
+            window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            "{window}"
+        );
+        assert!(
+            values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            "{values}"
+        );
+        assert!(
+            values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
+            "{values}"
+        );
+        assert!(
+            values.contains(&format!(
+                "0x674a0014={}",
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+            )),
+            "{values}"
+        );
+        assert!(values.contains("0x683a0003=8"), "{values}");
+        assert!(wire.contains("total=1"), "{wire}");
+        assert!(wire.contains("returned=1"), "{wire}");
+        assert!(
+            wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            "{wire}"
+        );
+        assert!(wire.contains("value_len=32"), "{wire}");
+        assert!(wire.contains("query_rows_len=33"), "{wire}");
     }
 
     #[test]
