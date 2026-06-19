@@ -2939,6 +2939,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
         PID_TAG_PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
         PID_TAG_STORAGE_QUOTA_LIMIT => "PidTagStorageQuotaLimit",
+        PID_TAG_EXTENDED_RULE_SIZE_LIMIT => "PidTagExtendedRuleSizeLimit",
         PID_TAG_PST_PATH_W => "PidTagPstPath",
         PID_TAG_ATTACH_NUM => "PidTagAttachNumber",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
@@ -7643,6 +7644,10 @@ mod tests {
         );
         assert_eq!(property_tag_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
         assert_eq!(
+            property_tag_debug_name(PID_TAG_EXTENDED_RULE_SIZE_LIMIT),
+            "PidTagExtendedRuleSizeLimit"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_ATTACH_NUM),
             "PidTagAttachNumber"
         );
@@ -7674,6 +7679,45 @@ mod tests {
         };
 
         assert_eq!(request.search_criteria_folder_ids(), None);
+    }
+
+    #[test]
+    fn logon_getprops_projects_extended_rule_size_limit() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_EXTENDED_RULE_SIZE_LIMIT.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&MapiObject::Logon),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[7..11].try_into().unwrap()),
+            35 * 1024
+        );
     }
 
     #[test]

@@ -428,6 +428,7 @@ pub(in crate::mapi) const PID_TAG_PROHIBIT_RECEIVE_QUOTA: u32 = 0x666A_0003;
 pub(in crate::mapi) const PID_TAG_MAX_SUBMIT_MESSAGE_SIZE: u32 = 0x666D_0003;
 pub(in crate::mapi) const PID_TAG_PROHIBIT_SEND_QUOTA: u32 = 0x666E_0003;
 pub(in crate::mapi) const PID_TAG_STORAGE_QUOTA_LIMIT: u32 = 0x3FF5_0003;
+pub(in crate::mapi) const PID_TAG_EXTENDED_RULE_SIZE_LIMIT: u32 = 0x0E9B_0003;
 pub(in crate::mapi) const PID_TAG_PST_PATH_W: u32 = 0x6700_001F;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_SENT_MAIL_SVR_EID: u32 = 0x6740_00FB;
@@ -932,7 +933,9 @@ pub(in crate::mapi) fn logon_property_value(
         | PID_TAG_STORAGE_QUOTA_LIMIT => principal
             .quota_mb
             .map(|value| MapiValue::U32(value.saturating_mul(1024))),
-        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => Some(MapiValue::U32(35 * 1024)),
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE | PID_TAG_EXTENDED_RULE_SIZE_LIMIT => {
+            Some(MapiValue::U32(35 * 1024))
+        }
         PID_TAG_PST_PATH_W => Some(MapiValue::String(String::new())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
@@ -11517,6 +11520,10 @@ mod tests {
 
         assert_eq!(
             logon_property_value(&principal, PID_TAG_MAX_SUBMIT_MESSAGE_SIZE),
+            Some(MapiValue::U32(35 * 1024))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_EXTENDED_RULE_SIZE_LIMIT),
             Some(MapiValue::U32(35 * 1024))
         );
         assert_eq!(
