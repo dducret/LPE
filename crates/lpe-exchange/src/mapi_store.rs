@@ -1929,7 +1929,7 @@ impl MapiMailStoreSnapshot {
         let mut table_shortcuts = shortcuts.clone();
         materialize_default_mail_group_header(&mut table_shortcuts);
         for default_shortcut in outlook_common_views_default_navigation_shortcuts() {
-            if !shortcuts.iter().any(|shortcut| {
+            if !table_shortcuts.iter().any(|shortcut| {
                 shortcut.target_folder_id == default_shortcut.target_folder_id
                     && shortcut.shortcut_type == default_shortcut.shortcut_type
                     && shortcut.section == default_shortcut.section
@@ -4394,7 +4394,18 @@ mod tests {
             .expect("persisted shortcut");
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
-        assert_eq!(messages.len(), 7);
+        assert_eq!(messages.len(), 6);
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| matches!(
+                    message,
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                ))
+                .count(),
+            1
+        );
         assert!(snapshot
             .navigation_shortcut_table_message_for_id(0)
             .is_none());
@@ -4527,6 +4538,17 @@ mod tests {
                 MapiCommonViewsMessage::NavigationShortcut(shortcut)
                     if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
             )));
+        assert_eq!(
+            snapshot
+                .common_views_table_messages()
+                .filter(|message| matches!(
+                    message,
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.shortcut_type == 4 && shortcut.subject == "Mail"
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
