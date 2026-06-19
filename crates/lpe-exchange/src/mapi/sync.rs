@@ -1433,10 +1433,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             ))
         }
         MapiObject::CommonViewNamedView { folder_id, view_id } => {
-            let message = snapshot.common_view_named_view_message_for_id(*view_id)?;
-            if message.folder_id != *folder_id {
-                return None;
-            }
+            let message = snapshot.named_view_message_for_folder_and_id(*folder_id, *view_id)?;
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(

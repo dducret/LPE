@@ -4074,8 +4074,7 @@ fn property_stream_data(
                 )
             }),
         MapiObject::CommonViewNamedView { folder_id, view_id } => snapshot
-            .common_view_named_view_message_for_id(*view_id)
-            .filter(|message| message.folder_id == *folder_id)
+            .named_view_message_for_folder_and_id(*folder_id, *view_id)
             .and_then(|message| {
                 common_view_named_view_property_value(&message, mailbox_guid, property_tag)
             }),

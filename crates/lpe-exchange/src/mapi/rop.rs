@@ -1105,8 +1105,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         }
         Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => {
             let Some(message) = snapshot
-                .common_view_named_view_message_for_id(*view_id)
-                .filter(|message| message.folder_id == *folder_id)
+                .named_view_message_for_folder_and_id(*folder_id, *view_id)
             else {
                 return rop_error_response(
                     0x07,
@@ -3366,8 +3365,7 @@ pub(in crate::mapi) fn serialize_object_property(
                 value
             }),
         Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => snapshot
-            .common_view_named_view_message_for_id(*view_id)
-            .filter(|message| message.folder_id == *folder_id)
+            .named_view_message_for_folder_and_id(*folder_id, *view_id)
             .map(|message| {
                 serialize_common_view_named_view_row_with_mailbox_guid(
                     &message,
@@ -7833,6 +7831,45 @@ mod tests {
             u32::from_le_bytes(response[2..6].try_into().unwrap()),
             0x8004_010F
         );
+    }
+
+    #[test]
+    fn folder_default_named_view_getprops_projects_message_class() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let object = MapiObject::CommonViewNamedView {
+            folder_id: INBOX_FOLDER_ID,
+            view_id: crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert!(response.windows(2).any(|bytes| bytes == b"I\0"));
     }
 
     fn test_accessible_calendar_event(

@@ -2020,6 +2020,16 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn named_view_message_for_folder_and_id(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<MapiCommonViewNamedViewMessage> {
+        self.common_view_named_view_message_for_id(item_id)
+            .or_else(|| self.default_folder_named_view_message(folder_id, item_id))
+            .filter(|message| message.folder_id == folder_id)
+    }
+
     pub(crate) fn default_folder_named_view_message(
         &self,
         folder_id: u64,
