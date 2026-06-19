@@ -8786,7 +8786,11 @@ fn log_outlook_contents_table_find_row(
         *associated,
         &view_handoff_table_contract,
     );
-    if response_return_value == 0 && response_found == 1 && found_row_value_summary.is_empty() {
+    if response_return_value == 0
+        && response_found == 1
+        && found_row_value_summary.is_empty()
+        && normal_message_find_row_summary.is_empty()
+    {
         tracing::warn!(
             rca_debug = true,
             adapter = "mapi",
