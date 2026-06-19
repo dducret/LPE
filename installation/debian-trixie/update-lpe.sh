@@ -64,6 +64,13 @@ install_magika() {
   rm -rf "${temp_dir}"
 }
 
+run_npm() {
+  local ignored_warning='npm warn Unknown builtin config "globalignorefile". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.'
+  npm "$@" 2> >(
+    grep -v -F "${ignored_warning}" >&2
+  )
+}
+
 git config --global --add safe.directory "${SRC_DIR}" || true
 
 RUSTUP_BIN="$(command -v rustup || true)"
@@ -1655,11 +1662,11 @@ cd "${SRC_DIR}"
 systemctl stop "${SERVICE_NAME}" || true
 "${CARGO_BIN}" build --release -p lpe-cli
 cd "${SRC_DIR}/web/admin"
-npm ci
-npm run build
+run_npm ci
+run_npm run build
 cd "${SRC_DIR}/web/client"
-npm ci
-npm run build
+run_npm ci
+run_npm run build
 
 install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
 install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
