@@ -237,6 +237,8 @@ pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF6);
 pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
+pub(crate) const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
 const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
 const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
@@ -344,6 +346,10 @@ pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> boo
         item_id,
         OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID | OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
     )
+}
+
+pub(crate) fn is_outlook_default_folder_named_view_id(item_id: u64) -> bool {
+    item_id == OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
 }
 
 pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u64) -> bool {
@@ -2004,6 +2010,21 @@ impl MapiMailStoreSnapshot {
         outlook_common_views_default_named_views()
             .into_iter()
             .find(|message| message.id == item_id)
+    }
+
+    pub(crate) fn default_folder_named_view_message(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<MapiCommonViewNamedViewMessage> {
+        is_outlook_default_folder_named_view_id(item_id).then(|| MapiCommonViewNamedViewMessage {
+            id: OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001),
+            name: "Compact".to_string(),
+            view_flags: 14_745_605,
+            view_type: 8,
+        })
     }
 
     pub(crate) fn associated_config_messages_for_folder(

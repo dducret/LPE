@@ -1163,6 +1163,9 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
         return "virtual_common_view_named_view";
     }
+    if mapi_store::is_outlook_default_folder_named_view_id(object_id) {
+        return "virtual_folder_named_view";
+    }
     if mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id) {
         return "virtual_common_view_navigation_shortcut";
     }
@@ -1185,6 +1188,7 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
         || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
         || mapi_store::is_outlook_contact_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
+        || mapi_store::is_outlook_default_folder_named_view_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
         || mapi_store::is_outlook_local_freebusy_message_id(object_id)
@@ -1938,7 +1942,9 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         }
         MapiObject::CommonViewNamedView { folder_id, view_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            if !mapi_store::is_outlook_common_views_default_named_view_id(*view_id) {
+            if !mapi_store::is_outlook_common_views_default_named_view_id(*view_id)
+                && !mapi_store::is_outlook_default_folder_named_view_id(*view_id)
+            {
                 push_unique(&mut plan.object_ids, *view_id);
             }
         }
@@ -2959,6 +2965,22 @@ mod tests {
             vec![COMMON_VIEWS_FOLDER_ID],
             "plan={plan:?}"
         );
+    }
+
+    #[test]
+    fn access_plan_does_not_fetch_default_folder_named_view_identity() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::CommonViewNamedView {
+                folder_id: CONTACTS_FOLDER_ID,
+                view_id: mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            },
+        );
+
+        let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
+
+        assert_eq!(plan.object_ids, vec![CONTACTS_FOLDER_ID], "plan={plan:?}");
     }
 
     #[test]

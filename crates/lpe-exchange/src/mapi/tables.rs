@@ -1148,7 +1148,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(folder_id, message_class) =>
         {
-            default_folder_view_entry_id(mailbox_guid, folder_id)
+            default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),

@@ -5874,10 +5874,12 @@ fn common_view_named_view_message_for_open(
     folder_id: u64,
     message_id: u64,
 ) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
-    (folder_id == COMMON_VIEWS_FOLDER_ID)
-        .then(|| snapshot.common_view_named_view_message_for_id(message_id))
-        .flatten()
-        .filter(|message| message.folder_id == folder_id)
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        return snapshot
+            .common_view_named_view_message_for_id(message_id)
+            .filter(|message| message.folder_id == folder_id);
+    }
+    snapshot.default_folder_named_view_message(folder_id, message_id)
 }
 
 fn format_debug_property_tags(tags: &[u32]) -> String {
@@ -11084,6 +11086,23 @@ where
                         0,
                     ));
                     output_handles.push(handle);
+                } else if let Some(message) =
+                    common_view_named_view_message_for_open(snapshot, folder_id, message_id)
+                {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::CommonViewNamedView {
+                            folder_id,
+                            view_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &message.name,
+                        0,
+                    ));
+                    output_handles.push(handle);
                 } else if folder_id == COMMON_VIEWS_FOLDER_ID {
                     if let Some(message) =
                         navigation_shortcut_message_for_open(snapshot, folder_id, message_id)
@@ -11099,23 +11118,6 @@ where
                         responses.extend_from_slice(&rop_open_message_response(
                             &request,
                             &message.subject,
-                            0,
-                        ));
-                        output_handles.push(handle);
-                    } else if let Some(message) =
-                        common_view_named_view_message_for_open(snapshot, folder_id, message_id)
-                    {
-                        let handle = session.allocate_output_handle(
-                            request.output_handle_index,
-                            MapiObject::CommonViewNamedView {
-                                folder_id,
-                                view_id: message_id,
-                            },
-                        );
-                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                        responses.extend_from_slice(&rop_open_message_response(
-                            &request,
-                            &message.name,
                             0,
                         ));
                         output_handles.push(handle);
@@ -23222,6 +23224,20 @@ mod tests {
         );
 
         assert!(selected.is_none());
+    }
+
+    #[test]
+    fn folder_default_named_view_open_materializes_for_target_folder() {
+        let selected = common_view_named_view_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            CONTACTS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        );
+
+        assert_eq!(
+            selected.map(|message| (message.folder_id, message.name)),
+            Some((CONTACTS_FOLDER_ID, "Compact".to_string()))
+        );
     }
 
     #[test]

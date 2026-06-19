@@ -1463,7 +1463,11 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
                 folder_message_class(mailbox),
             ) =>
         {
-            default_folder_view_entry_id(mailbox_guid, mapi_folder_id(mailbox))
+            default_folder_view_entry_id(
+                mailbox_guid,
+                mapi_folder_id(mailbox),
+                folder_message_class(mailbox),
+            )
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
@@ -1566,7 +1570,7 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         PID_TAG_DEFAULT_VIEW_ENTRY_ID if default_view_supported_container_class(message_class) => {
-            default_folder_view_entry_id(mailbox_guid, folder_id)
+            default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
@@ -1645,7 +1649,11 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
+    matches!(
+        container_class,
+        "IPF.Appointment" | "IPF.Contact" | "IPF.Task" | "IPF.StickyNote" | "IPF.Journal"
+    ) || container_class == "IPF.Note"
+        || container_class.starts_with("IPF.Note.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
@@ -1699,14 +1707,40 @@ pub(in crate::mapi) fn default_view_supported_folder(
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
     mailbox_guid: Uuid,
-    _folder_id: u64,
+    folder_id: u64,
+    container_class: &str,
 ) -> Option<MapiValue> {
-    crate::mapi::identity::message_entry_id_from_object_ids(
-        mailbox_guid,
-        COMMON_VIEWS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-    )
-    .map(MapiValue::Binary)
+    let (view_folder_id, view_id) = if default_view_uses_common_views(container_class, folder_id) {
+        (
+            COMMON_VIEWS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        )
+    } else {
+        (
+            folder_id,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+    };
+    crate::mapi::identity::message_entry_id_from_object_ids(mailbox_guid, view_folder_id, view_id)
+        .map(MapiValue::Binary)
+}
+
+pub(in crate::mapi) fn default_view_uses_common_views(
+    container_class: &str,
+    folder_id: u64,
+) -> bool {
+    (container_class == "IPF.Note" || container_class.starts_with("IPF.Note."))
+        && matches!(
+            folder_id,
+            INBOX_FOLDER_ID
+                | OUTBOX_FOLDER_ID
+                | SENT_FOLDER_ID
+                | TRASH_FOLDER_ID
+                | DRAFTS_FOLDER_ID
+                | JUNK_FOLDER_ID
+                | ARCHIVE_FOLDER_ID
+                | CONVERSATION_HISTORY_FOLDER_ID
+        )
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
@@ -1785,7 +1819,11 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
                 folder.kind,
             )) =>
         {
-            default_folder_view_entry_id(folder.collection.owner_account_id, folder.id)
+            default_folder_view_entry_id(
+                folder.collection.owner_account_id,
+                folder.id,
+                collaboration_folder_message_class(folder.kind),
+            )
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(IPM_SUBTREE_FOLDER_ID)),
@@ -8187,14 +8225,20 @@ mod tests {
             ),
             Some(MapiValue::String("IPM.Contact".to_string()))
         );
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            CONTACTS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            Some(MapiValue::Binary(expected_entry_id))
         );
     }
 
     #[test]
-    fn collaboration_calendar_does_not_advertise_mail_default_view() {
+    fn collaboration_calendar_advertises_folder_local_default_view() {
         let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
         let collection = MapiCollaborationFolder {
             id: CALENDAR_FOLDER_ID,
@@ -8221,9 +8265,15 @@ mod tests {
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             Some(MapiValue::String("IPM.Appointment".to_string()))
         );
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            CALENDAR_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            Some(MapiValue::Binary(expected_entry_id))
         );
     }
 
