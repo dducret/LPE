@@ -278,7 +278,7 @@ const OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
 const OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEA);
 const OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE2);
 const OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE: u64 = 0x7FFF_FE00_0000;
 const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
