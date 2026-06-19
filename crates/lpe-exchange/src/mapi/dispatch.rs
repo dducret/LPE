@@ -94,6 +94,41 @@ fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
     )
 }
 
+fn advertised_special_folder_container_class(folder_id: u64) -> Option<&'static str> {
+    role_for_folder_id(folder_id)?;
+    Some(match folder_id {
+        CALENDAR_FOLDER_ID => "IPF.Appointment",
+        CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID => {
+            "IPF.Contact"
+        }
+        QUICK_CONTACTS_FOLDER_ID => "IPF.Contact.MOC.QuickContacts",
+        IM_CONTACT_LIST_FOLDER_ID => "IPF.Contact.MOC.ImContactList",
+        TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPF.Task",
+        NOTES_FOLDER_ID => "IPF.StickyNote",
+        JOURNAL_FOLDER_ID => "IPF.Journal",
+        RSS_FEEDS_FOLDER_ID => "IPF.Note.OutlookHomepage",
+        _ => "IPF.Note",
+    })
+}
+
+fn folder_local_default_named_view_is_supported(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> bool {
+    snapshot
+        .default_folder_named_view_message(folder_id, message_id)
+        .is_some_and(|_| {
+            let container_class = snapshot
+                .collaboration_folder_for_id(folder_id)
+                .map(|folder| collaboration_folder_message_class(folder.kind))
+                .or_else(|| advertised_special_folder_container_class(folder_id));
+            container_class.is_some_and(|container_class| {
+                default_view_supported_folder(folder_id, container_class)
+            })
+        })
+}
+
 fn search_folder_handle_properties(
     definition: &SearchFolderDefinition,
     folder_id: u64,
@@ -15045,6 +15080,10 @@ where
                         } else {
                             record_sync_upload_content_checkpoint(session, folder_id);
                         }
+                        continue;
+                    }
+                    if folder_local_default_named_view_is_supported(snapshot, folder_id, message_id)
+                    {
                         continue;
                     }
                     if let Some(item) = snapshot.public_folder_item_for_id(folder_id, message_id) {

@@ -60,6 +60,26 @@ Read additional documents only when they are directly relevant to the change:
 
 Do not read unrelated documentation "just in case". Minimize the amount of context sent to agents.
 
+## Microsoft Protocol Documentation
+
+For Microsoft protocol, Outlook, Exchange, EWS, ActiveSync, Autodiscover, NSPI,
+EMSMDB, ROP, MAPI over HTTP, ICS, FastTransfer, and related interoperability
+work, query official Microsoft Learn Open Specifications first.
+
+Use `docs/microsoft/` as the project reference area:
+
+- check `docs/microsoft/protocol-sources.toml` before downloading references
+- keep cached Microsoft PDFs, DOCX files, HTML exports, ZIP files, and extracted
+  full-text copies under `docs/microsoft/cache/`
+- record the official Learn URL, download URL, publication version or date,
+  local cache path, SHA256, and exact sections relied on in
+  `docs/microsoft/protocol-sources.toml`
+- do not commit Microsoft protocol documents or extracted full-text copies
+  outside the cache, and do not commit cached copies unless redistribution has
+  been explicitly reviewed and approved
+- cite Microsoft documents by protocol ID and section in LPE code comments,
+  tests, and architecture notes instead of copying long specification text
+
 ## Stalwart Reference
 
 Stalwart is a product and architecture benchmark only.

@@ -246,7 +246,9 @@ non-canonical LPE state.
   exposing non-mail view definitions as Common Views FAI rows. Supported
   Outlook-visible folders also expose their folder-local default named view
   through associated-contents table discovery when clients restrict on
-  `IPM.Microsoft.FolderDesign.NamedView`.
+  `IPM.Microsoft.FolderDesign.NamedView`. Delete attempts against those
+  synthetic folder-local default view rows are acknowledged as no-op success
+  because the rows are compatibility projections, not canonical FAI messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder

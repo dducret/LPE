@@ -16314,6 +16314,49 @@ async fn mapi_over_http_common_views_delete_messages_deletes_navigation_shortcut
 }
 
 #[tokio::test]
+async fn mapi_over_http_delete_folder_local_default_named_view_is_noop_success() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_delete_messages(
+        &mut rops,
+        1,
+        &[crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID],
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x1E, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads() {
     let account = FakeStore::account();
     let store = FakeStore {
