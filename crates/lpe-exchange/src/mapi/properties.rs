@@ -4013,7 +4013,7 @@ pub(in crate::mapi) async fn open_stream_data<S: ExchangeStore>(
 }
 
 fn property_stream_data(
-    session: &MapiSession,
+    session: &mut MapiSession,
     input_handle: u32,
     property_tag: u32,
     open_mode: u8,
@@ -4021,10 +4021,14 @@ fn property_stream_data(
     mailbox_guid: Uuid,
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
-    if open_mode != 0 {
+    let object = session.handles.get(&input_handle)?;
+    let writable_associated_config = matches!(
+        (object, open_mode),
+        (MapiObject::AssociatedConfig { .. }, 1 | 2)
+    );
+    if open_mode != 0 && !writable_associated_config {
         return None;
     }
-    let object = session.handles.get(&input_handle)?;
     let allow_empty_missing_stream = match object {
         MapiObject::AssociatedConfig {
             folder_id,
@@ -4083,10 +4087,20 @@ fn property_stream_data(
     };
     let stream = match value {
         Some(value) => mapi_value_stream_bytes(property_tag, value)?,
-        None if allow_empty_missing_stream => empty_stream_bytes_for_property_tag(property_tag)?,
+        None if allow_empty_missing_stream || writable_associated_config => {
+            empty_stream_bytes_for_property_tag(property_tag)?
+        }
         None => return None,
     };
-    Some((stream, None))
+    let target = if writable_associated_config {
+        Some(StreamWriteTarget::AssociatedConfigProperty {
+            handle: input_handle,
+            property_tag,
+        })
+    } else {
+        None
+    };
+    Some((stream, target))
 }
 
 fn is_empty_virtual_rule_organizer_stream(
@@ -4396,6 +4410,24 @@ pub(in crate::mapi) fn sync_stream_target(
                 None
             }
         }
+        StreamWriteTarget::AssociatedConfigProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::AssociatedConfig {
+                saved_message: Some(message),
+                ..
+            }) = session.handles.get_mut(&handle)
+            {
+                let mut properties = mapi_properties_from_json(&message.properties_json);
+                properties.insert(canonical_property_storage_tag(property_tag), value);
+                message.properties_json = mapi_properties_to_json(&properties);
+                Some(())
+            } else {
+                None
+            }
+        }
         StreamWriteTarget::PublicFolderItemProperty {
             handle,
             property_tag,
@@ -4423,6 +4455,7 @@ pub(in crate::mapi) fn stream_property_value(
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
         }
         PID_TAG_HTML_BINARY => Some(MapiValue::Binary(data)),
+        _ if property_tag_type(property_tag) == 0x0102 => Some(MapiValue::Binary(data)),
         _ => None,
     }
 }
@@ -11032,7 +11065,7 @@ mod tests {
                 view_id,
             },
         );
-        let session = MapiSession {
+        let mut session = MapiSession {
             endpoint: MapiEndpoint::Emsmdb,
             tenant_id: Uuid::nil(),
             account_id,
@@ -11068,7 +11101,7 @@ mod tests {
         let snapshot = MapiMailStoreSnapshot::empty();
 
         let (stream, writable_target) = property_stream_data(
-            &session,
+            &mut session,
             1,
             PID_TAG_VIEW_DESCRIPTOR_BINARY,
             0,
@@ -11084,6 +11117,109 @@ mod tests {
         );
         assert_eq!(stream.len(), 312);
         assert!(writable_target.is_none());
+    }
+
+    #[test]
+    fn associated_config_missing_binary_property_opens_writable_stream() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let config_id = crate::mapi::identity::mapi_store_id(0x15c);
+        let mut handles = std::collections::HashMap::new();
+        handles.insert(
+            1,
+            MapiObject::AssociatedConfig {
+                folder_id: INBOX_FOLDER_ID,
+                config_id,
+                saved_message: Some(MapiAssociatedConfigMessage {
+                    id: config_id,
+                    folder_id: INBOX_FOLDER_ID,
+                    canonical_id: Uuid::from_u128(0x11111111222243338444555555555556),
+                    message_class: "IPM.ExtendedRule.Message".to_string(),
+                    subject: "Junk E-mail Rule".to_string(),
+                    properties_json: serde_json::json!({
+                        "0x001a001f": {
+                            "type": "string",
+                            "value": "IPM.ExtendedRule.Message"
+                        },
+                        "0x0037001f": {
+                            "type": "string",
+                            "value": "Junk E-mail Rule"
+                        }
+                    }),
+                }),
+            },
+        );
+        let mut session = MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "test@example.com".to_string(),
+            created_at: std::time::SystemTime::UNIX_EPOCH,
+            last_seen_at: std::time::SystemTime::UNIX_EPOCH,
+            first_request_type: String::new(),
+            first_request_id: String::new(),
+            last_request_type: String::new(),
+            last_request_id: String::new(),
+            request_count: 0,
+            execute_request_count: 0,
+            next_handle: 2,
+            handles,
+            message_statuses: std::collections::HashMap::new(),
+            saved_search_folder_definitions: std::collections::HashMap::new(),
+            special_folder_aliases: std::collections::HashMap::new(),
+            deleted_advertised_special_folders: std::collections::HashSet::new(),
+            deleted_search_folder_definitions: std::collections::HashSet::new(),
+            named_properties: std::collections::HashMap::new(),
+            named_property_ids: std::collections::HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: std::collections::VecDeque::new(),
+            completed_execute_requests: std::collections::HashMap::new(),
+            completed_execute_request_order: std::collections::VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+            inbox_associated_config_stream_handles: std::collections::HashSet::new(),
+            inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
+            logon_identity: None,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let (stream, writable_target) =
+            property_stream_data(&mut session, 1, 0x0e9a_0102, 1, &[], account_id, &snapshot)
+                .expect("writable extended-rule action stream");
+
+        assert!(stream.is_empty());
+        assert_eq!(
+            writable_target,
+            Some(StreamWriteTarget::AssociatedConfigProperty {
+                handle: 1,
+                property_tag: 0x0e9a_0102
+            })
+        );
+        assert_eq!(write_stream(&mut session, 2, b"ignored"), None);
+        let handle = 2;
+        session.handles.insert(
+            handle,
+            MapiObject::AttachmentStream {
+                data: stream,
+                position: 0,
+                writable_target,
+            },
+        );
+        assert_eq!(
+            write_stream(&mut session, handle, b"rule-actions"),
+            Some(12)
+        );
+        let Some(MapiObject::AssociatedConfig {
+            saved_message: Some(message),
+            ..
+        }) = session.handles.get(&1)
+        else {
+            panic!("expected associated config handle");
+        };
+        assert_eq!(
+            mapi_properties_from_json(&message.properties_json).get(&0x0e9a_0102),
+            Some(&MapiValue::Binary(b"rule-actions".to_vec()))
+        );
     }
 
     #[test]
@@ -11125,7 +11261,7 @@ mod tests {
                 }),
             },
         );
-        let session = MapiSession {
+        let mut session = MapiSession {
             endpoint: MapiEndpoint::Emsmdb,
             tenant_id: Uuid::nil(),
             account_id,
@@ -11161,7 +11297,7 @@ mod tests {
         let snapshot = MapiMailStoreSnapshot::empty();
 
         assert!(property_stream_data(
-            &session,
+            &mut session,
             1,
             OUTLOOK_RULE_ORGANIZER_BINARY_6802,
             0,
@@ -11171,7 +11307,7 @@ mod tests {
         )
         .is_none());
         let (rule_organizer_stream, writable_target) = property_stream_data(
-            &session,
+            &mut session,
             2,
             OUTLOOK_RULE_ORGANIZER_BINARY_6802,
             0,
@@ -11183,7 +11319,7 @@ mod tests {
         assert!(rule_organizer_stream.is_empty());
         assert!(writable_target.is_none());
         let (modeled_stream, writable_target) = property_stream_data(
-            &session,
+            &mut session,
             1,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
             0,

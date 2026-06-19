@@ -137,6 +137,7 @@ pub(in crate::mapi) enum StreamWriteTarget {
     PendingAttachment(u32),
     PendingMessageProperty { handle: u32, property_tag: u32 },
     PendingAssociatedMessageProperty { handle: u32, property_tag: u32 },
+    AssociatedConfigProperty { handle: u32, property_tag: u32 },
     PublicFolderItemProperty { handle: u32, property_tag: u32 },
 }
 
