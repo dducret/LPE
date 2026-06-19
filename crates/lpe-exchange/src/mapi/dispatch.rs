@@ -7583,11 +7583,19 @@ fn log_outlook_contents_table_open(
     associated: bool,
     row_count: u32,
     output_handle: u32,
+    snapshot: &MapiMailStoreSnapshot,
 ) {
     if !is_outlook_folder_table_debug_target(folder_id) {
         return;
     }
 
+    let selected_columns = Vec::new();
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        folder_id,
+        associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7607,7 +7615,15 @@ fn log_outlook_contents_table_open(
         selected_column_source = "none_before_setcolumns",
         selected_property_tag_count = 0,
         selected_property_tags = "",
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table opened"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x05",
+        folder_id,
+        associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -7618,11 +7634,14 @@ fn log_outlook_contents_table_set_columns(
     associated: bool,
     columns: &[u32],
     named_property_context: &str,
+    snapshot: &MapiMailStoreSnapshot,
 ) {
     if !is_outlook_folder_table_debug_target(folder_id) {
         return;
     }
 
+    let view_handoff_table_contract =
+        format_outlook_view_handoff_table_contract(folder_id, associated, columns, snapshot);
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7641,8 +7660,292 @@ fn log_outlook_contents_table_set_columns(
         selected_named_property_context = %named_property_context,
         ipm_configuration_column_contract =
             %format_ipm_configuration_set_columns_contract(folder_id, associated, columns),
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table columns selected"
     );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x12",
+        folder_id,
+        associated,
+        &view_handoff_table_contract,
+    );
+}
+
+fn log_outlook_view_handoff(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    folder_id: u64,
+    message_id: u64,
+    output_handle: u32,
+    message: &crate::mapi_store::MapiCommonViewNamedViewMessage,
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let definition = outlook_mail_view_definition(&message.name);
+    let descriptor_binary = view_descriptor_binary(&definition);
+    let descriptor_strings = view_descriptor_strings(&definition);
+    let descriptor_summary = format_view_descriptor_binary_summary(&descriptor_binary);
+    let descriptor_strings_chars = descriptor_strings.chars().count();
+    let descriptor_strings_utf16_bytes = descriptor_strings.encode_utf16().count() * 2;
+    let source = if folder_id == COMMON_VIEWS_FOLDER_ID {
+        "common_views"
+    } else {
+        "folder_local_default"
+    };
+    let folder_local_default_visible_in_fai_table = folder_id != COMMON_VIEWS_FOLDER_ID
+        && debug_default_folder_associated_named_view(snapshot, folder_id)
+            .is_some_and(|view| view.id == message_id);
+    let view_invariant_warnings = format_view_handoff_invariant_warnings(
+        folder_id,
+        message,
+        &descriptor_binary,
+        &descriptor_strings,
+        folder_local_default_visible_in_fai_table,
+    );
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x03",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        request_output_handle_index = request.output_handle_index.unwrap_or(0),
+        output_handle,
+        view_source = source,
+        view_folder_id = %format!("0x{folder_id:016x}"),
+        view_message_id = %format!("0x{message_id:016x}"),
+        opened_view_id = %format!("0x{:016x}", message.id),
+        view_canonical_id = %format!("0x{:032x}", message.canonical_id),
+        view_name = %message.name,
+        view_message_class = "IPM.Microsoft.FolderDesign.NamedView",
+        view_version = 8u32,
+        view_flags = message.view_flags,
+        view_type = message.view_type,
+        view_entry_id_decoded_folder_id = %format!("0x{folder_id:016x}"),
+        view_entry_id_decoded_message_id = %format!("0x{message_id:016x}"),
+        folder_local_default_visible_in_fai_table,
+        descriptor_binary_len = descriptor_binary.len(),
+        descriptor_strings_chars,
+        descriptor_strings_utf16_bytes,
+        descriptor_summary = %descriptor_summary,
+        associated_config_0e0b_shape = %format!(
+            "same_as_descriptor_binary;bytes={}",
+            descriptor_binary.len()
+        ),
+        required_view_descriptor_version_present = true,
+        required_view_descriptor_name_present = !message.name.is_empty(),
+        required_view_descriptor_binary_present = !descriptor_binary.is_empty(),
+        required_view_descriptor_strings_present = !descriptor_strings.is_empty(),
+        view_invariant_warnings = %view_invariant_warnings,
+        "rca debug outlook view handoff"
+    );
+
+    if !view_invariant_warnings.is_empty() {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x03",
+            view_source = source,
+            view_folder_id = %format!("0x{folder_id:016x}"),
+            view_message_id = %format!("0x{message_id:016x}"),
+            view_invariant_warnings = %view_invariant_warnings,
+            descriptor_summary = %descriptor_summary,
+            message = "rca debug outlook view handoff invariant warning",
+        );
+    }
+}
+
+fn format_view_handoff_invariant_warnings(
+    folder_id: u64,
+    message: &crate::mapi_store::MapiCommonViewNamedViewMessage,
+    descriptor_binary: &[u8],
+    descriptor_strings: &str,
+    folder_local_default_visible_in_fai_table: bool,
+) -> String {
+    let mut warnings = Vec::new();
+    if folder_id != COMMON_VIEWS_FOLDER_ID && !folder_local_default_visible_in_fai_table {
+        warnings.push("folder_local_default_view_not_visible_in_associated_table");
+    }
+    if message.name.is_empty() {
+        warnings.push("missing_view_descriptor_name");
+    }
+    if descriptor_strings.is_empty() {
+        warnings.push("missing_view_descriptor_strings");
+    }
+    if descriptor_binary.len() < 60 {
+        warnings.push("descriptor_binary_too_short");
+    }
+    if descriptor_binary
+        .get(8..12)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        != Some(8)
+    {
+        warnings.push("descriptor_version_not_8");
+    }
+    if view_descriptor_column_count(descriptor_binary) == Some(0) {
+        warnings.push("descriptor_has_no_columns");
+    }
+    warnings.join("|")
+}
+
+fn format_outlook_view_handoff_table_contract(
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !is_outlook_folder_table_debug_target(folder_id) {
+        return String::new();
+    }
+    let view = debug_default_folder_associated_named_view(snapshot, folder_id);
+    let folder_local_default_supported = view.is_some();
+    let folder_local_default_visible_in_fai_table = associated && view.is_some();
+    let descriptor_summary = view
+        .as_ref()
+        .map(|message| {
+            let definition = outlook_mail_view_definition(&message.name);
+            let descriptor = view_descriptor_binary(&definition);
+            format_view_descriptor_binary_summary(&descriptor)
+        })
+        .unwrap_or_default();
+    let selected_missing_descriptor_columns = view
+        .as_ref()
+        .map(|message| {
+            let definition = outlook_mail_view_definition(&message.name);
+            let descriptor = view_descriptor_binary(&definition);
+            let descriptor_columns = view_descriptor_property_tags(&descriptor);
+            missing_debug_property_tags(&descriptor_columns, columns)
+        })
+        .unwrap_or_default();
+    format!(
+        "folder_local_default_supported={folder_local_default_supported};\
+         folder_local_default_visible_in_fai_table={folder_local_default_visible_in_fai_table};\
+         expected_view_message_id=0x{:016x};selected_property_tag_count={};\
+         selected_missing_descriptor_columns={selected_missing_descriptor_columns};\
+         descriptor_summary={descriptor_summary}",
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        columns.len()
+    )
+}
+
+fn warn_outlook_view_handoff_table_invariants(
+    principal: &AccountPrincipal,
+    request_rop_id: &str,
+    folder_id: u64,
+    associated: bool,
+    view_handoff_table_contract: &str,
+) {
+    if !associated || folder_id == COMMON_VIEWS_FOLDER_ID {
+        return;
+    }
+    if view_handoff_table_contract.contains("folder_local_default_supported=true")
+        && view_handoff_table_contract.contains("folder_local_default_visible_in_fai_table=false")
+    {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id,
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(folder_id),
+            associated,
+            view_handoff_table_contract,
+            message = "rca debug outlook contents table invariant warning: default folder view is not visible in associated table",
+        );
+    }
+}
+
+fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
+    let version = descriptor
+        .get(8..12)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes);
+    let flags = descriptor
+        .get(12..16)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes);
+    let column_count = view_descriptor_column_count(descriptor);
+    let sort_column = descriptor
+        .get(24..28)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes);
+    let group_count = descriptor
+        .get(28..32)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes);
+    let category_sort = descriptor
+        .get(32..36)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes);
+    let column_tags = view_descriptor_property_tags(descriptor);
+    let expected_column_bytes = column_count
+        .and_then(|count| usize::try_from(count).ok())
+        .map(|count| 60usize.saturating_add(count.saturating_mul(36)))
+        .unwrap_or(60);
+    let restriction_bytes = descriptor.len().saturating_sub(expected_column_bytes);
+
+    format!(
+        "version={};ul_flags={};column_count={};sort_column={};group_count={};ul_cat_sort={};restriction_bytes={restriction_bytes};column_tags={}",
+        version
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        flags
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        column_count
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        sort_column
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        group_count
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        category_sort
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        format_debug_property_tags(&column_tags)
+    )
+}
+
+fn view_descriptor_column_count(descriptor: &[u8]) -> Option<u32> {
+    descriptor
+        .get(20..24)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+}
+
+fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
+    let Some(column_count) =
+        view_descriptor_column_count(descriptor).and_then(|count| usize::try_from(count).ok())
+    else {
+        return Vec::new();
+    };
+    (0..column_count)
+        .filter_map(|index| {
+            let offset = 60 + index * 36;
+            let property_type = descriptor
+                .get(offset..offset + 2)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)? as u32;
+            let property_id = descriptor
+                .get(offset + 2..offset + 4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)? as u32;
+            Some((property_id << 16) | property_type)
+        })
+        .collect()
 }
 
 fn log_outlook_contents_table_sort(
@@ -7668,6 +7971,12 @@ fn log_outlook_contents_table_sort(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7702,7 +8011,15 @@ fn log_outlook_contents_table_sort(
                 sort_orders,
                 snapshot
             ),
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table sorted"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x13",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -7729,6 +8046,12 @@ fn log_outlook_contents_table_restrict(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7761,7 +8084,15 @@ fn log_outlook_contents_table_restrict(
                 &[],
                 snapshot
             ),
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table restricted"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x14",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -7849,6 +8180,12 @@ fn log_outlook_contents_table_query_rows(
         &selected_columns,
         snapshot,
     );
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
 
     tracing::info!(
         rca_debug = true,
@@ -7900,7 +8237,15 @@ fn log_outlook_contents_table_query_rows(
         } else {
             String::new()
         },
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table query rows"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x15",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -7961,6 +8306,12 @@ fn log_outlook_contents_table_query_rows_response(
         .get(9..)
         .map(|bytes| hex_preview(bytes, 160))
         .unwrap_or_default();
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7993,7 +8344,15 @@ fn log_outlook_contents_table_query_rows_response(
         response_payload_bytes = response.len(),
         response_row_payload_preview = %response_row_payload_preview,
         associated_wire_row_summary = %associated_wire_row_summary,
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table query rows response"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x15.response",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -8191,6 +8550,12 @@ fn log_outlook_contents_table_seek_row(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -8231,7 +8596,15 @@ fn log_outlook_contents_table_seek_row(
                 sort_orders,
                 snapshot
             ),
+        view_handoff_table_contract = %view_handoff_table_contract,
         "rca debug outlook contents table seek row"
+    );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x18",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
     );
 }
 
@@ -8333,6 +8706,13 @@ fn log_outlook_contents_table_find_row(
     } else {
         String::new()
     };
+    let response_found = response.get(7).copied().unwrap_or(0);
+    let view_handoff_table_contract = format_outlook_view_handoff_table_contract(
+        *folder_id,
+        *associated,
+        &selected_columns,
+        snapshot,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -8353,7 +8733,7 @@ fn log_outlook_contents_table_find_row(
         restriction_decoded = %format_debug_restriction(request_restriction_bytes(request)),
         restriction_property_tags = %format_debug_property_tags(&restriction_property_tags),
         response_return_value = %format!("0x{response_return_value:08x}"),
-        response_found = response.get(7).copied().unwrap_or(0),
+        response_found,
         current_position = *position,
         table_total_row_count = total_row_count,
         table_has_restriction = restriction.is_some(),
@@ -8377,13 +8757,39 @@ fn log_outlook_contents_table_find_row(
         find_row_wire_summary = %found_wire_row_summary,
         normal_message_find_row_summary = %normal_message_find_row_summary,
         find_row_failure_candidate_summary = %find_row_failure_candidate_summary,
-        response_row_wire_preview = %if response.get(7).copied().unwrap_or(0) == 1 {
+        view_handoff_table_contract = %view_handoff_table_contract,
+        response_row_wire_preview = %if response_found == 1 {
             hex_preview(response.get(8..).unwrap_or_default(), 160)
         } else {
             String::new()
         },
         "rca debug outlook contents table find row"
     );
+    warn_outlook_view_handoff_table_invariants(
+        principal,
+        "0x4f",
+        *folder_id,
+        *associated,
+        &view_handoff_table_contract,
+    );
+    if response_return_value == 0 && response_found == 1 && found_row_value_summary.is_empty() {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x4f",
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(*folder_id),
+            associated,
+            response_return_value = "0x00000000",
+            response_found,
+            selected_property_tags = %format_debug_property_tags(&selected_columns),
+            message = "rca debug outlook contents table find row invariant warning: found row has no decoded row identity",
+        );
+    }
 }
 
 fn rop_response_return_value(response: &[u8]) -> u32 {
@@ -11264,6 +11670,9 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    log_outlook_view_handoff(
+                        principal, &request, folder_id, message_id, handle, &message, snapshot,
+                    );
                     responses.extend_from_slice(&rop_open_message_response(
                         &request,
                         &message.name,
@@ -11652,6 +12061,7 @@ where
                     associated,
                     row_count,
                     handle,
+                    snapshot,
                 );
                 if folder_id == INBOX_FOLDER_ID {
                     if associated {
@@ -13842,6 +14252,7 @@ where
                             *associated,
                             columns,
                             &selected_named_property_context,
+                            snapshot,
                         );
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
@@ -22203,6 +22614,33 @@ mod tests {
         assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
         assert!(context.contains("name=view custom column"));
         assert!(!context.contains("0x0037001f"));
+    }
+
+    #[test]
+    fn view_handoff_descriptor_summary_reports_outlook_view_shape() {
+        let definition = outlook_mail_view_definition("Compact");
+        let descriptor = view_descriptor_binary(&definition);
+        let summary = format_view_descriptor_binary_summary(&descriptor);
+
+        assert!(summary.contains("version=8"));
+        assert!(summary.contains("column_count=7"));
+        assert!(summary.contains("restriction_bytes=0"));
+        assert!(summary.contains("0x0e060040"));
+    }
+
+    #[test]
+    fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let contract = format_outlook_view_handoff_table_contract(
+            INBOX_FOLDER_ID,
+            true,
+            &default_associated_config_columns(),
+            &snapshot,
+        );
+
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
     #[test]
