@@ -202,8 +202,9 @@ fn associated_table_rows(
     restriction: Option<&MapiRestriction>,
     mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
-    let mut rows = snapshot
-        .associated_config_messages_for_folder(folder_id)
+    let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
+    append_exact_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
+    let mut rows = config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
@@ -217,6 +218,48 @@ fn associated_table_rows(
         }
     }
     rows
+}
+
+fn append_exact_virtual_inbox_associated_config(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    messages: &mut Vec<MapiAssociatedConfigMessage>,
+) {
+    if folder_id != INBOX_FOLDER_ID {
+        return;
+    }
+    let Some(message_class) = exact_message_class_restriction_value(restriction) else {
+        return;
+    };
+    let Some(message) =
+        crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+            message_class,
+        )
+    else {
+        return;
+    };
+    if !messages.iter().any(|existing| {
+        existing
+            .message_class
+            .eq_ignore_ascii_case(&message.message_class)
+    }) {
+        messages.push(message);
+    }
+}
+
+fn exact_message_class_restriction_value(restriction: Option<&MapiRestriction>) -> Option<&str> {
+    match restriction? {
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        }
+        | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+        } => Some(value.as_str()),
+        _ => None,
+    }
 }
 
 fn default_folder_associated_named_view(
@@ -8999,7 +9042,7 @@ mod tests {
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_elc_config() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
+        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
     }
 
     #[test]
@@ -9015,11 +9058,11 @@ mod tests {
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Configuration");
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
     }
 
     #[test]
-    fn inbox_associated_exact_virtual_find_row_restricts_followup_query_rows() {
+    fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -9064,8 +9107,8 @@ mod tests {
         );
 
         assert_eq!(find_response[0], RopId::FindRow.as_u8());
-        assert_eq!(find_response[7], 0);
-        assert_eq!(table_position(&table), Some(0));
+        assert_eq!(find_response[7], 1);
+        assert_response_contains_utf16(&find_response, "IPM.Sharing.Configuration");
 
         let query_request = RopRequest {
             rop_id: RopId::QueryRows.as_u8(),
@@ -9085,18 +9128,19 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            0
+            1
         );
+        assert_response_contains_utf16(&query_response, "IPM.Sharing.Configuration");
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_rule_organizer() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.RuleOrganizer");
+        assert_inbox_associated_find_row_returns_message_class("IPM.RuleOrganizer");
     }
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_sharing_index() {
-        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
+        assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
     }
 
     #[test]
@@ -9158,7 +9202,8 @@ mod tests {
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(response[7], 1);
+        assert_response_contains_utf16(&response, "IPM.Aggregation");
     }
 
     #[test]
@@ -9853,8 +9898,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
-        assert!(utf16_position(&response, "IPM.RuleOrganizer").is_none());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
     }
 
     #[test]
@@ -10346,6 +10391,16 @@ mod tests {
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[6], 0);
         assert_eq!(response[7], 0);
+    }
+
+    fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
+        let response = inbox_associated_find_row_response_for_message_class(message_class);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(response[7], 1);
+        assert_response_contains_utf16(&response, message_class);
     }
 
     fn inbox_associated_find_row_response_for_message_class(message_class: &str) -> Vec<u8> {

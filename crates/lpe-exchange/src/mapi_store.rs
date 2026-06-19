@@ -463,6 +463,38 @@ fn outlook_inbox_associated_config_sync_defaults(
     Vec::new()
 }
 
+pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
+    message_class: &str,
+) -> Option<MapiAssociatedConfigMessage> {
+    if !matches!(
+        message_class,
+        "IPM.Configuration.ELC"
+            | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+            | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
+            | OUTLOOK_INBOX_SHARING_INDEX_CLASS
+            | OUTLOOK_INBOX_AGGREGATION_CLASS
+    ) {
+        return None;
+    }
+    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .find(|message| message.message_class.eq_ignore_ascii_case(message_class))
+}
+
+fn outlook_inbox_exact_virtual_associated_config_for_id(
+    item_id: u64,
+) -> Option<MapiAssociatedConfigMessage> {
+    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .find(|message| {
+            message.id == item_id
+                && outlook_inbox_exact_virtual_associated_config_for_message_class(
+                    &message.message_class,
+                )
+                .is_some()
+        })
+}
+
 pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedConfigMessage {
     outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
         .into_iter()
@@ -2101,6 +2133,7 @@ impl MapiMailStoreSnapshot {
                 .into_iter()
                 .find(|message| message.id == item_id)
             })
+            .or_else(|| outlook_inbox_exact_virtual_associated_config_for_id(item_id))
             .or_else(|| {
                 outlook_quick_step_associated_config_defaults(
                     crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -3727,14 +3760,9 @@ mod tests {
         for suppressed_id in [
             OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
             OUTLOOK_INBOX_EAS_CONFIG_ID,
-            OUTLOOK_INBOX_ELC_CONFIG_ID,
             OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
             OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
             OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
-            OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
-            OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
-            OUTLOOK_INBOX_SHARING_INDEX_ID,
-            OUTLOOK_INBOX_AGGREGATION_ID,
         ] {
             assert!(snapshot
                 .associated_config_message_for_id(suppressed_id)
@@ -3742,6 +3770,22 @@ mod tests {
             assert!(!snapshot.associated_config_identity_matches_folder(
                 crate::mapi::identity::INBOX_FOLDER_ID,
                 suppressed_id
+            ));
+        }
+        for exact_virtual_id in [
+            OUTLOOK_INBOX_ELC_CONFIG_ID,
+            OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
+            OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
+            OUTLOOK_INBOX_SHARING_INDEX_ID,
+            OUTLOOK_INBOX_AGGREGATION_ID,
+        ] {
+            let message = snapshot
+                .associated_config_message_for_id(exact_virtual_id)
+                .expect("exact virtual Inbox FAI row should open by MID");
+            assert_eq!(message.id, exact_virtual_id);
+            assert!(snapshot.associated_config_identity_matches_folder(
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                exact_virtual_id
             ));
         }
 

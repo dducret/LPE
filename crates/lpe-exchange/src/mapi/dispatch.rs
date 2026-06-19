@@ -5026,8 +5026,7 @@ where
                     *folder_id,
                     *config_id,
                     saved_message.as_ref(),
-                )
-                else {
+                ) else {
                     return Err(anyhow!("MAPI associated config message was not found"));
                 };
                 let mut properties = associated_config_mutation_base_properties(&existing);
@@ -9800,8 +9799,13 @@ fn debug_associated_table_rows(
     restriction: Option<&MapiRestriction>,
     mailbox_guid: Uuid,
 ) -> Vec<DebugAssociatedTableRow> {
-    let mut rows = snapshot
-        .associated_config_messages_for_folder(folder_id)
+    let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
+    append_exact_virtual_inbox_debug_associated_config(
+        folder_id,
+        restriction,
+        &mut config_messages,
+    );
+    let mut rows = config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
@@ -9815,6 +9819,50 @@ fn debug_associated_table_rows(
         }
     }
     rows
+}
+
+fn append_exact_virtual_inbox_debug_associated_config(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    messages: &mut Vec<crate::mapi_store::MapiAssociatedConfigMessage>,
+) {
+    if folder_id != INBOX_FOLDER_ID {
+        return;
+    }
+    let Some(message_class) = debug_exact_message_class_restriction_value(restriction) else {
+        return;
+    };
+    let Some(message) =
+        crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+            message_class,
+        )
+    else {
+        return;
+    };
+    if !messages.iter().any(|existing| {
+        existing
+            .message_class
+            .eq_ignore_ascii_case(&message.message_class)
+    }) {
+        messages.push(message);
+    }
+}
+
+fn debug_exact_message_class_restriction_value(
+    restriction: Option<&MapiRestriction>,
+) -> Option<&str> {
+    match restriction? {
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        }
+        | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+        } => Some(value.as_str()),
+        _ => None,
+    }
 }
 
 fn debug_default_folder_associated_named_view(
@@ -22296,7 +22344,10 @@ fn message_list_settings_placeholder_persisted_properties(
             PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
             MapiValue::String(default.message_class.clone()),
         ),
-        (PID_TAG_SUBJECT_W, MapiValue::String(default.subject.clone())),
+        (
+            PID_TAG_SUBJECT_W,
+            MapiValue::String(default.subject.clone()),
+        ),
         (
             PID_TAG_NORMALIZED_SUBJECT_W,
             MapiValue::String(default.subject.clone()),
@@ -24241,7 +24292,10 @@ mod tests {
         .expect("saved handle fallback");
 
         assert_eq!(resolved.canonical_id, saved.canonical_id);
-        assert_eq!(resolved.message_class, "IPM.Configuration.MessageListSettings");
+        assert_eq!(
+            resolved.message_class,
+            "IPM.Configuration.MessageListSettings"
+        );
     }
 
     #[test]
