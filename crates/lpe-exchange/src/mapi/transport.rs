@@ -2563,6 +2563,7 @@ mod tests {
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
             inbox_associated_config_stream_handles: HashSet::new(),
+            inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
         }
     }

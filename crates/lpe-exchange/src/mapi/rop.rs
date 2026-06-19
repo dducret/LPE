@@ -1104,8 +1104,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             serialize_navigation_shortcut_row(&message, Some(principal), &columns)
         }
         Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => {
-            let Some(message) = snapshot
-                .named_view_message_for_folder_and_id(*folder_id, *view_id)
+            let Some(message) = snapshot.named_view_message_for_folder_and_id(*folder_id, *view_id)
             else {
                 return rop_error_response(
                     0x07,
@@ -7258,6 +7257,7 @@ mod tests {
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
             inbox_associated_config_stream_handles: HashSet::new(),
+            inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
         };
         let stale = MapiSession {

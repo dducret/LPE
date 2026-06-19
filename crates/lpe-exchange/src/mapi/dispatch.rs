@@ -2761,7 +2761,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
@@ -2769,12 +2769,14 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         state.inbox_associated_config_open_observed,
         state.inbox_associated_config_stream_open_observed,
         state.inbox_associated_config_stream_read_observed,
+        state.inbox_rule_organizer_stream_read_observed,
         inbox_open_loop_next_debug_focus(state),
         debug_context_or_none(&state.first_inbox_loop_transition_context),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
+        debug_context_or_none(&state.last_inbox_rule_organizer_stream_context),
         debug_context_or_none(&state.last_common_views_inbox_shortcut_context),
         debug_context_or_none(&state.last_inbox_hierarchy_table_context),
         debug_context_or_none(&state.last_inbox_hierarchy_query_context),
@@ -3117,17 +3119,19 @@ fn debug_context_or_none(context: &str) -> &str {
 
 fn format_inbox_post_fai_handoff_context(state: &PostHierarchyActionState) -> String {
     format!(
-        "normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        "normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
         state.inbox_normal_contents_table_observed,
         state.inbox_associated_contents_table_observed,
         state.inbox_associated_config_open_observed,
         state.inbox_associated_config_stream_open_observed,
         state.inbox_associated_config_stream_read_observed,
+        state.inbox_rule_organizer_stream_read_observed,
         debug_context_or_none(&state.first_inbox_loop_transition_context),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
+        debug_context_or_none(&state.last_inbox_rule_organizer_stream_context),
         debug_context_or_none(&state.last_common_views_inbox_shortcut_context),
         debug_context_or_none(&state.last_inbox_hierarchy_table_context),
         debug_context_or_none(&state.last_inbox_hierarchy_query_context),
@@ -11459,6 +11463,58 @@ where
                         );
                         session.mark_post_inbox_fai_reopen_logged();
                     }
+                    if session
+                        .post_hierarchy_actions
+                        .inbox_rule_organizer_stream_read_observed
+                        && !session
+                            .post_hierarchy_actions
+                            .post_rule_organizer_stream_reopen_logged
+                    {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x02",
+                            mapi_request_id = request_id,
+                            folder_id = format!("0x{folder_id:016x}"),
+                            output_handle_id = handle,
+                            open_mode_flags =
+                                format!("0x{:02x}", request.payload.get(8).copied().unwrap_or(0)),
+                            open_folder_response_bytes = open_folder_response.len(),
+                            open_folder_response_preview = %hex_preview(&open_folder_response, 32),
+                            last_rule_organizer_stream = %debug_context_or_none(
+                                &session
+                                    .post_hierarchy_actions
+                                    .last_inbox_rule_organizer_stream_context
+                            ),
+                            last_open = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_open_folder_context
+                            ),
+                            last_contents_table = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_contents_table_context
+                            ),
+                            last_associated_query = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_associated_query_context
+                            ),
+                            last_associated_find = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_associated_find_context
+                            ),
+                            last_inbox_related_release = %debug_context_or_none(
+                                &session.post_hierarchy_actions.last_inbox_related_release_context
+                            ),
+                            last_folder_type_getprops = %debug_context_or_none(
+                                &session
+                                    .post_hierarchy_actions
+                                    .last_inbox_folder_type_getprops_context
+                            ),
+                            recent_actions =
+                                %session.post_hierarchy_actions.recent_probe_actions.join(">"),
+                            "rca debug mapi inbox reopened after RuleOrganizer stream read"
+                        );
+                        session.mark_post_rule_organizer_stream_reopen_logged();
+                    }
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -16419,6 +16475,11 @@ where
                         ..
                     })
                 );
+                let is_inbox_rule_organizer_stream = is_inbox_associated_config_stream
+                    && associated_config_class
+                        == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+                    && request.stream_property_tag().unwrap_or(0)
+                        == OUTLOOK_RULE_ORGANIZER_BINARY_6802;
                 if is_inbox_associated_config_stream {
                     session.record_inbox_associated_config_stream_open();
                     session.record_recent_probe_action(format!(
@@ -16482,6 +16543,13 @@ where
                 if is_inbox_associated_config_stream {
                     session.record_inbox_associated_config_stream_handle(handle);
                 }
+                if is_inbox_rule_organizer_stream {
+                    session.record_inbox_rule_organizer_stream_handle(handle);
+                    session.record_recent_probe_action(format!(
+                        "OpenRuleOrganizerStream(in={},out={},size={})",
+                        input_handle, handle, stream_size
+                    ));
+                }
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 tracing::info!(
                     rca_debug = true,
@@ -16513,6 +16581,7 @@ where
                     ),
                     stream_open_result = "success",
                     inbox_associated_config_stream = is_inbox_associated_config_stream,
+                    inbox_rule_organizer_stream = is_inbox_rule_organizer_stream,
                     message = "rca debug mapi open stream"
                 );
                 responses.extend_from_slice(&rop_open_stream_response(&request, stream_size));
@@ -16520,6 +16589,8 @@ where
             }
             Some(RopId::ReadStream) => {
                 let read_input_handle = input_handle(&handle_slots, &request);
+                let is_rule_organizer_stream_read = read_input_handle
+                    .is_some_and(|handle| session.is_inbox_rule_organizer_stream_handle(handle));
                 if let Some(input_handle) = read_input_handle {
                     if session.is_inbox_associated_config_stream_handle(input_handle) {
                         session.record_inbox_associated_config_stream_read();
@@ -16563,6 +16634,48 @@ where
                     MapiObject::AttachmentStream { position, .. } => *position,
                     _ => 0,
                 };
+                let returned_byte_count = after_position.saturating_sub(before_position);
+                let end_of_stream = after_position >= stream_len;
+                if is_rule_organizer_stream_read {
+                    let context = format!(
+                        "input_handle={};requested_byte_count={};stream_size={};position_before={};position_after={};returned_byte_count={};end_of_stream={};response_bytes={};response_preview={}",
+                        read_input_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "missing".to_string()),
+                        request.read_byte_count().unwrap_or(0),
+                        stream_len,
+                        before_position,
+                        after_position,
+                        returned_byte_count,
+                        end_of_stream,
+                        response.len(),
+                        hex_preview(&response, 48)
+                    );
+                    session.record_inbox_rule_organizer_stream_read(context.clone());
+                    session.record_recent_probe_action(format!(
+                        "ReadRuleOrganizerStream(in={},returned={},eos={})",
+                        read_input_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "missing".to_string()),
+                        returned_byte_count,
+                        end_of_stream
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x2c",
+                        rule_organizer_stream_context = %context,
+                        inbox_loop_summary =
+                            %format_inbox_open_loop_summary(
+                                &session.post_hierarchy_actions
+                            )
+                            .unwrap_or_else(|| "none".to_string()),
+                        "rca debug outlook rule organizer stream read checkpoint"
+                    );
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -16578,11 +16691,12 @@ where
                     requested_byte_count = request.read_byte_count().unwrap_or(0),
                     stream_position_before = before_position,
                     stream_position_after = after_position,
-                    returned_byte_count = after_position.saturating_sub(before_position),
-                    end_of_stream = after_position >= stream_len,
+                    returned_byte_count,
+                    end_of_stream,
                     response_bytes = response.len(),
                     response_preview = %hex_preview(&response, 48),
                     stream_read_result = "success",
+                    inbox_rule_organizer_stream = is_rule_organizer_stream_read,
                     message = "rca debug mapi read stream"
                 );
                 responses.extend_from_slice(&response);
@@ -26529,6 +26643,7 @@ mod tests {
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
             inbox_associated_config_stream_handles: HashSet::new(),
+            inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
         }
     }

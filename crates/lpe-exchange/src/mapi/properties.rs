@@ -11062,6 +11062,7 @@ mod tests {
             completed_execute_request_order: std::collections::VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
             inbox_associated_config_stream_handles: std::collections::HashSet::new(),
+            inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
             logon_identity: None,
         };
         let snapshot = MapiMailStoreSnapshot::empty();
@@ -11154,6 +11155,7 @@ mod tests {
             completed_execute_request_order: std::collections::VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
             inbox_associated_config_stream_handles: std::collections::HashSet::new(),
+            inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
             logon_identity: None,
         };
         let snapshot = MapiMailStoreSnapshot::empty();
