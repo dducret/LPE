@@ -1926,7 +1926,10 @@ impl MapiMailStoreSnapshot {
         &self,
     ) -> impl Iterator<Item = MapiCommonViewsMessage> {
         let shortcuts = self.navigation_shortcut_messages();
-        let mut table_shortcuts = shortcuts.clone();
+        let mut table_shortcuts = shortcuts
+            .into_iter()
+            .filter(common_views_table_projects_navigation_shortcut)
+            .collect::<Vec<_>>();
         materialize_default_mail_group_header(&mut table_shortcuts);
         for default_shortcut in outlook_common_views_default_navigation_shortcuts() {
             if !table_shortcuts.iter().any(|shortcut| {
@@ -1980,6 +1983,7 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> Option<MapiNavigationShortcutMessage> {
         self.navigation_shortcut_message_for_id(item_id)
+            .filter(common_views_table_projects_navigation_shortcut)
     }
 
     pub(crate) fn common_view_named_view_message_for_id(
@@ -3038,6 +3042,23 @@ fn deduplicate_navigation_shortcuts(
             }
         })
         .collect()
+}
+
+fn common_views_table_projects_navigation_shortcut(
+    shortcut: &MapiNavigationShortcutMessage,
+) -> bool {
+    if shortcut.section != 1 || shortcut.group_name != "Mail" {
+        return false;
+    }
+    if shortcut.shortcut_type == 4 {
+        return true;
+    }
+    matches!(
+        shortcut.target_folder_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+            | Some(crate::mapi::identity::SENT_FOLDER_ID)
+            | Some(crate::mapi::identity::TRASH_FOLDER_ID)
+    )
 }
 
 fn is_synthetic_common_views_group_header(shortcut: &MapiNavigationShortcutRecord) -> bool {
@@ -4552,7 +4573,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_deduplicates_shortcuts_to_same_target_across_groups() {
+    fn common_views_keeps_non_mail_shortcuts_out_of_startup_table() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let first_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000020);
         let second_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000021);
@@ -4596,6 +4617,23 @@ mod tests {
         ]);
 
         assert_eq!(snapshot.navigation_shortcut_messages().len(), 1);
+        assert_eq!(
+            snapshot
+                .navigation_shortcut_messages()
+                .first()
+                .and_then(|shortcut| shortcut.target_folder_id),
+            Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        );
+        assert!(snapshot
+            .navigation_shortcut_message_for_id(crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90
+            ))
+            .is_some());
+        assert!(snapshot
+            .navigation_shortcut_table_message_for_id(crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90
+            ))
+            .is_none());
         let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
         assert_eq!(
             table_messages
@@ -4607,7 +4645,7 @@ mod tests {
                             == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
                 ))
                 .count(),
-            1
+            0
         );
     }
 
