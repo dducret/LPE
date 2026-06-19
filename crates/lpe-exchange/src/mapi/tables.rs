@@ -10137,6 +10137,20 @@ mod tests {
             associated_config_property_value(&xml_only, PID_TAG_ROAMING_XML_STREAM),
             Some(MapiValue::Binary(b"<xml/>".to_vec()))
         );
+        let binary_only = MapiAssociatedConfigMessage {
+            properties_json: serde_json::json!({
+                "0x7c090102": {"type": "binary", "value": "010203"}
+            }),
+            ..message.clone()
+        };
+        assert_eq!(
+            associated_config_property_value(&binary_only, PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::U32(1))
+        );
+        assert_eq!(
+            associated_config_property_value(&binary_only, 0x7C09_0102),
+            Some(MapiValue::Binary(vec![1, 2, 3]))
+        );
         let explicit_no_streams = MapiAssociatedConfigMessage {
             properties_json: serde_json::json!({
                 "0x7c060003": {"type": "i32", "value": 0}
@@ -11803,6 +11817,9 @@ fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage
 
 fn configuration_roaming_datatypes(properties: &HashMap<u32, MapiValue>) -> u32 {
     let mut datatypes = 0;
+    if properties.contains_key(&0x7C09_0102) {
+        datatypes |= 0x0000_0001;
+    }
     if properties.contains_key(&PID_TAG_ROAMING_XML_STREAM) {
         datatypes |= 0x0000_0002;
     }

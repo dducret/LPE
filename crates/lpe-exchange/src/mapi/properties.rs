@@ -390,6 +390,7 @@ pub(in crate::mapi) const MAPI_MESSAGE_ACCESS: u32 =
     MAPI_ACCESS_MODIFY | MAPI_ACCESS_READ | MAPI_ACCESS_DELETE;
 pub(in crate::mapi) const MSGFLAG_READ: u32 = 0x0000_0001;
 pub(in crate::mapi) const MSGFLAG_UNSENT: u32 = 0x0000_0008;
+pub(in crate::mapi) const MSGFLAG_FAI: u32 = 0x0000_0040;
 pub(in crate::mapi) const FOLLOWUP_COMPLETE: u32 = 0x0000_0001;
 pub(in crate::mapi) const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
@@ -2110,7 +2111,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
             "IPM.Microsoft.WunderBar.Link".to_string(),
         )),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
@@ -2236,7 +2237,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
             "IPM.Microsoft.FolderDesign.NamedView".to_string(),
         )),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
@@ -10866,6 +10867,10 @@ mod tests {
             )
             .map(MapiValue::Binary)
         );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_MESSAGE_FLAGS),
+            Some(MapiValue::U32(MSGFLAG_FAI))
+        );
     }
 
     fn descriptor_column_property_tags(descriptor: &[u8]) -> Vec<u32> {
@@ -10948,6 +10953,10 @@ mod tests {
                 PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
             ),
             Some(MapiValue::U32(8))
+        );
+        assert_eq!(
+            common_view_named_view_property_value(&view, account_id, PID_TAG_MESSAGE_FLAGS),
+            Some(MapiValue::U32(MSGFLAG_FAI))
         );
         assert_eq!(
             common_view_named_view_property_value(

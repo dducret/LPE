@@ -8909,6 +8909,11 @@ fn format_ipm_configuration_row_contract(
     let has_xml_stream =
         associated_config_property_value(message, PID_TAG_ROAMING_XML_STREAM).is_some();
     let has_binary_stream = associated_config_property_value(message, 0x7C09_0102).is_some();
+    let message_flags = associated_config_property_value(message, PID_TAG_MESSAGE_FLAGS)
+        .and_then(|value| value.into_u32());
+    let last_modified = associated_config_property_value(message, PID_TAG_LAST_MODIFICATION_TIME)
+        .map(|value| format_debug_mapi_value(&value))
+        .unwrap_or_else(|| "missing".to_string());
     let associated_config_0e0b =
         associated_config_property_value(message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
             .as_ref()
@@ -8916,9 +8921,13 @@ fn format_ipm_configuration_row_contract(
             .unwrap_or_else(|| "missing".to_string());
     let issues = ipm_configuration_row_issues(message);
     format!(
-        "id=0x{:016x};class={};datatypes={};has_dict={};has_xml={};has_binary={};associated_config_0e0b={};issues={}",
+        "id=0x{:016x};class={};message_flags={};last_modified={};datatypes={};has_dict={};has_xml={};has_binary={};associated_config_0e0b={};issues={}",
         message.id,
         message.message_class,
+        message_flags
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        last_modified,
         datatypes
             .map(|value| format!("0x{value:08x}"))
             .unwrap_or_else(|| "missing".to_string()),
@@ -8942,9 +8951,14 @@ fn ipm_configuration_row_issues(
     let mut issues = Vec::new();
     match datatypes {
         Some(value) => {
-            let invalid_bits = value & !0x0000_0006;
+            let invalid_bits = value & !0x0000_0007;
             if invalid_bits != 0 {
                 issues.push(format!("invalid_datatype_bits=0x{invalid_bits:08x}"));
+            }
+            if value & 0x0000_0001 != 0
+                && associated_config_property_value(message, 0x7C09_0102).is_none()
+            {
+                issues.push("binary_bit_without_stream".to_string());
             }
             if value & 0x0000_0002 != 0 && !has_xml_stream {
                 issues.push("xml_bit_without_stream".to_string());
