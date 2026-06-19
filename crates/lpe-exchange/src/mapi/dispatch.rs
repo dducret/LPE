@@ -5019,11 +5019,14 @@ where
             MapiObject::AssociatedConfig {
                 folder_id,
                 config_id,
-                ..
+                saved_message,
             } => {
-                let Some(existing) = snapshot
-                    .associated_config_message_for_id(*config_id)
-                    .filter(|message| message.folder_id == *folder_id)
+                let Some(existing) = associated_config_message_for_mutation(
+                    snapshot,
+                    *folder_id,
+                    *config_id,
+                    saved_message.as_ref(),
+                )
                 else {
                     return Err(anyhow!("MAPI associated config message was not found"));
                 };
@@ -5645,6 +5648,18 @@ where
         })
         .await?;
     Ok(deleted)
+}
+
+fn associated_config_message_for_mutation(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    config_id: u64,
+    saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
+) -> Option<crate::mapi_store::MapiAssociatedConfigMessage> {
+    snapshot
+        .associated_config_message_for_id(config_id)
+        .or_else(|| saved_message.cloned())
+        .filter(|message| message.folder_id == folder_id)
 }
 
 fn associated_config_mutation_base_properties(
@@ -24198,6 +24213,35 @@ mod tests {
             "IPM.Configuration.MessageListSettings",
             &persisted
         ));
+    }
+
+    #[test]
+    fn associated_config_mutation_uses_saved_handle_when_snapshot_misses_row() {
+        let config_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 219,
+        );
+        let saved = crate::mapi_store::MapiAssociatedConfigMessage {
+            id: config_id,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000219),
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+        };
+
+        let resolved = associated_config_message_for_mutation(
+            &MapiMailStoreSnapshot::empty(),
+            INBOX_FOLDER_ID,
+            config_id,
+            Some(&saved),
+        )
+        .expect("saved handle fallback");
+
+        assert_eq!(resolved.canonical_id, saved.canonical_id);
+        assert_eq!(resolved.message_class, "IPM.Configuration.MessageListSettings");
     }
 
     #[test]

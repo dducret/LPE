@@ -28597,7 +28597,29 @@ async fn mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary() {
 #[tokio::test]
 async fn mapi_over_http_virtual_associated_config_write_preserves_default_class() {
     let account = FakeStore::account();
-    let associated_configs = Arc::new(Mutex::new(Vec::new()));
+    let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000001);
+    let config_object_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
+    let associated_configs = Arc::new(Mutex::new(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: config_id,
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+        },
+    ]));
     let store = FakeStore {
         session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -28606,6 +28628,7 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
             "Inbox",
         )])),
         associated_configs: associated_configs.clone(),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(config_id, config_object_id)]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -28615,7 +28638,6 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let config_object_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
     let xml_stream = br#"<view-state />"#;
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x7C08_0102, xml_stream);
