@@ -23153,9 +23153,11 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=7"));
+        assert!(summary.contains("column_count=6"));
+        assert!(summary.contains("sort_column=3"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("0x0e060040"));
+        assert!(!summary.contains("0x00040001"));
     }
 
     #[test]
@@ -23185,9 +23187,11 @@ mod tests {
 
         assert!(contract.contains("phase=setcolumns"));
         assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
-        assert!(contract.contains("descriptor_columns=0x00040001"));
+        assert!(contract.contains("descriptor_columns=0x0e1b000b"));
+        assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-        assert!(contract.contains("selected_missing_descriptor_columns=0x00040001"));
+        assert!(contract.contains("selected_missing_descriptor_columns=0x0e1b000b"));
+        assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
     #[test]

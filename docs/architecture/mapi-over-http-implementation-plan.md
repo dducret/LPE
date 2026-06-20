@@ -242,6 +242,9 @@ non-canonical LPE state.
 - Outlook mail-folder default views point at bounded synthetic named-view rows.
   Inbox uses a folder-local synthetic `IPM.Microsoft.FolderDesign.NamedView`;
   other mail folders use the bounded synthetic Common Views named-view rows.
+  Mail named-view descriptor binaries list only real message-table property
+  tags used by the visible columns; they must not include synthetic placeholder
+  tags or named-property IDs that are not resolvable in the active session.
   Non-mail folders, including Calendar, Contacts, Tasks, Notes, and Journal,
   do not advertise `PidTagDefaultViewEntryId` until LPE has type-specific
   Outlook view descriptors for those container classes. Delete attempts against

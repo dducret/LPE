@@ -2376,7 +2376,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
                 view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
             ],
-            sort_column: 4,
+            sort_column: 3,
             sort_descending: true,
         };
     }
@@ -2391,7 +2391,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
             view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
             view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
         ],
-        sort_column: 4,
+        sort_column: 3,
         sort_descending: true,
     }
 }
@@ -2406,7 +2406,7 @@ fn view_column(property_tag: u32, width: u32, header: &'static str) -> ViewColum
 }
 
 pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Vec<u8> {
-    let column_count = definition.columns.len() + 1;
+    let column_count = definition.columns.len();
     let mut value = Vec::with_capacity(60 + column_count * 36);
     value.extend_from_slice(&[0; 8]);
     value.extend_from_slice(&8u32.to_le_bytes());
@@ -2425,14 +2425,13 @@ pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Ve
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&[0; 24]);
 
-    write_view_column_packet(&mut value, 0x0004_0001, 7, 0x28, 4);
     for (index, column) in definition.columns.iter().enumerate() {
         write_view_column_packet(
             &mut value,
             column.property_tag,
             column.width,
             column.flags,
-            (index + 1) as u32,
+            index as u32,
         );
     }
 
@@ -2472,7 +2471,7 @@ pub(in crate::mapi) fn log_view_definition_diagnostics(
     view_name: &str,
     definition: &ViewDefinition,
 ) {
-    let descriptor_len = 60 + (definition.columns.len() + 1) * 36;
+    let descriptor_len = 60 + definition.columns.len() * 36;
     let descriptor_strings_len = view_descriptor_strings(definition).encode_utf16().count() * 2;
     tracing::info!(
         folder_id = format_args!("0x{folder_id:016x}"),
@@ -2481,7 +2480,7 @@ pub(in crate::mapi) fn log_view_definition_diagnostics(
         canonical_version = 8u32,
         descriptor_binary_len = descriptor_len,
         descriptor_strings_len,
-        column_count = definition.columns.len() + 1,
+        column_count = definition.columns.len(),
         sort_count = 1usize,
         static_default = true,
         persisted = false,
@@ -10961,15 +10960,14 @@ mod tests {
             ),
             Some(MapiValue::Binary(descriptor.clone()))
         );
-        assert_eq!(descriptor.len(), 312);
+        assert_eq!(descriptor.len(), 276);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
         assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-        assert_eq!(&descriptor[20..24], &7u32.to_le_bytes());
-        assert_eq!(&descriptor[24..28], &4u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &6u32.to_le_bytes());
+        assert_eq!(&descriptor[24..28], &3u32.to_le_bytes());
         assert_eq!(
             descriptor_column_property_tags(&descriptor),
             vec![
-                0x0004_0001,
                 PID_TAG_HAS_ATTACHMENTS,
                 PID_TAG_SENDER_NAME_W,
                 PID_TAG_SUBJECT_W,
@@ -10978,12 +10976,12 @@ mod tests {
                 PID_TAG_MESSAGE_FLAGS,
             ]
         );
-        assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
-        assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
-        assert_eq!(&descriptor[64..68], &7u32.to_le_bytes());
-        assert_eq!(&descriptor[72..76], &0x28u32.to_le_bytes());
+        assert_eq!(&descriptor[60..62], &0x000bu16.to_le_bytes());
+        assert_eq!(&descriptor[62..64], &0x0e1bu16.to_le_bytes());
+        assert_eq!(&descriptor[64..68], &18u32.to_le_bytes());
+        assert_eq!(&descriptor[72..76], &0u32.to_le_bytes());
         assert_eq!(&descriptor[88..92], &0u32.to_le_bytes());
-        assert_eq!(&descriptor[92..96], &4u32.to_le_bytes());
+        assert_eq!(&descriptor[92..96], &0u32.to_le_bytes());
         assert_eq!(
             common_view_named_view_property_value(
                 &view,
@@ -11043,7 +11041,6 @@ mod tests {
         assert_eq!(
             descriptor_column_property_tags(&sent_to),
             vec![
-                0x0004_0001,
                 PID_TAG_HAS_ATTACHMENTS,
                 PID_TAG_DISPLAY_TO_W,
                 PID_TAG_SUBJECT_W,
@@ -11120,7 +11117,7 @@ mod tests {
             stream,
             view_descriptor_binary(&outlook_mail_view_definition("Compact"))
         );
-        assert_eq!(stream.len(), 312);
+        assert_eq!(stream.len(), 276);
         assert!(writable_target.is_none());
     }
 
