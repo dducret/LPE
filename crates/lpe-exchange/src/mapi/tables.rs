@@ -3864,6 +3864,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         return matches!(
             message.message_class.as_str(),
             "IPM.Configuration.ELC"
+                | "IPM.Configuration.UMOLK.UserOptions"
                 | "IPM.RuleOrganizer"
                 | "IPM.Sharing.Configuration"
                 | "IPM.Sharing.Index"
@@ -9853,8 +9854,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
-        assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_some());
     }
 
     #[test]
