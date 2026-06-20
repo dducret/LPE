@@ -3076,6 +3076,7 @@ fn format_inbox_related_release_context(
     object: Option<&MapiObject>,
     handle: Option<u32>,
     state: &PostHierarchyActionState,
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Option<String> {
     match object {
         Some(MapiObject::ContentsTable {
@@ -3084,15 +3085,29 @@ fn format_inbox_related_release_context(
             columns,
             position,
             sort_orders,
+            restriction,
             ..
         }) if *folder_id == INBOX_FOLDER_ID || *folder_id == COMMON_VIEWS_FOLDER_ID => Some(
             format!(
-                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};sort={};after_inbox_associated_query={};normal_contents_table_observed={}",
+                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={}",
                 format_optional_debug_handle(handle),
                 associated,
                 position,
                 format_debug_property_tags(columns),
                 format_debug_sort_orders(sort_orders),
+                format_debug_restriction_option(restriction.as_ref()),
+                format_outlook_view_handoff_table_contract(
+                    *folder_id,
+                    *associated,
+                    columns,
+                    snapshot,
+                ),
+                format_inbox_view_descriptor_set_columns_behavior_contract(
+                    *folder_id,
+                    *associated,
+                    columns,
+                    snapshot,
+                ),
                 state.inbox_associated_contents_table_observed,
                 state.inbox_normal_contents_table_observed
             ),
@@ -11231,7 +11246,10 @@ where
                     released_object,
                     released_handle,
                     &session.post_hierarchy_actions,
+                    snapshot,
                 );
+                let inbox_related_release_context_for_log =
+                    inbox_related_release_context.clone().unwrap_or_default();
                 let post_inbox_fai_handoff_context = match released_object {
                     Some(MapiObject::ContentsTable {
                         folder_id,
@@ -11351,6 +11369,7 @@ where
                     input_handle_value = %format_optional_debug_handle(released_handle),
                     object_kind = released_object_kind,
                     folder_id = %released_folder_id,
+                    inbox_related_release_context = %inbox_related_release_context_for_log,
                     remaining_handle_count = session.handles.len(),
                     "rca debug mapi release before inbox probe"
                 );
