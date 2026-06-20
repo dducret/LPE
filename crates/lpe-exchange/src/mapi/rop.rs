@@ -1578,7 +1578,10 @@ fn format_common_view_descriptor_getprops_contract(
     if !descriptor_requested {
         return String::new();
     }
-    let Some(message) = snapshot.common_view_named_view_message_for_id(*view_id) else {
+    let message = snapshot
+        .common_view_named_view_message_for_id(*view_id)
+        .or_else(|| snapshot.default_folder_named_view_message(*folder_id, *view_id));
+    let Some(message) = message else {
         return format!(
             "found=false;folder_id=0x{folder_id:016x};view_id=0x{view_id:016x};requested_descriptor_tags={}",
             format_property_tags_for_debug(columns)
