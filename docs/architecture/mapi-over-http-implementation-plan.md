@@ -556,6 +556,11 @@ not by itself authorize broad client publication.
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
 | Default-folder EntryID writes | computed canonical folder projections | Valid writes are accepted for compatibility and stripped from session storage; invalid values are rejected. |
 
+Normal message contents-table rows project Outlook-selected Inbox view columns
+from canonical mail data, including creation time, normal importance,
+sent-representing sender fields, and
+`PidNameContentClass = urn:content-classes:message`.
+
 ## State-Management Invariants
 
 ### ICS State Encoding

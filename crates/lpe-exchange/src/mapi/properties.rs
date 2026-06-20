@@ -334,8 +334,12 @@ pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
+pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_NAME_W: u32 = 0x0042_001F;
+pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
+pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W: u32 = 0x0065_001F;
 pub(in crate::mapi) const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 pub(in crate::mapi) const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
+pub(in crate::mapi) const PID_TAG_IMPORTANCE: u32 = 0x0017_0003;
 pub(in crate::mapi) const PID_TAG_ORIGINAL_MESSAGE_CLASS_W: u32 = 0x004B_001F;
 pub(in crate::mapi) const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
 pub(in crate::mapi) const PID_TAG_DISPLAY_BCC_W: u32 = 0x0E02_001F;
@@ -404,6 +408,7 @@ pub(in crate::mapi) const PID_TAG_SWAPPED_TODO_DATA: u32 = 0x0E2D_0102;
 pub(in crate::mapi) const PID_TAG_SENDER_SMTP_ADDRESS_W: u32 = 0x5D01_001F;
 pub(in crate::mapi) const PID_TAG_INTERNET_CODEPAGE: u32 = 0x3FDE_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_LOCALE_ID: u32 = 0x3FF1_0003;
+pub(in crate::mapi) const PID_TAG_CREATION_TIME: u32 = 0x3007_0040;
 pub(in crate::mapi) const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 pub(in crate::mapi) const PID_TAG_HIERARCHY_CHANGE_NUMBER: u32 = 0x663E_0003;
 pub(in crate::mapi) const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -433,6 +438,7 @@ pub(in crate::mapi) const PID_TAG_EXTENDED_RULE_SIZE_LIMIT: u32 = 0x0E9B_0003;
 pub(in crate::mapi) const PID_TAG_PST_PATH_W: u32 = 0x6700_001F;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_SENT_MAIL_SVR_EID: u32 = 0x6740_00FB;
+pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W: u32 = 0x5D02_001F;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 
 const OUTLOOK_STORE_ICON_ICO: &[u8] = &[
@@ -1971,7 +1977,8 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
             message_class_for_email(email).to_string(),
         )),
-        PID_TAG_MESSAGE_DELIVERY_TIME
+        PID_TAG_CREATION_TIME
+        | PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
@@ -1982,6 +1989,7 @@ pub(in crate::mapi) fn email_property_value(
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+        PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
@@ -2027,6 +2035,16 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
         PID_TAG_SENDER_SMTP_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
+        PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
+            email
+                .from_display
+                .clone()
+                .unwrap_or_else(|| email.from_address.clone()),
+        )),
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(email.from_address.clone()))
+        }
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
         PID_TAG_DISPLAY_BCC_W => Some(MapiValue::String(display_bcc(email))),
@@ -2079,6 +2097,9 @@ pub(in crate::mapi) fn email_property_value(
             mapi_mailstore::canonical_message_change_number(email),
         )),
         PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
+        PID_NAME_CONTENT_CLASS_W_TAG => {
+            Some(MapiValue::String("urn:content-classes:message".to_string()))
+        }
         PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => Some(MapiValue::String(transport_headers(email))),
         _ => None,
     }

@@ -9754,7 +9754,8 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
             message_class_for_email(email).to_string(),
         )),
-        PID_TAG_MESSAGE_DELIVERY_TIME
+        PID_TAG_CREATION_TIME
+        | PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
@@ -9768,6 +9769,7 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         )),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+        PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::U32(
@@ -9781,6 +9783,16 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         )),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(email.from_address.clone()))
+        }
+        PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
+            email
+                .from_display
+                .clone()
+                .unwrap_or_else(|| email.from_address.clone()),
+        )),
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
             Some(MapiValue::String(email.from_address.clone()))
         }
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
@@ -9800,6 +9812,9 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         PID_TAG_INTERNET_MESSAGE_ID_W => Some(MapiValue::String(
             email.internet_message_id.clone().unwrap_or_default(),
         )),
+        PID_NAME_CONTENT_CLASS_W_TAG => {
+            Some(MapiValue::String("urn:content-classes:message".to_string()))
+        }
         tag => email_property_value(email, tag),
     }
 }

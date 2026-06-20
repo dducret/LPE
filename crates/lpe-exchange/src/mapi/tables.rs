@@ -10693,6 +10693,54 @@ mod tests {
     }
 
     #[test]
+    fn normal_message_row_projects_outlook_inbox_view_columns() {
+        let email_id = Uuid::from_u128(0x7172);
+        let mut email = test_table_email(email_id, Uuid::from_u128(0x8182), "Inbox row");
+        email.received_at = "2026-06-20T16:28:38Z".to_string();
+        email.from_display = Some("Denis Ducret".to_string());
+        email.from_address = "denis.ducret@sdic.ch".to_string();
+        let expected_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
+        let columns = [
+            PID_TAG_CREATION_TIME,
+            PID_TAG_IMPORTANCE,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_NAME_CONTENT_CLASS_W_TAG,
+        ];
+
+        let row = serialize_message_row(&email, &columns);
+        let mut cursor = Cursor::new(&row);
+
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_CREATION_TIME).unwrap(),
+            MapiValue::I64(expected_time as i64)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_IMPORTANCE).unwrap(),
+            MapiValue::I32(1)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_NAME_W).unwrap(),
+            MapiValue::String("Denis Ducret".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W)
+                .unwrap(),
+            MapiValue::String("SMTP".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W)
+                .unwrap(),
+            MapiValue::String("denis.ducret@sdic.ch".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),
+            MapiValue::String("urn:content-classes:message".to_string())
+        );
+    }
+
+    #[test]
     fn access_rows_follow_microsoft_flags() {
         let mailbox = JmapMailbox {
             id: Uuid::nil(),
@@ -11215,7 +11263,8 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
                 write_utf16z(&mut row, message_class_for_email(email))
             }
-            PID_TAG_MESSAGE_DELIVERY_TIME
+            PID_TAG_CREATION_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
                 &mut row,
@@ -11231,6 +11280,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             ),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
             PID_TAG_ACCESS_LEVEL => write_u32(&mut row, 1),
+            PID_TAG_IMPORTANCE => write_u32(&mut row, 1),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_READ => row.push((!email.unread) as u8),
             PID_TAG_MESSAGE_SIZE => {
@@ -11243,6 +11293,15 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_SENDER_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
             PID_TAG_SENDER_SMTP_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
+            PID_TAG_SENT_REPRESENTING_NAME_W => write_utf16z(
+                &mut row,
+                email.from_display.as_deref().unwrap_or(&email.from_address),
+            ),
+            PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
+            | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
+                write_utf16z(&mut row, &email.from_address)
+            }
             PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
             PID_TAG_DISPLAY_CC_W => write_utf16z(&mut row, &display_cc(email)),
             PID_TAG_DISPLAY_BCC_W => write_utf16z(&mut row, &display_bcc(email)),
@@ -11262,6 +11321,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_INTERNET_MESSAGE_ID_W => {
                 write_utf16z(&mut row, email.internet_message_id.as_deref().unwrap_or(""))
             }
+            PID_NAME_CONTENT_CLASS_W_TAG => write_utf16z(&mut row, "urn:content-classes:message"),
             _ => match email_property_value(email, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
