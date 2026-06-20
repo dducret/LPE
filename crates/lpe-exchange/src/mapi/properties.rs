@@ -2022,24 +2022,19 @@ pub(in crate::mapi) fn email_property_value(
             .as_deref()
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
-        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
-            email
-                .from_display
-                .clone()
-                .unwrap_or_else(|| email.from_address.clone()),
-        )),
+        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(email_sender_name(email).to_string())),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
-        PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
-        PID_TAG_SENDER_SMTP_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
+        PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(email_sender_address(email).to_string()))
+        }
         PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
-            email
-                .from_display
-                .clone()
-                .unwrap_or_else(|| email.from_address.clone()),
+            email_sent_representing_name(email).to_string(),
         )),
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
-            Some(MapiValue::String(email.from_address.clone()))
+            Some(MapiValue::String(
+                email_sent_representing_address(email).to_string(),
+            ))
         }
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
@@ -2099,6 +2094,30 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => Some(MapiValue::String(transport_headers(email))),
         _ => None,
     }
+}
+
+pub(in crate::mapi) fn email_sender_name(email: &JmapEmail) -> &str {
+    email
+        .sender_display
+        .as_deref()
+        .or(email.sender_address.as_deref())
+        .or(email.from_display.as_deref())
+        .unwrap_or(&email.from_address)
+}
+
+pub(in crate::mapi) fn email_sender_address(email: &JmapEmail) -> &str {
+    email
+        .sender_address
+        .as_deref()
+        .unwrap_or(&email.from_address)
+}
+
+pub(in crate::mapi) fn email_sent_representing_name(email: &JmapEmail) -> &str {
+    email.from_display.as_deref().unwrap_or(&email.from_address)
+}
+
+pub(in crate::mapi) fn email_sent_representing_address(email: &JmapEmail) -> &str {
+    &email.from_address
 }
 
 pub(in crate::mapi) fn navigation_shortcut_property_value(
@@ -2385,10 +2404,9 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
         kind: ViewDefinitionKind::MailCompact,
         columns: vec![
             view_column(PID_TAG_HAS_ATTACHMENTS, 18, "Attachment"),
-            view_column(PID_TAG_SENDER_NAME_W, 160, "From"),
+            view_column(PID_TAG_SENT_REPRESENTING_NAME_W, 160, "From"),
             view_column(PID_TAG_SUBJECT_W, 280, "Subject"),
             view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 140, "Received"),
-            view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
             view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
         ],
         sort_column: 3,
@@ -9145,6 +9163,31 @@ mod tests {
             email_property_value(&email, PID_TAG_SENDER_SMTP_ADDRESS_W),
             Some(MapiValue::String("feed@example.test".to_string()))
         );
+        let mut delegated = email.clone();
+        delegated.from_display = Some("Represented User".to_string());
+        delegated.from_address = "represented@example.test".to_string();
+        delegated.sender_display = Some("Delegate Sender".to_string());
+        delegated.sender_address = Some("delegate@example.test".to_string());
+        assert_eq!(
+            email_property_value(&delegated, PID_TAG_SENDER_NAME_W),
+            Some(MapiValue::String("Delegate Sender".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&delegated, PID_TAG_SENDER_EMAIL_ADDRESS_W),
+            Some(MapiValue::String("delegate@example.test".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&delegated, PID_TAG_SENT_REPRESENTING_NAME_W),
+            Some(MapiValue::String("Represented User".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&delegated, PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W),
+            Some(MapiValue::String("represented@example.test".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&delegated, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::I64(128))
+        );
         assert_eq!(
             email_property_value(&email, PID_LID_POST_RSS_ITEM_GUID_W_TAG),
             Some(MapiValue::String("rss-guid".to_string()))
@@ -10960,19 +11003,18 @@ mod tests {
             ),
             Some(MapiValue::Binary(descriptor.clone()))
         );
-        assert_eq!(descriptor.len(), 276);
+        assert_eq!(descriptor.len(), 240);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
         assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-        assert_eq!(&descriptor[20..24], &6u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &5u32.to_le_bytes());
         assert_eq!(&descriptor[24..28], &3u32.to_le_bytes());
         assert_eq!(
             descriptor_column_property_tags(&descriptor),
             vec![
                 PID_TAG_HAS_ATTACHMENTS,
-                PID_TAG_SENDER_NAME_W,
+                PID_TAG_SENT_REPRESENTING_NAME_W,
                 PID_TAG_SUBJECT_W,
                 PID_TAG_MESSAGE_DELIVERY_TIME,
-                PID_TAG_MESSAGE_SIZE,
                 PID_TAG_MESSAGE_FLAGS,
             ]
         );
@@ -11009,7 +11051,7 @@ mod tests {
                 PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
             ),
             Some(MapiValue::String(
-                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
+                "\nAttachment\nFrom\nSubject\nReceived\nStatus\n".to_string()
             ))
         );
         assert_eq!(
@@ -11117,7 +11159,7 @@ mod tests {
             stream,
             view_descriptor_binary(&outlook_mail_view_definition("Compact"))
         );
-        assert_eq!(stream.len(), 276);
+        assert_eq!(stream.len(), 240);
         assert!(writable_target.is_none());
     }
 

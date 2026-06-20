@@ -2856,13 +2856,13 @@ pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiS
                 PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                     compare_case_insensitive(&left.subject, &right.subject)
                 }
-                PID_TAG_SENDER_NAME_W => compare_case_insensitive(
-                    left.from_display.as_deref().unwrap_or(&left.from_address),
-                    right.from_display.as_deref().unwrap_or(&right.from_address),
-                ),
-                PID_TAG_SENDER_EMAIL_ADDRESS_W => {
-                    compare_case_insensitive(&left.from_address, &right.from_address)
+                PID_TAG_SENDER_NAME_W => {
+                    compare_case_insensitive(email_sender_name(left), email_sender_name(right))
                 }
+                PID_TAG_SENDER_EMAIL_ADDRESS_W => compare_case_insensitive(
+                    email_sender_address(left),
+                    email_sender_address(right),
+                ),
                 PID_TAG_DISPLAY_TO_W => {
                     compare_case_insensitive(&display_to(left), &display_to(right))
                 }
@@ -2898,19 +2898,13 @@ pub(in crate::mapi) fn sort_mapi_messages(
                     compare_case_insensitive(&left.email.subject, &right.email.subject)
                 }
                 PID_TAG_SENDER_NAME_W => compare_case_insensitive(
-                    left.email
-                        .from_display
-                        .as_deref()
-                        .unwrap_or(&left.email.from_address),
-                    right
-                        .email
-                        .from_display
-                        .as_deref()
-                        .unwrap_or(&right.email.from_address),
+                    email_sender_name(&left.email),
+                    email_sender_name(&right.email),
                 ),
-                PID_TAG_SENDER_EMAIL_ADDRESS_W => {
-                    compare_case_insensitive(&left.email.from_address, &right.email.from_address)
-                }
+                PID_TAG_SENDER_EMAIL_ADDRESS_W => compare_case_insensitive(
+                    email_sender_address(&left.email),
+                    email_sender_address(&right.email),
+                ),
                 PID_TAG_DISPLAY_TO_W => {
                     compare_case_insensitive(&display_to(&left.email), &display_to(&right.email))
                 }
@@ -10317,7 +10311,7 @@ mod tests {
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
             Some(MapiValue::String(
-                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
+                "\nAttachment\nFrom\nSubject\nReceived\nStatus\n".to_string()
             ))
         );
         assert_eq!(
@@ -10699,13 +10693,19 @@ mod tests {
         email.received_at = "2026-06-20T16:28:38Z".to_string();
         email.from_display = Some("Denis Ducret".to_string());
         email.from_address = "denis.ducret@sdic.ch".to_string();
+        email.sender_display = Some("Delegate Sender".to_string());
+        email.sender_address = Some("delegate@example.test".to_string());
+        email.size_octets = 2048;
         let expected_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
         let columns = [
             PID_TAG_CREATION_TIME,
             PID_TAG_IMPORTANCE,
+            PID_TAG_SENDER_NAME_W,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_MESSAGE_SIZE,
             PID_NAME_CONTENT_CLASS_W_TAG,
         ];
 
@@ -10721,6 +10721,14 @@ mod tests {
             MapiValue::I32(1)
         );
         assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENDER_NAME_W).unwrap(),
+            MapiValue::String("Delegate Sender".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENDER_EMAIL_ADDRESS_W).unwrap(),
+            MapiValue::String("delegate@example.test".to_string())
+        );
+        assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_NAME_W).unwrap(),
             MapiValue::String("Denis Ducret".to_string())
         );
@@ -10733,6 +10741,10 @@ mod tests {
             parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W)
                 .unwrap(),
             MapiValue::String("denis.ducret@sdic.ch".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE).unwrap(),
+            MapiValue::I32(2048)
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),
@@ -11286,21 +11298,18 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_MESSAGE_SIZE => {
                 write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)
             }
-            PID_TAG_SENDER_NAME_W => write_utf16z(
-                &mut row,
-                email.from_display.as_deref().unwrap_or(&email.from_address),
-            ),
+            PID_TAG_SENDER_NAME_W => write_utf16z(&mut row, email_sender_name(email)),
             PID_TAG_SENDER_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
-            PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
-            PID_TAG_SENDER_SMTP_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
-            PID_TAG_SENT_REPRESENTING_NAME_W => write_utf16z(
-                &mut row,
-                email.from_display.as_deref().unwrap_or(&email.from_address),
-            ),
+            PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
+                write_utf16z(&mut row, email_sender_address(email))
+            }
+            PID_TAG_SENT_REPRESENTING_NAME_W => {
+                write_utf16z(&mut row, email_sent_representing_name(email))
+            }
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
             | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
-                write_utf16z(&mut row, &email.from_address)
+                write_utf16z(&mut row, email_sent_representing_address(email))
             }
             PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
             PID_TAG_DISPLAY_CC_W => write_utf16z(&mut row, &display_cc(email)),

@@ -9775,25 +9775,19 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::U32(
             email.size_octets.clamp(0, u32::MAX as i64) as u32
         )),
-        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
-            email
-                .from_display
-                .clone()
-                .unwrap_or_else(|| email.from_address.clone()),
-        )),
+        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(email_sender_name(email).to_string())),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
-            Some(MapiValue::String(email.from_address.clone()))
+            Some(MapiValue::String(email_sender_address(email).to_string()))
         }
         PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
-            email
-                .from_display
-                .clone()
-                .unwrap_or_else(|| email.from_address.clone()),
+            email_sent_representing_name(email).to_string(),
         )),
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
-            Some(MapiValue::String(email.from_address.clone()))
+            Some(MapiValue::String(
+                email_sent_representing_address(email).to_string(),
+            ))
         }
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
@@ -23153,7 +23147,7 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=6"));
+        assert!(summary.contains("column_count=5"));
         assert!(summary.contains("sort_column=3"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("0x0e060040"));
@@ -23192,6 +23186,42 @@ mod tests {
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
         assert!(contract.contains("selected_missing_descriptor_columns=0x0e1b000b"));
         assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
+    }
+
+    #[test]
+    fn inbox_compact_descriptor_matches_observed_visible_projection() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let contract = format_inbox_view_descriptor_set_columns_behavior_contract(
+            INBOX_FOLDER_ID,
+            false,
+            &[
+                0x6748_0014,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_CREATION_TIME,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_SENT_REPRESENTING_NAME_W,
+                PID_TAG_MESSAGE_FLAGS,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_INTERNET_MESSAGE_ID_W,
+                PID_TAG_IMPORTANCE,
+                PID_TAG_HAS_ATTACHMENTS,
+                PID_TAG_MESSAGE_STATUS,
+                0x8514_000B,
+                0x8017_000B,
+                0x801F_001F,
+                0x0041_0102,
+                0x1213_0003,
+                PID_TAG_MESSAGE_DELIVERY_TIME,
+            ],
+            &snapshot,
+        );
+
+        assert!(contract.contains("descriptor_columns=0x0e1b000b"));
+        assert!(contract.contains("0x0042001f"));
+        assert!(contract.contains("selected_missing_descriptor_columns="));
+        assert!(!contract.contains("selected_missing_descriptor_columns=0x"));
     }
 
     #[test]

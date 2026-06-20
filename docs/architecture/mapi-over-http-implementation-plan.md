@@ -245,6 +245,9 @@ non-canonical LPE state.
   Mail named-view descriptor binaries list only real message-table property
   tags used by the visible columns; they must not include synthetic placeholder
   tags or named-property IDs that are not resolvable in the active session.
+  The bounded Inbox Compact descriptor follows the observed Outlook 2016/2019
+  visible-message projection: attachment indicator, sent-representing display
+  name, subject, delivery time, and message flags.
   Non-mail folders, including Calendar, Contacts, Tasks, Notes, and Journal,
   do not advertise `PidTagDefaultViewEntryId` until LPE has type-specific
   Outlook view descriptors for those container classes. Delete attempts against
@@ -560,8 +563,13 @@ not by itself authorize broad client publication.
 
 Normal message contents-table rows project Outlook-selected Inbox view columns
 from canonical mail data, including creation time, normal importance,
-sent-representing sender fields, and
-`PidNameContentClass = urn:content-classes:message`.
+message size, attachment state, distinct sender and sent-representing fields,
+and `PidNameContentClass = urn:content-classes:message`. Per `[MS-OXPROPS]`
+sections 2.798, 2.1006, and 2.1018 plus `[MS-OXCMSG]` section 2.2.1.7,
+`PidTagMessageSize` is a read-only message property backed by canonical
+`messages.size_octets`, `PidTagSender*` uses the canonical `sender` recipient
+when present with a `from` fallback, and `PidTagSentRepresenting*` uses the
+canonical `from` identity.
 
 ## State-Management Invariants
 
