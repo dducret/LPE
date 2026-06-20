@@ -6151,6 +6151,8 @@ fn associated_contents_table_column_is_backed(storage_tag: u32) -> bool {
         || property_ids_match(storage_tag, PID_TAG_VIEW_DESCRIPTOR_CLSID)
         || property_ids_match(storage_tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE)
         || property_ids_match(storage_tag, PID_TAG_WLINK_GROUP_HEADER_ID)
+        || property_ids_match(storage_tag, PID_TAG_WLINK_FOLDER_TYPE)
+        || property_ids_match(storage_tag, PID_TAG_WLINK_GROUP_CLSID)
 }
 
 fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
@@ -25894,6 +25896,43 @@ mod tests {
         assert!(summary.contains("0x7c060003"));
         assert!(summary.contains("0x685d0003"));
         assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+    }
+
+    #[test]
+    fn associated_column_support_covers_common_views_wlink_binary_variants() {
+        let summary = associated_contents_table_column_support_summary(&[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_CLASS_W,
+            0x6842_0102,
+            PID_TAG_WLINK_SAVE_STAMP,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_WLINK_TYPE,
+            PID_TAG_WLINK_FLAGS,
+            PID_TAG_WLINK_ORDINAL,
+            PID_TAG_WLINK_ENTRY_ID,
+            PID_TAG_WLINK_RECORD_KEY,
+            0x6853_0003,
+            PID_TAG_WLINK_STORE_ENTRY_ID,
+            0x684F_0102,
+            0x6850_0102,
+            PID_TAG_WLINK_GROUP_NAME_W,
+            PID_TAG_WLINK_SECTION,
+            0x6854_0102,
+            0x6890_0102,
+            PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+            0x6892_0003,
+            0x6893_0102,
+            0x8010_0102,
+        ]);
+
+        assert!(summary.contains("0x684f0102"));
+        assert!(summary.contains("0x68500102"));
+        assert!(summary.contains("named_or_dynamic=0x80100102"));
+        assert!(!summary.contains("defaulted=0x684f0102"));
+        assert!(!summary.contains("defaulted=0x68500102"));
     }
 
     #[test]
