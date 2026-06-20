@@ -7660,6 +7660,10 @@ fn log_outlook_contents_table_set_columns(
 
     let view_handoff_table_contract =
         format_outlook_view_handoff_table_contract(folder_id, associated, columns, snapshot);
+    let inbox_view_descriptor_behavior_contract =
+        format_inbox_view_descriptor_set_columns_behavior_contract(
+            folder_id, associated, columns, snapshot,
+        );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -7679,6 +7683,7 @@ fn log_outlook_contents_table_set_columns(
         ipm_configuration_column_contract =
             %format_ipm_configuration_set_columns_contract(folder_id, associated, columns),
         view_handoff_table_contract = %view_handoff_table_contract,
+        inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
         "rca debug outlook contents table columns selected"
     );
     warn_outlook_view_handoff_table_invariants(
@@ -7933,6 +7938,37 @@ fn format_inbox_view_descriptor_behavior_contract(
         selected.len().min(3),
         descriptor_column_projection,
         sample_values
+    )
+}
+
+fn format_inbox_view_descriptor_set_columns_behavior_contract(
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if associated || folder_id != INBOX_FOLDER_ID {
+        return String::new();
+    }
+    let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
+        return "default_view=missing".to_string();
+    };
+    let definition = outlook_mail_view_definition(&message.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let selected_missing_descriptor_columns =
+        missing_debug_property_tags(&descriptor_columns, columns);
+
+    format!(
+        "phase=setcolumns;default_view_id=0x{:016x};view_name={};\
+         descriptor_summary={};descriptor_columns={};\
+         selected_columns={};selected_missing_descriptor_columns={}",
+        message.id,
+        message.name,
+        format_view_descriptor_binary_summary(&descriptor),
+        format_debug_property_tags(&descriptor_columns),
+        format_debug_property_tags(columns),
+        selected_missing_descriptor_columns
     )
 }
 
@@ -22971,6 +23007,23 @@ mod tests {
         assert!(contract.contains("folder_local_default_supported=true"));
         assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    }
+
+    #[test]
+    fn inbox_view_descriptor_set_columns_contract_reports_missing_descriptor_columns() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let contract = format_inbox_view_descriptor_set_columns_behavior_contract(
+            INBOX_FOLDER_ID,
+            false,
+            &[PID_TAG_SUBJECT_W, PID_TAG_MESSAGE_DELIVERY_TIME],
+            &snapshot,
+        );
+
+        assert!(contract.contains("phase=setcolumns"));
+        assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
+        assert!(contract.contains("descriptor_columns=0x00040001"));
+        assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
+        assert!(contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
     #[test]
