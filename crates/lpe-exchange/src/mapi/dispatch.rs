@@ -7854,6 +7854,88 @@ fn format_outlook_view_handoff_table_contract(
     )
 }
 
+fn format_inbox_view_descriptor_behavior_contract(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if associated || folder_id != INBOX_FOLDER_ID {
+        return String::new();
+    }
+    let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
+        return "default_view=missing".to_string();
+    };
+    let definition = outlook_mail_view_definition(&message.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let mut rows = emails_for_folder(folder_id, mailboxes, emails);
+    rows.retain(|email| restriction_matches_email(restriction, email));
+    sort_emails(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let selected_missing_descriptor_columns =
+        missing_debug_property_tags(&descriptor_columns, columns);
+    let sample_values = selected
+        .iter()
+        .take(3)
+        .map(|index| {
+            let email = rows[*index];
+            let values = descriptor_columns
+                .iter()
+                .map(|tag| {
+                    let value = normal_message_debug_property_value(email, *tag)
+                        .map(|value| format_normal_message_debug_value(*tag, &value))
+                        .unwrap_or_else(|| "default".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "index={index};mid=0x{:016x};{}",
+                mapi_message_id(email),
+                values
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let descriptor_column_projection = descriptor_columns
+        .iter()
+        .map(|tag| {
+            let projected = selected
+                .iter()
+                .any(|index| normal_message_debug_property_value(rows[*index], *tag).is_some());
+            format!("0x{tag:08x}:projected={projected}")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "default_view_id=0x{:016x};view_name={};descriptor_summary={};\
+         descriptor_columns={};selected_missing_descriptor_columns={};\
+         total_rows={};position={};forward={};requested={};sampled={};\
+         descriptor_column_projection={};sample_values={}",
+        message.id,
+        message.name,
+        format_view_descriptor_binary_summary(&descriptor),
+        format_debug_property_tags(&descriptor_columns),
+        selected_missing_descriptor_columns,
+        rows.len(),
+        position,
+        forward_read,
+        row_count,
+        selected.len().min(3),
+        descriptor_column_projection,
+        sample_values
+    )
+}
+
 fn warn_outlook_view_handoff_table_invariants(
     principal: &AccountPrincipal,
     request_rop_id: &str,
@@ -8204,6 +8286,19 @@ fn log_outlook_contents_table_query_rows(
         &selected_columns,
         snapshot,
     );
+    let inbox_view_descriptor_behavior_contract = format_inbox_view_descriptor_behavior_contract(
+        *folder_id,
+        *associated,
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+        sort_orders,
+        restriction.as_ref(),
+        &selected_columns,
+        mailboxes,
+        emails,
+        snapshot,
+    );
 
     tracing::info!(
         rca_debug = true,
@@ -8256,6 +8351,7 @@ fn log_outlook_contents_table_query_rows(
             String::new()
         },
         view_handoff_table_contract = %view_handoff_table_contract,
+        inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
         "rca debug outlook contents table query rows"
     );
     warn_outlook_view_handoff_table_invariants(

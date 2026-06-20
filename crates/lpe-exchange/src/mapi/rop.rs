@@ -1484,6 +1484,8 @@ fn log_get_properties_specific_debug(
     let default_view_entry_id_decoding = format_default_view_entry_id_decoding(
         object, principal, columns, mailboxes, emails, snapshot,
     );
+    let common_view_descriptor_getprops_contract =
+        format_common_view_descriptor_getprops_contract(object, principal, columns, snapshot);
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1533,6 +1535,7 @@ fn log_get_properties_specific_debug(
         folder_type_getprops_contract = %folder_type_getprops_contract,
         message_body_getprops_contract = %message_body_getprops_contract,
         default_view_entry_id_decoding = %default_view_entry_id_decoding,
+        common_view_descriptor_getprops_contract = %common_view_descriptor_getprops_contract,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
         outlook_bootstrap_estimated_rop_payload_bytes =
             outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
@@ -1551,6 +1554,89 @@ fn log_get_properties_specific_debug(
         snapshot,
         &flagged_error_tags,
     );
+}
+
+fn format_common_view_descriptor_getprops_contract(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let Some(MapiObject::CommonViewNamedView { folder_id, view_id }) = object else {
+        return String::new();
+    };
+    let descriptor_requested = columns.iter().any(|tag| {
+        matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_VIEW_DESCRIPTOR_BINARY
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        )
+    });
+    if !descriptor_requested {
+        return String::new();
+    }
+    let Some(message) = snapshot.common_view_named_view_message_for_id(*view_id) else {
+        return format!(
+            "found=false;folder_id=0x{folder_id:016x};view_id=0x{view_id:016x};requested_descriptor_tags={}",
+            format_property_tags_for_debug(columns)
+        );
+    };
+    let definition = outlook_mail_view_definition(&message.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
+    let descriptor_strings = view_descriptor_strings(&definition);
+    let target = default_view_message_entry_id_target(
+        &crate::mapi::identity::message_entry_id_from_object_ids(
+            principal.account_id,
+            *folder_id,
+            *view_id,
+        )
+        .unwrap_or_default(),
+    )
+    .map(|(target_folder_id, target_message_id)| {
+        format!("folder_id=0x{target_folder_id:016x};message_id=0x{target_message_id:016x}")
+    })
+    .unwrap_or_else(|| "decode=not_message_entry_id".to_string());
+
+    format!(
+        "found=true;folder_id=0x{folder_id:016x};view_id=0x{view_id:016x};view_name={};\
+         requested_descriptor_tags={};descriptor_bytes={};descriptor_strings_utf16_bytes={};\
+         descriptor_column_count={};descriptor_column_tags={};descriptor_entry_id_target={target}",
+        message.name,
+        format_property_tags_for_debug(columns),
+        descriptor.len(),
+        descriptor_strings.encode_utf16().count() * 2,
+        descriptor_columns.len(),
+        format_property_tags_for_debug(&descriptor_columns)
+    )
+}
+
+fn view_descriptor_debug_property_tags(descriptor: &[u8]) -> Vec<u32> {
+    let Some(column_count) = descriptor
+        .get(20..24)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .and_then(|count| usize::try_from(count).ok())
+    else {
+        return Vec::new();
+    };
+    (0..column_count)
+        .filter_map(|index| {
+            let offset = 60 + index * 36;
+            let property_type = descriptor
+                .get(offset..offset + 2)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)? as u32;
+            let property_id = descriptor
+                .get(offset + 2..offset + 4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)? as u32;
+            Some((property_id << 16) | property_type)
+        })
+        .collect()
 }
 
 fn format_default_view_entry_id_decoding(
