@@ -15549,6 +15549,102 @@ async fn mapi_over_http_ipm_subtree_ost_identity_survives_reconnect() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let stored_folder_profile_values = store.mapi_folder_profile_property_values.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let client_flags = vec![0x01, 0x04, 0x00, 0x00, 0x20, 0x00];
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x36DA_0102, &client_flags);
+
+    let mut set_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut set_rops, test_mapi_folder_id(5));
+    set_rops.push(0);
+    set_rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on Inbox
+    ]);
+    set_rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    set_rops.extend_from_slice(&1u16.to_le_bytes());
+    set_rops.extend_from_slice(&property_values);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&set_rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(stored_folder_profile_values
+        .lock()
+        .unwrap()
+        .values()
+        .any(|value| value == &client_flags));
+
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = reconnect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut get_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut get_rops, test_mapi_folder_id(5));
+    get_rops.push(0);
+    get_rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific on reopened Inbox
+    ]);
+    get_rops.extend_from_slice(&4096u16.to_le_bytes());
+    get_rops.extend_from_slice(&1u16.to_le_bytes());
+    get_rops.extend_from_slice(&0x36DA_0102u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&get_rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut persisted = (client_flags.len() as u16).to_le_bytes().to_vec();
+    persisted.extend_from_slice(&client_flags);
+    assert!(contains_bytes(&response_rops, &persisted));
+}
+
+#[tokio::test]
 async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let message_id = "39393939-3939-3939-3939-393939393939";
     let mailbox_id = "55555555-5555-5555-5555-555555555555";

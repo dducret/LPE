@@ -12,9 +12,9 @@ use super::wire::{MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
 use crate::store::{
-    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
-    MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
-    UpsertMapiNavigationShortcutInput,
+    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiFolderProfilePropertyValue,
+    MapiIdentityObjectKind, MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint,
+    UpsertMapiAssociatedConfigInput, UpsertMapiNavigationShortcutInput,
 };
 use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
@@ -3253,6 +3253,23 @@ where
             properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
         }
     }
+    if let Ok(values) = store
+        .fetch_mapi_folder_profile_property_values(
+            principal.account_id,
+            folder_id,
+            &[PID_TAG_EXTENDED_FOLDER_FLAGS],
+        )
+        .await
+    {
+        for value in values {
+            if value.property_tag == PID_TAG_EXTENDED_FOLDER_FLAGS {
+                properties.insert(
+                    PID_TAG_EXTENDED_FOLDER_FLAGS,
+                    MapiValue::Binary(value.property_value),
+                );
+            }
+        }
+    }
     properties
 }
 
@@ -3447,6 +3464,11 @@ fn log_set_properties_specific_debug(
     } else {
         "normal_property_validation"
     };
+    let folder_profile_property_storage = folder_profile_property_storage_mode_for_debug(
+        object,
+        &probe.property_tags,
+        &probe.property_value_shapes,
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -3467,9 +3489,32 @@ fn log_set_properties_specific_debug(
         default_folder_entry_id_values = %probe.default_folder_entry_id_values,
         default_folder_identification_values_stripped = default_folder_identification_values_stripped,
         default_folder_entry_id_storage_mode = default_folder_entry_id_storage_mode,
+        folder_profile_property_storage = %folder_profile_property_storage,
         parse_error = %probe.parse_error,
         "rca debug mapi set properties specific"
     );
+}
+
+fn folder_profile_property_storage_mode_for_debug(
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+    property_value_shapes: &str,
+) -> String {
+    let Some(MapiObject::Folder { folder_id, .. }) = object else {
+        return String::new();
+    };
+    let supported = property_tags
+        .iter()
+        .copied()
+        .map(canonical_property_storage_tag)
+        .filter(|tag| *tag == PID_TAG_EXTENDED_FOLDER_FLAGS)
+        .map(|tag| format!("{tag:#010x}:durable_folder_profile_property"))
+        .collect::<Vec<_>>()
+        .join(",");
+    if supported.is_empty() {
+        return String::new();
+    }
+    format!("folder=0x{folder_id:016x};{supported};values={property_value_shapes}")
 }
 
 fn log_get_properties_default_folder_response_debug(
@@ -4369,6 +4414,12 @@ fn folder_set_property_problems(
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
+            if storage_tag == PID_TAG_EXTENDED_FOLDER_FLAGS {
+                return match value {
+                    MapiValue::Binary(bytes) if !bytes.is_empty() && bytes.len() <= 4096 => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
             let hidden_configuration_class =
                 hidden_configuration_folder_message_class(*folder_id, mailboxes);
             if storage_tag == PID_TAG_ATTRIBUTE_HIDDEN && hidden_configuration_class.is_some() {
@@ -4812,7 +4863,13 @@ fn mapi_value_debug_shape(value: &MapiValue) -> String {
         MapiValue::U32(_) => "u32".to_string(),
         MapiValue::U64(_) => "u64".to_string(),
         MapiValue::String(value) => format!("string:chars={}", value.chars().count()),
-        MapiValue::Binary(value) => format!("binary:bytes={}", value.len()),
+        MapiValue::Binary(value) => {
+            format!(
+                "binary:bytes={}:preview={}",
+                value.len(),
+                hex_preview(value, 32)
+            )
+        }
         MapiValue::Guid(_) => "guid".to_string(),
         MapiValue::Error(error) => format!("error:{error:#010x}"),
         MapiValue::MultiI16(value) => format!("multi_i16:count={}", value.len()),
@@ -5166,6 +5223,32 @@ async fn persist_profile_folder_property_values<S>(
 where
     S: ExchangeStore,
 {
+    let folder_profile_values = values
+        .iter()
+        .filter_map(|(tag, value)| {
+            let storage_tag = canonical_property_storage_tag(*tag);
+            if storage_tag != PID_TAG_EXTENDED_FOLDER_FLAGS {
+                return None;
+            }
+            let MapiValue::Binary(bytes) = value else {
+                return None;
+            };
+            Some(MapiFolderProfilePropertyValue {
+                folder_id,
+                property_tag: storage_tag,
+                property_type: (PID_TAG_EXTENDED_FOLDER_FLAGS & 0xffff) as u16,
+                property_value: bytes.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if !folder_profile_values.is_empty() {
+        store
+            .upsert_mapi_folder_profile_property_values(
+                principal.account_id,
+                &folder_profile_values,
+            )
+            .await?;
+    }
     if folder_id != IPM_SUBTREE_FOLDER_ID {
         return Ok(());
     }

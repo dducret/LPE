@@ -818,6 +818,35 @@ fn mapi_profile_settings_are_canonical_account_settings() {
 }
 
 #[test]
+fn mapi_folder_profile_properties_are_bounded_profile_state() {
+    let profile = table_definition("mapi_folder_profile_property_values");
+    for required in [
+        "account_id UUID NOT NULL",
+        "folder_id BIGINT NOT NULL CHECK (folder_id > 0)",
+        "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
+        "property_value BYTEA NOT NULL CHECK (octet_length(property_value) > 0 AND octet_length(property_value) <= 4096)",
+        "PRIMARY KEY (tenant_id, account_id, folder_id, property_tag, property_type)",
+        "REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            profile.contains(required),
+            "mapi_folder_profile_property_values must persist bounded Outlook folder profile state: {required}"
+        );
+    }
+
+    assert_source_contains_all(
+        "lpe-exchange folder profile property store",
+        EXCHANGE_STORE,
+        &[
+            "fn fetch_mapi_folder_profile_property_values",
+            "fn upsert_mapi_folder_profile_property_values",
+            "FROM mapi_folder_profile_property_values",
+            "INSERT INTO mapi_folder_profile_property_values",
+        ],
+    );
+}
+
+#[test]
 fn update_script_only_applies_documented_schema_compatibility_updates() {
     for forbidden in [
         "CREATE TABLE IF NOT EXISTS public.mapi_named_properties",
@@ -877,6 +906,8 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         "update-lpe.sh MAPI associated configuration compatibility patch",
         UPDATE_LPE_SCRIPT,
         &[
+            "CREATE TABLE IF NOT EXISTS public.mapi_folder_profile_property_values",
+            "mapi_folder_profile_property_values_account_idx",
             "CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages",
             "mapi_object_identities_object_kind_check",
             "associated_config",
@@ -900,6 +931,7 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         "check-lpe.sh MAPI associated configuration compatibility check",
         CHECK_LPE_SCRIPT,
         &[
+            "to_regclass('public.mapi_folder_profile_property_values')",
             "to_regclass('public.mapi_associated_config_messages')",
             "mapi_associated_config_shape_constraint_ok",
             "mail_change_log_object_shape_check",

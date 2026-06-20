@@ -246,6 +246,21 @@ ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN group_name SET DEFAULT '',
   ALTER COLUMN group_name SET NOT NULL;
 
+CREATE TABLE IF NOT EXISTS public.mapi_folder_profile_property_values (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
+    property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),
+    property_value BYTEA NOT NULL CHECK (octet_length(property_value) > 0 AND octet_length(property_value) <= 4096),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, folder_id, property_tag, property_type),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mapi_folder_profile_property_values_account_idx
+    ON public.mapi_folder_profile_property_values (tenant_id, account_id, folder_id);
+
 CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages (
     tenant_id UUID NOT NULL,
     id UUID NOT NULL,
@@ -1605,6 +1620,12 @@ fi
 mapi_profile_ost_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_profile_settings'::regclass AND conname = 'mapi_profile_settings_ipm_subtree_ost_id_check' AND pg_get_constraintdef(oid) LIKE '%<= 2048%';")"
 if [[ "${mapi_profile_ost_constraint_count}" != "1" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected mapi_profile_settings OST identity shape." >&2
+  exit 1
+fi
+mapi_folder_profile_property_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_folder_profile_property_values');")"
+mapi_folder_profile_property_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_folder_profile_property_values_account_idx');")"
+if [[ "${mapi_folder_profile_property_table}" != "mapi_folder_profile_property_values" || "${mapi_folder_profile_property_idx}" != "mapi_folder_profile_property_values_account_idx" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_folder_profile_property_values shape." >&2
   exit 1
 fi
 mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"

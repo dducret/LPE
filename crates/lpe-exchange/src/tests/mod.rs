@@ -63,9 +63,10 @@ use crate::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiFolderProfilePropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
+        MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
+        MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -1546,6 +1547,8 @@ struct FakeStore {
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
+    mapi_folder_profile_property_values:
+        Arc<Mutex<HashMap<FakeMapiFolderProfilePropertyKey, Vec<u8>>>>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
@@ -1587,6 +1590,7 @@ struct FakeStore {
 }
 
 type FakeMapiCustomPropertyKey = (Uuid, MapiCustomPropertyObjectKind, Uuid, u32, u16);
+type FakeMapiFolderProfilePropertyKey = (Uuid, u64, u32, u16);
 
 #[derive(Clone)]
 struct FakeRetentionPolicyTag {
@@ -4032,6 +4036,58 @@ impl ExchangeStore for FakeStore {
             return Box::pin(async move { anyhow::bail!("simulated OST identity store failure") });
         }
         *self.mapi_ipm_subtree_ost_id.lock().unwrap() = Some(ost_id.to_vec());
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn fetch_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>> {
+        let values = self
+            .mapi_folder_profile_property_values
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(
+                |((stored_account_id, stored_folder_id, property_tag, property_type), value)| {
+                    if *stored_account_id == account_id
+                        && *stored_folder_id == folder_id
+                        && property_tags.contains(property_tag)
+                    {
+                        Some(MapiFolderProfilePropertyValue {
+                            folder_id,
+                            property_tag: *property_tag,
+                            property_type: *property_type,
+                            property_value: value.clone(),
+                        })
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(values) })
+    }
+
+    fn upsert_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiFolderProfilePropertyValue],
+    ) -> StoreFuture<'a, ()> {
+        let mut stored = self.mapi_folder_profile_property_values.lock().unwrap();
+        for value in values {
+            stored.insert(
+                (
+                    account_id,
+                    value.folder_id,
+                    value.property_tag,
+                    value.property_type,
+                ),
+                value.property_value.clone(),
+            );
+        }
         Box::pin(async move { Ok(()) })
     }
 

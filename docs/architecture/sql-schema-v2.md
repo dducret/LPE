@@ -330,6 +330,12 @@ Protocol adapters store only cursor rows:
   Outlook cached-mode identity blobs can be persisted without turning the table
   into a general OST/profile blob store. Default-folder EntryID properties
   remain computed canonical folder projections and must not be stored here.
+- `mapi_folder_profile_property_values` stores bounded per-folder Outlook
+  profile display state keyed by account, MAPI folder id, property tag, and
+  property type. The current runtime use is `PidTagExtendedFolderFlags`
+  (`0x36DA0102`) because Outlook writes and rereads that folder UI stream
+  before displaying a folder view. It must not become a generic Exchange folder
+  property store or canonical mailbox metadata source.
 - The read-only Outlook profile summary exposed through
   `/api/mail/outlook-profile` and private JMAP `OutlookProfile/*` is derived
   from these canonical tables. It must not become a separate Exchange profile

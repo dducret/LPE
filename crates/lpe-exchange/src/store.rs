@@ -193,6 +193,14 @@ pub(crate) struct MapiCustomPropertyValue {
     pub(crate) property_value: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiFolderProfilePropertyValue {
+    pub(crate) folder_id: u64,
+    pub(crate) property_tag: u32,
+    pub(crate) property_type: u16,
+    pub(crate) property_value: Vec<u8>,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum MapiCheckpointKind {
@@ -727,6 +735,19 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
         ost_id: &'a [u8],
+    ) -> StoreFuture<'a, ()>;
+
+    fn fetch_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>>;
+
+    fn upsert_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiFolderProfilePropertyValue],
     ) -> StoreFuture<'a, ()>;
 
     fn fetch_mapi_sync_changes<'a>(
@@ -4029,6 +4050,97 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>> {
+        Box::pin(async move {
+            if property_tags.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let tags = property_tags
+                .iter()
+                .map(|tag| i64::from(*tag))
+                .collect::<Vec<_>>();
+            let rows = sqlx::query(
+                r#"
+                SELECT folder_id, property_tag, property_type, property_value
+                FROM mapi_folder_profile_property_values
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND folder_id = $3
+                  AND property_tag = ANY($4)
+                ORDER BY property_tag, property_type
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(folder_id as i64)
+            .bind(&tags)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_folder_profile_property_value_from_row)
+                .collect()
+        })
+    }
+
+    fn upsert_mapi_folder_profile_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiFolderProfilePropertyValue],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if values.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            for value in values {
+                if value.property_value.is_empty() || value.property_value.len() > 4096 {
+                    anyhow::bail!("invalid MAPI folder profile property value");
+                }
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_folder_profile_property_values (
+                        tenant_id,
+                        account_id,
+                        folder_id,
+                        property_tag,
+                        property_type,
+                        property_value
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (
+                        tenant_id,
+                        account_id,
+                        folder_id,
+                        property_tag,
+                        property_type
+                    )
+                    DO UPDATE SET
+                        property_value = EXCLUDED.property_value,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(value.folder_id as i64)
+                .bind(i64::from(value.property_tag))
+                .bind(i32::from(value.property_type))
+                .bind(&value.property_value)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
     fn fetch_mapi_sync_checkpoint<'a>(
         &'a self,
         account_id: Uuid,
@@ -7327,6 +7439,17 @@ fn mapi_custom_property_value_from_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<MapiCustomPropertyValue> {
     Ok(MapiCustomPropertyValue {
+        property_tag: row.get::<i64, _>("property_tag") as u32,
+        property_type: row.get::<i32, _>("property_type") as u16,
+        property_value: row.get("property_value"),
+    })
+}
+
+fn mapi_folder_profile_property_value_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<MapiFolderProfilePropertyValue> {
+    Ok(MapiFolderProfilePropertyValue {
+        folder_id: row.get::<i64, _>("folder_id") as u64,
         property_tag: row.get::<i64, _>("property_tag") as u32,
         property_type: row.get::<i32, _>("property_type") as u16,
         property_value: row.get("property_value"),

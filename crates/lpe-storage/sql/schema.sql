@@ -2244,6 +2244,21 @@ CREATE TABLE mapi_navigation_shortcuts (
 CREATE INDEX mapi_navigation_shortcuts_account_idx
     ON mapi_navigation_shortcuts (tenant_id, account_id, section, ordinal, subject, id);
 
+CREATE TABLE mapi_folder_profile_property_values (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
+    property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),
+    property_value BYTEA NOT NULL CHECK (octet_length(property_value) > 0 AND octet_length(property_value) <= 4096),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, folder_id, property_tag, property_type),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_folder_profile_property_values_account_idx
+    ON mapi_folder_profile_property_values (tenant_id, account_id, folder_id);
+
 CREATE TABLE mapi_associated_config_messages (
     tenant_id UUID NOT NULL,
     id UUID NOT NULL,
