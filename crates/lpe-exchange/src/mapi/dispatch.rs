@@ -2761,10 +2761,12 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_rows={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
+        state.inbox_normal_contents_table_setcolumns_observed,
+        state.inbox_normal_contents_table_query_rows_observed,
         state.inbox_associated_contents_table_observed,
         state.inbox_associated_config_open_observed,
         state.inbox_associated_config_stream_open_observed,
@@ -2774,6 +2776,8 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         debug_context_or_none(&state.first_inbox_loop_transition_context),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
+        debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
+        debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
         debug_context_or_none(&state.last_inbox_rule_organizer_stream_context),
@@ -3087,13 +3091,19 @@ fn format_inbox_related_release_context(
             sort_orders,
             restriction,
             ..
-        }) if *folder_id == INBOX_FOLDER_ID || *folder_id == COMMON_VIEWS_FOLDER_ID => Some(
-            format!(
-                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={}",
+        }) if *folder_id == INBOX_FOLDER_ID || *folder_id == COMMON_VIEWS_FOLDER_ID => {
+            let release_without_query_rows = *folder_id == INBOX_FOLDER_ID
+                && !*associated
+                && !columns.is_empty()
+                && state.last_inbox_normal_contents_table_setcolumns_handle == handle
+                && state.last_inbox_normal_contents_table_query_rows_handle != handle;
+            Some(format!(
+                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};column_support={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};visible_inbox_release_without_query_rows={};last_normal_setcolumns={};last_normal_query_rows={}",
                 format_optional_debug_handle(handle),
                 associated,
                 position,
                 format_debug_property_tags(columns),
+                normal_message_table_column_support_summary(columns),
                 format_debug_sort_orders(sort_orders),
                 format_debug_restriction_option(restriction.as_ref()),
                 format_outlook_view_handoff_table_contract(
@@ -3109,15 +3119,24 @@ fn format_inbox_related_release_context(
                     snapshot,
                 ),
                 state.inbox_associated_contents_table_observed,
-                state.inbox_normal_contents_table_observed
-            ),
-        ),
+                state.inbox_normal_contents_table_observed,
+                state.inbox_normal_contents_table_setcolumns_observed,
+                state.inbox_normal_contents_table_query_rows_observed,
+                release_without_query_rows,
+                debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
+                debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context)
+            ))
+        }
         Some(MapiObject::Folder { folder_id, .. }) if *folder_id == INBOX_FOLDER_ID => {
             Some(format!(
-                "handle={};kind=folder;folder=0x{folder_id:016x};after_inbox_associated_query={};normal_contents_table_observed={}",
+                "handle={};kind=folder;folder=0x{folder_id:016x};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};last_normal_setcolumns={};last_normal_query_rows={}",
                 format_optional_debug_handle(handle),
                 state.inbox_associated_contents_table_observed,
-                state.inbox_normal_contents_table_observed
+                state.inbox_normal_contents_table_observed,
+                state.inbox_normal_contents_table_setcolumns_observed,
+                state.inbox_normal_contents_table_query_rows_observed,
+                debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
+                debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context)
             ))
         }
         _ => None,
@@ -3134,8 +3153,10 @@ fn debug_context_or_none(context: &str) -> &str {
 
 fn format_inbox_post_fai_handoff_context(state: &PostHierarchyActionState) -> String {
     format!(
-        "normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        "normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_rows={};last_associated_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
         state.inbox_normal_contents_table_observed,
+        state.inbox_normal_contents_table_setcolumns_observed,
+        state.inbox_normal_contents_table_query_rows_observed,
         state.inbox_associated_contents_table_observed,
         state.inbox_associated_config_open_observed,
         state.inbox_associated_config_stream_open_observed,
@@ -3144,6 +3165,8 @@ fn format_inbox_post_fai_handoff_context(state: &PostHierarchyActionState) -> St
         debug_context_or_none(&state.first_inbox_loop_transition_context),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
+        debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
+        debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
         debug_context_or_none(&state.last_inbox_rule_organizer_stream_context),
@@ -6040,6 +6063,97 @@ fn format_debug_property_tags(tags: &[u32]) -> String {
         .map(|tag| format!("{tag:#010x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn normal_message_table_column_support_summary(columns: &[u32]) -> String {
+    let mut backed = Vec::new();
+    let mut defaulted = Vec::new();
+    let mut named_or_dynamic = Vec::new();
+
+    for column in columns {
+        let storage_tag = canonical_property_storage_tag(*column);
+        if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
+            named_or_dynamic.push(*column);
+        } else if normal_message_table_column_is_backed(storage_tag) {
+            backed.push(*column);
+        } else {
+            defaulted.push(*column);
+        }
+    }
+
+    format!(
+        "backed={};defaulted={};named_or_dynamic={}",
+        format_debug_property_tags(&backed),
+        format_debug_property_tags(&defaulted),
+        format_debug_property_tags(&named_or_dynamic)
+    )
+}
+
+fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
+    matches!(
+        storage_tag,
+        PID_TAG_FOLDER_ID
+            | PID_TAG_PARENT_FOLDER_ID
+            | PID_TAG_MID
+            | PID_TAG_INST_ID
+            | PID_TAG_INSTANCE_NUM
+            | PID_TAG_ROW_TYPE
+            | PID_TAG_SUBJECT_W
+            | PID_TAG_NORMALIZED_SUBJECT_W
+            | PID_TAG_CONVERSATION_TOPIC_W
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_ORIGINAL_MESSAGE_CLASS_W
+            | PID_TAG_CREATION_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_CLIENT_SUBMIT_TIME
+            | PID_TAG_ACCESS
+            | PID_TAG_ACCESS_LEVEL
+            | PID_TAG_IMPORTANCE
+            | PID_TAG_MESSAGE_STATUS
+            | PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_READ
+            | PID_TAG_FLAG_STATUS
+            | PID_TAG_FLAG_COMPLETE_TIME
+            | PID_TAG_FOLLOWUP_ICON
+            | PID_TAG_TODO_ITEM_FLAGS
+            | PID_TAG_SWAPPED_TODO_STORE
+            | PID_TAG_SWAPPED_TODO_DATA
+            | PID_TAG_MESSAGE_SIZE
+            | PID_TAG_SENDER_NAME_W
+            | PID_TAG_SENDER_ADDRESS_TYPE_W
+            | PID_TAG_SENDER_EMAIL_ADDRESS_W
+            | PID_TAG_SENDER_SMTP_ADDRESS_W
+            | PID_TAG_SENT_REPRESENTING_NAME_W
+            | PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W
+            | PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
+            | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W
+            | PID_TAG_DISPLAY_TO_W
+            | PID_TAG_DISPLAY_CC_W
+            | PID_TAG_DISPLAY_BCC_W
+            | PID_TAG_HAS_ATTACHMENTS
+            | PID_TAG_RTF_IN_SYNC
+            | PID_TAG_BODY_W
+            | PID_TAG_RTF_COMPRESSED
+            | PID_TAG_BODY_HTML_W
+            | PID_TAG_HTML_BINARY
+            | PID_TAG_NATIVE_BODY
+            | PID_TAG_INTERNET_CODEPAGE
+            | PID_TAG_MESSAGE_LOCALE_ID
+            | PID_TAG_CONVERSATION_INDEX
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_INSTANCE_KEY
+            | PID_TAG_SOURCE_KEY
+            | PID_TAG_SEARCH_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+            | PID_TAG_INTERNET_MESSAGE_ID_W
+            | PID_TAG_TRANSPORT_MESSAGE_HEADERS_W
+            | PID_NAME_CONTENT_CLASS_W_TAG
+    )
 }
 
 fn format_debug_property_ids(property_ids: &[u16]) -> String {
@@ -11342,6 +11456,62 @@ where
                 );
                 let inbox_related_release_context_for_log =
                     inbox_related_release_context.clone().unwrap_or_default();
+                let visible_inbox_release_without_query_rows = match released_object {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID
+                        && !*associated
+                        && !columns.is_empty()
+                        && session
+                            .post_hierarchy_actions
+                            .last_inbox_normal_contents_table_setcolumns_handle
+                            == released_handle
+                        && session
+                            .post_hierarchy_actions
+                            .last_inbox_normal_contents_table_query_rows_handle
+                            != released_handle =>
+                    {
+                        Some(format!(
+                            "handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};descriptor_behavior={}",
+                            format_optional_debug_handle(released_handle),
+                            position,
+                            folder_message_count(*folder_id, mailboxes, emails, snapshot),
+                            format_debug_property_tags(columns),
+                            normal_message_table_column_support_summary(columns),
+                            format_debug_sort_orders(sort_orders),
+                            format_debug_restriction_option(restriction.as_ref()),
+                            debug_context_or_none(
+                                &session
+                                    .post_hierarchy_actions
+                                    .last_inbox_normal_contents_table_setcolumns_context
+                            ),
+                            debug_context_or_none(
+                                &session
+                                    .post_hierarchy_actions
+                                    .last_inbox_normal_contents_table_query_rows_context
+                            ),
+                            format_outlook_view_handoff_table_contract(
+                                *folder_id,
+                                *associated,
+                                columns,
+                                snapshot,
+                            ),
+                            format_inbox_view_descriptor_set_columns_behavior_contract(
+                                *folder_id,
+                                *associated,
+                                columns,
+                                snapshot,
+                            )
+                        ))
+                    }
+                    _ => None,
+                };
                 let post_inbox_fai_handoff_context = match released_object {
                     Some(MapiObject::ContentsTable {
                         folder_id,
@@ -11419,6 +11589,20 @@ where
                 }
                 if let Some(context) = inbox_related_release_context {
                     session.record_last_inbox_related_release_context(context);
+                }
+                if let Some(context) = visible_inbox_release_without_query_rows {
+                    tracing::warn!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x01",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(released_handle),
+                        release_without_query_rows_context = %context,
+                        "rca debug mapi visible inbox released before query rows"
+                    );
                 }
                 if let Some((released_table_context, handoff_context, live_handle_summary)) =
                     post_inbox_fai_handoff_context
@@ -14571,11 +14755,13 @@ where
                 let requested_columns = request.property_tags();
                 let normalized_columns =
                     normalize_table_property_tags_for_session(session, requested_columns.clone());
+                let input_handle_value = input_handle(&handle_slots, &request);
                 let normalized_named_property_context = (requested_columns != normalized_columns)
                     .then(|| format_debug_named_property_context(session, &requested_columns))
                     .unwrap_or_default();
                 let selected_named_property_context =
                     format_debug_named_property_context(session, &normalized_columns);
+                let mut inbox_normal_setcolumns_context = None;
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable {
                         folder_id, columns, ..
@@ -14679,6 +14865,38 @@ where
                             &selected_named_property_context,
                             snapshot,
                         );
+                        if *folder_id == INBOX_FOLDER_ID && !*associated {
+                            let row_count =
+                                folder_message_count(*folder_id, mailboxes, emails, snapshot);
+                            let view_handoff_table_contract =
+                                format_outlook_view_handoff_table_contract(
+                                    *folder_id,
+                                    *associated,
+                                    columns,
+                                    snapshot,
+                                );
+                            let descriptor_behavior =
+                                format_inbox_view_descriptor_set_columns_behavior_contract(
+                                    *folder_id,
+                                    *associated,
+                                    columns,
+                                    snapshot,
+                                );
+                            inbox_normal_setcolumns_context = Some((
+                                input_handle_value,
+                                format!(
+                                    "handle={};input_index={};row_count={};columns={};column_support={};named_properties={};view_handoff={};descriptor_behavior={}",
+                                    format_optional_debug_handle(input_handle_value),
+                                    request.input_handle_index().unwrap_or(0),
+                                    row_count,
+                                    format_debug_property_tags(columns),
+                                    normal_message_table_column_support_summary(columns),
+                                    selected_named_property_context,
+                                    view_handoff_table_contract,
+                                    descriptor_behavior
+                                ),
+                            ));
+                        }
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
                     Some(MapiObject::PermissionTable { columns, .. })
@@ -14691,6 +14909,21 @@ where
                         request.response_handle_index(),
                         0x8004_0102,
                     )),
+                }
+                if let Some((handle, context)) = inbox_normal_setcolumns_context {
+                    session.record_inbox_normal_contents_table_setcolumns(handle, context.clone());
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x12",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(handle),
+                        setcolumns_context = %context,
+                        "rca debug mapi visible inbox setcolumns tracked"
+                    );
                 }
             }
             Some(RopId::SortTable) => match input_object_mut(session, &handle_slots, &request) {
@@ -14807,7 +15040,34 @@ where
                 )),
             },
             Some(RopId::QueryRows) => {
+                let input_handle_value = input_handle(&handle_slots, &request);
                 let query_object = input_object(session, &handle_slots, &request);
+                let inbox_normal_query_rows_context = match query_object {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID && !*associated => Some((
+                        input_handle_value,
+                        format!(
+                            "handle={};input_index={};position={};requested_forward_read={};requested_row_count={};columns={};column_support={};sort={};restriction={}",
+                            format_optional_debug_handle(input_handle_value),
+                            request.input_handle_index().unwrap_or(0),
+                            position,
+                            request.query_forward_read(),
+                            request.query_row_count().unwrap_or(0),
+                            format_debug_property_tags(columns),
+                            normal_message_table_column_support_summary(columns),
+                            format_debug_sort_orders(sort_orders),
+                            format_debug_restriction_option(restriction.as_ref())
+                        ),
+                    )),
+                    _ => None,
+                };
                 let bootstrap_query_phase = outlook_bootstrap_query_rows_phase(query_object);
                 let bootstrap_row_invariants = outlook_bootstrap_row_invariant_summaries(
                     query_object,
@@ -14924,6 +15184,21 @@ where
                             principal, phase, folder_id, associated, &summary,
                         );
                     }
+                }
+                if let Some((handle, context)) = inbox_normal_query_rows_context {
+                    session.record_inbox_normal_contents_table_query_rows(handle, context.clone());
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x15",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(handle),
+                        query_rows_context = %context,
+                        "rca debug mapi visible inbox query rows tracked"
+                    );
                 }
             }
             Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
@@ -25441,6 +25716,77 @@ mod tests {
         assert!(context.contains(
             "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
         ));
+    }
+
+    #[test]
+    fn inbox_release_context_flags_visible_table_setcolumns_without_query_rows() {
+        let mut state = PostHierarchyActionState::default();
+        state.inbox_normal_contents_table_observed = true;
+        state.inbox_normal_contents_table_setcolumns_observed = true;
+        state.last_inbox_normal_contents_table_setcolumns_handle = Some(17);
+        state.last_inbox_normal_contents_table_setcolumns_context =
+            "handle=17;columns=0x67480014,0x674a0014,0x0037001f".to_string();
+        let table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_FOLDER_ID, PID_TAG_MID, PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        let context = format_inbox_related_release_context(
+            Some(&table),
+            Some(17),
+            &state,
+            &MapiMailStoreSnapshot::empty(),
+        )
+        .unwrap();
+
+        assert!(context.contains("associated=false"));
+        assert!(context.contains("normal_setcolumns_observed=true"));
+        assert!(context.contains("normal_query_rows_observed=false"));
+        assert!(context.contains("visible_inbox_release_without_query_rows=true"));
+        assert!(context.contains("last_normal_setcolumns=handle=17"));
+        assert!(context.contains("last_normal_query_rows=none"));
+    }
+
+    #[test]
+    fn normal_message_column_support_covers_visible_inbox_probe_columns() {
+        let summary = normal_message_table_column_support_summary(&[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ]);
+
+        assert!(summary
+            .contains("backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"));
+        assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+    }
+
+    #[test]
+    fn normal_message_column_support_covers_outlook_mail_view_columns() {
+        for view_name in ["Compact", "Sent To"] {
+            let columns = outlook_mail_view_definition(view_name)
+                .columns
+                .iter()
+                .map(|column| column.property_tag)
+                .collect::<Vec<_>>();
+            let summary = normal_message_table_column_support_summary(&columns);
+
+            assert!(
+                summary.ends_with("defaulted=;named_or_dynamic="),
+                "{view_name} view has unsupported message-table columns: {summary}"
+            );
+        }
     }
 
     #[test]

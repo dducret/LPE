@@ -88,6 +88,10 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) inbox_open_folder_probe_count: usize,
     pub(in crate::mapi) inbox_folder_type_getprops_probe_count: usize,
     pub(in crate::mapi) inbox_normal_contents_table_observed: bool,
+    pub(in crate::mapi) inbox_normal_contents_table_setcolumns_observed: bool,
+    pub(in crate::mapi) inbox_normal_contents_table_query_rows_observed: bool,
+    pub(in crate::mapi) last_inbox_normal_contents_table_setcolumns_handle: Option<u32>,
+    pub(in crate::mapi) last_inbox_normal_contents_table_query_rows_handle: Option<u32>,
     pub(in crate::mapi) inbox_associated_contents_table_observed: bool,
     pub(in crate::mapi) inbox_associated_config_open_observed: bool,
     pub(in crate::mapi) inbox_associated_config_stream_open_observed: bool,
@@ -95,6 +99,8 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) inbox_rule_organizer_stream_read_observed: bool,
     pub(in crate::mapi) last_inbox_open_folder_context: String,
     pub(in crate::mapi) last_inbox_contents_table_context: String,
+    pub(in crate::mapi) last_inbox_normal_contents_table_setcolumns_context: String,
+    pub(in crate::mapi) last_inbox_normal_contents_table_query_rows_context: String,
     pub(in crate::mapi) last_inbox_associated_query_context: String,
     pub(in crate::mapi) last_inbox_associated_find_context: String,
     pub(in crate::mapi) last_inbox_rule_organizer_stream_context: String,
@@ -845,6 +851,32 @@ impl MapiSession {
     pub(in crate::mapi) fn record_inbox_normal_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_normal_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_normal_contents_table_setcolumns(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .inbox_normal_contents_table_setcolumns_observed = true;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_setcolumns_handle = handle;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_setcolumns_context = context;
+    }
+
+    pub(in crate::mapi) fn record_inbox_normal_contents_table_query_rows(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .inbox_normal_contents_table_query_rows_observed = true;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_query_rows_handle = handle;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_query_rows_context = context;
     }
 
     pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
