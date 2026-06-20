@@ -6930,7 +6930,7 @@ fn next_response_rop_start(
 fn is_plausible_response_return_value(value: u32) -> bool {
     value == 0
         || value <= 0x0000_0fff
-        || (0x0004_0000..=0x0004_ffff).contains(&value)
+        || (0x0004_0001..=0x0004_ffff).contains(&value)
         || (0x8004_0000..=0x8004_ffff).contains(&value)
         || (0x8007_0000..=0x8007_ffff).contains(&value)
 }
@@ -25879,6 +25879,34 @@ mod tests {
             "0x07@0..{first_getprops_end}:len={first_getprops_end}:out=1:rv=0x00000000"
         )));
         assert!(!response_summary.results_csv.contains("0xd36f1f74"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_response_summary_skips_bare_warning_getprops_payload_marker() {
+        let mut responses = vec![0x4F, 0x01];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.push(1);
+        responses.extend_from_slice(&[0x00, 0x01, 0x07, 0x00, 0x00, 0x00, 0x04, 0x00]);
+        let find_row_end = responses.len();
+        responses.extend_from_slice(&[0x07, 0x02]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[0x0000_0001]));
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x4F, 0x07]);
+
+        assert_eq!(response_summary.ids_csv, "0x4f,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x4f:0x00000000,0x07:0x00000000"
+        );
+        assert!(response_summary.frames.contains(&format!(
+            "0x4f@0..{find_row_end}:len={find_row_end}:out=1:rv=0x00000000"
+        )));
+        assert!(!response_summary.results_csv.contains("0x07:0x00040000"));
         assert!(response_summary.parse_error.is_empty());
     }
 
