@@ -8300,6 +8300,7 @@ fn log_outlook_contents_table_query_rows(
         request.query_forward_read(),
         requested_row_count,
         sort_orders,
+        restriction.as_ref(),
         &selected_columns,
         mailboxes,
         emails,
@@ -8591,6 +8592,8 @@ fn log_mapi_query_position_debug(
     request: &RopRequest,
     object: Option<&MapiObject>,
     response: &[u8],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) {
     if !object.is_some_and(is_table_object) {
@@ -8613,27 +8616,64 @@ fn log_mapi_query_position_debug(
         restriction_present,
         restriction_decoded,
         restriction_property_tags,
+        normal_message_query_position_summary,
+        inbox_view_descriptor_behavior_contract,
     ) = match object {
         Some(MapiObject::ContentsTable {
             folder_id,
             associated,
             columns,
+            position: table_position,
             sort_orders,
             restriction,
             ..
-        }) => (
-            Some(*associated),
-            format_debug_property_tags(&effective_contents_table_columns(
-                *folder_id,
-                *associated,
-                columns,
-            )),
-            sort_orders.len(),
-            restriction.is_some(),
-            format_debug_restriction_option(restriction.as_ref()),
-            format_debug_restriction_property_tags(restriction.as_ref()),
+        }) => {
+            let effective_columns =
+                effective_contents_table_columns(*folder_id, *associated, columns);
+            (
+                Some(*associated),
+                format_debug_property_tags(&effective_columns),
+                sort_orders.len(),
+                restriction.is_some(),
+                format_debug_restriction_option(restriction.as_ref()),
+                format_debug_restriction_property_tags(restriction.as_ref()),
+                format_normal_message_query_row_summary(
+                    *folder_id,
+                    *associated,
+                    *table_position,
+                    true,
+                    row_count.min(5) as usize,
+                    sort_orders,
+                    restriction.as_ref(),
+                    &effective_columns,
+                    mailboxes,
+                    emails,
+                ),
+                format_inbox_view_descriptor_behavior_contract(
+                    *folder_id,
+                    *associated,
+                    *table_position,
+                    true,
+                    row_count.min(5) as usize,
+                    sort_orders,
+                    restriction.as_ref(),
+                    &effective_columns,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ),
+            )
+        }
+        _ => (
+            None,
+            String::new(),
+            0,
+            false,
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
         ),
-        _ => (None, String::new(), 0, false, String::new(), String::new()),
     };
     tracing::info!(
         rca_debug = true,
@@ -8660,6 +8700,8 @@ fn log_mapi_query_position_debug(
         restriction_present,
         restriction_decoded = %restriction_decoded,
         restriction_property_tags = %restriction_property_tags,
+        normal_message_query_position_summary = %normal_message_query_position_summary,
+        inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
         inbox_associated_config_summary = object
             .and_then(MapiObject::folder_id)
             .map(|folder_id| {
@@ -8849,6 +8891,7 @@ fn log_outlook_contents_table_find_row(
             true,
             total_row_count.min(5) as usize,
             sort_orders,
+            restriction.as_ref(),
             &selected_columns,
             mailboxes,
             emails,
@@ -9435,6 +9478,7 @@ fn format_normal_message_query_row_summary(
     forward_read: bool,
     row_count: usize,
     sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
     columns: &[u32],
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -9444,6 +9488,7 @@ fn format_normal_message_query_row_summary(
     }
 
     let mut rows = emails_for_folder(folder_id, mailboxes, emails);
+    rows.retain(|email| restriction_matches_email(restriction, email));
     sort_emails(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let row_summaries = selected
@@ -14788,6 +14833,8 @@ where
                     &request,
                     input_object(session, &handle_slots, &request),
                     &response,
+                    mailboxes,
+                    emails,
                     snapshot,
                 );
                 responses.extend_from_slice(&response);
@@ -23950,6 +23997,7 @@ mod tests {
             true,
             50,
             &[],
+            None,
             &[
                 PID_TAG_MID,
                 PID_TAG_MESSAGE_CLASS_W,
@@ -23960,8 +24008,8 @@ mod tests {
                 PID_TAG_NATIVE_BODY,
                 PID_TAG_INTERNET_MESSAGE_ID_W,
             ],
-            &[mailbox],
-            &[email],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&email),
         );
 
         assert!(summary.contains("total=1"));
@@ -23976,6 +24024,26 @@ mod tests {
         assert!(summary.contains("0x10130102=binary:bytes=16"), "{summary}");
         assert!(summary.contains("0x10160003=3"));
         assert!(summary.contains("0x1035001f=<message@example.test>"));
+
+        let restricted = format_normal_message_query_row_summary(
+            INBOX_FOLDER_ID,
+            false,
+            0,
+            true,
+            50,
+            &[],
+            Some(&MapiRestriction::Bitmask {
+                property_tag: PID_TAG_MESSAGE_FLAGS,
+                mask: 0x0000_0001,
+                must_be_nonzero: true,
+            }),
+            &[PID_TAG_SUBJECT_W],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&email),
+        );
+
+        assert!(restricted.contains("total=0"));
+        assert!(restricted.contains("returned=0"));
     }
 
     #[test]
