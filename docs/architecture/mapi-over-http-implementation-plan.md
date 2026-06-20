@@ -239,16 +239,15 @@ non-canonical LPE state.
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
   `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
   message with `WLink` properties.
-- Outlook mail-folder default views point at the bounded synthetic Common Views
-  named-view rows. Outlook-visible non-mail folders, including Calendar and
-  Contacts, use folder-local synthetic `IPM.Microsoft.FolderDesign.NamedView`
-  defaults so clients can open the advertised `PidTagDefaultViewEntryId` without
-  exposing non-mail view definitions as Common Views FAI rows. Supported
-  Outlook-visible folders also expose their folder-local default named view
-  through associated-contents table discovery when clients restrict on
-  `IPM.Microsoft.FolderDesign.NamedView`. Delete attempts against those
-  synthetic folder-local default view rows are acknowledged as no-op success
-  because the rows are compatibility projections, not canonical FAI messages.
+- Outlook mail-folder default views point at bounded synthetic named-view rows.
+  Inbox uses a folder-local synthetic `IPM.Microsoft.FolderDesign.NamedView`;
+  other mail folders use the bounded synthetic Common Views named-view rows.
+  Non-mail folders, including Calendar, Contacts, Tasks, Notes, and Journal,
+  do not advertise `PidTagDefaultViewEntryId` until LPE has type-specific
+  Outlook view descriptors for those container classes. Delete attempts against
+  synthetic folder-local mail default view rows are acknowledged as no-op
+  success because the rows are compatibility projections, not canonical FAI
+  messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder

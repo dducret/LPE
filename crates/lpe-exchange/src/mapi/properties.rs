@@ -1659,11 +1659,7 @@ pub(in crate::mapi) fn extended_folder_flags() -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    matches!(
-        container_class,
-        "IPF.Appointment" | "IPF.Contact" | "IPF.Task" | "IPF.StickyNote" | "IPF.Journal"
-    ) || container_class == "IPF.Note"
-        || container_class.starts_with("IPF.Note.")
+    container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
@@ -8285,20 +8281,14 @@ mod tests {
             ),
             Some(MapiValue::String("IPM.Contact".to_string()))
         );
-        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-            account_id,
-            CONTACTS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            Some(MapiValue::Binary(expected_entry_id))
+            None
         );
     }
 
     #[test]
-    fn collaboration_calendar_advertises_folder_local_default_view() {
+    fn collaboration_calendar_does_not_advertise_mail_default_view() {
         let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
         let collection = MapiCollaborationFolder {
             id: CALENDAR_FOLDER_ID,
@@ -8325,15 +8315,9 @@ mod tests {
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             Some(MapiValue::String("IPM.Appointment".to_string()))
         );
-        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-            account_id,
-            CALENDAR_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            Some(MapiValue::Binary(expected_entry_id))
+            None
         );
     }
 
