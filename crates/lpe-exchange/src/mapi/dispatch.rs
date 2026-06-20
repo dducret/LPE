@@ -3103,7 +3103,7 @@ fn format_inbox_related_release_context(
                 associated,
                 position,
                 format_debug_property_tags(columns),
-                normal_message_table_column_support_summary(columns),
+                contents_table_column_support_summary(*associated, columns),
                 format_debug_sort_orders(sort_orders),
                 format_debug_restriction_option(restriction.as_ref()),
                 format_outlook_view_handoff_table_contract(
@@ -6066,6 +6066,22 @@ fn format_debug_property_tags(tags: &[u32]) -> String {
 }
 
 fn normal_message_table_column_support_summary(columns: &[u32]) -> String {
+    table_column_support_summary(columns, normal_message_table_column_is_backed)
+}
+
+fn associated_contents_table_column_support_summary(columns: &[u32]) -> String {
+    table_column_support_summary(columns, associated_contents_table_column_is_backed)
+}
+
+fn contents_table_column_support_summary(associated: bool, columns: &[u32]) -> String {
+    if associated {
+        associated_contents_table_column_support_summary(columns)
+    } else {
+        normal_message_table_column_support_summary(columns)
+    }
+}
+
+fn table_column_support_summary(columns: &[u32], is_backed: impl Fn(u32) -> bool) -> String {
     let mut backed = Vec::new();
     let mut defaulted = Vec::new();
     let mut named_or_dynamic = Vec::new();
@@ -6074,7 +6090,7 @@ fn normal_message_table_column_support_summary(columns: &[u32]) -> String {
         let storage_tag = canonical_property_storage_tag(*column);
         if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
             named_or_dynamic.push(*column);
-        } else if normal_message_table_column_is_backed(storage_tag) {
+        } else if is_backed(storage_tag) {
             backed.push(*column);
         } else {
             defaulted.push(*column);
@@ -6087,6 +6103,54 @@ fn normal_message_table_column_support_summary(columns: &[u32]) -> String {
         format_debug_property_tags(&defaulted),
         format_debug_property_tags(&named_or_dynamic)
     )
+}
+
+fn associated_contents_table_column_is_backed(storage_tag: u32) -> bool {
+    normal_message_table_column_is_backed(storage_tag)
+        || matches!(
+            storage_tag,
+            PID_TAG_ASSOCIATED
+                | PID_TAG_SENT_MAIL_SVR_EID
+                | PID_TAG_ROAMING_DATATYPES
+                | PID_TAG_ROAMING_DICTIONARY
+                | PID_TAG_ROAMING_XML_STREAM
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                | PID_NAME_CONTENT_TYPE_W_TAG
+                | PID_TAG_VIEW_DESCRIPTOR_CLSID
+                | PID_TAG_VIEW_DESCRIPTOR_FLAGS
+                | PID_TAG_VIEW_DESCRIPTOR_VERSION
+                | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
+                | PID_TAG_VIEW_DESCRIPTOR_NAME_W
+                | PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                | PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE
+                | PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
+                | PID_TAG_VIEW_DESCRIPTOR_BINARY
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | PID_TAG_WLINK_GROUP_HEADER_ID
+                | PID_TAG_WLINK_SAVE_STAMP
+                | PID_TAG_WLINK_TYPE
+                | PID_TAG_WLINK_FLAGS
+                | PID_TAG_WLINK_ORDINAL
+                | PID_TAG_WLINK_ENTRY_ID
+                | PID_TAG_WLINK_RECORD_KEY
+                | PID_TAG_WLINK_STORE_ENTRY_ID
+                | PID_TAG_WLINK_FOLDER_TYPE
+                | PID_TAG_WLINK_GROUP_CLSID
+                | PID_TAG_WLINK_GROUP_NAME_W
+                | PID_TAG_WLINK_SECTION
+                | PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID
+                | 0x685D_0003
+                | 0x7C09_0102
+                | 0x6853_0003
+                | 0x6854_0102
+                | 0x6890_0102
+                | 0x6892_0003
+                | 0x6893_0102
+        )
+        || property_ids_match(storage_tag, PID_TAG_VIEW_DESCRIPTOR_CLSID)
+        || property_ids_match(storage_tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE)
+        || property_ids_match(storage_tag, PID_TAG_WLINK_GROUP_HEADER_ID)
 }
 
 fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
@@ -25787,6 +25851,49 @@ mod tests {
                 "{view_name} view has unsupported message-table columns: {summary}"
             );
         }
+    }
+
+    #[test]
+    fn associated_column_support_covers_inbox_view_descriptor_columns() {
+        let summary = associated_contents_table_column_support_summary(&[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+            PID_TAG_VIEW_DESCRIPTOR_CLSID,
+            PID_TAG_VIEW_DESCRIPTOR_VERSION,
+            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+            0x6842_0102,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_MESSAGE_CLASS_W,
+        ]);
+
+        assert!(summary.contains("0x68340003"));
+        assert!(summary.contains("0x68330048"));
+        assert!(summary.contains("0x683a0003"));
+        assert!(summary.contains("0x68410003"));
+        assert!(summary.contains("0x68420102"));
+        assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+    }
+
+    #[test]
+    fn associated_column_support_covers_inbox_configuration_columns() {
+        let summary = associated_contents_table_column_support_summary(&[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_ROAMING_DATATYPES,
+            PID_TAG_MESSAGE_CLASS_W,
+            0x685D_0003,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ]);
+
+        assert!(summary.contains("0x7c060003"));
+        assert!(summary.contains("0x685d0003"));
+        assert!(summary.ends_with("defaulted=;named_or_dynamic="));
     }
 
     #[test]
