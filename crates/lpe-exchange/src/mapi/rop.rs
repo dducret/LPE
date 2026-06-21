@@ -4350,7 +4350,15 @@ impl RopRequest {
     pub(in crate::mapi) fn response_handle_index(&self) -> u8 {
         if matches!(
             self.rop_id,
-            0x0C | 0x11
+            0x02 | 0x03
+                | 0x04
+                | 0x05
+                | 0x06
+                | 0x0C
+                | 0x11
+                | 0x1C
+                | 0x21
+                | 0x22
                 | 0x25
                 | 0x29
                 | 0x3B

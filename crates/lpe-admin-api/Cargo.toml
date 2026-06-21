@@ -4,17 +4,25 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["protocols"]
+protocols = ["activesync", "dav", "exchange", "jmap"]
+activesync = ["dep:lpe-activesync"]
+dav = ["dep:lpe-dav"]
+exchange = ["dep:lpe-exchange"]
+jmap = ["dep:lpe-jmap"]
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-lpe-activesync = { path = "../lpe-activesync" }
+lpe-activesync = { path = "../lpe-activesync", optional = true }
 lpe-ai = { path = "../lpe-ai" }
 lpe-attachments = { path = "../lpe-attachments" }
 lpe-core = { path = "../lpe-core" }
-lpe-dav = { path = "../lpe-dav" }
+lpe-dav = { path = "../lpe-dav", optional = true }
 lpe-domain = { path = "../lpe-domain" }
-lpe-exchange = { path = "../lpe-exchange" }
-lpe-jmap = { path = "../lpe-jmap" }
+lpe-exchange = { path = "../lpe-exchange", optional = true }
+lpe-jmap = { path = "../lpe-jmap", optional = true }
 lpe-magika = { path = "../lpe-magika" }
 lpe-mail-auth = { path = "../lpe-mail-auth" }
 lpe-storage = { path = "../lpe-storage" }

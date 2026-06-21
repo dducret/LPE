@@ -26574,6 +26574,41 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_debug_summary_uses_output_handle_for_open_folder_response() {
+        let mut request_bytes = vec![RopId::OpenFolder.as_u8(), 0, 0, 1];
+        request_bytes.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
+        );
+        request_bytes.push(0);
+        request_bytes.extend_from_slice(&[RopId::GetPropertiesSpecific.as_u8(), 0, 1, 0, 0, 0, 0]);
+        let request_buffer = rop_buffer_with_response(request_bytes, &[0, u32::MAX]);
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+
+        let request = RopRequest {
+            rop_id: RopId::OpenFolder.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        let mut responses = rop_open_folder_response(&request, false);
+        responses.extend_from_slice(&[RopId::GetPropertiesSpecific.as_u8(), 1]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&0u16.to_le_bytes());
+        let response_buffer = rop_buffer_with_response(responses, &[ROOT_FOLDER_ID as u32, 42]);
+        let response_summary = summarize_response_rop_buffer_with_expected_handles(
+            &response_buffer,
+            &request_summary.full_ids,
+            &request_summary.full_response_handle_indexes,
+        );
+
+        assert_eq!(response_summary.ids_csv, "0x02,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x02:0x00000000,0x07:0x00000000"
+        );
+    }
+
+    #[test]
     fn execute_rop_debug_summary_distinguishes_truncated_release_prefix() {
         let mut request_bytes = Vec::new();
         for index in 0..MAX_ROP_DEBUG_ENTRIES {
