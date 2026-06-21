@@ -2440,7 +2440,7 @@ fn view_column(property_tag: u32, width: u32, header: &'static str) -> ViewColum
 }
 
 pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Vec<u8> {
-    let column_count = definition.columns.len();
+    let column_count = definition.columns.len() + 1;
     let mut value = Vec::with_capacity(60 + column_count * 36);
     value.extend_from_slice(&[0; 8]);
     value.extend_from_slice(&8u32.to_le_bytes());
@@ -2454,31 +2454,20 @@ pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Ve
     );
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&(column_count as u32).to_le_bytes());
-    value.extend_from_slice(&(definition.sort_column as u32).to_le_bytes());
+    value.extend_from_slice(&((definition.sort_column + 1) as u32).to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&[0; 24]);
 
-    for (index, column) in definition.columns.iter().enumerate() {
-        write_view_column_packet(
-            &mut value,
-            column.property_tag,
-            column.width,
-            column.flags,
-            index as u32,
-        );
+    write_view_column_packet(&mut value, 0x0004_0001, 7, 0x0000_0028);
+    for column in &definition.columns {
+        write_view_column_packet(&mut value, column.property_tag, column.width, column.flags);
     }
 
     value
 }
 
-fn write_view_column_packet(
-    value: &mut Vec<u8>,
-    property_tag: u32,
-    width: u32,
-    flags: u32,
-    column_id: u32,
-) {
+fn write_view_column_packet(value: &mut Vec<u8>, property_tag: u32, width: u32, flags: u32) {
     value.extend_from_slice(&(property_tag_type(property_tag) as u16).to_le_bytes());
     value.extend_from_slice(&((property_tag >> 16) as u16).to_le_bytes());
     value.extend_from_slice(&width.to_le_bytes());
@@ -2486,7 +2475,7 @@ fn write_view_column_packet(
     value.extend_from_slice(&flags.to_le_bytes());
     value.extend_from_slice(&[0; 12]);
     value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&column_id.to_le_bytes());
+    value.extend_from_slice(&(property_tag >> 16).to_le_bytes());
 }
 
 pub(in crate::mapi) fn view_descriptor_strings(definition: &ViewDefinition) -> String {
@@ -2505,7 +2494,7 @@ pub(in crate::mapi) fn log_view_definition_diagnostics(
     view_name: &str,
     definition: &ViewDefinition,
 ) {
-    let descriptor_len = 60 + definition.columns.len() * 36;
+    let descriptor_len = 60 + (definition.columns.len() + 1) * 36;
     let descriptor_strings_len = view_descriptor_strings(definition).encode_utf16().count() * 2;
     tracing::info!(
         folder_id = format_args!("0x{folder_id:016x}"),
@@ -10981,6 +10970,7 @@ mod tests {
                         as u32;
                 (property_id << 16) | property_type
             })
+            .skip(1)
             .collect()
     }
 
@@ -11019,11 +11009,16 @@ mod tests {
             ),
             Some(MapiValue::Binary(descriptor.clone()))
         );
-        assert_eq!(descriptor.len(), 240);
+        assert_eq!(descriptor.len(), 276);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
         assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-        assert_eq!(&descriptor[20..24], &5u32.to_le_bytes());
-        assert_eq!(&descriptor[24..28], &3u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &6u32.to_le_bytes());
+        assert_eq!(&descriptor[24..28], &4u32.to_le_bytes());
+        assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
+        assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
+        assert_eq!(&descriptor[64..68], &7u32.to_le_bytes());
+        assert_eq!(&descriptor[72..76], &0x28u32.to_le_bytes());
+        assert_eq!(&descriptor[92..96], &4u32.to_le_bytes());
         assert_eq!(
             descriptor_column_property_tags(&descriptor),
             vec![
@@ -11034,12 +11029,12 @@ mod tests {
                 PID_TAG_MESSAGE_FLAGS,
             ]
         );
-        assert_eq!(&descriptor[60..62], &0x000bu16.to_le_bytes());
-        assert_eq!(&descriptor[62..64], &0x0e1bu16.to_le_bytes());
-        assert_eq!(&descriptor[64..68], &18u32.to_le_bytes());
-        assert_eq!(&descriptor[72..76], &0u32.to_le_bytes());
-        assert_eq!(&descriptor[88..92], &0u32.to_le_bytes());
-        assert_eq!(&descriptor[92..96], &0u32.to_le_bytes());
+        assert_eq!(&descriptor[96..98], &0x000bu16.to_le_bytes());
+        assert_eq!(&descriptor[98..100], &0x0e1bu16.to_le_bytes());
+        assert_eq!(&descriptor[100..104], &18u32.to_le_bytes());
+        assert_eq!(&descriptor[108..112], &0u32.to_le_bytes());
+        assert_eq!(&descriptor[124..128], &0u32.to_le_bytes());
+        assert_eq!(&descriptor[128..132], &0x0e1bu32.to_le_bytes());
         assert_eq!(
             common_view_named_view_property_value(
                 &view,
@@ -11175,7 +11170,7 @@ mod tests {
             stream,
             view_descriptor_binary(&outlook_mail_view_definition("Compact"))
         );
-        assert_eq!(stream.len(), 240);
+        assert_eq!(stream.len(), 276);
         assert!(writable_target.is_none());
     }
 

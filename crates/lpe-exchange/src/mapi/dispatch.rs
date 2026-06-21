@@ -8303,7 +8303,8 @@ fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
         .get(32..36)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u32::from_le_bytes);
-    let column_tags = view_descriptor_property_tags(descriptor);
+    let all_column_tags = view_descriptor_all_property_tags(descriptor);
+    let visible_column_tags = view_descriptor_property_tags(descriptor);
     let expected_column_bytes = column_count
         .and_then(|count| usize::try_from(count).ok())
         .map(|count| 60usize.saturating_add(count.saturating_mul(36)))
@@ -8311,7 +8312,7 @@ fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
     let restriction_bytes = descriptor.len().saturating_sub(expected_column_bytes);
 
     format!(
-        "version={};ul_flags={};column_count={};sort_column={};group_count={};ul_cat_sort={};restriction_bytes={restriction_bytes};column_tags={}",
+        "version={};ul_flags={};column_count={};sort_column={};group_count={};ul_cat_sort={};restriction_bytes={restriction_bytes};column_tags={};visible_column_tags={}",
         version
             .map(|value| value.to_string())
             .unwrap_or_else(|| "missing".to_string()),
@@ -8330,7 +8331,8 @@ fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
         category_sort
             .map(|value| format!("0x{value:08x}"))
             .unwrap_or_else(|| "missing".to_string()),
-        format_debug_property_tags(&column_tags)
+        format_debug_property_tags(&all_column_tags),
+        format_debug_property_tags(&visible_column_tags)
     )
 }
 
@@ -8341,7 +8343,7 @@ fn view_descriptor_column_count(descriptor: &[u8]) -> Option<u32> {
         .map(u32::from_le_bytes)
 }
 
-fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
+fn view_descriptor_all_property_tags(descriptor: &[u8]) -> Vec<u32> {
     let Some(column_count) =
         view_descriptor_column_count(descriptor).and_then(|count| usize::try_from(count).ok())
     else {
@@ -8360,6 +8362,13 @@ fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
                 .map(u16::from_le_bytes)? as u32;
             Some((property_id << 16) | property_type)
         })
+        .collect()
+}
+
+fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
+    view_descriptor_all_property_tags(descriptor)
+        .into_iter()
+        .skip(1)
         .collect()
 }
 
@@ -23492,11 +23501,14 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=5"));
-        assert!(summary.contains("sort_column=3"));
+        assert!(summary.contains("column_count=6"));
+        assert!(summary.contains("sort_column=4"));
         assert!(summary.contains("restriction_bytes=0"));
+        assert!(summary.contains("column_tags=0x00040001"));
+        assert!(summary.contains(
+            "visible_column_tags=0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x0e070003"
+        ));
         assert!(summary.contains("0x0e060040"));
-        assert!(!summary.contains("0x00040001"));
     }
 
     #[test]
