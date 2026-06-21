@@ -1823,28 +1823,7 @@ fn view_descriptor_value_shape_for_debug(value: &MapiValue) -> String {
 }
 
 fn view_descriptor_debug_property_tags(descriptor: &[u8]) -> Vec<u32> {
-    let Some(column_count) = descriptor
-        .get(20..24)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u32::from_le_bytes)
-        .and_then(|count| usize::try_from(count).ok())
-    else {
-        return Vec::new();
-    };
-    (0..column_count)
-        .filter_map(|index| {
-            let offset = 60 + index * 36;
-            let property_type = descriptor
-                .get(offset..offset + 2)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u16::from_le_bytes)? as u32;
-            let property_id = descriptor
-                .get(offset + 2..offset + 4)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u16::from_le_bytes)? as u32;
-            Some((property_id << 16) | property_type)
-        })
-        .collect()
+    view_descriptor_all_property_tags(descriptor)
 }
 
 fn format_default_view_entry_id_decoding(

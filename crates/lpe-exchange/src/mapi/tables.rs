@@ -379,6 +379,10 @@ struct CategorizedTableRow {
     leaf: bool,
 }
 
+const TABLE_LEAF_ROW: u32 = 0x0000_0001;
+const TABLE_EXPANDED_CATEGORY: u32 = 0x0000_0003;
+const TABLE_COLLAPSED_CATEGORY: u32 = 0x0000_0004;
+
 fn category_id_for_value(folder_id: u64, property_tag: u32, value: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in folder_id
@@ -404,6 +408,26 @@ fn category_value_for_email(email: &JmapEmail, property_tag: u32) -> String {
         tag => email_property_value(email, tag)
             .map(|value| category_value_to_string(&value))
             .unwrap_or_default(),
+    }
+}
+
+fn category_values_for_email(email: &JmapEmail, property_tag: u32) -> Vec<String> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_NAME_KEYWORDS_TAG => {
+            let values = email
+                .categories
+                .iter()
+                .map(|category| category.trim())
+                .filter(|category| !category.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                vec![String::new()]
+            } else {
+                values
+            }
+        }
+        _ => vec![category_value_for_email(email, property_tag)],
     }
 }
 
@@ -462,14 +486,19 @@ fn categorized_email_rows(
             })
             .collect();
     };
-    let mut groups: Vec<(u64, String, Vec<&JmapEmail>)> = Vec::new();
+    let mut groups: Vec<(u64, String, Vec<(&JmapEmail, u32)>)> = Vec::new();
     for email in emails {
-        let value = category_value_for_email(email, category_sort.property_tag);
-        let category_id = category_id_for_value(folder_id, category_sort.property_tag, &value);
-        if let Some((_, _, rows)) = groups.iter_mut().find(|(id, _, _)| *id == category_id) {
-            rows.push(email);
-        } else {
-            groups.push((category_id, value, vec![email]));
+        for (instance, value) in category_values_for_email(email, category_sort.property_tag)
+            .into_iter()
+            .enumerate()
+        {
+            let category_id = category_id_for_value(folder_id, category_sort.property_tag, &value);
+            let instance_num = instance.saturating_add(1).min(u32::MAX as usize) as u32;
+            if let Some((_, _, rows)) = groups.iter_mut().find(|(id, _, _)| *id == category_id) {
+                rows.push((email, instance_num));
+            } else {
+                groups.push((category_id, value, vec![(email, instance_num)]));
+            }
         }
     }
     groups.sort_by(|left, right| {
@@ -481,6 +510,8 @@ fn categorized_email_rows(
 
     let mut rows = Vec::new();
     for (category_id, value, leaves) in groups {
+        let expanded = expanded_count > 0 && !collapsed_categories.contains(&category_id);
+        let unread_count = leaves.iter().filter(|(email, _)| email.unread).count();
         rows.push(CategorizedTableRow {
             category_id,
             leaf_count: leaves.len(),
@@ -488,18 +519,30 @@ fn categorized_email_rows(
                 category_id,
                 &value,
                 leaves.len(),
+                unread_count,
                 category_sort.property_tag,
+                expanded,
                 columns,
             ),
             leaf: false,
         });
-        if expanded_count > 0 && !collapsed_categories.contains(&category_id) {
-            rows.extend(leaves.into_iter().map(|email| CategorizedTableRow {
-                category_id,
-                leaf_count: 1,
-                row: serialize_message_row(email, columns),
-                leaf: true,
-            }));
+        if expanded {
+            rows.extend(
+                leaves
+                    .into_iter()
+                    .map(|(email, instance_num)| CategorizedTableRow {
+                        category_id,
+                        leaf_count: 1,
+                        row: serialize_categorized_message_row(
+                            email,
+                            columns,
+                            category_sort.property_tag,
+                            &value,
+                            instance_num,
+                        ),
+                        leaf: true,
+                    }),
+            );
         }
     }
     rows
@@ -509,7 +552,9 @@ fn serialize_category_header_row(
     category_id: u64,
     value: &str,
     leaf_count: usize,
+    unread_count: usize,
     category_property_tag: u32,
+    expanded: bool,
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
@@ -517,16 +562,36 @@ fn serialize_category_header_row(
         match canonical_property_storage_tag(*column) {
             PID_TAG_INST_ID => write_u64(&mut row, category_id),
             PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
-            PID_TAG_ROW_TYPE => write_u32(&mut row, 1),
+            PID_TAG_ROW_TYPE => write_u32(
+                &mut row,
+                if expanded {
+                    TABLE_EXPANDED_CATEGORY
+                } else {
+                    TABLE_COLLAPSED_CATEGORY
+                },
+            ),
+            PID_TAG_DEPTH => write_u32(&mut row, 0),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, leaf_count.min(u32::MAX as usize) as u32),
-            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_CONTENT_UNREAD_COUNT => {
+                write_u32(&mut row, unread_count.min(u32::MAX as usize) as u32)
+            }
             tag if tag == canonical_property_storage_tag(category_property_tag) => {
-                write_mapi_value(&mut row, *column, &MapiValue::String(value.to_string()))
+                write_category_instance_value(&mut row, *column, value)
             }
             _ => write_property_default(&mut row, *column),
         }
     }
     row
+}
+
+fn write_category_instance_value(row: &mut Vec<u8>, property_tag: u32, value: &str) {
+    let value = match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::MultipleString | MapiPropertyType::MultipleString8) => {
+            MapiValue::MultiString(vec![value.to_string()])
+        }
+        _ => MapiValue::String(value.to_string()),
+    };
+    write_mapi_value(row, property_tag, &value);
 }
 
 pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
@@ -7525,6 +7590,124 @@ mod tests {
     }
 
     #[test]
+    fn categorized_keywords_project_multivalue_instances_and_table_row_metadata() {
+        let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let email_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 903,
+            ),
+        );
+        let mut email = test_table_email(email_id, mailbox_id, "Categorized");
+        email.categories = vec!["Blue".to_string(), "Customer".to_string()];
+        email.unread = true;
+        let columns = [
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_ROW_TYPE,
+            PID_TAG_DEPTH,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            PID_NAME_KEYWORDS_TAG,
+            PID_TAG_SUBJECT_W,
+        ];
+
+        let rows = categorized_email_rows(
+            INBOX_FOLDER_ID,
+            vec![&email],
+            &columns,
+            &[MapiSortOrder {
+                property_tag: PID_NAME_KEYWORDS_TAG,
+                order: 0,
+            }],
+            1,
+            &HashSet::new(),
+        );
+
+        assert_eq!(rows.len(), 4);
+        assert_category_header_row(&rows[0].row, "Blue", 1, 1, TABLE_EXPANDED_CATEGORY);
+        assert_category_leaf_row(&rows[1].row, &email, 1, "Blue");
+        assert_category_header_row(&rows[2].row, "Customer", 1, 1, TABLE_EXPANDED_CATEGORY);
+        assert_category_leaf_row(&rows[3].row, &email, 2, "Customer");
+    }
+
+    fn assert_category_header_row(
+        row: &[u8],
+        category: &str,
+        content_count: u32,
+        unread_count: u32,
+        row_type: u32,
+    ) {
+        let mut cursor = Cursor::new(row);
+        parse_mapi_property_value(&mut cursor, PID_TAG_INST_ID).unwrap();
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_NUM).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_ROW_TYPE).unwrap(),
+            MapiValue::I32(row_type as i32)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_DEPTH).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_CONTENT_COUNT).unwrap(),
+            MapiValue::I32(content_count as i32)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_CONTENT_UNREAD_COUNT).unwrap(),
+            MapiValue::I32(unread_count as i32)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_NAME_KEYWORDS_TAG).unwrap(),
+            MapiValue::MultiString(vec![category.to_string()])
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SUBJECT_W).unwrap(),
+            MapiValue::String(String::new())
+        );
+    }
+
+    fn assert_category_leaf_row(row: &[u8], email: &JmapEmail, instance_num: u32, category: &str) {
+        let mut cursor = Cursor::new(row);
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_INST_ID).unwrap(),
+            MapiValue::I64(mapi_message_id(email) as i64)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_NUM).unwrap(),
+            MapiValue::I32(instance_num as i32)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_ROW_TYPE).unwrap(),
+            MapiValue::I32(TABLE_LEAF_ROW as i32)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_DEPTH).unwrap(),
+            MapiValue::I32(1)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_CONTENT_COUNT).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_CONTENT_UNREAD_COUNT).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_NAME_KEYWORDS_TAG).unwrap(),
+            MapiValue::MultiString(vec![category.to_string()])
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SUBJECT_W).unwrap(),
+            MapiValue::String("Categorized".to_string())
+        );
+    }
+
+    #[test]
     fn mapi_hierarchy_row_projects_inbox_display_name() {
         let inbox = JmapMailbox {
             id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
@@ -10311,7 +10494,7 @@ mod tests {
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
             Some(MapiValue::String(
-                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
+                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n".to_string()
             ))
         );
         assert_eq!(
@@ -10702,16 +10885,26 @@ mod tests {
         email.sender_display = Some("Delegate Sender".to_string());
         email.sender_address = Some("delegate@example.test".to_string());
         email.size_octets = 2048;
+        email.has_attachments = true;
+        email.followup_flag_status = "flagged".to_string();
+        email.reminder_set = true;
+        email.categories = vec!["Blue".to_string(), "Customer".to_string()];
         let expected_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
         let columns = [
             PID_TAG_CREATION_TIME,
             PID_TAG_IMPORTANCE,
+            PID_LID_REMINDER_SET_TAG,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_FLAG_STATUS,
+            PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENDER_NAME_W,
             PID_TAG_SENDER_EMAIL_ADDRESS_W,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_MESSAGE_SIZE,
+            PID_NAME_KEYWORDS_TAG,
             PID_NAME_CONTENT_CLASS_W_TAG,
         ];
 
@@ -10725,6 +10918,22 @@ mod tests {
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_IMPORTANCE).unwrap(),
             MapiValue::I32(1)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_LID_REMINDER_SET_TAG).unwrap(),
+            MapiValue::Bool(true)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
+            MapiValue::String("IPM.Note".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_FLAG_STATUS).unwrap(),
+            MapiValue::I32(2)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_HAS_ATTACHMENTS).unwrap(),
+            MapiValue::Bool(true)
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_SENDER_NAME_W).unwrap(),
@@ -10749,8 +10958,16 @@ mod tests {
             MapiValue::String("denis.ducret@sdic.ch".to_string())
         );
         assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_DELIVERY_TIME).unwrap(),
+            MapiValue::I64(expected_time as i64)
+        );
+        assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE).unwrap(),
             MapiValue::I32(2048)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_NAME_KEYWORDS_TAG).unwrap(),
+            MapiValue::MultiString(vec!["Blue".to_string(), "Customer".to_string()])
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),
@@ -11265,16 +11482,50 @@ pub(in crate::mapi) fn serialize_public_folder_row(
 }
 
 pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
+    serialize_message_row_with_table_instance(email, columns, 0, 0, None)
+}
+
+fn serialize_categorized_message_row(
+    email: &JmapEmail,
+    columns: &[u32],
+    category_property_tag: u32,
+    category_value: &str,
+    instance_num: u32,
+) -> Vec<u8> {
+    serialize_message_row_with_table_instance(
+        email,
+        columns,
+        instance_num,
+        1,
+        Some((category_property_tag, category_value)),
+    )
+}
+
+fn serialize_message_row_with_table_instance(
+    email: &JmapEmail,
+    columns: &[u32],
+    instance_num: u32,
+    depth: u32,
+    category_value: Option<(u32, &str)>,
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
+        let storage_tag = canonical_property_storage_tag(*column);
+        if let Some((category_property_tag, value)) = category_value {
+            if storage_tag == canonical_property_storage_tag(category_property_tag) {
+                write_category_instance_value(&mut row, *column, value);
+                continue;
+            }
+        }
         match *column {
             PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => {
                 write_object_id(&mut row, mapi_folder_id_for_email(email))
             }
             PID_TAG_MID => write_object_id(&mut row, mapi_message_id(email)),
             PID_TAG_INST_ID => write_u64(&mut row, mapi_message_id(email)),
-            PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
-            PID_TAG_ROW_TYPE => write_u32(&mut row, 0),
+            PID_TAG_INSTANCE_NUM => write_u32(&mut row, instance_num),
+            PID_TAG_ROW_TYPE => write_u32(&mut row, TABLE_LEAF_ROW),
+            PID_TAG_DEPTH => write_u32(&mut row, depth),
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                 write_utf16z(&mut row, &email.subject)
             }
@@ -11366,7 +11617,8 @@ pub(in crate::mapi) fn serialize_public_folder_item_row(
             PID_TAG_MID => write_object_id(&mut row, item.id),
             PID_TAG_INST_ID => write_u64(&mut row, item.id),
             PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
-            PID_TAG_ROW_TYPE => write_u32(&mut row, 0),
+            PID_TAG_ROW_TYPE => write_u32(&mut row, TABLE_LEAF_ROW),
+            PID_TAG_DEPTH => write_u32(&mut row, 0),
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                 write_utf16z(&mut row, &item.item.subject)
             }
@@ -11483,7 +11735,8 @@ fn recoverable_item_property_value(
     let change_number = mapi_mailstore::change_number_for_store_id(item.id);
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(item.id)),
-        PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE => Some(MapiValue::U32(0)),
+        PID_TAG_INSTANCE_NUM | PID_TAG_DEPTH => Some(MapiValue::U32(0)),
+        PID_TAG_ROW_TYPE => Some(MapiValue::U32(TABLE_LEAF_ROW)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(item.item.subject.clone()))
         }

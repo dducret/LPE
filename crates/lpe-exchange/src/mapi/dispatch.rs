@@ -8473,32 +8473,11 @@ fn view_descriptor_column_count(descriptor: &[u8]) -> Option<u32> {
 }
 
 fn view_descriptor_all_property_tags(descriptor: &[u8]) -> Vec<u32> {
-    let Some(column_count) =
-        view_descriptor_column_count(descriptor).and_then(|count| usize::try_from(count).ok())
-    else {
-        return Vec::new();
-    };
-    (0..column_count)
-        .filter_map(|index| {
-            let offset = 60 + index * 36;
-            let property_type = descriptor
-                .get(offset..offset + 2)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u16::from_le_bytes)? as u32;
-            let property_id = descriptor
-                .get(offset + 2..offset + 4)
-                .and_then(|bytes| bytes.try_into().ok())
-                .map(u16::from_le_bytes)? as u32;
-            Some((property_id << 16) | property_type)
-        })
-        .collect()
+    crate::mapi::properties::view_descriptor_all_property_tags(descriptor)
 }
 
 fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
-    view_descriptor_all_property_tags(descriptor)
-        .into_iter()
-        .skip(1)
-        .collect()
+    crate::mapi::properties::view_descriptor_property_tags(descriptor)
 }
 
 fn log_outlook_contents_table_sort(
@@ -10066,7 +10045,8 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
 
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(mapi_message_id(email))),
-        PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE => Some(MapiValue::U32(0)),
+        PID_TAG_INSTANCE_NUM | PID_TAG_DEPTH => Some(MapiValue::U32(0)),
+        PID_TAG_ROW_TYPE => Some(MapiValue::U32(1)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(email.subject.clone()))
         }
@@ -24008,10 +23988,11 @@ mod tests {
 
         assert!(contract.contains("phase=setcolumns"));
         assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
-        assert!(contract.contains("descriptor_columns=0x0e1b000b"));
+        assert!(contract
+            .contains("descriptor_columns=0x00170003,0x8503000b,0x001a001f,0x10900003,0x0e1b000b"));
         assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-        assert!(contract.contains("selected_missing_descriptor_columns=0x0e1b000b"));
+        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8503000b,0x001a001f,0x10900003,0x0e1b000b"));
         assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
