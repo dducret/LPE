@@ -480,7 +480,7 @@ pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
 pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835: u32 = 0x6835_0102;
-pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C: u32 = 0x683C_0102;
+pub(in crate::mapi) const OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C: u32 = 0x683C_0102;
 pub(in crate::mapi) const OUTLOOK_RULE_ORGANIZER_BINARY_6802: u32 = 0x6802_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE: u32 = 0x683E_0102;
@@ -2324,9 +2324,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
             )))
         }
         PID_TAG_VIEW_DESCRIPTOR_FLAGS => Some(MapiValue::U32(message.view_flags)),
-        PID_TAG_VIEW_DESCRIPTOR_BINARY
-        | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-        | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => {
+        PID_TAG_VIEW_DESCRIPTOR_BINARY | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => {
             let definition = outlook_mail_view_definition(&message.name);
             log_view_definition_diagnostics(
                 message.folder_id,
@@ -2335,6 +2333,18 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
                 &definition,
             );
             Some(MapiValue::Binary(view_descriptor_binary(&definition)))
+        }
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C => {
+            let definition = outlook_mail_view_definition(&message.name);
+            log_view_definition_diagnostics(
+                message.folder_id,
+                message.id,
+                &message.name,
+                &definition,
+            );
+            Some(MapiValue::Binary(view_descriptor_strings_binary(
+                &definition,
+            )))
         }
         PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL => {
             Some(MapiValue::U32(message.view_type))
@@ -2486,6 +2496,15 @@ pub(in crate::mapi) fn view_descriptor_strings(definition: &ViewDefinition) -> S
         strings.push('\n');
     }
     strings
+}
+
+pub(in crate::mapi) fn view_descriptor_strings_binary(definition: &ViewDefinition) -> Vec<u8> {
+    let strings = view_descriptor_strings(definition);
+    let mut bytes = Vec::with_capacity(strings.encode_utf16().count() * 2);
+    for unit in strings.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
 }
 
 pub(in crate::mapi) fn log_view_definition_diagnostics(
@@ -11040,9 +11059,11 @@ mod tests {
             common_view_named_view_property_value(
                 &view,
                 account_id,
-                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
             ),
-            Some(MapiValue::Binary(descriptor.clone()))
+            Some(MapiValue::Binary(view_descriptor_strings_binary(
+                &outlook_mail_view_definition("Messages")
+            )))
         );
         assert_eq!(descriptor.len(), 276);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());

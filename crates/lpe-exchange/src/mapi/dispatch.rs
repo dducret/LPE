@@ -6166,7 +6166,7 @@ fn associated_contents_table_column_is_backed(storage_tag: u32) -> bool {
                 | PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
                 | PID_TAG_VIEW_DESCRIPTOR_BINARY
                 | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
                 | PID_TAG_WLINK_GROUP_HEADER_ID
                 | PID_TAG_WLINK_SAVE_STAMP
                 | PID_TAG_WLINK_TYPE

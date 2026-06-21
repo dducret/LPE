@@ -975,7 +975,7 @@ fn common_view_named_view_sync_object(
         PID_TAG_VIEW_DESCRIPTOR_CLSID,
         PID_TAG_VIEW_DESCRIPTOR_FLAGS,
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
-        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C,
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
         PID_TAG_VIEW_DESCRIPTOR_VERSION,
         PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
         PID_TAG_VIEW_DESCRIPTOR_NAME_W,
@@ -2676,6 +2676,11 @@ mod tests {
             property(PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
             mapi_mailstore::SpecialMessagePropertyValue::String(value)
                 if value.contains("From") && value.contains("Received")
+        ));
+        assert!(matches!(
+            property(OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
+            mapi_mailstore::SpecialMessagePropertyValue::Binary(value)
+                if !value.is_empty() && value.starts_with(&[0x0a, 0x00])
         ));
     }
 

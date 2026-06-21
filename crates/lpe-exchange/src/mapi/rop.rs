@@ -1642,7 +1642,7 @@ fn common_view_descriptor_property_requested(columns: &[u32]) -> bool {
             canonical_property_storage_tag(*tag),
             PID_TAG_VIEW_DESCRIPTOR_BINARY
                 | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
                 | PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
                 | PID_TAG_VIEW_DESCRIPTOR_NAME_W
                 | PID_TAG_VIEW_DESCRIPTOR_VERSION
@@ -1668,7 +1668,7 @@ fn format_requested_view_descriptor_contract(columns: &[u32]) -> String {
             &[
                 PID_TAG_VIEW_DESCRIPTOR_BINARY,
                 OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
-                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
             ][..],
         ),
         ("strings", &[PID_TAG_VIEW_DESCRIPTOR_STRINGS_W][..]),
@@ -1717,7 +1717,7 @@ fn format_common_view_descriptor_getprops_contract(
             canonical_property_storage_tag(*tag),
             PID_TAG_VIEW_DESCRIPTOR_BINARY
                 | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
                 | PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
                 | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         )
@@ -3079,7 +3079,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_VIEW_DESCRIPTOR_FLAGS => "PidTagViewDescriptorFlags",
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => "OutlookCommonViewDescriptorBinary6835",
         PID_TAG_VIEW_DESCRIPTOR_VERSION => "PidTagViewDescriptorVersion",
-        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C => "OutlookCommonViewDescriptorBinary683C",
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C => "OutlookCommonViewDescriptorStrings683C",
         PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE => "PidTagViewDescriptorFolderType",
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => "PidTagViewDescriptorViewMode",
         PID_TAG_VIEW_DESCRIPTOR_BINARY => "PidTagViewDescriptorBinary",
@@ -7761,8 +7761,8 @@ mod tests {
             "PidTagViewDescriptorVersion"
         );
         assert_eq!(
-            property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C),
-            "OutlookCommonViewDescriptorBinary683C"
+            property_tag_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
+            "OutlookCommonViewDescriptorStrings683C"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE),
