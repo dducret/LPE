@@ -780,9 +780,13 @@ running `init-schema.sh`.
 To keep routine source updates faster, `update-lpe.sh` skips unchanged rebuild
 steps when the installed outputs already exist. It rebuilds the Rust service
 when `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, or `crates/` changed,
-reinstalls `Magika` only when the installed version is missing or different,
-runs `npm ci` only when the relevant web package files changed, and rebuilds a
-web UI only when its own source tree changed. Set `LPE_FORCE_RUST_BUILD=true`,
+or when one of those tracked source files is newer than the installed
+`lpe-cli` binary. The timestamp check covers wrappers that already ran
+`git pull` before invoking `update-lpe.sh`, where the script can no longer see
+the previous Git `HEAD`. The script reinstalls `Magika` only when the installed
+version is missing or different, runs `npm ci` only when the relevant web
+package files changed, and rebuilds a web UI only when tracked source/config
+files changed. Set `LPE_FORCE_RUST_BUILD=true`,
 `LPE_FORCE_MAGIKA_INSTALL=true`, `LPE_FORCE_WEB_DEPS=true`, or
 `LPE_FORCE_WEB_BUILD=true` to force a specific step.
 

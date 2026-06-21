@@ -84,6 +84,22 @@ path_changed_since_previous_head() {
   [[ -n "$(git -C "${SRC_DIR}" status --porcelain -- "$@")" ]]
 }
 
+tracked_path_newer_than_file() {
+  local reference_file="$1"
+  shift
+
+  [[ -e "${reference_file}" ]] || return 0
+
+  local tracked_file
+  while IFS= read -r -d '' tracked_file; do
+    if [[ "${SRC_DIR}/${tracked_file}" -nt "${reference_file}" ]]; then
+      return 0
+    fi
+  done < <(git -C "${SRC_DIR}" ls-files -z -- "$@")
+
+  return 1
+}
+
 directory_has_files() {
   local directory="$1"
   [[ -d "${directory}" ]] && find "${directory}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
@@ -92,7 +108,8 @@ directory_has_files() {
 rust_build_needed() {
   [[ "${LPE_FORCE_RUST_BUILD:-false}" == "true" ]] && return 0
   [[ -x "${BIN_DIR}/lpe-cli" ]] || return 0
-  path_changed_since_previous_head Cargo.toml Cargo.lock rust-toolchain.toml crates
+  path_changed_since_previous_head Cargo.toml Cargo.lock rust-toolchain.toml crates \
+    || tracked_path_newer_than_file "${BIN_DIR}/lpe-cli" Cargo.toml Cargo.lock rust-toolchain.toml crates
 }
 
 magika_install_needed() {
@@ -108,16 +125,28 @@ web_dependencies_needed() {
   local app_path="$1"
   [[ "${LPE_FORCE_WEB_DEPS:-false}" == "true" ]] && return 0
   [[ -d "${SRC_DIR}/${app_path}/node_modules" ]] || return 0
-  path_changed_since_previous_head "${app_path}/package.json" "${app_path}/package-lock.json"
+  path_changed_since_previous_head "${app_path}/package.json" "${app_path}/package-lock.json" \
+    || tracked_path_newer_than_file "${SRC_DIR}/${app_path}/node_modules" "${app_path}/package.json" "${app_path}/package-lock.json"
 }
 
 web_build_needed() {
   local app_path="$1"
   local web_root="$2"
+  local build_stamp="${SRC_DIR}/${app_path}/dist/.lpe-build-stamp"
+
   [[ "${LPE_FORCE_WEB_BUILD:-false}" == "true" ]] && return 0
   [[ -d "${SRC_DIR}/${app_path}/dist" ]] || return 0
   directory_has_files "${web_root}" || return 0
-  path_changed_since_previous_head "${app_path}"
+  path_changed_since_previous_head "${app_path}" \
+    || tracked_path_newer_than_file "${build_stamp}" \
+      "${app_path}/src" \
+      "${app_path}/index.html" \
+      "${app_path}/package.json" \
+      "${app_path}/package-lock.json" \
+      "${app_path}/postcss.config.cjs" \
+      "${app_path}/tailwind.config.ts" \
+      "${app_path}/tsconfig.json" \
+      "${app_path}/vite.config.ts"
 }
 
 build_web_app() {
@@ -134,6 +163,7 @@ build_web_app() {
 
   if web_build_needed "${app_path}" "${web_root}"; then
     run_npm run build
+    touch "${SRC_DIR}/${app_path}/dist/.lpe-build-stamp"
     install -d -o root -g root "${web_root}"
     cp -a "${SRC_DIR}/${app_path}/dist/." "${web_root}/"
   else
