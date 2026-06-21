@@ -2433,6 +2433,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
             view_column(PID_TAG_SENT_REPRESENTING_NAME_W, 160, "From"),
             view_column(PID_TAG_SUBJECT_W, 280, "Subject"),
             view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 140, "Received"),
+            view_column(PID_TAG_MESSAGE_SIZE, 75, "Size"),
             view_column(PID_TAG_MESSAGE_FLAGS, 26, "Status"),
         ],
         sort_column: 3,
@@ -11065,10 +11066,10 @@ mod tests {
                 &outlook_mail_view_definition("Messages")
             )))
         );
-        assert_eq!(descriptor.len(), 276);
+        assert_eq!(descriptor.len(), 312);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
         assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-        assert_eq!(&descriptor[20..24], &6u32.to_le_bytes());
+        assert_eq!(&descriptor[20..24], &7u32.to_le_bytes());
         assert_eq!(&descriptor[24..28], &4u32.to_le_bytes());
         assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
         assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
@@ -11082,6 +11083,7 @@ mod tests {
                 PID_TAG_SENT_REPRESENTING_NAME_W,
                 PID_TAG_SUBJECT_W,
                 PID_TAG_MESSAGE_DELIVERY_TIME,
+                PID_TAG_MESSAGE_SIZE,
                 PID_TAG_MESSAGE_FLAGS,
             ]
         );
@@ -11118,7 +11120,7 @@ mod tests {
                 PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
             ),
             Some(MapiValue::String(
-                "\nAttachment\nFrom\nSubject\nReceived\nStatus\n".to_string()
+                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
             ))
         );
         assert_eq!(
@@ -11226,7 +11228,7 @@ mod tests {
             stream,
             view_descriptor_binary(&outlook_mail_view_definition("Compact"))
         );
-        assert_eq!(stream.len(), 276);
+        assert_eq!(stream.len(), 312);
         assert!(writable_target.is_none());
     }
 

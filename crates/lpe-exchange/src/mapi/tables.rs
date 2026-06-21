@@ -10311,7 +10311,7 @@ mod tests {
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
             Some(MapiValue::String(
-                "\nAttachment\nFrom\nSubject\nReceived\nStatus\n".to_string()
+                "\nAttachment\nFrom\nSubject\nReceived\nSize\nStatus\n".to_string()
             ))
         );
         assert_eq!(
