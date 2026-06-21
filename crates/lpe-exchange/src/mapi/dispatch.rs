@@ -973,7 +973,7 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
             succeeded_count += 1;
         }
     }
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         mailbox = %principal.email,
@@ -1088,7 +1088,7 @@ async fn hard_delete_mailbox_tree_contents<S: ExchangeStore>(
             }
         }
     }
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         mailbox = %principal.email,
@@ -1636,7 +1636,9 @@ const MAX_ROP_DEBUG_ENTRIES: usize = 32;
 #[derive(Debug, Default)]
 struct RopRequestDebugSummary {
     full_ids: Vec<u8>,
+    full_response_handle_indexes: Vec<Option<u8>>,
     ids: Vec<u8>,
+    response_handle_indexes: Vec<Option<u8>>,
     ids_csv: String,
     names_csv: String,
     tail_ids_csv: String,
@@ -1700,7 +1702,11 @@ fn log_execute_rop_debug(
     session: &MapiSession,
     post_hierarchy_observation: PostHierarchyExecuteObservation,
 ) {
-    let response = summarize_response_rop_buffer(response_rop_buffer, &request.full_ids);
+    let response = summarize_response_rop_buffer_with_expected_handles(
+        response_rop_buffer,
+        &request.full_ids,
+        &request.full_response_handle_indexes,
+    );
     let logon = summarize_logon_response_rop(response_rop_buffer, &request.full_ids);
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
@@ -1713,7 +1719,7 @@ fn log_execute_rop_debug(
     let post_hierarchy = post_hierarchy_action_summary(session, false);
     let message = "rca debug mapi execute rops";
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
@@ -1773,7 +1779,7 @@ fn log_execute_rop_debug(
         let response_store_identity_matches_session = logon.mailbox_guid
             == principal.account_id.to_string()
             && logon.replica_guid == bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID);
-        tracing::info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             endpoint = endpoint,
@@ -1807,7 +1813,7 @@ fn log_execute_rop_debug(
     }
 
     if endpoint == "emsmdb" && !request.parse_error.is_empty() {
-        tracing::info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             endpoint = endpoint,
@@ -1836,7 +1842,7 @@ fn log_execute_rop_debug(
     if let Some(response_framing_context) =
         execute_response_framing_context(&request.full_ids).filter(|_| endpoint == "emsmdb")
     {
-        tracing::info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             endpoint = endpoint,
@@ -2070,7 +2076,7 @@ fn log_execute_request_start_debug(
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let message = "rca debug mapi execute request start";
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
@@ -2124,7 +2130,7 @@ fn log_execute_store_access_debug(
     };
     let message = "rca debug mapi execute store access";
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
@@ -2163,7 +2169,7 @@ fn log_execute_dispatch_start_debug(
     };
     let message = "rca debug mapi execute dispatch start";
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
@@ -2537,7 +2543,7 @@ fn log_open_message_debug(
     email: &JmapEmail,
     response_len: usize,
 ) {
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -2599,7 +2605,7 @@ fn log_message_getprops_response_debug(
         ("missing", None)
     };
     let property_tags = request.property_tags();
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -3492,7 +3498,7 @@ fn log_set_properties_specific_debug(
         &probe.property_tags,
         &probe.property_value_shapes,
     );
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -3604,7 +3610,7 @@ fn log_get_properties_specific_response_debug(
     let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
     let response_values =
         get_properties_specific_response_values_for_debug(&probe.property_tags, property_response);
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -6741,8 +6747,18 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
                 summary.total_count += 1;
                 summary.all_release &= rop_id == RopId::Release.as_u8();
                 summary.full_ids.push(rop_id);
+                if !rop_has_no_response(rop_id) {
+                    summary
+                        .full_response_handle_indexes
+                        .push(Some(request.response_handle_index()));
+                }
                 if summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
                     summary.ids.push(rop_id);
+                    if !rop_has_no_response(rop_id) {
+                        summary
+                            .response_handle_indexes
+                            .push(Some(request.response_handle_index()));
+                    }
                 } else {
                     summary.truncated = true;
                 }
@@ -6846,6 +6862,26 @@ fn summarize_response_rop_buffer(
     rop_buffer: &[u8],
     request_rop_ids: &[u8],
 ) -> RopResponseDebugSummary {
+    summarize_response_rop_buffer_with_optional_expected_handles(rop_buffer, request_rop_ids, None)
+}
+
+fn summarize_response_rop_buffer_with_expected_handles(
+    rop_buffer: &[u8],
+    request_rop_ids: &[u8],
+    expected_response_handle_indexes: &[Option<u8>],
+) -> RopResponseDebugSummary {
+    summarize_response_rop_buffer_with_optional_expected_handles(
+        rop_buffer,
+        request_rop_ids,
+        Some(expected_response_handle_indexes),
+    )
+}
+
+fn summarize_response_rop_buffer_with_optional_expected_handles(
+    rop_buffer: &[u8],
+    request_rop_ids: &[u8],
+    expected_response_handle_indexes: Option<&[Option<u8>]>,
+) -> RopResponseDebugSummary {
     let mut summary = RopResponseDebugSummary {
         extended: is_rpc_header_ext_rop_buffer(rop_buffer),
         buffer_layout: rop_buffer_layout_name(rop_buffer).to_string(),
@@ -6875,10 +6911,15 @@ fn summarize_response_rop_buffer(
         .collect::<Vec<_>>();
     let mut frames = Vec::new();
     for (expected_index, expected_rop_id) in expected_ids.iter().copied().enumerate() {
+        let expected_response_handle_index = expected_response_handle_indexes
+            .and_then(|handles| handles.get(expected_index).copied().flatten());
+        let next_expected_response_handle_index = expected_response_handle_indexes
+            .and_then(|handles| handles.get(expected_index + 1).copied().flatten());
         let Some(found_offset) = next_response_rop_start_from(
             responses,
             offset,
             expected_rop_id,
+            expected_response_handle_index,
             expected_ids.get(expected_index + 1).copied(),
         ) else {
             break;
@@ -6899,6 +6940,7 @@ fn summarize_response_rop_buffer(
             offset,
             error_code,
             next_expected_rop_id,
+            next_expected_response_handle_index,
             following_expected_rop_id,
         );
         frames.push(summarize_response_rop_frame(
@@ -7061,6 +7103,7 @@ fn response_rop_frame_end(
     start: usize,
     error_code: Option<u32>,
     next_expected_rop_id: Option<u8>,
+    next_expected_response_handle_index: Option<u8>,
     following_expected_rop_id: Option<u8>,
 ) -> usize {
     let rop_id = responses.get(start).copied().unwrap_or_default();
@@ -7073,6 +7116,7 @@ fn response_rop_frame_end(
                         responses,
                         start.saturating_add(8),
                         next_expected_rop_id,
+                        next_expected_response_handle_index,
                         following_expected_rop_id,
                     ),
                     None => None,
@@ -7130,6 +7174,7 @@ fn next_response_rop_start_validated(
     responses: &[u8],
     search_start: usize,
     next_expected_rop_id: Option<u8>,
+    next_expected_response_handle_index: Option<u8>,
     following_expected_rop_id: Option<u8>,
 ) -> Option<usize> {
     let next_expected_rop_id = next_expected_rop_id?;
@@ -7142,6 +7187,14 @@ fn next_response_rop_start_validated(
         let candidate_start = cursor + found;
         let error_code = read_response_error_code(responses, candidate_start);
         if !error_code.is_some_and(is_plausible_response_return_value) {
+            cursor = candidate_start.saturating_add(1);
+            continue;
+        }
+        if !response_handle_index_matches(
+            responses,
+            candidate_start,
+            next_expected_response_handle_index,
+        ) {
             cursor = candidate_start.saturating_add(1);
             continue;
         }
@@ -7169,6 +7222,7 @@ fn next_response_rop_start_from(
     responses: &[u8],
     search_start: usize,
     expected_rop_id: u8,
+    expected_response_handle_index: Option<u8>,
     following_expected_rop_id: Option<u8>,
 ) -> Option<usize> {
     let mut cursor = search_start;
@@ -7180,6 +7234,14 @@ fn next_response_rop_start_from(
         let candidate_start = cursor + found;
         let error_code = read_response_error_code(responses, candidate_start);
         if !error_code.is_some_and(is_plausible_response_return_value) {
+            cursor = candidate_start.saturating_add(1);
+            continue;
+        }
+        if !response_handle_index_matches(
+            responses,
+            candidate_start,
+            expected_response_handle_index,
+        ) {
             cursor = candidate_start.saturating_add(1);
             continue;
         }
@@ -7199,6 +7261,16 @@ fn next_response_rop_start_from(
         cursor = candidate_start.saturating_add(1);
     }
     None
+}
+
+fn response_handle_index_matches(
+    responses: &[u8],
+    start: usize,
+    expected_response_handle_index: Option<u8>,
+) -> bool {
+    expected_response_handle_index
+        .and_then(|expected| responses.get(start + 1).map(|actual| *actual == expected))
+        .unwrap_or(true)
 }
 
 fn next_response_rop_start(
@@ -7602,7 +7674,7 @@ fn log_outlook_bootstrap_phase(
     output_handle: Option<u32>,
     default_folder_ids: &str,
 ) {
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -8803,7 +8875,7 @@ fn log_outlook_contents_table_query_rows_response(
         &selected_columns,
         snapshot,
     );
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -8893,7 +8965,7 @@ fn log_outlook_hierarchy_table_query_rows_response(
         .map(|bytes| hex_preview(bytes, 160))
         .unwrap_or_default();
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -9015,7 +9087,7 @@ fn log_mapi_query_position_debug(
             String::new(),
         ),
     };
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -11788,7 +11860,7 @@ where
                     released_object_kind,
                     released_folder_id
                 ));
-                tracing::info!(
+                tracing::debug!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
@@ -11838,7 +11910,7 @@ where
                 } else {
                     "not_found"
                 };
-                tracing::info!(
+                tracing::debug!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
@@ -11866,7 +11938,7 @@ where
                     result = open_folder_result,
                     message = "rca debug mapi open folder"
                 );
-                tracing::info!(
+                tracing::debug!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
@@ -11923,7 +11995,7 @@ where
                     store, principal, session, folder_id, mailboxes, snapshot,
                 )
                 .await;
-                tracing::info!(
+                tracing::debug!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
@@ -26451,6 +26523,54 @@ mod tests {
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
         assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_debug_summary_skips_false_getprops_inside_findrow_payload() {
+        let mut request_bytes = vec![
+            RopId::FindRow.as_u8(),
+            0,
+            3,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            RopId::GetPropertiesSpecific.as_u8(),
+            0,
+            5,
+        ];
+        request_bytes.extend_from_slice(&0u16.to_le_bytes());
+        request_bytes.extend_from_slice(&1u16.to_le_bytes());
+        request_bytes.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        let request_buffer = rop_buffer_with_response(request_bytes, &[0]);
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+
+        let mut responses = vec![RopId::FindRow.as_u8(), 3];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.push(1);
+        responses.extend_from_slice(&[0, 1, 0, 0, 0, 0]);
+        responses.extend_from_slice(&[RopId::GetPropertiesSpecific.as_u8(), 0x0e, 0x1a, 0, 0, 0]);
+        responses.extend_from_slice(&[RopId::GetPropertiesSpecific.as_u8(), 5, 0, 0, 0, 0, 0]);
+        for unit in "Subject\0".encode_utf16() {
+            responses.extend_from_slice(&unit.to_le_bytes());
+        }
+        let response_buffer = rop_buffer_with_response(responses, &[0]);
+        let response_summary = summarize_response_rop_buffer_with_expected_handles(
+            &response_buffer,
+            &request_summary.full_ids,
+            &request_summary.full_response_handle_indexes,
+        );
+
+        assert_eq!(response_summary.ids_csv, "0x4f,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x4f:0x00000000,0x07:0x00000000"
+        );
+        assert!(response_summary.frames.contains("0x07@"));
+        assert!(!response_summary.results_csv.contains("0x0000001a"));
     }
 
     #[test]

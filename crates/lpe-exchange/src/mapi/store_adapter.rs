@@ -899,7 +899,7 @@ fn log_mapi_store_load_step(
 }
 
 fn log_mapi_store_full_snapshot(account_id: Uuid, plan: &MapiAccessPlan) {
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
@@ -997,7 +997,7 @@ fn log_mapi_requested_collaboration_resolution(
         return;
     }
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
@@ -1112,7 +1112,7 @@ fn log_mapi_identity_request_summary(
         })
         .collect::<Vec<_>>()
         .join("|");
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
@@ -1255,7 +1255,7 @@ fn log_mapi_store_load_summary(
     default_calendar_collection_loaded: bool,
     loaded_default_calendar_event_count: usize,
 ) {
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",

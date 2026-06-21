@@ -2139,7 +2139,7 @@ pub(in crate::mapi) fn log_mapi_connection(
     let message = "rca debug mapi connection";
 
     if response_code == "0" {
-        info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             endpoint = endpoint,
@@ -2464,7 +2464,7 @@ pub(in crate::mapi) fn log_session_cookie_lookup(
         MapiEndpoint::Nspi => "nspi",
     };
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,

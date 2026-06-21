@@ -529,7 +529,7 @@ fn log_mapi_transport_connection(
     let message = "rca debug mapi transport connection";
 
     if status < 400 && mapi_response_code == "0" {
-        info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             endpoint = endpoint,

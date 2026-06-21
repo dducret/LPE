@@ -1487,7 +1487,7 @@ fn log_get_properties_specific_debug(
     let common_view_descriptor_getprops_contract =
         format_common_view_descriptor_getprops_contract(object, principal, columns, snapshot);
     let message = "rca debug mapi get properties specific";
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
