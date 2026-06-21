@@ -71,6 +71,76 @@ run_npm() {
   )
 }
 
+path_changed_since_previous_head() {
+  if [[ -z "${PREVIOUS_HEAD:-}" || -z "${CURRENT_HEAD:-}" ]]; then
+    return 0
+  fi
+
+  if [[ "${PREVIOUS_HEAD}" != "${CURRENT_HEAD}" ]] \
+    && ! git -C "${SRC_DIR}" diff --quiet "${PREVIOUS_HEAD}" "${CURRENT_HEAD}" -- "$@"; then
+    return 0
+  fi
+
+  [[ -n "$(git -C "${SRC_DIR}" status --porcelain -- "$@")" ]]
+}
+
+directory_has_files() {
+  local directory="$1"
+  [[ -d "${directory}" ]] && find "${directory}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
+}
+
+rust_build_needed() {
+  [[ "${LPE_FORCE_RUST_BUILD:-false}" == "true" ]] && return 0
+  [[ -x "${BIN_DIR}/lpe-cli" ]] || return 0
+  path_changed_since_previous_head Cargo.toml Cargo.lock rust-toolchain.toml crates
+}
+
+magika_install_needed() {
+  [[ "${LPE_FORCE_MAGIKA_INSTALL:-false}" == "true" ]] && return 0
+  [[ -x "${BIN_DIR}/magika" ]] || return 0
+  if "${BIN_DIR}/magika" --version 2>/dev/null | grep -q "${MAGIKA_VERSION}"; then
+    return 1
+  fi
+  return 0
+}
+
+web_dependencies_needed() {
+  local app_path="$1"
+  [[ "${LPE_FORCE_WEB_DEPS:-false}" == "true" ]] && return 0
+  [[ -d "${SRC_DIR}/${app_path}/node_modules" ]] || return 0
+  path_changed_since_previous_head "${app_path}/package.json" "${app_path}/package-lock.json"
+}
+
+web_build_needed() {
+  local app_path="$1"
+  local web_root="$2"
+  [[ "${LPE_FORCE_WEB_BUILD:-false}" == "true" ]] && return 0
+  [[ -d "${SRC_DIR}/${app_path}/dist" ]] || return 0
+  directory_has_files "${web_root}" || return 0
+  path_changed_since_previous_head "${app_path}"
+}
+
+build_web_app() {
+  local app_path="$1"
+  local web_root="$2"
+  local label="$3"
+
+  cd "${SRC_DIR}/${app_path}"
+  if web_dependencies_needed "${app_path}"; then
+    run_npm ci
+  else
+    echo "Skipping ${label} npm ci; package files and node_modules are unchanged."
+  fi
+
+  if web_build_needed "${app_path}" "${web_root}"; then
+    run_npm run build
+    install -d -o root -g root "${web_root}"
+    cp -a "${SRC_DIR}/${app_path}/dist/." "${web_root}/"
+  else
+    echo "Skipping ${label} web build; sources and installed assets are unchanged."
+  fi
+}
+
 git config --global --add safe.directory "${SRC_DIR}" || true
 
 RUSTUP_BIN="$(command -v rustup || true)"
@@ -79,10 +149,12 @@ if [[ -z "${RUSTUP_BIN}" ]]; then
   exit 1
 fi
 
+PREVIOUS_HEAD="$(git -C "${SRC_DIR}" rev-parse HEAD 2>/dev/null || true)"
 git -C "${SRC_DIR}" remote set-url origin "${REPO_URL}" || true
 git -C "${SRC_DIR}" fetch --all --tags
 git -C "${SRC_DIR}" checkout "${BRANCH}"
 git -C "${SRC_DIR}" pull --ff-only origin "${BRANCH}"
+CURRENT_HEAD="$(git -C "${SRC_DIR}" rev-parse HEAD 2>/dev/null || true)"
 
 ENV_CHECK_SCRIPT="${SRC_DIR}/installation/debian-trixie/check-lpe-env.sh"
 ENV_EXAMPLE_FILE="${SRC_DIR}/installation/debian-trixie/lpe.env.example"
@@ -1681,19 +1753,20 @@ install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${LPE_PST_IMPORT_DIR}"
 
 cd "${SRC_DIR}"
 systemctl stop "${SERVICE_NAME}" || true
-"${CARGO_BIN}" build --release -p lpe-cli
-cd "${SRC_DIR}/web/admin"
-run_npm ci
-run_npm run build
-cd "${SRC_DIR}/web/client"
-run_npm ci
-run_npm run build
-
-install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
-install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
+if rust_build_needed; then
+  "${CARGO_BIN}" build --release -p lpe-cli
+  install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
+else
+  echo "Skipping Rust build; Rust sources and installed lpe-cli are unchanged."
+fi
+if magika_install_needed; then
+  install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
+else
+  echo "Skipping Magika install; installed binary matches requested version."
+fi
 install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}"
-cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
-cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
+build_web_app "web/admin" "${ADMIN_WEB_ROOT}" "admin"
+build_web_app "web/client" "${CLIENT_WEB_ROOT}" "client"
 render_template \
   "${SRC_DIR}/installation/debian-trixie/lpe.service" \
   "/etc/systemd/system/lpe.service" \

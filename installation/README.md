@@ -777,6 +777,15 @@ rebuilds and redeploys code and web assets. For a new `0.4` deployment, point
 disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before
 running `init-schema.sh`.
 
+To keep routine source updates faster, `update-lpe.sh` skips unchanged rebuild
+steps when the installed outputs already exist. It rebuilds the Rust service
+when `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, or `crates/` changed,
+reinstalls `Magika` only when the installed version is missing or different,
+runs `npm ci` only when the relevant web package files changed, and rebuilds a
+web UI only when its own source tree changed. Set `LPE_FORCE_RUST_BUILD=true`,
+`LPE_FORCE_MAGIKA_INSTALL=true`, `LPE_FORCE_WEB_DEPS=true`, or
+`LPE_FORCE_WEB_BUILD=true` to force a specific step.
+
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
 When `LPE_CT_LOCAL_DB_ENABLED=true`, `LPE_CT_LOCAL_DB_URL` and the private PostgreSQL store are required at startup because the LPE-CT management dashboard state is persisted there. Queue payload custody remains in `/var/spool/lpe-ct`, while `state.json` is only a legacy bootstrap/export file.

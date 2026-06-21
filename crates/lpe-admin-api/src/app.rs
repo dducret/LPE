@@ -372,13 +372,23 @@ pub fn router(storage: Storage) -> Router {
             post(restore_snapshot),
         )
         .merge(client_config::router())
-        .nest("/jmap", lpe_jmap::router())
-        .merge(lpe_exchange::router())
-        .merge(lpe_activesync::router())
-        .merge(lpe_dav::router())
+        .merge(protocol_router())
         .layer(middleware::from_fn(observability::observe_http))
         .layer(DefaultBodyLimit::max(pst_upload_max_bytes()))
         .with_state(storage)
+}
+
+fn protocol_router() -> Router<Storage> {
+    let router = Router::new();
+    #[cfg(feature = "jmap")]
+    let router = router.nest("/jmap", lpe_jmap::router());
+    #[cfg(feature = "exchange")]
+    let router = router.merge(lpe_exchange::router());
+    #[cfg(feature = "activesync")]
+    let router = router.merge(lpe_activesync::router());
+    #[cfg(feature = "dav")]
+    let router = router.merge(lpe_dav::router());
+    router
 }
 
 pub fn init_observability(service_name: &str) {
@@ -405,6 +415,7 @@ mod tests {
         parse_smtp_submission_sender,
     };
     use crate::pst::validate_uploaded_pst_file_with_validator;
+    #[cfg(feature = "exchange")]
     use axum::{
         body::Body,
         http::{Method, Request, StatusCode},
@@ -421,9 +432,11 @@ mod tests {
         sync::{Mutex, MutexGuard},
         time::{SystemTime, UNIX_EPOCH},
     };
+    #[cfg(feature = "exchange")]
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    #[cfg(feature = "exchange")]
     #[tokio::test]
     async fn app_router_serves_exchange_mapi_options_route() {
         let Ok(database_url) = std::env::var("TEST_DATABASE_URL") else {
@@ -449,6 +462,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "exchange")]
     #[tokio::test]
     async fn app_router_routes_mapi_post_to_exchange_handler() {
         let Ok(database_url) = std::env::var("TEST_DATABASE_URL") else {
