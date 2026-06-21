@@ -940,7 +940,7 @@ fn log_mapi_requested_identity_resolution(
         .copied()
         .filter(|object_id| !is_expected_unbacked_mapi_object(*object_id))
         .collect::<Vec<_>>();
-    if expected_unbacked_object_ids.is_empty() && unresolved_object_ids.is_empty() {
+    if unresolved_object_ids.is_empty() {
         return;
     }
     tracing::info!(

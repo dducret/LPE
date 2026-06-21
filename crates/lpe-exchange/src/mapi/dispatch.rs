@@ -7631,21 +7631,39 @@ fn log_outlook_bootstrap_row_invariant(
     associated: bool,
     summary: &str,
 ) {
-    tracing::info!(
-        rca_debug = true,
-        adapter = "mapi",
-        endpoint = "emsmdb",
-        account_id = %principal.account_id,
-        mailbox = %principal.email,
-        request_type = "Execute",
-        request_rop_id = "0x15",
-        phase,
-        folder_id = %format!("0x{folder_id:016x}"),
-        folder_role = debug_role_for_folder_id(folder_id),
-        associated,
-        row_invariant_summary = summary,
-        "rca debug outlook bootstrap row invariant"
-    );
+    if summary.contains("issues=none") {
+        tracing::debug!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x15",
+            phase,
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(folder_id),
+            associated,
+            row_invariant_summary = summary,
+            "rca debug outlook bootstrap row invariant"
+        );
+    } else {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x15",
+            phase,
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(folder_id),
+            associated,
+            row_invariant_summary = summary,
+            "rca debug outlook bootstrap row invariant"
+        );
+    }
 }
 
 fn outlook_bootstrap_query_rows_phase(
