@@ -60,6 +60,13 @@ LPE_CT_PUBLIC_TLS_KEY_PATH="${LPE_CT_PUBLIC_TLS_KEY_PATH:-/etc/lpe-ct/tls/privke
 validate_publication_config() {
   local nginx_site="${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
   local required_patterns=(
+    "location = /mail"
+    "location /mail/"
+    "location = /admin"
+    "location /admin/"
+    "location /assets/"
+    "location /api/auth/"
+    "location /api/console/"
     "location /api/mail/"
     "location /api/jmap/"
     "location = /api/jmap/ws"

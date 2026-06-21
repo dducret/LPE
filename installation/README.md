@@ -57,9 +57,10 @@ For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trix
 
 The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, redirect plain `HTTP` on `80` to `HTTPS`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
-The generated `LPE-CT` `nginx` site also re-exposes the core client publication
-routes on the public HTTPS edge: `/Microsoft-Server-ActiveSync`, `/mapi/`,
-`/rpc/rpcproxy.dll`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`,
+The generated `LPE-CT` `nginx` site also re-exposes the core web and client
+publication routes on the public HTTPS edge: `/mail/`, `/admin/`,
+`/Microsoft-Server-ActiveSync`, `/mapi/`, `/rpc/rpcproxy.dll`,
+`/EWS/Exchange.asmx`, `/ews/exchange.asmx`,
 `/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
 `/.well-known/autoconfig/`. ActiveSync and MAPI use long proxy timeouts so
 mobile and Outlook long-poll requests are not cut off by the edge proxy. The
@@ -638,8 +639,10 @@ certificate files may be reused for `465` submission through
 `LPE_CT_IMAPS_TLS_KEY_PATH`. The certificate must cover the public `LPE-CT`
 hostname used by clients.
 
-`LPE-CT` must publish the mailbox login and `JMAP` HTTPS/WSS paths and proxy
-them to the core `LPE` service: `/api/mail/auth/login`,
+`LPE-CT` must publish the mailbox web UI, core administration UI, mailbox login,
+and `JMAP` HTTPS/WSS paths and proxy them to the core `LPE` service: `/mail/`,
+`/admin/`, `/api/auth/login`, `/api/console/dashboard`,
+`/api/mail/auth/login`,
 `/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.

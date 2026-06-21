@@ -973,7 +973,7 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
             succeeded_count += 1;
         }
     }
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         mailbox = %principal.email,
@@ -3104,7 +3104,7 @@ fn format_inbox_related_release_context(
                 && state.last_inbox_normal_contents_table_setcolumns_handle == handle
                 && state.last_inbox_normal_contents_table_query_rows_handle != handle;
             Some(format!(
-                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};column_support={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};visible_inbox_release_without_query_rows={};last_normal_setcolumns={};last_normal_query_rows={}",
+                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};column_support={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};visible_inbox_release_without_query_rows={};last_normal_setcolumns_handle={};last_normal_query_rows_handle={}",
                 format_optional_debug_handle(handle),
                 associated,
                 position,
@@ -3129,20 +3129,20 @@ fn format_inbox_related_release_context(
                 state.inbox_normal_contents_table_setcolumns_observed,
                 state.inbox_normal_contents_table_query_rows_observed,
                 release_without_query_rows,
-                debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
-                debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context)
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_setcolumns_handle),
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle)
             ))
         }
         Some(MapiObject::Folder { folder_id, .. }) if *folder_id == INBOX_FOLDER_ID => {
             Some(format!(
-                "handle={};kind=folder;folder=0x{folder_id:016x};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};last_normal_setcolumns={};last_normal_query_rows={}",
+                "handle={};kind=folder;folder=0x{folder_id:016x};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};last_normal_setcolumns_handle={};last_normal_query_rows_handle={}",
                 format_optional_debug_handle(handle),
                 state.inbox_associated_contents_table_observed,
                 state.inbox_normal_contents_table_observed,
                 state.inbox_normal_contents_table_setcolumns_observed,
                 state.inbox_normal_contents_table_query_rows_observed,
-                debug_context_or_none(&state.last_inbox_normal_contents_table_setcolumns_context),
-                debug_context_or_none(&state.last_inbox_normal_contents_table_query_rows_context)
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_setcolumns_handle),
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle)
             ))
         }
         _ => None,
@@ -26299,8 +26299,8 @@ mod tests {
         assert!(context.contains("normal_setcolumns_observed=true"));
         assert!(context.contains("normal_query_rows_observed=false"));
         assert!(context.contains("visible_inbox_release_without_query_rows=true"));
-        assert!(context.contains("last_normal_setcolumns=handle=17"));
-        assert!(context.contains("last_normal_query_rows=none"));
+        assert!(context.contains("last_normal_setcolumns_handle=17"));
+        assert!(context.contains("last_normal_query_rows_handle=none"));
     }
 
     #[test]

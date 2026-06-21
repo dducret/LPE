@@ -25,6 +25,11 @@
 - `LPE` must not expose Internet-facing `SMTP`.
 - `LPE-CT` must not store canonical mailbox, collaboration, rights, or user-visible state.
 - Public HTTPS routes may include:
+  - `/mail/`
+  - `/admin/`
+  - `/assets/`
+  - `/api/auth/login`
+  - `/api/console/dashboard`
   - `/api/mail/auth/login`
   - `/api/jmap/session`
   - `/api/jmap/api`
