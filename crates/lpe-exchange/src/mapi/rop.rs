@@ -1598,6 +1598,8 @@ fn log_common_view_descriptor_getprops_summary(
     let descriptor_string_bytes = utf16le_bytes(&descriptor_strings);
     let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
     let requested_required = format_requested_view_descriptor_contract(columns);
+    let response_values =
+        format_common_view_descriptor_response_values(principal.account_id, &message, columns);
     let descriptor_strings_terminators = descriptor_strings
         .chars()
         .filter(|value| *value == '\n')
@@ -1618,6 +1620,7 @@ fn log_common_view_descriptor_getprops_summary(
         view_message_class = "IPM.Microsoft.FolderDesign.NamedView",
         requested_property_tags = %format_property_tags_for_debug(columns),
         requested_view_descriptor_contract = %requested_required,
+        requested_view_descriptor_response_values = %response_values,
         ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.3",
         descriptor_version = 8u32,
         descriptor_name_present = !message.name.is_empty(),
