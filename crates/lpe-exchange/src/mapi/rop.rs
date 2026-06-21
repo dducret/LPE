@@ -1668,10 +1668,15 @@ fn format_requested_view_descriptor_contract(columns: &[u32]) -> String {
             &[
                 PID_TAG_VIEW_DESCRIPTOR_BINARY,
                 OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+            ][..],
+        ),
+        (
+            "strings",
+            &[
+                PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
                 OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
             ][..],
         ),
-        ("strings", &[PID_TAG_VIEW_DESCRIPTOR_STRINGS_W][..]),
     ] {
         parts.push(format!(
             "{name}={}",
@@ -1738,6 +1743,8 @@ fn format_common_view_descriptor_getprops_contract(
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
     let descriptor_strings = view_descriptor_strings(&definition);
+    let response_values =
+        format_common_view_descriptor_response_values(principal.account_id, &message, columns);
     let target = default_view_message_entry_id_target(
         &crate::mapi::identity::message_entry_id_from_object_ids(
             principal.account_id,
@@ -1754,14 +1761,62 @@ fn format_common_view_descriptor_getprops_contract(
     format!(
         "found=true;folder_id=0x{folder_id:016x};view_id=0x{view_id:016x};view_name={};\
          requested_descriptor_tags={};descriptor_bytes={};descriptor_strings_utf16_bytes={};\
-         descriptor_column_count={};descriptor_column_tags={};descriptor_entry_id_target={target}",
+         descriptor_column_count={};descriptor_column_tags={};response_values={};\
+         descriptor_entry_id_target={target}",
         message.name,
         format_property_tags_for_debug(columns),
         descriptor.len(),
         descriptor_strings.encode_utf16().count() * 2,
         descriptor_columns.len(),
-        format_property_tags_for_debug(&descriptor_columns)
+        format_property_tags_for_debug(&descriptor_columns),
+        response_values
     )
+}
+
+fn format_common_view_descriptor_response_values(
+    account_id: uuid::Uuid,
+    message: &crate::mapi_store::MapiCommonViewNamedViewMessage,
+    columns: &[u32],
+) -> String {
+    columns
+        .iter()
+        .filter_map(|tag| {
+            if !common_view_descriptor_property_requested(&[*tag]) {
+                return None;
+            }
+            let storage_tag = canonical_property_storage_tag(*tag);
+            let value = common_view_named_view_property_value(message, account_id, storage_tag)?;
+            Some(format!(
+                "{tag:#010x}:{}:{}",
+                property_tag_debug_name(storage_tag),
+                view_descriptor_value_shape_for_debug(&value)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn view_descriptor_value_shape_for_debug(value: &MapiValue) -> String {
+    match value {
+        MapiValue::Binary(bytes) => format!(
+            "binary_bytes={};sha256_16={};preview={}",
+            bytes.len(),
+            sha256_hex_prefix(bytes, 16),
+            hex_preview_for_debug(bytes, 64)
+        ),
+        MapiValue::String(value) => {
+            let bytes = utf16le_bytes(value);
+            format!(
+                "string_chars={};utf16_bytes={};sha256_16={};preview={}",
+                value.chars().count(),
+                bytes.len(),
+                sha256_hex_prefix(&bytes, 16),
+                text_preview_for_debug(value, 48)
+            )
+        }
+        MapiValue::U32(value) => format!("u32={value}"),
+        value => mapi_value_shape_for_debug(value),
+    }
 }
 
 fn view_descriptor_debug_property_tags(descriptor: &[u8]) -> Vec<u32> {
