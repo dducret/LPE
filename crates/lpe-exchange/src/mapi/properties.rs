@@ -2496,7 +2496,7 @@ pub(in crate::mapi) fn log_view_definition_diagnostics(
 ) {
     let descriptor_len = 60 + (definition.columns.len() + 1) * 36;
     let descriptor_strings_len = view_descriptor_strings(definition).encode_utf16().count() * 2;
-    tracing::info!(
+    tracing::debug!(
         folder_id = format_args!("0x{folder_id:016x}"),
         view_message_id = format_args!("0x{view_id:016x}"),
         view_name,

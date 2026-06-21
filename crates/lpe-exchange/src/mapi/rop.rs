@@ -4,6 +4,7 @@ use super::sync::*;
 use super::tables::*;
 use super::wire::{MapiError, MapiRestrictionType, RopId};
 use super::*;
+use sha2::{Digest, Sha256};
 
 pub(in crate::mapi) fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
     if let Some(payload) = rpc_header_ext_payload(buffer) {
@@ -1545,6 +1546,7 @@ fn log_get_properties_specific_debug(
         outlook_bootstrap_property_details = %outlook_bootstrap_property_details,
         message = message,
     );
+    log_common_view_descriptor_getprops_summary(principal, request, object, columns, snapshot);
     log_calendar_default_folder_lookup_debug(
         object,
         principal,
@@ -1554,6 +1556,137 @@ fn log_get_properties_specific_debug(
         snapshot,
         &flagged_error_tags,
     );
+}
+
+fn log_common_view_descriptor_getprops_summary(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let Some(MapiObject::CommonViewNamedView { folder_id, view_id }) = object else {
+        return;
+    };
+    if !common_view_descriptor_property_requested(columns) {
+        return;
+    }
+    let Some(message) = snapshot
+        .common_view_named_view_message_for_id(*view_id)
+        .or_else(|| snapshot.default_folder_named_view_message(*folder_id, *view_id))
+    else {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x07",
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            folder_id = %format!("0x{folder_id:016x}"),
+            view_message_id = %format!("0x{view_id:016x}"),
+            requested_property_tags = %format_property_tags_for_debug(columns),
+            ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.3",
+            message = "rca debug outlook view descriptor getprops missing view message",
+        );
+        return;
+    };
+
+    let definition = outlook_mail_view_definition(&message.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_strings = view_descriptor_strings(&definition);
+    let descriptor_string_bytes = utf16le_bytes(&descriptor_strings);
+    let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
+    let requested_required = format_requested_view_descriptor_contract(columns);
+    let descriptor_strings_terminators = descriptor_strings
+        .chars()
+        .filter(|value| *value == '\n')
+        .count();
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        folder_id = %format!("0x{folder_id:016x}"),
+        view_message_id = %format!("0x{view_id:016x}"),
+        view_name = %message.name,
+        view_message_class = "IPM.Microsoft.FolderDesign.NamedView",
+        requested_property_tags = %format_property_tags_for_debug(columns),
+        requested_view_descriptor_contract = %requested_required,
+        ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.3",
+        descriptor_version = 8u32,
+        descriptor_name_present = !message.name.is_empty(),
+        descriptor_binary_bytes = descriptor.len(),
+        descriptor_binary_sha256_16 = %sha256_hex_prefix(&descriptor, 16),
+        descriptor_binary_preview = %hex_preview_for_debug(&descriptor, 96),
+        descriptor_column_count = descriptor_columns.len(),
+        descriptor_column_tags = %format_property_tags_for_debug(&descriptor_columns),
+        descriptor_strings_utf16_bytes = descriptor_string_bytes.len(),
+        descriptor_strings_sha256_16 = %sha256_hex_prefix(&descriptor_string_bytes, 16),
+        descriptor_strings_utf16_preview = %hex_preview_for_debug(&descriptor_string_bytes, 96),
+        descriptor_strings_terminators,
+        descriptor_strings_starts_with_terminator = descriptor_strings.starts_with('\n'),
+        descriptor_strings_ends_with_terminator = descriptor_strings.ends_with('\n'),
+        message = "rca debug outlook view descriptor getprops",
+    );
+}
+
+fn common_view_descriptor_property_requested(columns: &[u32]) -> bool {
+    columns.iter().any(|tag| {
+        matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_VIEW_DESCRIPTOR_BINARY
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C
+                | PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                | PID_TAG_VIEW_DESCRIPTOR_NAME_W
+                | PID_TAG_VIEW_DESCRIPTOR_VERSION
+                | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        )
+    })
+}
+
+fn format_requested_view_descriptor_contract(columns: &[u32]) -> String {
+    let mut parts = Vec::new();
+    for (name, tag) in [
+        ("version", PID_TAG_VIEW_DESCRIPTOR_VERSION),
+        ("name", PID_TAG_VIEW_DESCRIPTOR_NAME_W),
+        ("binary", PID_TAG_VIEW_DESCRIPTOR_BINARY),
+        ("strings", PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+    ] {
+        parts.push(format!(
+            "{name}={}",
+            columns
+                .iter()
+                .any(|column| canonical_property_storage_tag(*column) == tag)
+        ));
+    }
+    parts.join(";")
+}
+
+fn utf16le_bytes(value: &str) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(value.encode_utf16().count() * 2);
+    for unit in value.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
+}
+
+fn sha256_hex_prefix(bytes: &[u8], hex_chars: usize) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let hex = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    hex.chars().take(hex_chars).collect()
 }
 
 fn format_common_view_descriptor_getprops_contract(
