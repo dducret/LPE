@@ -4360,6 +4360,41 @@ pub(in crate::mapi) fn write_stream(
     Some(written)
 }
 
+pub(in crate::mapi) fn resolve_writable_stream_handle(
+    session: &MapiSession,
+    requested_handle: u32,
+) -> Option<u32> {
+    if matches!(
+        session.handles.get(&requested_handle),
+        Some(MapiObject::AttachmentStream { .. })
+    ) {
+        return Some(requested_handle);
+    }
+    if !matches!(
+        session.handles.get(&requested_handle),
+        Some(MapiObject::AssociatedConfig { .. })
+    ) {
+        return None;
+    }
+
+    let mut matches = session
+        .handles
+        .iter()
+        .filter_map(|(handle, object)| match object {
+            MapiObject::AttachmentStream {
+                writable_target:
+                    Some(StreamWriteTarget::AssociatedConfigProperty {
+                        handle: target_handle,
+                        ..
+                    }),
+                ..
+            } if *target_handle == requested_handle => Some(*handle),
+            _ => None,
+        });
+    let handle = matches.next()?;
+    matches.next().is_none().then_some(handle)
+}
+
 pub(in crate::mapi) fn stream_write_error(
     session: &MapiSession,
     stream_handle: u32,
@@ -11259,6 +11294,13 @@ mod tests {
                 position: 0,
                 writable_target,
             },
+        );
+        assert_eq!(resolve_writable_stream_handle(&session, 1), Some(handle));
+        assert_eq!(set_attachment_stream_size(&mut session, 1, 4), None);
+        let resolved_handle = resolve_writable_stream_handle(&session, 1).unwrap();
+        assert_eq!(
+            set_attachment_stream_size(&mut session, resolved_handle, 4),
+            Some(())
         );
         assert_eq!(
             write_stream(&mut session, handle, b"rule-actions"),

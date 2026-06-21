@@ -17269,19 +17269,23 @@ where
             }
             Some(RopId::ReadStream) => {
                 let read_input_handle = input_handle(&handle_slots, &request);
-                let is_rule_organizer_stream_read = read_input_handle
+                let resolved_stream_handle = read_input_handle
+                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                let is_rule_organizer_stream_read = resolved_stream_handle
                     .is_some_and(|handle| session.is_inbox_rule_organizer_stream_handle(handle));
-                if let Some(input_handle) = read_input_handle {
-                    if session.is_inbox_associated_config_stream_handle(input_handle) {
+                if let Some(stream_handle) = resolved_stream_handle {
+                    if session.is_inbox_associated_config_stream_handle(stream_handle) {
                         session.record_inbox_associated_config_stream_read();
                         session.record_recent_probe_action(format!(
                             "ReadAssociatedConfigStream(in={},max={})",
-                            input_handle,
+                            stream_handle,
                             request.read_byte_count().unwrap_or(0)
                         ));
                     }
                 }
-                let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
+                let Some(stream) =
+                    resolved_stream_handle.and_then(|handle| session.handles.get_mut(&handle))
+                else {
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -17293,6 +17297,9 @@ where
                         input_handle_value = read_input_handle
                             .map(|handle| handle.to_string())
                             .unwrap_or_else(|| "missing".to_string()),
+                        resolved_stream_handle = resolved_stream_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
                         response_handle_index = request.response_handle_index(),
                         requested_byte_count = request.read_byte_count().unwrap_or(0),
                         stream_read_result = "missing_input_object",
@@ -17367,6 +17374,9 @@ where
                     input_handle_value = read_input_handle
                         .map(|handle| handle.to_string())
                         .unwrap_or_else(|| "missing".to_string()),
+                    resolved_stream_handle = resolved_stream_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
                     response_handle_index = request.response_handle_index(),
                     requested_byte_count = request.read_byte_count().unwrap_or(0),
                     stream_position_before = before_position,
@@ -17382,7 +17392,12 @@ where
                 responses.extend_from_slice(&response);
             }
             Some(RopId::SeekStream) => {
-                let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
+                let requested_handle = input_handle(&handle_slots, &request);
+                let stream_handle = requested_handle
+                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                let Some(stream) =
+                    stream_handle.and_then(|handle| session.handles.get_mut(&handle))
+                else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2E,
                         request.response_handle_index(),
@@ -17390,10 +17405,26 @@ where
                     ));
                     continue;
                 };
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x2e",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    requested_handle = requested_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "missing".to_string()),
+                    resolved_stream_handle = stream_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    message = "rca debug mapi seek stream"
+                );
                 responses.extend_from_slice(&rop_seek_stream_response(&request, stream));
             }
             Some(RopId::SetStreamSize) => {
-                let Some(stream_handle) = input_handle(&handle_slots, &request) else {
+                let Some(requested_handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2F,
                         request.response_handle_index(),
@@ -17401,9 +17432,30 @@ where
                     ));
                     continue;
                 };
+                let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x2f",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    requested_handle,
+                    resolved_stream_handle = stream_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    requested_stream_size = request.stream_size().unwrap_or(u64::MAX),
+                    requested_object_kind = mapi_object_debug_kind(session.handles.get(&requested_handle)),
+                    resolved_object_kind = stream_handle
+                        .and_then(|handle| session.handles.get(&handle))
+                        .map(|object| mapi_object_debug_kind(Some(object)))
+                        .unwrap_or("none"),
+                    message = "rca debug mapi set stream size"
+                );
                 match set_attachment_stream_size(
                     session,
-                    stream_handle,
+                    stream_handle.unwrap_or(requested_handle),
                     request.stream_size().unwrap_or(u64::MAX),
                 ) {
                     Some(()) => responses.extend_from_slice(&rop_simple_success_response(&request)),
@@ -17415,7 +17467,7 @@ where
                 }
             }
             Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
-                let Some(stream_handle) = input_handle(&handle_slots, &request) else {
+                let Some(requested_handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
                         request.response_handle_index(),
@@ -17423,6 +17475,28 @@ where
                     ));
                     continue;
                 };
+                let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = %format!("0x{:02x}", request.rop_id),
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    requested_handle,
+                    resolved_stream_handle = stream_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    write_byte_count = request.stream_write_data().len(),
+                    requested_object_kind = mapi_object_debug_kind(session.handles.get(&requested_handle)),
+                    resolved_object_kind = stream_handle
+                        .and_then(|handle| session.handles.get(&handle))
+                        .map(|object| mapi_object_debug_kind(Some(object)))
+                        .unwrap_or("none"),
+                    message = "rca debug mapi write stream"
+                );
+                let stream_handle = stream_handle.unwrap_or(requested_handle);
                 match write_stream(session, stream_handle, request.stream_write_data()) {
                     Some(written) => {
                         responses.extend_from_slice(&rop_write_stream_response(&request, written))
@@ -17449,6 +17523,8 @@ where
                     ));
                     continue;
                 };
+                let source_handle =
+                    resolve_writable_stream_handle(session, source_handle).unwrap_or(source_handle);
                 let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -17458,6 +17534,9 @@ where
                     ));
                     continue;
                 };
+                let destination_handle =
+                    resolve_writable_stream_handle(session, destination_handle)
+                        .unwrap_or(destination_handle);
                 match copy_stream(
                     session,
                     source_handle,
@@ -17473,18 +17552,28 @@ where
                     )),
                 }
             }
-            Some(RopId::GetStreamSize) => match input_object(session, &handle_slots, &request) {
-                Some(MapiObject::AttachmentStream { data, .. }) => {
-                    responses.extend_from_slice(&rop_get_stream_size_response(&request, data.len()))
+            Some(RopId::GetStreamSize) => {
+                let requested_handle = input_handle(&handle_slots, &request);
+                let stream_handle = requested_handle
+                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                match stream_handle.and_then(|handle| session.handles.get(&handle)) {
+                    Some(MapiObject::AttachmentStream { data, .. }) => responses
+                        .extend_from_slice(&rop_get_stream_size_response(&request, data.len())),
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x5E,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
                 }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x5E,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            },
+            }
             Some(RopId::CloneStream) => {
-                match input_object(session, &handle_slots, &request).cloned() {
+                let requested_handle = input_handle(&handle_slots, &request);
+                let stream_handle = requested_handle
+                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                match stream_handle
+                    .and_then(|handle| session.handles.get(&handle))
+                    .cloned()
+                {
                     Some(MapiObject::AttachmentStream {
                         data,
                         position,
@@ -17518,16 +17607,40 @@ where
                     request.response_handle_index(),
                     0x8004_0102,
                 )),
-            Some(RopId::CommitStream) => match input_object(session, &handle_slots, &request) {
-                Some(MapiObject::AttachmentStream { .. }) => {
-                    responses.extend_from_slice(&rop_simple_success_response(&request))
+            Some(RopId::CommitStream) => {
+                let requested_handle = input_handle(&handle_slots, &request);
+                let stream_handle = requested_handle
+                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x5d",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    requested_handle = requested_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "missing".to_string()),
+                    resolved_stream_handle = stream_handle
+                        .map(|handle| handle.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    message = "rca debug mapi commit stream"
+                );
+                match stream_handle
+                    .and_then(|handle| session.handles.get(&handle))
+                    .or_else(|| input_object(session, &handle_slots, &request))
+                {
+                    Some(MapiObject::AttachmentStream { .. }) => {
+                        responses.extend_from_slice(&rop_simple_success_response(&request))
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x5D,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
                 }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x5D,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            },
+            }
             Some(RopId::SubmitMessage | RopId::TransportSend) => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
                     tracing::info!(
