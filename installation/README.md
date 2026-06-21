@@ -798,6 +798,16 @@ bash -c "ls -la"
 bash -c "bash -n installation/debian-trixie/update-lpe.sh"
 ```
 
+For a fast local Rust check of the core server wiring without the optional
+protocol adapters, use:
+
+```bash
+cargo check -p lpe-cli --no-default-features --all-targets
+```
+
+Keep using `cargo check -p lpe-cli --all-targets` before deployment when the
+full JMAP, IMAP, ManageSieve, ActiveSync, DAV, EWS, and MAPI surface matters.
+
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
 When `LPE_CT_LOCAL_DB_ENABLED=true`, `LPE_CT_LOCAL_DB_URL` and the private PostgreSQL store are required at startup because the LPE-CT management dashboard state is persisted there. Queue payload custody remains in `/var/spool/lpe-ct`, while `state.json` is only a legacy bootstrap/export file.

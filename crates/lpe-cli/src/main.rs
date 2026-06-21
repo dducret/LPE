@@ -10,11 +10,13 @@ use lpe_domain::{
     INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
     INTEGRATION_TIMESTAMP_HEADER,
 };
+#[cfg(feature = "imap")]
 use lpe_imap::ImapServer;
+#[cfg(feature = "managesieve")]
 use lpe_managesieve::ManageSieveServer;
 use lpe_storage::Storage;
 use std::{env, time::Duration};
-use tokio::{net::TcpListener, time::sleep};
+use tokio::{net::TcpListener, task::JoinSet, time::sleep};
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -28,47 +30,61 @@ async fn main() -> Result<()> {
 
     let bind_address =
         env::var("LPE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
-    let imap_bind_address =
-        env::var("LPE_IMAP_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:1143".to_string());
-    let managesieve_bind_address =
-        env::var("LPE_MANAGESIEVE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:4190".to_string());
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
     let storage = Storage::connect(&database_url).await?;
     auto_bootstrap_admin_if_missing(&storage).await?;
     let listener = TcpListener::bind(&bind_address).await?;
-    let imap_listener = TcpListener::bind(&imap_bind_address).await?;
-    let managesieve_listener = TcpListener::bind(&managesieve_bind_address).await?;
     info!("lpe admin api listening on http://{bind_address}");
-    info!("lpe imap listening on {imap_bind_address}");
-    info!("lpe managesieve listening on {managesieve_bind_address}");
 
-    let api_storage = storage.clone();
-    let worker_storage = storage.clone();
-    let imap_storage = storage.clone();
-    let managesieve_storage = storage.clone();
-    let journal_storage = storage.clone();
-    let api_task = tokio::spawn(async move {
-        axum::serve(listener, router(api_storage)).await?;
-        Result::<()>::Ok(())
+    let mut tasks = JoinSet::new();
+    tasks.spawn({
+        let api_storage = storage.clone();
+        async move {
+            axum::serve(listener, router(api_storage)).await?;
+            Result::<()>::Ok(())
+        }
     });
-    let imap_task =
-        tokio::spawn(async move { ImapServer::new(imap_storage).serve(imap_listener).await });
-    let managesieve_task = tokio::spawn(async move {
-        ManageSieveServer::new(managesieve_storage)
-            .serve(managesieve_listener)
-            .await
-    });
-    let worker_task = tokio::spawn(async move { run_outbound_worker(worker_storage).await });
-    let journal_task =
-        tokio::spawn(async move { run_jmap_journal_purge_worker(journal_storage).await });
 
-    tokio::select! {
-        result = api_task => result??,
-        result = imap_task => result??,
-        result = managesieve_task => result??,
-        result = worker_task => result??,
-        result = journal_task => result??,
+    #[cfg(feature = "imap")]
+    {
+        let imap_bind_address =
+            env::var("LPE_IMAP_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:1143".to_string());
+        let imap_listener = TcpListener::bind(&imap_bind_address).await?;
+        info!("lpe imap listening on {imap_bind_address}");
+        tasks.spawn({
+            let imap_storage = storage.clone();
+            async move { ImapServer::new(imap_storage).serve(imap_listener).await }
+        });
+    }
+
+    #[cfg(feature = "managesieve")]
+    {
+        let managesieve_bind_address = env::var("LPE_MANAGESIEVE_BIND_ADDRESS")
+            .unwrap_or_else(|_| "127.0.0.1:4190".to_string());
+        let managesieve_listener = TcpListener::bind(&managesieve_bind_address).await?;
+        info!("lpe managesieve listening on {managesieve_bind_address}");
+        tasks.spawn({
+            let managesieve_storage = storage.clone();
+            async move {
+                ManageSieveServer::new(managesieve_storage)
+                    .serve(managesieve_listener)
+                    .await
+            }
+        });
+    }
+
+    tasks.spawn({
+        let worker_storage = storage.clone();
+        async move { run_outbound_worker(worker_storage).await }
+    });
+    tasks.spawn({
+        let journal_storage = storage;
+        async move { run_jmap_journal_purge_worker(journal_storage).await }
+    });
+
+    if let Some(result) = tasks.join_next().await {
+        result??;
     }
 
     Ok(())

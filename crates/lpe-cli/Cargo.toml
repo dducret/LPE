@@ -4,13 +4,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["protocols"]
+protocols = ["lpe-admin-api/protocols", "imap", "managesieve"]
+imap = ["dep:lpe-imap"]
+managesieve = ["dep:lpe-managesieve"]
+
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
-lpe-admin-api = { path = "../lpe-admin-api" }
+lpe-admin-api = { path = "../lpe-admin-api", default-features = false }
 lpe-domain = { path = "../lpe-domain" }
-lpe-imap = { path = "../lpe-imap" }
-lpe-managesieve = { path = "../lpe-managesieve" }
+lpe-imap = { path = "../lpe-imap", optional = true }
+lpe-managesieve = { path = "../lpe-managesieve", optional = true }
 lpe-storage = { path = "../lpe-storage" }
 reqwest.workspace = true
 tokio.workspace = true
