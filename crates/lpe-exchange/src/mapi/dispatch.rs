@@ -7151,6 +7151,11 @@ fn response_rop_fixed_frame_end(
         (0x0C, Some(0)) => Some(start.saturating_add(15)),
         (0x12 | 0x13, Some(0)) => Some(start.saturating_add(7)),
         (0x18, Some(0)) => Some(start.saturating_add(11)),
+        (0x2B, Some(0)) => Some(start.saturating_add(10)),
+        (0x2C, Some(0)) => responses.get(start + 6..start + 8).and_then(|bytes| {
+            let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
+            Some(start.saturating_add(8).saturating_add(byte_count))
+        }),
         (0x29, Some(0)) => Some(start.saturating_add(6)),
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
@@ -26605,6 +26610,53 @@ mod tests {
         assert_eq!(
             response_summary.results_csv,
             "0x02:0x00000000,0x07:0x00000000"
+        );
+    }
+
+    #[test]
+    fn execute_rop_debug_summary_uses_output_handle_for_open_stream_response() {
+        let mut request_bytes = vec![RopId::OpenMessage.as_u8(), 0, 0, 1];
+        request_bytes.extend_from_slice(&0u16.to_le_bytes());
+        request_bytes.extend_from_slice(&ROOT_FOLDER_ID.to_le_bytes());
+        request_bytes.push(0);
+        request_bytes.extend_from_slice(&0x7fff_ffff_ffed_0001u64.to_le_bytes());
+        request_bytes.extend_from_slice(&[RopId::OpenStream.as_u8(), 0, 1, 2]);
+        request_bytes.extend_from_slice(&0x6802_0102u32.to_le_bytes());
+        request_bytes.push(0);
+        request_bytes.extend_from_slice(&[RopId::ReadStream.as_u8(), 0, 2]);
+        request_bytes.extend_from_slice(&0xffffu16.to_le_bytes());
+        let request_buffer = rop_buffer_with_response(request_bytes, &[0, u32::MAX, u32::MAX]);
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+
+        let open_message_request = RopRequest {
+            rop_id: RopId::OpenMessage.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        let open_stream_request = RopRequest {
+            rop_id: RopId::OpenStream.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: Some(2),
+            payload: Vec::new(),
+        };
+        let mut responses =
+            rop_open_message_response(&open_message_request, "IPM.RuleOrganizer", 0);
+        responses.extend_from_slice(&rop_open_stream_response(&open_stream_request, 0));
+        responses.extend_from_slice(&[RopId::ReadStream.as_u8(), 2]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&0u16.to_le_bytes());
+        let response_buffer = rop_buffer_with_response(responses, &[ROOT_FOLDER_ID as u32, 42, 43]);
+        let response_summary = summarize_response_rop_buffer_with_expected_handles(
+            &response_buffer,
+            &request_summary.full_ids,
+            &request_summary.full_response_handle_indexes,
+        );
+
+        assert_eq!(response_summary.ids_csv, "0x03,0x2b,0x2c");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x03:0x00000000,0x2b:0x00000000,0x2c:0x00000000"
         );
     }
 
