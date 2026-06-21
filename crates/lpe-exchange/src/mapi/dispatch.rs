@@ -6069,6 +6069,40 @@ fn normal_message_table_column_support_summary(columns: &[u32]) -> String {
     table_column_support_summary(columns, normal_message_table_column_is_backed)
 }
 
+fn normal_message_defaulted_column_detail(columns: &[u32]) -> String {
+    columns
+        .iter()
+        .filter_map(|column| {
+            let storage_tag = canonical_property_storage_tag(*column);
+            let tag = MapiPropertyTag::new(storage_tag);
+            if tag.property_id() >= FIRST_NAMED_PROPERTY_ID
+                || normal_message_table_column_is_backed(storage_tag)
+            {
+                return None;
+            }
+            let mut default_bytes = Vec::new();
+            write_property_default(&mut default_bytes, storage_tag);
+            let property_type = tag
+                .property_type()
+                .map(|property_type| format!("{property_type:?}"))
+                .unwrap_or_else(|| "unknown".to_string());
+            let source = if tag.property_id() == 0x1213 {
+                "ms_oxprops=not_found_in_cached_2025_05_20"
+            } else {
+                "ms_oxprops=unchecked"
+            };
+            Some(format!(
+                "tag=0x{column:08x};storage=0x{storage_tag:08x};property_id=0x{:04x};property_type=0x{:04x}:{property_type};backed=false;default_wire_bytes={};{}",
+                tag.property_id(),
+                tag.property_type_code(),
+                hex_preview(&default_bytes, 32),
+                source
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn associated_contents_table_column_support_summary(columns: &[u32]) -> String {
     table_column_support_summary(columns, associated_contents_table_column_is_backed)
 }
@@ -11557,12 +11591,13 @@ where
                             != released_handle =>
                     {
                         Some(format!(
-                            "handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};descriptor_behavior={}",
+                            "handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};descriptor_behavior={}",
                             format_optional_debug_handle(released_handle),
                             position,
                             folder_message_count(*folder_id, mailboxes, emails, snapshot),
                             format_debug_property_tags(columns),
                             normal_message_table_column_support_summary(columns),
+                            normal_message_defaulted_column_detail(columns),
                             format_debug_sort_orders(sort_orders),
                             format_debug_restriction_option(restriction.as_ref()),
                             debug_context_or_none(
@@ -14964,12 +14999,13 @@ where
                             inbox_normal_setcolumns_context = Some((
                                 input_handle_value,
                                 format!(
-                                    "handle={};input_index={};row_count={};columns={};column_support={};named_properties={};view_handoff={};descriptor_behavior={}",
+                                    "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};view_handoff={};descriptor_behavior={}",
                                     format_optional_debug_handle(input_handle_value),
                                     request.input_handle_index().unwrap_or(0),
                                     row_count,
                                     format_debug_property_tags(columns),
                                     normal_message_table_column_support_summary(columns),
+                                    normal_message_defaulted_column_detail(columns),
                                     selected_named_property_context,
                                     view_handoff_table_contract,
                                     descriptor_behavior
@@ -25899,6 +25935,20 @@ mod tests {
         assert!(!summary.contains("defaulted=0x00410102"));
         assert!(summary.contains("defaulted=0x12130003"));
         assert!(summary.contains("named_or_dynamic=0x8514000b,0x8017000b,0x801f001f"));
+    }
+
+    #[test]
+    fn normal_message_defaulted_column_detail_reports_undocumented_1213_wire_shape() {
+        let detail =
+            normal_message_defaulted_column_detail(&[PID_TAG_SUBJECT_W, 0x1213_0003, 0x801f_001f]);
+
+        assert!(detail.contains("tag=0x12130003"));
+        assert!(detail.contains("property_id=0x1213"));
+        assert!(detail.contains("property_type=0x0003:Integer32"));
+        assert!(detail.contains("default_wire_bytes=00000000"));
+        assert!(detail.contains("ms_oxprops=not_found_in_cached_2025_05_20"));
+        assert!(!detail.contains("0x0037001f"));
+        assert!(!detail.contains("0x801f001f"));
     }
 
     #[test]
