@@ -1719,7 +1719,7 @@ fn log_execute_rop_debug(
     let post_hierarchy = post_hierarchy_action_summary(session, false);
     let message = "rca debug mapi execute rops";
 
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
