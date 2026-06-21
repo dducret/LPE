@@ -65,8 +65,6 @@ validate_publication_config() {
     "location = /admin"
     "location /admin/"
     "location /assets/"
-    "location /api/auth/"
-    "location /api/console/"
     "location /api/mail/"
     "location /api/jmap/"
     "location = /api/jmap/ws"

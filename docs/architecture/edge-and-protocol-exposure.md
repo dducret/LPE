@@ -28,8 +28,6 @@
   - `/mail/`
   - `/admin/`
   - `/assets/`
-  - `/api/auth/login`
-  - `/api/console/dashboard`
   - `/api/mail/auth/login`
   - `/api/jmap/session`
   - `/api/jmap/api`

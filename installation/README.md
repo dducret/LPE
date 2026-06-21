@@ -68,6 +68,8 @@ mobile and Outlook long-poll requests are not cut off by the edge proxy. The
 publication settings, while `check-lpe-ct.sh` and `test-lpe-ct-edge-ports.sh`
 validate the live autodiscover, ActiveSync, MAPI, and RPC proxy auth-shim
 responses through the public edge.
+The `/admin/` route publishes the core administration web assets only; the
+core administration API is not exposed by this `LPE-CT` template.
 The same generated `HTTPS` site now emits baseline security headers:
 `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options:
 nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
@@ -641,8 +643,7 @@ hostname used by clients.
 
 `LPE-CT` must publish the mailbox web UI, core administration UI, mailbox login,
 and `JMAP` HTTPS/WSS paths and proxy them to the core `LPE` service: `/mail/`,
-`/admin/`, `/api/auth/login`, `/api/console/dashboard`,
-`/api/mail/auth/login`,
+`/admin/`, `/api/mail/auth/login`,
 `/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
