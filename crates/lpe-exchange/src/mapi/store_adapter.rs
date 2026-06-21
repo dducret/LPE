@@ -880,7 +880,10 @@ fn log_mapi_store_load_step(
     step: &'static str,
     item_count: usize,
 ) {
-    tracing::info!(
+    if item_count > 0 {
+        return;
+    }
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
@@ -937,6 +940,9 @@ fn log_mapi_requested_identity_resolution(
         .copied()
         .filter(|object_id| !is_expected_unbacked_mapi_object(*object_id))
         .collect::<Vec<_>>();
+    if expected_unbacked_object_ids.is_empty() && unresolved_object_ids.is_empty() {
+        return;
+    }
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",

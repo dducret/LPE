@@ -11,6 +11,8 @@ use lpe_storage::{JmapEmail, SearchFolderDefinition};
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;
+const MAX_OUTLOOK_VIEW_FAILURE_TRACE_EVENTS: usize = 32;
+const MAX_OUTLOOK_STREAM_BATCH_EVENTS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiSession {
@@ -115,6 +117,9 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) post_inbox_fai_reopen_logged: bool,
     pub(in crate::mapi) post_rule_organizer_stream_reopen_logged: bool,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
+    pub(in crate::mapi) outlook_view_failure_trace_events: Vec<String>,
+    pub(in crate::mapi) outlook_stream_batch_observed: bool,
+    pub(in crate::mapi) outlook_stream_batch_summaries: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1008,6 +1013,39 @@ impl MapiSession {
         self.post_hierarchy_actions
             .recent_probe_actions
             .push(action);
+    }
+
+    pub(in crate::mapi) fn record_outlook_view_failure_trace_event(&mut self, event: String) {
+        if self
+            .post_hierarchy_actions
+            .outlook_view_failure_trace_events
+            .len()
+            >= MAX_OUTLOOK_VIEW_FAILURE_TRACE_EVENTS
+        {
+            self.post_hierarchy_actions
+                .outlook_view_failure_trace_events
+                .remove(0);
+        }
+        self.post_hierarchy_actions
+            .outlook_view_failure_trace_events
+            .push(event);
+    }
+
+    pub(in crate::mapi) fn record_outlook_stream_batch_observed(&mut self, summary: String) {
+        self.post_hierarchy_actions.outlook_stream_batch_observed = true;
+        if self
+            .post_hierarchy_actions
+            .outlook_stream_batch_summaries
+            .len()
+            >= MAX_OUTLOOK_STREAM_BATCH_EVENTS
+        {
+            self.post_hierarchy_actions
+                .outlook_stream_batch_summaries
+                .remove(0);
+        }
+        self.post_hierarchy_actions
+            .outlook_stream_batch_summaries
+            .push(summary);
     }
 
     pub(in crate::mapi) fn record_post_hierarchy_request_contract(&mut self, contract: String) {

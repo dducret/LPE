@@ -551,6 +551,9 @@ fn log_outlook_inbox_associated_config_bootstrap(
     inserted: &[MapiAssociatedConfigRecord],
     required_defaults: &[UpsertMapiAssociatedConfigInput],
 ) {
+    if inserted.is_empty() {
+        return;
+    }
     // Keep EAS, ELC, Sharing, and RuleOrganizer rows virtual or client-created
     // until Outlook traces require durable modeled state with non-empty payloads.
     let virtual_only_defaults = [
@@ -1292,7 +1295,7 @@ impl MapiMailStoreSnapshot {
                 )
             })
             .count();
-        tracing::info!(
+        tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
             account_id = %account_id
@@ -2550,14 +2553,14 @@ impl<T: ExchangeStore> MapiStore for T {
             if dropped_empty_synthetic_inbox_configs > 0 {
                 associated_configs
                     .retain(|config| !is_empty_synthetic_inbox_associated_config(config));
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    account_id = %account_id,
-                    folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
-                    dropped_empty_synthetic_inbox_configs,
-                    "rca debug mapi dropped empty synthetic inbox associated configs"
-                );
+                tracing::debug!(
+                rca_debug = true,
+                adapter = "mapi",
+                        account_id = %account_id,
+                        folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
+                        dropped_empty_synthetic_inbox_configs,
+                        "rca debug mapi dropped empty synthetic inbox associated configs"
+                    );
             }
             let dropped_empty_named_view_configs = associated_configs
                 .iter()
@@ -2566,7 +2569,7 @@ impl<T: ExchangeStore> MapiStore for T {
             if dropped_empty_named_view_configs > 0 {
                 associated_configs
                     .retain(|config| !is_empty_outlook_inbox_named_view_placeholder(config));
-                tracing::info!(
+                tracing::debug!(
                     rca_debug = true,
                     adapter = "mapi",
                     account_id = %account_id,

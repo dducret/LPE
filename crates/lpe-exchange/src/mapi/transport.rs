@@ -766,6 +766,20 @@ fn log_mapi_session_disconnect(
         .join("|");
     let logon_identity = session.logon_identity.clone().unwrap_or_default();
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
+    let outlook_view_failure_trace_summary = session
+        .post_hierarchy_actions
+        .outlook_view_failure_trace_events
+        .join("|");
+    let outlook_stream_batch_status =
+        if session.post_hierarchy_actions.outlook_stream_batch_observed {
+            "observed"
+        } else {
+            "not_observed"
+        };
+    let outlook_stream_batch_summaries = session
+        .post_hierarchy_actions
+        .outlook_stream_batch_summaries
+        .join("|");
     let special_folder_contract_summary = special_folder_contract_summary(session);
     let required_default_folder_coverage =
         required_default_folder_disconnect_coverage_summary(session);
@@ -845,6 +859,11 @@ fn log_mapi_session_disconnect(
             outlook_profile_stage = %outlook_profile_stage,
             next_expected_client_step = %next_expected_client_step,
             recent_execute_summaries = %recent_execute_summaries,
+            outlook_view_failure_trace_event_count =
+                session.post_hierarchy_actions.outlook_view_failure_trace_events.len(),
+            outlook_view_failure_trace_summary = %outlook_view_failure_trace_summary,
+            outlook_stream_batch_status = outlook_stream_batch_status,
+            outlook_stream_batch_summaries = %outlook_stream_batch_summaries,
             next_debug_focus =
                 if clean_client_close_after_sync && !session.handles.is_empty() {
                     "client_closed_cleanly_with_completed_live_handles"
@@ -969,6 +988,11 @@ fn log_mapi_session_disconnect(
         outlook_profile_stage = %outlook_profile_stage,
         next_expected_client_step = %next_expected_client_step,
         recent_execute_summaries = %recent_execute_summaries,
+        outlook_view_failure_trace_event_count =
+            session.post_hierarchy_actions.outlook_view_failure_trace_events.len(),
+        outlook_view_failure_trace_summary = %outlook_view_failure_trace_summary,
+        outlook_stream_batch_status = outlook_stream_batch_status,
+        outlook_stream_batch_summaries = %outlook_stream_batch_summaries,
         "rca debug mapi session disconnect"
     );
     tracing::info!(
@@ -1014,6 +1038,11 @@ fn log_mapi_session_disconnect(
         live_handle_count_before_remove = session.handles.len(),
         completed_execute_request_count = session.completed_execute_requests.len(),
         recent_execute_summaries = %recent_execute_summaries,
+        outlook_view_failure_trace_event_count =
+            session.post_hierarchy_actions.outlook_view_failure_trace_events.len(),
+        outlook_view_failure_trace_summary = %outlook_view_failure_trace_summary,
+        outlook_stream_batch_status = outlook_stream_batch_status,
+        outlook_stream_batch_summaries = %outlook_stream_batch_summaries,
         completed_sync_source_count,
         incomplete_sync_source_count,
         all_sync_sources_completed,
@@ -1036,6 +1065,11 @@ fn log_mapi_session_disconnect(
         nspi_address_book_probe_only,
         outlook_profile_stage = %outlook_profile_stage,
         next_expected_client_step = %next_expected_client_step,
+        outlook_view_failure_trace_event_count =
+            session.post_hierarchy_actions.outlook_view_failure_trace_events.len(),
+        outlook_view_failure_trace_summary = %outlook_view_failure_trace_summary,
+        outlook_stream_batch_status = outlook_stream_batch_status,
+        outlook_stream_batch_summaries = %outlook_stream_batch_summaries,
         "rca debug mapi disconnect wire contract"
     );
     tracing::info!(

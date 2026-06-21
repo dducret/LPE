@@ -11518,6 +11518,25 @@ where
     let mut same_execute_released_handles = HashSet::new();
     let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
+    if request_rop_names == "SetProperties,OpenStream,SetStreamSize,WriteStream,CommitStream" {
+        let summary = format!(
+            "request_id={request_id};request_rops={request_rop_names};handles={request_handle_table_summary}"
+        );
+        session.record_outlook_stream_batch_observed(summary.clone());
+        session.record_outlook_view_failure_trace_event(format!("stream_batch_observed:{summary}"));
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_names = %request_rop_names,
+            input_handle_table_summary = %request_handle_table_summary,
+            stream_batch_observed = true,
+            "rca debug outlook stream batch observed"
+        );
+    }
     while cursor.remaining() > 0 {
         if cursor.remaining_is_zero_padding() {
             break;
@@ -11705,6 +11724,9 @@ where
                     session.record_last_inbox_related_release_context(context);
                 }
                 if let Some(context) = visible_inbox_release_without_query_rows {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "visible_inbox_release_without_query_rows:{context}"
+                    ));
                     tracing::warn!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -12396,6 +12418,11 @@ where
                     log_outlook_view_handoff(
                         principal, &request, folder_id, message_id, handle, &message, snapshot,
                     );
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "view_handoff:request_id={request_id};folder=0x{folder_id:016x};view=0x{message_id:016x};handle={handle};class={};name={}",
+                        "IPM.Microsoft.FolderDesign.NamedView",
+                        message.name
+                    ));
                     responses.extend_from_slice(&rop_open_message_response(
                         &request,
                         &message.name,
@@ -12519,6 +12546,12 @@ where
                         && message.message_class.starts_with("IPM.Configuration.")
                     {
                         session.record_inbox_associated_config_open();
+                        session.record_outlook_view_failure_trace_event(format!(
+                            "open_inbox_config:request_id={request_id};folder=0x{folder_id:016x};config=0x{:016x};handle={handle};class={};subject={}",
+                            message.id,
+                            message.message_class,
+                            message.subject
+                        ));
                         session.record_recent_probe_action(format!(
                             "OpenAssociatedConfig(out={},folder=0x{folder_id:016x},id=0x{:016x},class={})",
                             request.output_handle_index.unwrap_or(0),
@@ -12787,6 +12820,9 @@ where
                     snapshot,
                 );
                 if folder_id == INBOX_FOLDER_ID {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "inbox_contents_table_open:request_id={request_id};handle={handle};associated={associated};row_count={row_count};flags=0x{table_flags:02x}"
+                    ));
                     if associated {
                         session.record_inbox_associated_contents_table();
                     } else {
@@ -13044,6 +13080,25 @@ where
                 };
                 let named_property_context =
                     format_debug_named_property_context(session, &request.property_tags());
+                let inbox_config_getprops_trace = if let Some(MapiObject::AssociatedConfig {
+                    folder_id: INBOX_FOLDER_ID,
+                    config_id,
+                    saved_message,
+                }) = object
+                {
+                    let (message_class, subject) = saved_message
+                        .as_ref()
+                        .map(|message| (message.message_class.as_str(), message.subject.as_str()))
+                        .unwrap_or(("missing_saved_message", ""));
+                    Some(format!(
+                        "getprops_inbox_config:request_id={request_id};handle={};config=0x{config_id:016x};class={message_class};subject={subject};tags={};named_properties={}",
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        format_debug_property_tags(&request.property_tags()),
+                        named_property_context
+                    ))
+                } else {
+                    None
+                };
                 if !named_property_context.is_empty() {
                     tracing::info!(
                         rca_debug = true,
@@ -13129,6 +13184,9 @@ where
                             "rca debug mapi repeated inbox open folder loop summary"
                         );
                     }
+                }
+                if let Some(trace) = inbox_config_getprops_trace {
+                    session.record_outlook_view_failure_trace_event(trace);
                 }
             }
             Some(RopId::GetPropertiesAll) => {
@@ -15027,6 +15085,9 @@ where
                 }
                 if let Some((handle, context)) = inbox_normal_setcolumns_context {
                     session.record_inbox_normal_contents_table_setcolumns(handle, context.clone());
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "visible_inbox_setcolumns:{context}"
+                    ));
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -15041,83 +15102,44 @@ where
                     );
                 }
             }
-            Some(RopId::SortTable) => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::HierarchyTable {
-                    sort_orders,
-                    category_count,
-                    expanded_count,
-                    collapsed_categories,
-                    position,
-                    bookmarks,
-                    ..
-                })
-                | Some(MapiObject::ContentsTable {
-                    sort_orders,
-                    category_count,
-                    expanded_count,
-                    collapsed_categories,
-                    position,
-                    bookmarks,
-                    ..
-                }) => {
-                    *sort_orders = request.sort_orders();
-                    *category_count = request.sort_category_count();
-                    *expanded_count = request.sort_expanded_count();
-                    collapsed_categories.clear();
-                    *position = 0;
-                    bookmarks.clear();
-                    let selected_named_property_context =
-                        format_contents_table_named_property_context(
-                            session,
-                            input_object(session, &handle_slots, &request),
-                        );
-                    log_outlook_contents_table_sort(
-                        principal,
-                        &request,
-                        input_object(session, &handle_slots, &request),
-                        &selected_named_property_context,
-                        snapshot,
-                    );
-                    responses.extend_from_slice(&rop_sort_table_response(&request));
-                }
-                Some(MapiObject::AttachmentTable {
-                    sort_orders,
-                    position,
-                    bookmarks,
-                    ..
-                }) => {
-                    *sort_orders = request.sort_orders();
-                    *position = 0;
-                    bookmarks.clear();
-                    responses.extend_from_slice(&rop_sort_table_response(&request));
-                }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x13,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
-            Some(RopId::Restrict) => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::HierarchyTable {
-                    restriction,
-                    position,
-                    bookmarks,
-                    ..
-                })
-                | Some(MapiObject::ContentsTable {
-                    restriction,
-                    position,
-                    bookmarks,
-                    ..
-                })
-                | Some(MapiObject::AttachmentTable {
-                    restriction,
-                    position,
-                    bookmarks,
-                    ..
-                }) => match request.restriction() {
-                    Ok(parsed) => {
-                        *restriction = parsed;
+            Some(RopId::SortTable) => {
+                let sort_trace = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID => Some(format!(
+                        "inbox_sort_table:request_id={request_id};handle={};associated={associated};columns={};sort={}",
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(&request.sort_orders())
+                    )),
+                    _ => None,
+                };
+                match input_object_mut(session, &handle_slots, &request) {
+                    Some(MapiObject::HierarchyTable {
+                        sort_orders,
+                        category_count,
+                        expanded_count,
+                        collapsed_categories,
+                        position,
+                        bookmarks,
+                        ..
+                    })
+                    | Some(MapiObject::ContentsTable {
+                        sort_orders,
+                        category_count,
+                        expanded_count,
+                        collapsed_categories,
+                        position,
+                        bookmarks,
+                        ..
+                    }) => {
+                        *sort_orders = request.sort_orders();
+                        *category_count = request.sort_category_count();
+                        *expanded_count = request.sort_expanded_count();
+                        collapsed_categories.clear();
                         *position = 0;
                         bookmarks.clear();
                         let selected_named_property_context =
@@ -15125,35 +15147,119 @@ where
                                 session,
                                 input_object(session, &handle_slots, &request),
                             );
-                        log_outlook_contents_table_restrict(
+                        log_outlook_contents_table_sort(
                             principal,
                             &request,
                             input_object(session, &handle_slots, &request),
                             &selected_named_property_context,
                             snapshot,
                         );
+                        responses.extend_from_slice(&rop_sort_table_response(&request));
+                    }
+                    Some(MapiObject::AttachmentTable {
+                        sort_orders,
+                        position,
+                        bookmarks,
+                        ..
+                    }) => {
+                        *sort_orders = request.sort_orders();
+                        *position = 0;
+                        bookmarks.clear();
+                        responses.extend_from_slice(&rop_sort_table_response(&request));
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x13,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
+                }
+                if let Some(trace) = sort_trace {
+                    session.record_outlook_view_failure_trace_event(trace);
+                }
+            }
+            Some(RopId::Restrict) => {
+                let restrict_trace = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID => Some(format!(
+                        "inbox_restrict:request_id={request_id};handle={};associated={associated};columns={};restriction_tags={}",
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        format_debug_property_tags(columns),
+                        request
+                            .restriction()
+                            .ok()
+                            .and_then(|restriction| restriction)
+                            .map(|restriction| {
+                                format_debug_restriction_property_tags(Some(&restriction))
+                            })
+                            .unwrap_or_default()
+                    )),
+                    _ => None,
+                };
+                match input_object_mut(session, &handle_slots, &request) {
+                    Some(MapiObject::HierarchyTable {
+                        restriction,
+                        position,
+                        bookmarks,
+                        ..
+                    })
+                    | Some(MapiObject::ContentsTable {
+                        restriction,
+                        position,
+                        bookmarks,
+                        ..
+                    })
+                    | Some(MapiObject::AttachmentTable {
+                        restriction,
+                        position,
+                        bookmarks,
+                        ..
+                    }) => match request.restriction() {
+                        Ok(parsed) => {
+                            *restriction = parsed;
+                            *position = 0;
+                            bookmarks.clear();
+                            let selected_named_property_context =
+                                format_contents_table_named_property_context(
+                                    session,
+                                    input_object(session, &handle_slots, &request),
+                                );
+                            log_outlook_contents_table_restrict(
+                                principal,
+                                &request,
+                                input_object(session, &handle_slots, &request),
+                                &selected_named_property_context,
+                                snapshot,
+                            );
+                            responses.extend_from_slice(&rop_restrict_response(&request));
+                        }
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x14,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            break;
+                        }
+                    },
+                    Some(MapiObject::PermissionTable { position, .. })
+                    | Some(MapiObject::RuleTable { position, .. }) => {
+                        *position = 0;
                         responses.extend_from_slice(&rop_restrict_response(&request));
                     }
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x14,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        break;
-                    }
-                },
-                Some(MapiObject::PermissionTable { position, .. })
-                | Some(MapiObject::RuleTable { position, .. }) => {
-                    *position = 0;
-                    responses.extend_from_slice(&rop_restrict_response(&request));
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x14,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
                 }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x14,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
+                if let Some(trace) = restrict_trace {
+                    session.record_outlook_view_failure_trace_event(trace);
+                }
+            }
             Some(RopId::QueryRows) => {
                 let input_handle_value = input_handle(&handle_slots, &request);
                 let query_object = input_object(session, &handle_slots, &request);
@@ -15302,6 +15408,9 @@ where
                 }
                 if let Some((handle, context)) = inbox_normal_query_rows_context {
                     session.record_inbox_normal_contents_table_query_rows(handle, context.clone());
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "visible_inbox_query_rows:{context}"
+                    ));
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -16584,6 +16693,22 @@ where
                 responses.extend_from_slice(&rop_message_status_response(&request, old_status));
             }
             Some(RopId::FindRow) => {
+                let find_trace = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID => Some(format!(
+                        "inbox_find_row:request_id={request_id};handle={};associated={associated};position={position};columns={};restriction={}",
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        format_debug_property_tags(columns),
+                        format_debug_restriction_option(restriction.as_ref())
+                    )),
+                    _ => None,
+                };
                 let selected_named_property_context = format_contents_table_named_property_context(
                     session,
                     input_object(session, &handle_slots, &request),
@@ -16614,6 +16739,9 @@ where
                     &response,
                 ) {
                     session.record_last_inbox_associated_find_context(context);
+                }
+                if let Some(trace) = find_trace {
+                    session.record_outlook_view_failure_trace_event(trace);
                 }
                 responses.extend_from_slice(&response);
             }
@@ -17162,6 +17290,11 @@ where
                         == OUTLOOK_RULE_ORGANIZER_BINARY_6802;
                 if is_inbox_associated_config_stream {
                     session.record_inbox_associated_config_stream_open();
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "open_inbox_config_stream:request_id={request_id};input_handle={input_handle};tag=0x{:08x};mode=0x{:02x};class={associated_config_class};subject={associated_config_subject}",
+                        request.stream_property_tag().unwrap_or(0),
+                        request.stream_open_mode().unwrap_or(0)
+                    ));
                     session.record_recent_probe_action(format!(
                         "OpenAssociatedConfigStream(in={},tag=0x{:08x},mode=0x{:02x})",
                         input_handle,
@@ -17222,6 +17355,10 @@ where
                 );
                 if is_inbox_associated_config_stream {
                     session.record_inbox_associated_config_stream_handle(handle);
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "open_inbox_config_stream_result:request_id={request_id};input_handle={input_handle};output_handle={handle};size={stream_size};writable={}",
+                        writable_target.is_some()
+                    ));
                 }
                 if is_inbox_rule_organizer_stream {
                     session.record_inbox_rule_organizer_stream_handle(handle);
@@ -17276,6 +17413,10 @@ where
                 if let Some(stream_handle) = resolved_stream_handle {
                     if session.is_inbox_associated_config_stream_handle(stream_handle) {
                         session.record_inbox_associated_config_stream_read();
+                        session.record_outlook_view_failure_trace_event(format!(
+                            "read_inbox_config_stream:request_id={request_id};handle={stream_handle};requested_bytes={}",
+                            request.read_byte_count().unwrap_or(0)
+                        ));
                         session.record_recent_probe_action(format!(
                             "ReadAssociatedConfigStream(in={},max={})",
                             stream_handle,
@@ -17433,6 +17574,17 @@ where
                     continue;
                 };
                 let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+                if stream_handle
+                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
+                {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "set_inbox_config_stream_size:request_id={request_id};requested_handle={requested_handle};resolved_handle={};size={}",
+                        stream_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                        request.stream_size().unwrap_or(u64::MAX)
+                    ));
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -17476,6 +17628,17 @@ where
                     continue;
                 };
                 let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+                if stream_handle
+                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
+                {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "write_inbox_config_stream:request_id={request_id};requested_handle={requested_handle};resolved_handle={};bytes={}",
+                        stream_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "none".to_string()),
+                        request.stream_write_data().len()
+                    ));
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -17611,6 +17774,19 @@ where
                 let requested_handle = input_handle(&handle_slots, &request);
                 let stream_handle = requested_handle
                     .and_then(|handle| resolve_writable_stream_handle(session, handle));
+                if stream_handle
+                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
+                {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "commit_inbox_config_stream:request_id={request_id};requested_handle={};resolved_handle={}",
+                        requested_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "missing".to_string()),
+                        stream_handle
+                            .map(|handle| handle.to_string())
+                            .unwrap_or_else(|| "none".to_string())
+                    ));
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
