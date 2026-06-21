@@ -12512,7 +12512,7 @@ where
                         MapiObject::AssociatedConfig {
                             folder_id,
                             config_id: message.id,
-                            saved_message: None,
+                            saved_message: Some(message.clone()),
                         },
                     );
                     if folder_id == INBOX_FOLDER_ID
@@ -17627,14 +17627,42 @@ where
                         .unwrap_or_else(|| "none".to_string()),
                     message = "rca debug mapi commit stream"
                 );
-                match stream_handle
+                let commit_object = stream_handle
                     .and_then(|handle| session.handles.get(&handle))
                     .or_else(|| input_object(session, &handle_slots, &request))
-                {
-                    Some(MapiObject::AttachmentStream { .. }) => {
-                        responses.extend_from_slice(&rop_simple_success_response(&request))
+                    .cloned();
+                let commit_result = match commit_object {
+                    Some(MapiObject::AttachmentStream {
+                        writable_target:
+                            Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
+                        ..
+                    }) => {
+                        let message = match session.handles.get(&handle) {
+                            Some(MapiObject::AssociatedConfig {
+                                folder_id,
+                                saved_message: Some(message),
+                                ..
+                            }) => Some((*folder_id, message.clone())),
+                            _ => None,
+                        };
+                        match message {
+                            Some((folder_id, message)) => {
+                                persist_associated_config_stream_message(
+                                    store, principal, folder_id, &message,
+                                )
+                                .await
+                            }
+                            None => Err(anyhow!(
+                                "MAPI associated config stream commit target was not found"
+                            )),
+                        }
                     }
-                    _ => responses.extend_from_slice(&rop_error_response(
+                    Some(MapiObject::AttachmentStream { .. }) => Ok(()),
+                    _ => Err(anyhow!("MAPI stream commit target was not found")),
+                };
+                match commit_result {
+                    Ok(()) => responses.extend_from_slice(&rop_simple_success_response(&request)),
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
                         0x5D,
                         request.response_handle_index(),
                         0x8004_010F,
@@ -23241,6 +23269,28 @@ where
     )
     .await?;
     Ok((saved, message_id))
+}
+
+async fn persist_associated_config_stream_message<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(message.canonical_id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class: message.message_class.clone(),
+            subject: message.subject.clone(),
+            properties_json: message.properties_json.clone(),
+        })
+        .await?;
+    Ok(())
 }
 
 fn message_list_settings_placeholder_persisted_properties(
