@@ -1689,41 +1689,83 @@ where
         }
     }
     store_session(session_id.clone(), session);
-    info!(
-        rca_debug = true,
-        adapter = "mapi",
-        operation = "NotificationWait",
-        account_id = %principal.account_id,
-        mailbox = %principal.email,
-        mapi_request_id = %request_id,
-        request_guid = %request_guid,
-        request_counter = %request_counter,
-        client_info = %client_info,
-        client_flow_key = %client_flow_key,
-        client_info_guid = %client_info_guid,
-        client_info_counter = %client_info_counter,
-        session_id_prefix = %session_id_prefix(&session_id),
-        initial_queued_event_count,
-        initial_cursor = ?initial_cursor,
-        first_poll_event_pending,
-        first_poll_event_count,
-        first_poll_cursor = ?first_poll_cursor,
-        second_poll_event_pending,
-        second_poll_event_count,
-        second_poll_cursor = ?second_poll_cursor,
-        event_pending,
-        event_count = events.len(),
-        waited_for_empty_events,
-        configured_empty_wait_millis = if waited_for_empty_events {
-            MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
-        } else {
-            0
-        },
-        empty_wait_elapsed_millis,
-        active_during_empty_wait,
-        reacquire_after_wait_failed,
-        "rca debug notification wait result"
-    );
+    if event_pending
+        || !events.is_empty()
+        || active_during_empty_wait
+        || reacquire_after_wait_failed
+    {
+        info!(
+            rca_debug = true,
+            adapter = "mapi",
+            operation = "NotificationWait",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            mapi_request_id = %request_id,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
+            session_id_prefix = %session_id_prefix(&session_id),
+            initial_queued_event_count,
+            initial_cursor = ?initial_cursor,
+            first_poll_event_pending,
+            first_poll_event_count,
+            first_poll_cursor = ?first_poll_cursor,
+            second_poll_event_pending,
+            second_poll_event_count,
+            second_poll_cursor = ?second_poll_cursor,
+            event_pending,
+            event_count = events.len(),
+            waited_for_empty_events,
+            configured_empty_wait_millis = if waited_for_empty_events {
+                MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+            } else {
+                0
+            },
+            empty_wait_elapsed_millis,
+            active_during_empty_wait,
+            reacquire_after_wait_failed,
+            "rca debug notification wait result"
+        );
+    } else {
+        tracing::debug!(
+            rca_debug = true,
+            adapter = "mapi",
+            operation = "NotificationWait",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            mapi_request_id = %request_id,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
+            session_id_prefix = %session_id_prefix(&session_id),
+            initial_queued_event_count,
+            initial_cursor = ?initial_cursor,
+            first_poll_event_pending,
+            first_poll_event_count,
+            first_poll_cursor = ?first_poll_cursor,
+            second_poll_event_pending,
+            second_poll_event_count,
+            second_poll_cursor = ?second_poll_cursor,
+            event_pending,
+            event_count = events.len(),
+            waited_for_empty_events,
+            configured_empty_wait_millis = if waited_for_empty_events {
+                MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+            } else {
+                0
+            },
+            empty_wait_elapsed_millis,
+            active_during_empty_wait,
+            reacquire_after_wait_failed,
+            "rca debug notification wait result"
+        );
+    }
     let body = notification_wait_body_with_events(event_pending, &events);
     mapi_response_with_cookies(
         "NotificationWait",

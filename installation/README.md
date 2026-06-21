@@ -85,7 +85,7 @@ They also install `/opt/lpe-ct/bin/lpe-ct-host-action` with a narrow sudoers pol
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
 
-The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_CT_CORE_DELIVERY_BASE_URL` points from `LPE-CT` to the core `LPE` HTTP listener, default port `8080`, and is used for `/internal/lpe-ct/inbound-deliveries`, `/internal/lpe-ct/recipient-verification`, `/internal/lpe-ct/submission-auth`, and `/internal/lpe-ct/submissions`. `LPE_CT_API_BASE_URL` points from the `LPE` outbound worker to the `LPE-CT` management/API listener, default port `8380`, and is used for `/api/v1/integration/outbound-messages`. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On both `LPE` and `LPE-CT`, a missing or weak value leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
+The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_CORE_WEB_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_CT_CORE_DELIVERY_BASE_URL` points from `LPE-CT` to the core `LPE` HTTP listener, default port `8080`, and is used for `/internal/lpe-ct/inbound-deliveries`, `/internal/lpe-ct/recipient-verification`, `/internal/lpe-ct/submission-auth`, and `/internal/lpe-ct/submissions`. `LPE_CT_CORE_WEB_BASE_URL` points from `LPE-CT` to the private core `nginx` web listener that serves `/mail/`, `/`, and `/assets/`; do not point it at the Rust service listener. `LPE_CT_API_BASE_URL` points from the `LPE` outbound worker to the `LPE-CT` management/API listener, default port `8380`, and is used for `/api/v1/integration/outbound-messages`. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On both `LPE` and `LPE-CT`, a missing or weak value leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 Accepted inbound domains for the public `LPE-CT` SMTP listener are not environment variables. After the `LPE-CT` service is running, add and verify each domain in the management console under `System Setup -> Mail relay -> Domains`; the active domain list is stored in the private `LPE-CT` PostgreSQL dashboard state.
 
@@ -534,6 +534,7 @@ Typical unattended `LPE-CT` environment variables:
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH`
 - `LPE_CT_SUBMISSION_TLS_KEY_PATH`
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
+- `LPE_CT_CORE_WEB_BASE_URL`
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `SPOOL_DIR`
 - `LPE_CT_LOCAL_DB_HOST`
@@ -587,6 +588,7 @@ LPE_CT_SUBMISSION_BIND_ADDRESS=0.0.0.0:465 \
 LPE_CT_SUBMISSION_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
 LPE_CT_SUBMISSION_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
 LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080 \
+LPE_CT_CORE_WEB_BASE_URL=http://10.20.0.40 \
 LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
 LPE_CT_LOCAL_DB_HOST=127.0.0.1 \
 LPE_CT_LOCAL_DB_PORT=5432 \
@@ -642,8 +644,9 @@ certificate files may be reused for `465` submission through
 hostname used by clients.
 
 `LPE-CT` must publish the mailbox web UI, core administration UI, mailbox login,
-and `JMAP` HTTPS/WSS paths and proxy them to the core `LPE` service: `/mail/`,
-`/admin/`, `/api/mail/auth/login`,
+and `JMAP` HTTPS/WSS paths. `/mail/`, `/admin/`, and `/assets/` proxy to
+`LPE_CT_CORE_WEB_BASE_URL`; mailbox and protocol APIs proxy to the core service:
+`/mail/`, `/api/mail/auth/login`,
 `/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
