@@ -1654,17 +1654,31 @@ fn common_view_descriptor_property_requested(columns: &[u32]) -> bool {
 
 fn format_requested_view_descriptor_contract(columns: &[u32]) -> String {
     let mut parts = Vec::new();
-    for (name, tag) in [
-        ("version", PID_TAG_VIEW_DESCRIPTOR_VERSION),
-        ("name", PID_TAG_VIEW_DESCRIPTOR_NAME_W),
-        ("binary", PID_TAG_VIEW_DESCRIPTOR_BINARY),
-        ("strings", PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+    for (name, tags) in [
+        (
+            "version",
+            &[
+                PID_TAG_VIEW_DESCRIPTOR_VERSION,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+            ][..],
+        ),
+        ("name", &[PID_TAG_VIEW_DESCRIPTOR_NAME_W][..]),
+        (
+            "binary",
+            &[
+                PID_TAG_VIEW_DESCRIPTOR_BINARY,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_683C,
+            ][..],
+        ),
+        ("strings", &[PID_TAG_VIEW_DESCRIPTOR_STRINGS_W][..]),
     ] {
         parts.push(format!(
             "{name}={}",
-            columns
-                .iter()
-                .any(|column| canonical_property_storage_tag(*column) == tag)
+            columns.iter().any(|column| {
+                let storage_tag = canonical_property_storage_tag(*column);
+                tags.iter().any(|tag| storage_tag == *tag)
+            })
         ));
     }
     parts.join(";")
