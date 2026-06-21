@@ -6192,6 +6192,7 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_SENDER_EMAIL_ADDRESS_W
             | PID_TAG_SENDER_SMTP_ADDRESS_W
             | PID_TAG_SENT_REPRESENTING_NAME_W
+            | PID_TAG_SENT_REPRESENTING_ENTRY_ID
             | PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W
             | PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
             | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W
@@ -9963,6 +9964,9 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
         PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
             email_sent_representing_name(email).to_string(),
         )),
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID => {
+            Some(MapiValue::Binary(sent_representing_entry_id(email)))
+        }
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
             Some(MapiValue::String(
@@ -25853,6 +25857,36 @@ mod tests {
                 "{view_name} view has unsupported message-table columns: {summary}"
             );
         }
+    }
+
+    #[test]
+    fn normal_message_column_support_covers_observed_inbox_compact_projection() {
+        let summary = normal_message_table_column_support_summary(&[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_CREATION_TIME,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_INTERNET_MESSAGE_ID_W,
+            PID_TAG_IMPORTANCE,
+            PID_TAG_HAS_ATTACHMENTS,
+            PID_TAG_MESSAGE_STATUS,
+            0x8514_000B,
+            0x8017_000B,
+            0x801F_001F,
+            PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+            0x1213_0003,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ]);
+
+        assert!(summary.contains("0x00410102"));
+        assert!(!summary.contains("defaulted=0x00410102"));
+        assert!(summary.contains("defaulted=0x12130003"));
+        assert!(summary.contains("named_or_dynamic=0x8514000b,0x8017000b,0x801f001f"));
     }
 
     #[test]

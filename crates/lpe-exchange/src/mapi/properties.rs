@@ -335,6 +335,7 @@ pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
 pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_NAME_W: u32 = 0x0042_001F;
+pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_ENTRY_ID: u32 = 0x0041_0102;
 pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
 pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W: u32 = 0x0065_001F;
 pub(in crate::mapi) const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
@@ -1146,6 +1147,18 @@ fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
     value.extend_from_slice(legacy_dn.as_bytes());
     value.push(0);
     value
+}
+
+pub(in crate::mapi) fn sent_representing_entry_id(email: &JmapEmail) -> Vec<u8> {
+    let entry = ExchangeAddressBookEntry {
+        id: email.submitted_by_account_id,
+        display_name: email_sent_representing_name(email).to_string(),
+        email: email_sent_representing_address(email).to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+    };
+    super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
 
 pub(in crate::mapi) fn rop_read_recipients_response(
@@ -2030,6 +2043,9 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SENT_REPRESENTING_NAME_W => Some(MapiValue::String(
             email_sent_representing_name(email).to_string(),
         )),
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID => {
+            Some(MapiValue::Binary(sent_representing_entry_id(email)))
+        }
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {
             Some(MapiValue::String(

@@ -11306,6 +11306,9 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_SENT_REPRESENTING_NAME_W => {
                 write_utf16z(&mut row, email_sent_representing_name(email))
             }
+            PID_TAG_SENT_REPRESENTING_ENTRY_ID => {
+                write_u16_prefixed_bytes(&mut row, &sent_representing_entry_id(email))
+            }
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
             | PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => {

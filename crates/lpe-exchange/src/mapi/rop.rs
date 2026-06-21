@@ -2924,6 +2924,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
         PID_TAG_IMPORTANCE => "PidTagImportance",
         PID_TAG_SENT_REPRESENTING_NAME_W => "PidTagSentRepresentingName",
+        PID_TAG_SENT_REPRESENTING_ENTRY_ID => "PidTagSentRepresentingEntryId",
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W => "PidTagSentRepresentingAddressType",
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W => "PidTagSentRepresentingEmailAddress",
         PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W => "PidTagSentRepresentingSmtpAddress",

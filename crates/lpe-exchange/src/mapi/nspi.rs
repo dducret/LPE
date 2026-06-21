@@ -2006,7 +2006,7 @@ fn nspi_entry_record_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
     nspi_entry_permanent_entry_id(entry)
 }
 
-fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+pub(in crate::mapi) fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
     let legacy_dn = nspi_entry_unprefixed_legacy_dn(entry);
     let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);
     value.extend_from_slice(&[0, 0, 0, 0]);
