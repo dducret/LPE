@@ -305,6 +305,14 @@ fn private_logon_request_handle(
             && input_handle(handle_slots, request).is_some())
 }
 
+fn logon_request_handle(session: &MapiSession, handle_slots: &[u32], request: &RopRequest) -> bool {
+    private_logon_request_handle(session, handle_slots, request)
+        || matches!(
+            input_object(session, handle_slots, request),
+            Some(MapiObject::PublicFolderLogon)
+        )
+}
+
 #[derive(Debug)]
 struct BoundedSearchCriteria {
     scope_json: Value,
@@ -585,6 +593,7 @@ fn bounded_search_criteria_from_rop(
 
 fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<Vec<Value>, u32> {
     match restriction {
+        MapiRestriction::InvalidTableRestriction => Err(EC_SEARCH_UNSUPPORTED),
         MapiRestriction::And(children) => {
             let mut clauses = Vec::new();
             for child in children {
@@ -599,6 +608,7 @@ fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<V
             ..
         } => bounded_search_content_clause(*property_tag, value, *fuzzy_level_low)
             .map(|clause| vec![clause]),
+        MapiRestriction::Not(child) => bounded_search_not_clause(child).map(|clause| vec![clause]),
         MapiRestriction::Property {
             relop,
             property_tag,
@@ -648,6 +658,28 @@ fn bounded_search_content_clause(
     }))
 }
 
+fn bounded_search_not_clause(restriction: &MapiRestriction) -> Result<Value, u32> {
+    match restriction {
+        MapiRestriction::Content {
+            property_tag,
+            value,
+            fuzzy_level_low,
+            ..
+        } if canonical_property_storage_tag(*property_tag) == PID_TAG_MESSAGE_CLASS_W => {
+            let operator = match fuzzy_level_low {
+                0x0000 => "notEquals",
+                0x0002 => "notPrefix",
+                _ => return Err(EC_SEARCH_UNSUPPORTED),
+            };
+            Ok(json!({
+                "field": "messageClass",
+                operator: value
+            }))
+        }
+        _ => Err(EC_SEARCH_UNSUPPORTED),
+    }
+}
+
 fn bounded_search_property_clause(
     relop: u8,
     property_tag: u32,
@@ -665,6 +697,10 @@ fn bounded_search_property_clause(
         PID_TAG_HAS_ATTACHMENTS if relop == 0x04 => Ok(json!({
             "field": "hasAttachment",
             "equals": value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
+        PID_TAG_IMPORTANCE if relop == 0x04 => Ok(json!({
+            "field": "importance",
+            "equals": value.as_i64().ok_or(EC_SEARCH_UNSUPPORTED)?
         })),
         PID_NAME_KEYWORDS_TAG if relop == 0x04 => Ok(json!({
             "field": "category",
@@ -850,6 +886,18 @@ fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
     if let Some(value) = clause.get("equals") {
         return rop_property_restriction(field, 0x04, value);
     }
+    for (key, fuzzy_level_low) in [("notEquals", 0x0000), ("notPrefix", 0x0002)] {
+        if let Some(value) = clause.get(key).and_then(Value::as_str) {
+            if field != "messageClass" {
+                return Err(EC_SEARCH_UNSUPPORTED);
+            }
+            return Ok(rop_not_content_restriction(
+                PID_TAG_MESSAGE_CLASS_W,
+                fuzzy_level_low,
+                value,
+            ));
+        }
+    }
     for (key, relop) in [("beforeOrAt", 0x01), ("afterOrAt", 0x03)] {
         if let Some(value) = clause.get(key) {
             return rop_property_restriction(field, relop, value);
@@ -861,6 +909,20 @@ fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
 fn rop_content_restriction(property_tag: u32, value: &str) -> Vec<u8> {
     let mut bytes = vec![0x03];
     bytes.extend_from_slice(&0x0001u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0001u16.to_le_bytes());
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    write_mapi_value(
+        &mut bytes,
+        property_tag,
+        &MapiValue::String(value.to_string()),
+    );
+    bytes
+}
+
+fn rop_not_content_restriction(property_tag: u32, fuzzy_level_low: u16, value: &str) -> Vec<u8> {
+    let mut bytes = vec![0x02, 0x03];
+    bytes.extend_from_slice(&fuzzy_level_low.to_le_bytes());
     bytes.extend_from_slice(&0x0001u16.to_le_bytes());
     bytes.extend_from_slice(&property_tag.to_le_bytes());
     bytes.extend_from_slice(&property_tag.to_le_bytes());
@@ -890,6 +952,12 @@ fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec
             let value = value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?;
             MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))
         }
+        "importance" => MapiValue::U32(
+            value
+                .as_u64()
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or(EC_SEARCH_UNSUPPORTED)?,
+        ),
         _ => MapiValue::String(value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?.to_string()),
     };
     let mut bytes = vec![0x04, relop];
@@ -909,6 +977,8 @@ fn property_tag_for_search_field(field: &str) -> Result<u32, u32> {
         "flagged" => Ok(PID_TAG_FLAG_STATUS),
         "hasAttachment" => Ok(PID_TAG_HAS_ATTACHMENTS),
         "receivedAt" => Ok(PID_TAG_MESSAGE_DELIVERY_TIME),
+        "importance" => Ok(PID_TAG_IMPORTANCE),
+        "messageClass" => Ok(PID_TAG_MESSAGE_CLASS_W),
         _ => Err(EC_SEARCH_UNSUPPORTED),
     }
 }
@@ -4128,9 +4198,15 @@ fn set_property_debug_name(tag: u32) -> &'static str {
         tag if property_ids_match(tag, PID_TAG_WLINK_GROUP_CLSID) => "PidTagWlinkGroupClsid",
         tag if property_ids_match(tag, PID_TAG_WLINK_GROUP_NAME_W) => "PidTagWlinkGroupName",
         tag if property_ids_match(tag, PID_TAG_WLINK_SECTION) => "PidTagWlinkSection",
+        tag if property_ids_match(tag, PID_TAG_WLINK_CALENDAR_COLOR) => "PidTagWlinkCalendarColor",
+        tag if property_ids_match(tag, PID_TAG_WLINK_ADDRESS_BOOK_EID) => {
+            "PidTagWlinkAddressBookEid"
+        }
+        tag if property_ids_match(tag, PID_TAG_WLINK_CLIENT_ID) => "PidTagWlinkClientId",
         tag if property_ids_match(tag, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID) => {
             "PidTagWlinkAddressBookStoreEid"
         }
+        tag if property_ids_match(tag, PID_TAG_WLINK_RO_GROUP_TYPE) => "PidTagWlinkRoGroupType",
         0x7C09_0102 => "PidTagRoamingBinary",
         0x685D_0003 => "OutlookConfigurationStamp",
         _ => "unknown",
@@ -6579,10 +6655,10 @@ fn associated_contents_table_column_is_backed(storage_tag: u32) -> bool {
                 | PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID
                 | 0x685D_0003
                 | 0x7C09_0102
-                | 0x6853_0003
-                | 0x6854_0102
-                | 0x6890_0102
-                | 0x6892_0003
+                | PID_TAG_WLINK_CALENDAR_COLOR
+                | PID_TAG_WLINK_ADDRESS_BOOK_EID
+                | PID_TAG_WLINK_CLIENT_ID
+                | PID_TAG_WLINK_RO_GROUP_TYPE
                 | 0x6893_0102
         )
         || property_ids_match(storage_tag, PID_TAG_VIEW_DESCRIPTOR_CLSID)
@@ -9996,6 +10072,7 @@ fn restriction_property_tags_from_request(request: &RopRequest) -> Vec<u32> {
 
 fn collect_restriction_property_tags(restriction: &MapiRestriction, tags: &mut Vec<u32>) {
     match restriction {
+        MapiRestriction::InvalidTableRestriction => {}
         MapiRestriction::And(children) | MapiRestriction::Or(children) => {
             for child in children {
                 collect_restriction_property_tags(child, tags);
@@ -10041,6 +10118,7 @@ fn format_debug_restriction_property_tags(restriction: Option<&MapiRestriction>)
 
 fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
     match restriction {
+        MapiRestriction::InvalidTableRestriction => "invalid".to_string(),
         MapiRestriction::And(children) => format!(
             "and({})",
             children
@@ -10229,6 +10307,25 @@ fn format_outlook_query_row_values(
                             .collect::<Vec<_>>()
                             .join(",");
                         format!("index={};id=0x{:016x};{}", index, view.id, values)
+                    }
+                    crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
+                        definition,
+                    ) => {
+                        let values = columns
+                            .iter()
+                            .map(|tag| {
+                                let value = search_folder_definition_message_property_value(
+                                    definition, account_id, *tag,
+                                )
+                                .map(|value| format_debug_mapi_value(&value))
+                                .unwrap_or_else(|| "default".to_string());
+                                format!("0x{tag:08x}={value}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let id = crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+                            .unwrap_or_default();
+                        format!("index={index};id=0x{id:016x};{values}")
                     }
                 }
             })
@@ -10643,6 +10740,7 @@ fn format_common_views_wlink_target_decoding(
                 ))
             }
             crate::mapi_store::MapiCommonViewsMessage::NamedView(_) => None,
+            crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(_) => None,
         })
         .collect::<Vec<_>>()
         .join("|")
@@ -10776,7 +10874,11 @@ fn common_views_link_row_expected_default(property_tag: u32) -> bool {
     let property_id = property_tag & 0xffff_0000;
     matches!(
         property_id,
-        0x6853_0000 | 0x6854_0000 | 0x6890_0000 | 0x6892_0000 | 0x6893_0000
+        tag if property_ids_match(tag, PID_TAG_WLINK_CALENDAR_COLOR)
+            || property_ids_match(tag, PID_TAG_WLINK_ADDRESS_BOOK_EID)
+            || property_ids_match(tag, PID_TAG_WLINK_CLIENT_ID)
+            || property_ids_match(tag, PID_TAG_WLINK_RO_GROUP_TYPE)
+            || property_ids_match(tag, 0x6893_0102)
     )
 }
 
@@ -11037,6 +11139,12 @@ fn format_common_views_query_row_window(
                 "index={};id=0x{:016x};subject={};class=IPM.Microsoft.FolderDesign.NamedView;view_flags={};view_type={}",
                 index, message.id, message.name, message.view_flags, message.view_type
             )),
+            crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => Some(
+                format!(
+                    "index={};id={};subject={};class=IPM.Microsoft.WunderBar.SFInfo;role={}",
+                    index, message.id, message.display_name, message.role
+                ),
+            ),
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -13141,6 +13249,14 @@ where
                     responses.extend_from_slice(&rop_handle_index_error_response(&request));
                     continue;
                 }
+                if !hierarchy_table_flags_are_valid(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x04,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
                     .unwrap_or(ROOT_FOLDER_ID);
@@ -13240,22 +13356,34 @@ where
                     responses.extend_from_slice(&rop_handle_index_error_response(&request));
                     continue;
                 }
-                if request
-                    .payload
-                    .first()
-                    .is_some_and(|flags| flags & 0x20 != 0)
-                {
+                let Some(input_object) = input_object(session, &handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                };
+                let folder_id = match input_object {
+                    MapiObject::Folder { folder_id, .. } => *folder_id,
+                    _ => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x05,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                };
+                let table_flags = request.payload.first().copied().unwrap_or(0);
+                if let Some(error) = contents_table_flags_error(
+                    table_flags,
+                    folder_id,
+                    snapshot.public_folder_for_id(folder_id).is_some(),
+                ) {
                     responses.extend_from_slice(&rop_error_response(
                         0x05,
                         request.output_handle_index.unwrap_or(0),
-                        0x8004_0102,
+                        error,
                     ));
                     continue;
                 }
-                let folder_id = input_object(session, &handle_slots, &request)
-                    .and_then(|object| object.folder_id())
-                    .unwrap_or(INBOX_FOLDER_ID);
-                let table_flags = request.payload.first().copied().unwrap_or(0);
                 let associated = table_flags & 0x02 != 0;
                 if !snapshot
                     .folder_access_for_principal(folder_id, principal.account_id)
@@ -14010,6 +14138,14 @@ where
                     ));
                     continue;
                 };
+                if !save_flags_are_supported(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0C,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let save_changes_object = session.handles.get(&handle).cloned();
                 session.record_recent_probe_action(format!(
                     "SaveChangesMessage(in={},handle={},kind={},folder={})",
@@ -15538,6 +15674,14 @@ where
                 ))
             }
             Some(RopId::ReloadCachedInformation) => {
+                if request.reload_cached_information_reserved() != Some(0) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x10,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_reload_cached_information_response(
                     &request,
                     input_object(session, &handle_slots, &request),
@@ -15696,6 +15840,8 @@ where
                         ..
                     }) => {
                         if !set_columns_request_is_valid(&request) {
+                            columns.clear();
+                            *columns_set = false;
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
@@ -15734,6 +15880,8 @@ where
                         ..
                     }) => {
                         if !set_columns_request_is_valid(&request) {
+                            columns.clear();
+                            *columns_set = false;
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
@@ -15768,6 +15916,8 @@ where
                                 response_error = "0x80070057",
                                 message = "rca debug mapi contents table set columns rejected",
                             );
+                            columns.clear();
+                            *columns_set = false;
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
@@ -15848,6 +15998,8 @@ where
                         ..
                     }) => {
                         if !set_columns_request_is_valid(&request) {
+                            columns.clear();
+                            *columns_set = false;
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
@@ -15910,6 +16062,12 @@ where
                         ..
                     }) => {
                         if !sort_table_request_is_valid(&request) {
+                            *sort_orders = invalid_table_sort_orders();
+                            *category_count = 0;
+                            *expanded_count = 0;
+                            collapsed_categories.clear();
+                            *position = 0;
+                            bookmarks.clear();
                             responses.extend_from_slice(&rop_error_response(
                                 0x13,
                                 request.response_handle_index(),
@@ -15962,6 +16120,25 @@ where
                     continue;
                 }
                 if !table_async_flags_are_valid(&request) {
+                    if let Some(
+                        MapiObject::HierarchyTable {
+                            restriction,
+                            position,
+                            bookmarks,
+                            ..
+                        }
+                        | MapiObject::ContentsTable {
+                            restriction,
+                            position,
+                            bookmarks,
+                            ..
+                        },
+                    ) = input_object_mut(session, &handle_slots, &request)
+                    {
+                        *restriction = Some(MapiRestriction::InvalidTableRestriction);
+                        *position = 0;
+                        bookmarks.clear();
+                    }
                     responses.extend_from_slice(&rop_error_response(
                         0x14,
                         request.response_handle_index(),
@@ -16022,6 +16199,9 @@ where
                             responses.extend_from_slice(&rop_restrict_response(&request));
                         }
                         Err(_) => {
+                            *restriction = Some(MapiRestriction::InvalidTableRestriction);
+                            *position = 0;
+                            bookmarks.clear();
                             responses.extend_from_slice(&rop_error_response(
                                 0x14,
                                 request.response_handle_index(),
@@ -16375,7 +16555,10 @@ where
                     display_name = display_name,
                     message = "rca debug mapi create folder request",
                 );
-                if display_name.is_empty() || request.create_folder_type() == 0 {
+                if display_name.is_empty()
+                    || !matches!(request.create_folder_type(), 1 | 2)
+                    || request.create_folder_reserved() != 0
+                {
                     tracing::warn!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -16388,6 +16571,7 @@ where
                         parent_folder_id = %format!("{parent_folder_id:#018x}"),
                         folder_type = request.create_folder_type(),
                         open_existing = request.create_folder_open_existing(),
+                        reserved = request.create_folder_reserved(),
                         display_name = display_name,
                         response_error = "0x80070057",
                         message = "rca debug mapi create folder invalid request",
@@ -16772,6 +16956,17 @@ where
                 }
             }
             Some(RopId::DeleteFolder) => {
+                if request
+                    .delete_folder_flags()
+                    .is_none_or(|flags| flags & !0x15 != 0)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let Some(_parent_folder_id) =
                     input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
                 else {
@@ -17442,13 +17637,12 @@ where
                 ));
             }
             Some(RopId::GetMessageStatus | RopId::SetMessageStatus) => {
-                let folder_id = match input_object(session, &handle_slots, &request)
-                    .and_then(MapiObject::folder_id)
-                {
-                    Some(folder_id) => folder_id,
-                    None => {
+                let response_rop_id = RopId::SetMessageStatus.as_u8();
+                let folder_id = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
+                    Some(_) | None => {
                         responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
+                            response_rop_id,
                             request.response_handle_index(),
                             0x0000_04B9,
                         ));
@@ -17471,7 +17665,7 @@ where
                     || snapshot.task_for_id(folder_id, message_id).is_some();
                 if !item_exists {
                     responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
+                        response_rop_id,
                         request.response_handle_index(),
                         0x8004_010F,
                     ));
@@ -17607,6 +17801,14 @@ where
                 output_handles.push(handle);
             }
             Some(RopId::OpenAttachment) => {
+                if !open_attachment_flags_are_valid(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x22,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let (folder_id, message_id, is_calendar_event) =
                     match input_object(session, &handle_slots, &request) {
                         Some(MapiObject::Message {
@@ -17903,6 +18105,14 @@ where
                     ));
                     continue;
                 };
+                if !save_flags_are_supported(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let save_attachment_object = session.handles.get(&handle).cloned();
                 session.record_recent_probe_action(format!(
                     "SaveChangesAttachment(in={},handle={},kind={},folder={})",
@@ -22481,6 +22691,19 @@ where
                 ));
             }
             Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders) => {
+                if !matches!(request.empty_folder_want_asynchronous(), Some(0x00 | 0x01))
+                    || !matches!(
+                        request.empty_folder_want_delete_associated(),
+                        Some(0x00 | 0x01)
+                    )
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let Some(folder_id) =
                     input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
                 else {
@@ -22901,6 +23124,14 @@ where
                 responses.extend_from_slice(&rop_write_per_user_information_response(&request));
             }
             Some(RopId::GetOwningServers) => {
+                if !logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x42,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let Some(folder_id) = request.public_folder_probe_object_id() else {
                     responses.extend_from_slice(&rop_error_response(
                         0x42,
@@ -22923,6 +23154,14 @@ where
                 responses.extend_from_slice(&rop_get_owning_servers_response(&request, &servers))
             }
             Some(RopId::PublicFolderIsGhosted) => {
+                if !logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x45,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let Some(folder_id) = request.public_folder_probe_object_id() else {
                     responses.extend_from_slice(&rop_error_response(
                         0x45,
@@ -23674,7 +23913,15 @@ where
                 }
             }
             Some(RopId::GetStoreState) => {
-                responses.extend_from_slice(&rop_get_store_state_response(&request))
+                if logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_get_store_state_response(&request));
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x7B,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                }
             }
             Some(RopId::Abort) => {
                 let result = match input_object(session, &handle_slots, &request) {
@@ -24002,6 +24249,9 @@ fn sort_table_request_is_valid(request: &RopRequest) -> bool {
     if !sort_orders.iter().all(sort_order_is_valid) {
         return false;
     }
+    if !maximum_category_sort_order_is_valid(&sort_orders, category_count) {
+        return false;
+    }
     sort_orders
         .iter()
         .take(usize::from(category_count))
@@ -24020,8 +24270,56 @@ fn sort_order_is_valid(sort_order: &MapiSortOrder) -> bool {
     multivalue == multivalue_instance
 }
 
+fn maximum_category_sort_order_is_valid(
+    sort_orders: &[MapiSortOrder],
+    category_count: u16,
+) -> bool {
+    let mut maximum_category_indexes = sort_orders
+        .iter()
+        .enumerate()
+        .filter_map(|(index, sort_order)| (sort_order.order == 0x04).then_some(index));
+    let Some(index) = maximum_category_indexes.next() else {
+        return true;
+    };
+    maximum_category_indexes.next().is_none()
+        && category_count > 0
+        && index == usize::from(category_count)
+}
+
 fn get_attachment_table_flags_are_valid(request: &RopRequest) -> bool {
     matches!(request.payload.first().copied().unwrap_or(0), 0x00 | 0x40)
+}
+
+fn hierarchy_table_flags_are_valid(request: &RopRequest) -> bool {
+    let flags = request.payload.first().copied().unwrap_or(0);
+    flags & !0xFC == 0
+}
+
+fn contents_table_flags_error(flags: u8, folder_id: u64, is_public_folder: bool) -> Option<u32> {
+    if flags & !0xFA != 0 {
+        return Some(0x8007_0057);
+    }
+    if flags & 0x20 != 0 {
+        return Some(0x8004_0102);
+    }
+    if flags & 0x80 != 0 {
+        let has_required_bits = flags & 0x48 == 0x48;
+        let valid_scope =
+            matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID) || is_public_folder;
+        if !has_required_bits || !valid_scope {
+            return Some(0x8007_0057);
+        }
+    }
+    None
+}
+
+fn open_attachment_flags_are_valid(request: &RopRequest) -> bool {
+    matches!(request.payload.first().copied(), Some(0x00 | 0x01 | 0x03))
+}
+
+fn save_flags_are_supported(request: &RopRequest) -> bool {
+    let flags = request.payload.first().copied().unwrap_or(0);
+    flags & 0x03 != 0x03
 }
 
 fn table_async_flags_are_valid(request: &RopRequest) -> bool {
@@ -24219,13 +24517,42 @@ mod property_tag_validation_tests {
         assert!(!sort_table_request_is_valid(&request(0x02, 1, 0, 0)));
         assert!(!sort_table_request_is_valid(&request(0x00, 1, 2, 0)));
         assert!(!sort_table_request_is_valid(&request(0x00, 1, 1, 2)));
-        assert!(sort_table_request_is_valid(&request_with_orders(
+        assert!(!sort_table_request_is_valid(&request_with_orders(
             0x00,
             0,
             0,
             &[
                 (PID_TAG_SUBJECT_W, 0x01),
                 (PID_TAG_MESSAGE_DELIVERY_TIME, 0x04)
+            ],
+        )));
+        assert!(sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            1,
+            0,
+            &[
+                (PID_TAG_SUBJECT_W, 0x01),
+                (PID_TAG_MESSAGE_DELIVERY_TIME, 0x04),
+                (PID_TAG_MESSAGE_SIZE, 0x00)
+            ],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            1,
+            0,
+            &[
+                (PID_TAG_SUBJECT_W, 0x04),
+                (PID_TAG_MESSAGE_DELIVERY_TIME, 0x00)
+            ],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            1,
+            0,
+            &[
+                (PID_TAG_SUBJECT_W, 0x00),
+                (PID_TAG_MESSAGE_DELIVERY_TIME, 0x04),
+                (PID_TAG_MESSAGE_SIZE, 0x04)
             ],
         )));
         assert!(!sort_table_request_is_valid(&request_with_orders(
@@ -24280,6 +24607,121 @@ mod property_tag_validation_tests {
         assert!(!get_attachment_table_flags_are_valid(&request(0x01)));
         assert!(!get_attachment_table_flags_are_valid(&request(0x02)));
         assert!(!get_attachment_table_flags_are_valid(&request(0x41)));
+    }
+
+    #[test]
+    fn hierarchy_table_flags_match_microsoft_folder_values() {
+        fn request(flags: u8) -> RopRequest {
+            RopRequest {
+                rop_id: RopId::GetHierarchyTable.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: Some(1),
+                payload: vec![flags],
+            }
+        }
+
+        assert!(hierarchy_table_flags_are_valid(&request(0x00)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x04)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x08)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x10)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x20)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x40)));
+        assert!(hierarchy_table_flags_are_valid(&request(0x80)));
+        assert!(!hierarchy_table_flags_are_valid(&request(0x01)));
+        assert!(!hierarchy_table_flags_are_valid(&request(0x02)));
+        assert!(!hierarchy_table_flags_are_valid(&request(0x03)));
+    }
+
+    #[test]
+    fn contents_table_flags_match_microsoft_folder_values() {
+        assert_eq!(
+            contents_table_flags_error(0x00, INBOX_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0x02, INBOX_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0x08, INBOX_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0x10, INBOX_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0x40, INBOX_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0x20, INBOX_FOLDER_ID, false),
+            Some(0x8004_0102)
+        );
+        assert_eq!(
+            contents_table_flags_error(0x01, INBOX_FOLDER_ID, false),
+            Some(0x8007_0057)
+        );
+        assert_eq!(
+            contents_table_flags_error(0x04, INBOX_FOLDER_ID, false),
+            Some(0x8007_0057)
+        );
+        assert_eq!(
+            contents_table_flags_error(0x80, ROOT_FOLDER_ID, false),
+            Some(0x8007_0057)
+        );
+        assert_eq!(
+            contents_table_flags_error(0xC8, INBOX_FOLDER_ID, false),
+            Some(0x8007_0057)
+        );
+        assert_eq!(
+            contents_table_flags_error(0xC8, ROOT_FOLDER_ID, false),
+            None
+        );
+        assert_eq!(
+            contents_table_flags_error(0xC8, INBOX_FOLDER_ID, true),
+            None
+        );
+    }
+
+    #[test]
+    fn open_attachment_flags_match_microsoft_message_values() {
+        fn request(flags: u8) -> RopRequest {
+            RopRequest {
+                rop_id: RopId::OpenAttachment.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: Some(1),
+                payload: vec![flags, 0, 0, 0, 0],
+            }
+        }
+
+        assert!(open_attachment_flags_are_valid(&request(0x00)));
+        assert!(open_attachment_flags_are_valid(&request(0x01)));
+        assert!(open_attachment_flags_are_valid(&request(0x03)));
+        assert!(!open_attachment_flags_are_valid(&request(0x02)));
+        assert!(!open_attachment_flags_are_valid(&request(0x04)));
+        assert!(!open_attachment_flags_are_valid(&request(0x40)));
+    }
+
+    #[test]
+    fn save_flags_match_microsoft_message_and_attachment_combinations() {
+        fn request(flags: u8) -> RopRequest {
+            RopRequest {
+                rop_id: RopId::SaveChangesAttachment.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: Some(1),
+                payload: vec![flags],
+            }
+        }
+
+        assert!(save_flags_are_supported(&request(0x00)));
+        assert!(save_flags_are_supported(&request(0x01)));
+        assert!(save_flags_are_supported(&request(0x02)));
+        assert!(save_flags_are_supported(&request(0x04)));
+        assert!(save_flags_are_supported(&request(0x0A)));
+        assert!(!save_flags_are_supported(&request(0x03)));
+        assert!(!save_flags_are_supported(&request(0x07)));
+        assert!(!save_flags_are_supported(&request(0x0B)));
     }
 }
 
@@ -27636,11 +28078,11 @@ mod tests {
             PID_TAG_WLINK_FLAGS,
             PID_TAG_WLINK_SAVE_STAMP,
             0x6842_0102,
-            0x6853_0003,
-            0x6854_0102,
-            0x6890_0102,
-            0x6891_0102,
-            0x6892_0003,
+            PID_TAG_WLINK_CALENDAR_COLOR,
+            PID_TAG_WLINK_ADDRESS_BOOK_EID,
+            PID_TAG_WLINK_CLIENT_ID,
+            PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+            PID_TAG_WLINK_RO_GROUP_TYPE,
             0x6893_0102,
             PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
         ];
@@ -27887,16 +28329,16 @@ mod tests {
             PID_TAG_WLINK_ORDINAL,
             PID_TAG_WLINK_ENTRY_ID,
             PID_TAG_WLINK_RECORD_KEY,
-            0x6853_0003,
+            PID_TAG_WLINK_CALENDAR_COLOR,
             PID_TAG_WLINK_STORE_ENTRY_ID,
             0x684F_0102,
             0x6850_0102,
             PID_TAG_WLINK_GROUP_NAME_W,
             PID_TAG_WLINK_SECTION,
-            0x6854_0102,
-            0x6890_0102,
+            PID_TAG_WLINK_ADDRESS_BOOK_EID,
+            PID_TAG_WLINK_CLIENT_ID,
             PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
-            0x6892_0003,
+            PID_TAG_WLINK_RO_GROUP_TYPE,
             0x6893_0102,
             0x8010_0102,
         ]);
@@ -29117,6 +29559,18 @@ mod tests {
         assert_eq!(
             set_property_debug_name(PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID),
             "PidTagWlinkAddressBookStoreEid"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_WLINK_CALENDAR_COLOR),
+            "PidTagWlinkCalendarColor"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_WLINK_ADDRESS_BOOK_EID),
+            "PidTagWlinkAddressBookEid"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_WLINK_RO_GROUP_TYPE),
+            "PidTagWlinkRoGroupType"
         );
         assert_eq!(
             set_property_debug_name(PID_TAG_IPM_APPOINTMENT_ENTRY_ID),

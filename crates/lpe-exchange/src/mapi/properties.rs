@@ -13,6 +13,7 @@ use crate::mapi_store::{
     MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
 use anyhow::bail;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, parse_calendar_participants_metadata,
     serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
@@ -39,6 +40,7 @@ pub(in crate::mapi) struct MapiSortOrder {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiRestriction {
+    InvalidTableRestriction,
     And(Vec<MapiRestriction>),
     Or(Vec<MapiRestriction>),
     Not(Box<MapiRestriction>),
@@ -313,7 +315,14 @@ pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8: u32 = 0x36
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 pub(in crate::mapi) const PID_TAG_DEFAULT_FORM_NAME_W: u32 = 0x36E6_001F;
 pub(in crate::mapi) const PID_TAG_EXTENDED_FOLDER_FLAGS: u32 = 0x36DA_0102;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TEMPLATE_ID: u32 = 0x6841_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_ID: u32 = 0x6842_0102;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_LAST_USED: u32 = 0x6834_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EXPIRATION: u32 = 0x683A_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TAG: u32 = 0x6847_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EFP_FLAGS: u32 = 0x6848_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6846_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_FORM_FLAGS: u32 = 0x36DE_0003;
 pub(in crate::mapi) const PID_TAG_FOLDER_WEBVIEWINFO: u32 = 0x36DF_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_XVIEWINFO_E: u32 = 0x36E0_0102;
@@ -480,7 +489,11 @@ pub(in crate::mapi) const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0048;
 pub(in crate::mapi) const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
 pub(in crate::mapi) const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 pub(in crate::mapi) const PID_TAG_WLINK_SECTION: u32 = 0x6852_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_CALENDAR_COLOR: u32 = 0x6853_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_ADDRESS_BOOK_EID: u32 = 0x6854_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_CLIENT_ID: u32 = 0x6890_0102;
 pub(in crate::mapi) const PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID: u32 = 0x6891_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_RO_GROUP_TYPE: u32 = 0x6892_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_CLSID: u32 = 0x6833_0048;
 pub(in crate::mapi) const PID_TAG_VIEW_DESCRIPTOR_FLAGS: u32 = 0x6834_0003;
@@ -1425,6 +1438,7 @@ pub(in crate::mapi) fn restriction_matches(
         return true;
     };
     match restriction {
+        MapiRestriction::InvalidTableRestriction => false,
         MapiRestriction::And(children) => children
             .iter()
             .all(|child| restriction_matches(Some(child), value_for)),
@@ -1699,6 +1713,139 @@ fn search_folder_container_class_for_result_kind(result_object_kind: &str) -> &'
     }
 }
 
+pub(in crate::mapi) fn search_folder_definition_message_property_value(
+    definition: &SearchFolderDefinition,
+    account_id: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let message_id = search_folder_definition_message_id(definition)?;
+    let change_number = mapi_mailstore::change_number_for_store_id(message_id);
+    match property_tag {
+        PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => {
+            Some(MapiValue::U64(COMMON_VIEWS_FOLDER_ID))
+        }
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(message_id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            COMMON_VIEWS_FOLDER_ID,
+            message_id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message_id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(definition.display_name.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_SOURCE_KEY | PID_TAG_RECORD_KEY | PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_uuid(&definition.id),
+        )),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(COMMON_VIEWS_FOLDER_ID),
+        )),
+        PID_TAG_PARENT_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+            account_id,
+            COMMON_VIEWS_FOLDER_ID,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_SEARCH_FOLDER_ID => Some(MapiValue::Binary(search_folder_id(definition))),
+        PID_TAG_SEARCH_FOLDER_TEMPLATE_ID => {
+            Some(MapiValue::U32(search_folder_template_id(definition)))
+        }
+        PID_TAG_SEARCH_FOLDER_TAG => Some(MapiValue::U32(search_folder_tag(definition))),
+        PID_TAG_SEARCH_FOLDER_LAST_USED => Some(MapiValue::U32(search_folder_last_used())),
+        PID_TAG_SEARCH_FOLDER_EXPIRATION => Some(MapiValue::U32(search_folder_expiration())),
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => {
+            Some(MapiValue::U32(search_folder_storage_type(definition)))
+        }
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_SEARCH_FOLDER_DEFINITION => {
+            Some(MapiValue::Binary(search_folder_definition_blob(definition)))
+        }
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_change_number(change_number),
+        )),
+        _ => None,
+    }
+}
+
+fn search_folder_definition_message_id(definition: &SearchFolderDefinition) -> Option<u64> {
+    crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+}
+
+fn search_folder_template_id(definition: &SearchFolderDefinition) -> u32 {
+    match definition.role.as_str() {
+        "todo_search" => 10,
+        _ if definition.is_builtin => 2,
+        _ => 0,
+    }
+}
+
+fn search_folder_storage_type(definition: &SearchFolderDefinition) -> u32 {
+    if definition
+        .restriction_json
+        .get("pidTagSearchFolderDefinition")
+        .and_then(serde_json::Value::as_str)
+        .is_some()
+    {
+        0
+    } else {
+        0x48
+    }
+}
+
+fn search_folder_definition_blob(definition: &SearchFolderDefinition) -> Vec<u8> {
+    if let Some(value) = definition
+        .restriction_json
+        .get("pidTagSearchFolderDefinition")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| BASE64_STANDARD.decode(value).ok())
+    {
+        return value;
+    }
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0x0410_0000u32.to_be_bytes());
+    blob.extend_from_slice(&search_folder_storage_type(definition).to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob
+}
+
+fn search_folder_last_used() -> u32 {
+    214_089_600
+}
+
+fn search_folder_expiration() -> u32 {
+    u32::MAX
+}
+
+fn search_folder_tag(definition: &SearchFolderDefinition) -> u32 {
+    let bytes = definition.id.as_bytes();
+    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
 pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
     if mailbox.role.eq_ignore_ascii_case("inbox") {
         "Inbox".to_string()
@@ -1746,6 +1893,8 @@ fn extended_folder_flags_for_search_folder(
     folder_id: u64,
 ) -> Vec<u8> {
     let mut flags = extended_folder_flags_for_folder(folder_id);
+    flags.extend_from_slice(&[0x03, 0x04]);
+    flags.extend_from_slice(&search_folder_tag(definition).to_le_bytes());
     flags.extend_from_slice(&[0x02, 0x10]);
     flags.extend_from_slice(&search_folder_id(definition));
     flags
@@ -2327,9 +2476,18 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
             mapi_mailstore::private_store_entry_id(account_id),
         )),
+        PID_TAG_WLINK_CALENDAR_COLOR if navigation_shortcut_targets_calendar(message) => {
+            Some(MapiValue::I32(-1))
+        }
+        PID_TAG_WLINK_ADDRESS_BOOK_EID if navigation_shortcut_targets_calendar(message) => Some(
+            MapiValue::Binary(navigation_shortcut_owner_entry_id(account_id)),
+        ),
         PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => Some(
             MapiValue::Binary(mapi_mailstore::private_store_entry_id(account_id)),
         ),
+        PID_TAG_WLINK_RO_GROUP_TYPE if navigation_shortcut_targets_calendar(message) => {
+            Some(MapiValue::I32(-1))
+        }
         property_tag
             if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_FOLDER_TYPE) =>
         {
@@ -2340,6 +2498,23 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         }
         _ => None,
     }
+}
+
+fn navigation_shortcut_targets_calendar(message: &MapiNavigationShortcutMessage) -> bool {
+    message.shortcut_type != 4
+        && (message.section == 3 || message.target_folder_id == Some(CALENDAR_FOLDER_ID))
+}
+
+fn navigation_shortcut_owner_entry_id(account_id: Uuid) -> Vec<u8> {
+    let entry = ExchangeAddressBookEntry {
+        id: account_id,
+        display_name: String::new(),
+        email: String::new(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+    };
+    super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
 
 fn is_sharing_local_folder_id_property_tag(property_tag: u32) -> bool {
@@ -2913,8 +3088,8 @@ pub(in crate::mapi) fn wlink_folder_type_guid(message: &MapiNavigationShortcutMe
     ]
 }
 
-fn wlink_ordinal_bytes(value: u32) -> Vec<u8> {
-    if value <= u8::MAX as u32 {
+pub(in crate::mapi) fn wlink_ordinal_bytes(value: u32) -> Vec<u8> {
+    let mut bytes = if value <= u8::MAX as u32 {
         vec![value as u8]
     } else {
         value
@@ -2922,7 +3097,14 @@ fn wlink_ordinal_bytes(value: u32) -> Vec<u8> {
             .into_iter()
             .skip_while(|byte| *byte == 0)
             .collect()
+    };
+    match bytes.last_mut() {
+        Some(last) if *last == 0 => *last = 1,
+        Some(last) if *last == u8::MAX => *last = u8::MAX - 1,
+        None => bytes.push(1),
+        _ => {}
     }
+    bytes
 }
 
 pub(in crate::mapi) fn conversation_action_property_value(
@@ -11709,6 +11891,30 @@ mod tests {
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_FOLDER_TYPE),
             Some(MapiValue::Guid(calendar_folder_type))
         );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CALENDAR_COLOR),
+            Some(MapiValue::I32(-1))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_ADDRESS_BOOK_EID),
+            Some(MapiValue::Binary(navigation_shortcut_owner_entry_id(
+                account_id
+            )))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(
+                &link,
+                account_id,
+                PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+            ),
+            Some(MapiValue::Binary(mapi_mailstore::private_store_entry_id(
+                account_id
+            )))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_RO_GROUP_TYPE),
+            Some(MapiValue::I32(-1))
+        );
 
         let parsed_link = navigation_shortcut_from_mapi_properties(
             account_id,
@@ -12569,6 +12775,15 @@ mod tests {
                 account_id
             )))
         );
+    }
+
+    #[test]
+    fn microsoft_oxocfg_wlink_ordinal_never_ends_with_reserved_insert_markers() {
+        for ordinal in [0, 0x0100, 0x01ff] {
+            let bytes = wlink_ordinal_bytes(ordinal);
+            assert!(!bytes.is_empty());
+            assert!(!matches!(bytes.last(), Some(0 | 0xff)));
+        }
     }
 
     #[test]

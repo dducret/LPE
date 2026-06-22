@@ -6301,7 +6301,8 @@ impl ExchangeStore for Storage {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_id, folder_id, message_class, subject, properties_json
+                SELECT id, account_id, folder_id, message_class, subject, properties_json,
+                       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                 FROM mapi_associated_config_messages
                 WHERE tenant_id = $1 AND account_id = $2
                 ORDER BY folder_id, message_class, updated_at DESC, id
@@ -6415,7 +6416,8 @@ impl ExchangeStore for Storage {
                         properties_json = EXCLUDED.properties_json,
                         updated_at = NOW()
                     WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
+                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                     "#,
                 )
                 .bind(tenant_id)
@@ -6440,7 +6442,8 @@ impl ExchangeStore for Storage {
                         subject = EXCLUDED.subject,
                         properties_json = EXCLUDED.properties_json,
                         updated_at = NOW()
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
+                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                     "#,
                 )
                 .bind(tenant_id)
@@ -6468,7 +6471,8 @@ impl ExchangeStore for Storage {
                         properties_json = EXCLUDED.properties_json,
                         updated_at = NOW()
                     WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
+                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                     "#,
                 )
                 .bind(tenant_id)
@@ -7523,13 +7527,22 @@ fn mapi_navigation_shortcut_from_row(
 fn mapi_associated_config_from_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<MapiAssociatedConfigRecord> {
+    let mut properties_json: serde_json::Value = row.try_get("properties_json")?;
+    if let Ok(updated_at) = row.try_get::<String, _>("updated_at") {
+        if let Some(properties) = properties_json.as_object_mut() {
+            properties.insert(
+                "__lpe_updated_at".to_string(),
+                serde_json::json!(updated_at),
+            );
+        }
+    }
     Ok(MapiAssociatedConfigRecord {
         id: row.try_get("id")?,
         account_id: row.try_get("account_id")?,
         folder_id: row.try_get::<i64, _>("folder_id")? as u64,
         message_class: row.try_get("message_class")?,
         subject: row.try_get("subject")?,
-        properties_json: row.try_get("properties_json")?,
+        properties_json,
     })
 }
 

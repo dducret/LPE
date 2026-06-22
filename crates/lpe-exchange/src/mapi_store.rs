@@ -897,6 +897,7 @@ pub(crate) enum MapiCommonViewsMessage {
     NavigationShortcut(MapiNavigationShortcutMessage),
     #[allow(dead_code)]
     NamedView(MapiCommonViewNamedViewMessage),
+    SearchFolderDefinition(SearchFolderDefinition),
 }
 
 #[derive(Debug, Clone)]
@@ -2022,6 +2023,12 @@ impl MapiMailStoreSnapshot {
                 outlook_common_views_default_named_views()
                     .into_iter()
                     .map(MapiCommonViewsMessage::NamedView),
+            )
+            .chain(
+                self.search_folder_definitions
+                    .clone()
+                    .into_iter()
+                    .map(MapiCommonViewsMessage::SearchFolderDefinition),
             )
             .collect::<Vec<_>>();
         messages.into_iter()
@@ -3247,7 +3254,8 @@ fn format_common_views_table_shortcut_debug_summary(messages: &[MapiCommonViewsM
         .iter()
         .filter_map(|message| match message {
             MapiCommonViewsMessage::NavigationShortcut(shortcut) => Some(shortcut),
-            MapiCommonViewsMessage::NamedView(_) => None,
+            MapiCommonViewsMessage::NamedView(_)
+            | MapiCommonViewsMessage::SearchFolderDefinition(_) => None,
         })
         .take(8)
         .map(format_navigation_shortcut_debug_entry)

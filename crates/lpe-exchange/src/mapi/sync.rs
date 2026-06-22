@@ -963,6 +963,21 @@ fn common_views_sync_object(
         crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => {
             common_view_named_view_sync_object(&message, account_id)
         }
+        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(_) => {
+            mapi_mailstore::SpecialMessageSyncFact {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                item_id: 0,
+                canonical_id: Uuid::nil(),
+                associated: true,
+                subject: String::new(),
+                body_text: String::new(),
+                message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+                last_modified_filetime: 0,
+                message_size: 0,
+                read_state: None,
+                named_properties: Vec::new(),
+            }
+        }
     }
 }
 

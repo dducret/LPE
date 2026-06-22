@@ -831,11 +831,21 @@ pub(in crate::mapi) fn rop_get_search_criteria_response(
 ) -> Vec<u8> {
     let mut response = vec![0x31, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.extend_from_slice(&(restriction.len().min(u16::MAX as usize) as u16).to_le_bytes());
-    response.extend_from_slice(&restriction[..restriction.len().min(u16::MAX as usize)]);
-    response.extend_from_slice(&(folder_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
-    for folder_id in folder_ids.iter().take(u16::MAX as usize) {
-        write_object_id(&mut response, *folder_id);
+    if request.get_search_criteria_include_restriction() {
+        response
+            .extend_from_slice(&(restriction.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        response.extend_from_slice(&restriction[..restriction.len().min(u16::MAX as usize)]);
+    } else {
+        response.extend_from_slice(&0u16.to_le_bytes());
+    }
+    response.push(0);
+    if request.get_search_criteria_include_folders() {
+        response.extend_from_slice(&(folder_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        for folder_id in folder_ids.iter().take(u16::MAX as usize) {
+            write_object_id(&mut response, *folder_id);
+        }
+    } else {
+        response.extend_from_slice(&0u16.to_le_bytes());
     }
     write_u32(&mut response, search_flags);
     response
@@ -3306,7 +3316,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_WLINK_GROUP_CLSID => "PidTagWlinkGroupClsid",
         PID_TAG_WLINK_GROUP_NAME_W => "PidTagWlinkGroupName",
         PID_TAG_WLINK_SECTION => "PidTagWlinkSection",
+        PID_TAG_WLINK_CALENDAR_COLOR => "PidTagWlinkCalendarColor",
+        PID_TAG_WLINK_ADDRESS_BOOK_EID => "PidTagWlinkAddressBookEid",
+        PID_TAG_WLINK_CLIENT_ID => "PidTagWlinkClientId",
         PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID => "PidTagWlinkAddressBookStoreEid",
+        PID_TAG_WLINK_RO_GROUP_TYPE => "PidTagWlinkRoGroupType",
         OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG => {
             "OutlookStaleSharingCalendarGroupEntryAssociatedLocalFolderId"
         }
@@ -3503,8 +3517,18 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         tag if debug_property_id_matches(tag, PID_TAG_WLINK_GROUP_CLSID) => "PidTagWlinkGroupClsid",
         tag if debug_property_id_matches(tag, PID_TAG_WLINK_GROUP_NAME_W) => "PidTagWlinkGroupName",
         tag if debug_property_id_matches(tag, PID_TAG_WLINK_SECTION) => "PidTagWlinkSection",
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_CALENDAR_COLOR) => {
+            "PidTagWlinkCalendarColor"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_ADDRESS_BOOK_EID) => {
+            "PidTagWlinkAddressBookEid"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_CLIENT_ID) => "PidTagWlinkClientId",
         tag if debug_property_id_matches(tag, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID) => {
             "PidTagWlinkAddressBookStoreEid"
+        }
+        tag if debug_property_id_matches(tag, PID_TAG_WLINK_RO_GROUP_TYPE) => {
+            "PidTagWlinkRoGroupType"
         }
         tag if debug_property_id_matches(tag, PID_TAG_USER_GUID) => "PidTagUserGuid",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
@@ -4270,8 +4294,10 @@ pub(in crate::mapi) fn rop_get_owning_servers_response(
 ) -> Vec<u8> {
     let mut response = vec![0x42, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u16(&mut response, servers.len().min(u16::MAX as usize) as u16);
-    for server in servers.iter().take(u16::MAX as usize) {
+    let server_count = servers.len().min(u16::MAX as usize) as u16;
+    write_u16(&mut response, server_count);
+    write_u16(&mut response, server_count);
+    for server in servers.iter().take(usize::from(server_count)) {
         response.extend_from_slice(server.as_bytes());
         response.push(0);
     }
@@ -4285,6 +4311,10 @@ pub(in crate::mapi) fn rop_public_folder_is_ghosted_response(
     let mut response = vec![0x45, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(u8::from(is_ghosted));
+    if is_ghosted {
+        write_u16(&mut response, 0);
+        write_u16(&mut response, 0);
+    }
     response
 }
 
@@ -5451,6 +5481,16 @@ impl RopRequest {
         ))
     }
 
+    pub(in crate::mapi) fn get_search_criteria_include_restriction(&self) -> bool {
+        matches!(RopId::from_u8(self.rop_id), Some(RopId::GetSearchCriteria))
+            && self.payload.get(1).copied().unwrap_or(0) != 0
+    }
+
+    pub(in crate::mapi) fn get_search_criteria_include_folders(&self) -> bool {
+        matches!(RopId::from_u8(self.rop_id), Some(RopId::GetSearchCriteria))
+            && self.payload.get(2).copied().unwrap_or(0) != 0
+    }
+
     pub(in crate::mapi) fn receive_folder_message_class(&self) -> Option<&str> {
         let bytes = self.payload.strip_suffix(&[0])?;
         std::str::from_utf8(bytes).ok()
@@ -5564,6 +5604,17 @@ impl RopRequest {
             .unwrap_or(0)
     }
 
+    pub(in crate::mapi) fn reload_cached_information_reserved(&self) -> Option<u16> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::ReloadCachedInformation)
+        ) {
+            return None;
+        }
+        let bytes = self.payload.get(..2)?;
+        Some(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
     pub(in crate::mapi) fn create_folder_type(&self) -> u8 {
         self.payload.first().copied().unwrap_or(0)
     }
@@ -5574,8 +5625,19 @@ impl RopRequest {
             .is_some_and(|open_existing| *open_existing != 0)
     }
 
+    pub(in crate::mapi) fn create_folder_reserved(&self) -> u8 {
+        self.payload.get(3).copied().unwrap_or(0)
+    }
+
     pub(in crate::mapi) fn create_folder_display_name(&self) -> String {
-        read_u16_prefixed_string(&self.payload, 3).unwrap_or_default()
+        read_u16_prefixed_string(&self.payload, 4).unwrap_or_default()
+    }
+
+    pub(in crate::mapi) fn delete_folder_flags(&self) -> Option<u8> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::DeleteFolder)) {
+            return None;
+        }
+        self.payload.first().copied()
     }
 
     pub(in crate::mapi) fn delete_folder_id(&self) -> Option<u64> {
@@ -5717,6 +5779,26 @@ impl RopRequest {
             }
             String::from_utf16_lossy(&units)
         }
+    }
+
+    pub(in crate::mapi) fn empty_folder_want_asynchronous(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders)
+        ) {
+            return None;
+        }
+        self.payload.first().copied()
+    }
+
+    pub(in crate::mapi) fn empty_folder_want_delete_associated(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders)
+        ) {
+            return None;
+        }
+        self.payload.get(1).copied()
     }
 
     pub(in crate::mapi) fn move_copy_target_handle(&self, input_handles: &[u32]) -> Option<u32> {
@@ -7317,12 +7399,12 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(RopId::ReloadCachedInformation) => {
             let input_handle_index = cursor.read_u8()?;
-            let _reserved = cursor.read_u16()?;
+            let reserved = cursor.read_u16()?;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
-                payload: Vec::new(),
+                payload: reserved.to_le_bytes().to_vec(),
             })
         }
         Some(RopId::SeekRow) => {
@@ -7402,9 +7484,10 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let folder_type = cursor.read_u8()?;
-            let use_unicode = cursor.read_u8()? != 0;
+            let use_unicode_raw = cursor.read_u8()?;
+            let use_unicode = use_unicode_raw != 0;
             let open_existing = cursor.read_u8()?;
-            let _reserved = cursor.read_u8()?;
+            let reserved = cursor.read_u8()?;
             let display_name = if use_unicode {
                 cursor.read_utf16z()?
             } else {
@@ -7415,7 +7498,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             } else {
                 cursor.read_ascii_z()?
             };
-            let mut payload = vec![folder_type, use_unicode as u8, open_existing];
+            let mut payload = vec![folder_type, use_unicode_raw, open_existing, reserved];
             write_u16_prefixed_bytes(&mut payload, display_name.as_bytes());
             write_u16_prefixed_bytes(&mut payload, comment.as_bytes());
             Ok(RopRequest {
@@ -11003,6 +11086,32 @@ mod tests {
 
         assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
         assert_eq!(u32::from_le_bytes(response[7..11].try_into().unwrap()), 1);
+    }
+
+    #[test]
+    fn public_folder_replica_responses_match_microsoft_counter_shape() {
+        let request = RopRequest {
+            rop_id: 0x42,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        assert_eq!(
+            rop_get_owning_servers_response(&request, &["LPE-MBX-01".to_string()]),
+            [
+                0x42, 0x00, 0, 0, 0, 0, 1, 0, 1, 0, b'L', b'P', b'E', b'-', b'M', b'B', b'X', b'-',
+                b'0', b'1', 0,
+            ]
+        );
+        assert_eq!(
+            rop_public_folder_is_ghosted_response(&request, true),
+            [0x45, 0x00, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            rop_public_folder_is_ghosted_response(&request, false),
+            [0x45, 0x00, 0, 0, 0, 0, 0]
+        );
     }
 
     #[test]

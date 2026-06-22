@@ -9500,10 +9500,20 @@ fn append_rop_query_subject_rows(rops: &mut Vec<u8>, input: u8, output: u8, row_
 
 async fn response_rops_from_execute_response(response: axum::response::Response) -> Vec<u8> {
     let body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&body);
+    response_rops
+}
+
+fn response_rops_and_handles_from_execute_body(body: &[u8]) -> (Vec<u8>, Vec<u32>) {
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
     let rop_buffer = &body[16..16 + rop_buffer_size];
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    rop_buffer[2..2 + response_rop_size].to_vec()
+    let response_rops = rop_buffer[2..2 + response_rop_size].to_vec();
+    let response_handles = rop_buffer[2 + response_rop_size..]
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .collect();
+    (response_rops, response_handles)
 }
 
 async fn execute_rops_response_rops(rops: &[u8], handles: &[u32]) -> Vec<u8> {
