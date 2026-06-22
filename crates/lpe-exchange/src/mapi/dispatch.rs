@@ -19,10 +19,10 @@ use crate::store::{
     UpsertMapiAssociatedConfigInput, UpsertMapiNavigationShortcutInput,
 };
 use lpe_storage::{
-    AuditEntryInput, CancelSubmissionResult, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermissionInput, SearchFolderDefinition, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    AuditEntryInput, CancelSubmissionResult, CreatePublicFolderInput, JmapEmail, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, PublicFolderPerUserState,
+    PublicFolderPerUserStatePatch, PublicFolderPermissionInput, SearchFolderDefinition,
+    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1347,6 +1347,72 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
         partial_completion,
     );
     Ok((changed_folder_ids, partial_completion))
+}
+
+async fn hard_delete_public_folder_contents<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<(Vec<u64>, bool), u32> {
+    let Some(folder) = snapshot.public_folder_for_id(folder_id) else {
+        return Err(0x8004_010F);
+    };
+    let item_ids = snapshot
+        .public_folder_items_for_folder(folder_id)
+        .into_iter()
+        .map(|item| item.item.id)
+        .collect::<Vec<_>>();
+    let attempted_count = item_ids.len();
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
+    let mut partial_completion = false;
+
+    for item_id in item_ids {
+        if store
+            .delete_public_folder_item(
+                principal.account_id,
+                folder.folder.id,
+                item_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-hard-delete-public-folder-contents".to_string(),
+                    subject: format!("public-folder:{} item:{}", folder.folder.id, item_id),
+                },
+            )
+            .await
+            .is_err()
+        {
+            partial_completion = true;
+            failed_count += 1;
+        } else {
+            succeeded_count += 1;
+        }
+    }
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        mailbox = %principal.email,
+        folder_id = %format!("{folder_id:#018x}"),
+        public_folder_id = %folder.folder.id,
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+        message = "rca debug mapi hard delete public folder contents"
+    );
+    record_mapi_folder_purge_metrics(
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+    );
+    Ok(if succeeded_count == 0 {
+        (Vec::new(), partial_completion)
+    } else {
+        (vec![folder_id], partial_completion)
+    })
 }
 
 async fn hard_delete_mailbox_tree_contents<S: ExchangeStore>(
@@ -3703,6 +3769,44 @@ where
         }
     }
     properties
+}
+
+fn public_folder_handle_properties(
+    folder: &lpe_storage::PublicFolder,
+    folder_id: u64,
+) -> HashMap<u32, MapiValue> {
+    let folder = crate::mapi_store::MapiPublicFolder {
+        id: folder_id,
+        folder: folder.clone(),
+        item_count: 0,
+        child_count: 0,
+    };
+    [
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_RECORD_KEY,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_ACCESS,
+        PID_TAG_RIGHTS,
+        PID_TAG_EXTENDED_FOLDER_FLAGS,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+    .into_iter()
+    .filter_map(|tag| public_folder_property_value(&folder, tag).map(|value| (tag, value)))
+    .collect()
 }
 
 fn folder_properties_for_open_from_mailboxes(
@@ -16946,8 +17050,12 @@ where
                     }
                 };
                 let parent_mailbox = folder_row_for_id(parent_folder_id, mailboxes);
+                let parent_public_folder_id = snapshot
+                    .public_folder_for_id(parent_folder_id)
+                    .map(|folder| folder.folder.id);
                 if !is_root_hierarchy_folder(parent_folder_id)
                     && parent_mailbox.is_none()
+                    && parent_public_folder_id.is_none()
                     && parent_folder_id != SEARCH_FOLDER_ID
                     && role_for_folder_id(parent_folder_id).is_none()
                 {
@@ -17072,6 +17180,140 @@ where
                         output_handles.push(handle);
                         continue;
                     }
+                }
+
+                if let Some(parent_public_folder_id) = parent_public_folder_id {
+                    if request.create_folder_type() != 1 {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1C,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8000_4005,
+                        ));
+                        continue;
+                    }
+                    let existing_public_folder_id = snapshot
+                        .public_folders()
+                        .iter()
+                        .find(|folder| {
+                            folder.folder.parent_folder_id == Some(parent_public_folder_id)
+                                && folder.folder.lifecycle_state == "active"
+                                && folder
+                                    .folder
+                                    .display_name
+                                    .eq_ignore_ascii_case(display_name)
+                        })
+                        .map(|folder| folder.folder.id);
+                    if let Some(existing_public_folder_id) = existing_public_folder_id {
+                        if !request.create_folder_open_existing() {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x1C,
+                                request.output_handle_index.unwrap_or(0),
+                                0x8004_0604,
+                            ));
+                            continue;
+                        }
+                        let folder_id = match remember_created_mapi_identity(
+                            store,
+                            principal,
+                            MapiIdentityObjectKind::PublicFolder,
+                            existing_public_folder_id,
+                            None,
+                            None,
+                        )
+                        .await
+                        {
+                            Ok(folder_id) => folder_id,
+                            Err(_) => {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x1C,
+                                    request.output_handle_index.unwrap_or(0),
+                                    0x8004_0102,
+                                ));
+                                continue;
+                            }
+                        };
+                        let properties = folder_properties_for_open(
+                            store, principal, session, folder_id, mailboxes, snapshot,
+                        )
+                        .await;
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::Folder {
+                                folder_id,
+                                properties,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_create_folder_response(
+                            &request, folder_id, false,
+                        ));
+                        output_handles.push(handle);
+                        continue;
+                    }
+
+                    match store
+                        .create_public_folder_child(
+                            CreatePublicFolderInput {
+                                account_id: principal.account_id,
+                                parent_folder_id: parent_public_folder_id,
+                                display_name: display_name.to_string(),
+                                folder_class: "IPF.Note".to_string(),
+                                sort_order: 0,
+                            },
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-create-public-folder".to_string(),
+                                subject: display_name.to_string(),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(folder) => {
+                            let folder_id = match remember_created_mapi_identity(
+                                store,
+                                principal,
+                                MapiIdentityObjectKind::PublicFolder,
+                                folder.id,
+                                None,
+                                None,
+                            )
+                            .await
+                            {
+                                Ok(folder_id) => folder_id,
+                                Err(_) => {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x1C,
+                                        request.output_handle_index.unwrap_or(0),
+                                        0x8004_0102,
+                                    ));
+                                    continue;
+                                }
+                            };
+                            let properties = public_folder_handle_properties(&folder, folder_id);
+                            let handle = session.allocate_output_handle(
+                                request.output_handle_index,
+                                MapiObject::Folder {
+                                    folder_id,
+                                    properties,
+                                },
+                            );
+                            set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                            responses.extend_from_slice(&rop_create_folder_response(
+                                &request, folder_id, false,
+                            ));
+                            session.record_notification(MapiNotificationEvent::hierarchy(
+                                parent_folder_id,
+                                Some(folder_id),
+                            ));
+                            output_handles.push(handle);
+                        }
+                        Err(_) => responses.extend_from_slice(&rop_error_response(
+                            0x1C,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8007_0005,
+                        )),
+                    }
+                    continue;
                 }
 
                 if parent_folder_id == SEARCH_FOLDER_ID {
@@ -17479,6 +17721,32 @@ where
                         0x1D,
                         request.response_handle_index(),
                         false,
+                    ));
+                    continue;
+                }
+                if let Some(public_folder) = snapshot.public_folder_for_id(folder_id) {
+                    let partial_completion = store
+                        .delete_public_folder(
+                            principal.account_id,
+                            public_folder.folder.id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-delete-public-folder".to_string(),
+                                subject: format!("public-folder:{}", public_folder.folder.id),
+                            },
+                        )
+                        .await
+                        .is_err();
+                    if !partial_completion {
+                        session.record_notification(MapiNotificationEvent::hierarchy(
+                            _parent_folder_id,
+                            Some(folder_id),
+                        ));
+                    }
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        partial_completion,
                     ));
                     continue;
                 }
@@ -23157,18 +23425,11 @@ where
                     ));
                     continue;
                 }
-                if snapshot.public_folder_for_id(folder_id).is_some() {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-
                 let result = if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
                     hard_delete_recoverable_folder_contents(store, principal, folder_id, snapshot)
                         .await
+                } else if snapshot.public_folder_for_id(folder_id).is_some() {
+                    hard_delete_public_folder_contents(store, principal, folder_id, snapshot).await
                 } else if request.rop_id == RopId::HardDeleteMessagesAndSubfolders.as_u8() {
                     hard_delete_mailbox_tree_contents(
                         store, principal, folder_id, mailboxes, emails, snapshot,
