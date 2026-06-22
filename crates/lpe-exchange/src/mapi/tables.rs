@@ -12729,6 +12729,44 @@ mod tests {
                 attachment.size_octets,
                 &columns,
             ),
+            serialize_pending_attachment_row(
+                0,
+                &HashMap::from([
+                    (PID_TAG_ATTACH_METHOD, MapiValue::U32(ATTACH_BY_VALUE)),
+                    (PID_TAG_RENDERING_POSITION, MapiValue::U32(u32::MAX)),
+                    (PID_TAG_ATTACHMENT_FLAGS, MapiValue::U32(0)),
+                    (
+                        PID_TAG_DISPLAY_NAME_W,
+                        MapiValue::String("image001.PNG".to_string()),
+                    ),
+                    (PID_TAG_ATTACHMENT_LINK_ID, MapiValue::U32(0)),
+                    (PID_TAG_ATTACH_FLAGS, MapiValue::U32(4)),
+                    (PID_TAG_ATTACHMENT_HIDDEN, MapiValue::Bool(true)),
+                    (
+                        PID_TAG_ATTACH_LONG_FILENAME_W,
+                        MapiValue::String("image001.PNG".to_string()),
+                    ),
+                    (
+                        PID_TAG_ATTACH_FILENAME_W,
+                        MapiValue::String("image001.PNG".to_string()),
+                    ),
+                    (
+                        PID_TAG_ATTACH_EXTENSION_W,
+                        MapiValue::String(".PNG".to_string()),
+                    ),
+                    (
+                        PID_TAG_ATTACH_MIME_TAG_W,
+                        MapiValue::String("image/png".to_string()),
+                    ),
+                    (
+                        PID_TAG_ATTACH_CONTENT_ID_W,
+                        MapiValue::String("image001.PNG@01C86E1C.F1954390".to_string()),
+                    ),
+                    (PID_TAG_ATTACH_RENDERING, MapiValue::Binary(Vec::new())),
+                ]),
+                &[],
+                &columns,
+            ),
         ] {
             let mut cursor = Cursor::new(&row);
             assert_eq!(

@@ -8342,6 +8342,88 @@ mod tests {
     }
 
     #[test]
+    fn folder_create_and_hierarchy_table_responses_match_microsoft_folder_examples() {
+        let create = RopRequest {
+            rop_id: RopId::CreateFolder.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_create_folder_response(
+                &create,
+                crate::mapi::identity::mapi_store_id(0x0E91_5212),
+                false,
+            ),
+            vec![0x1C, 0x01, 0, 0, 0, 0, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x91, 0x52, 0x12, 0x00]
+        );
+
+        let hierarchy = RopRequest {
+            rop_id: RopId::GetHierarchyTable.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: Some(2),
+            payload: vec![0x00],
+        };
+        assert_eq!(
+            rop_get_hierarchy_table_response(&hierarchy, 21),
+            vec![0x04, 0x02, 0, 0, 0, 0, 0x15, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn folder_mutation_responses_match_microsoft_folder_examples() {
+        for (rop_id, handle_index, expected) in [
+            (
+                RopId::DeleteFolder.as_u8(),
+                1,
+                vec![0x1D, 0x01, 0, 0, 0, 0, 0],
+            ),
+            (
+                RopId::DeleteMessages.as_u8(),
+                0,
+                vec![0x1E, 0x00, 0, 0, 0, 0, 0],
+            ),
+            (
+                RopId::MoveCopyMessages.as_u8(),
+                0,
+                vec![0x33, 0x00, 0, 0, 0, 0, 0],
+            ),
+            (
+                RopId::MoveFolder.as_u8(),
+                1,
+                vec![0x35, 0x01, 0, 0, 0, 0, 0],
+            ),
+            (
+                RopId::CopyFolder.as_u8(),
+                0,
+                vec![0x36, 0x00, 0, 0, 0, 0, 0],
+            ),
+        ] {
+            let request = RopRequest {
+                rop_id,
+                input_handle_index: Some(handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
+            };
+            assert_eq!(
+                rop_partial_completion_response(rop_id, request.response_handle_index(), false),
+                expected
+            );
+        }
+
+        let set_search = RopRequest {
+            rop_id: RopId::SetSearchCriteria.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_simple_success_response(&set_search),
+            vec![0x30, 0x01, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
     fn contents_table_responses_match_microsoft_table_examples() {
         let open = RopRequest {
             rop_id: RopId::GetContentsTable.as_u8(),
