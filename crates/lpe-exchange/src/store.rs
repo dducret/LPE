@@ -555,6 +555,29 @@ pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) entry_kind: ExchangeAddressBookEntryKind,
     pub(crate) directory_kind: ExchangeAddressBookDirectoryKind,
     pub(crate) member_emails: Vec<String>,
+    pub(crate) details: ExchangeAddressBookEntryDetails,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ExchangeAddressBookEntryDetails {
+    pub(crate) given_name: String,
+    pub(crate) surname: String,
+    pub(crate) nickname: String,
+    pub(crate) primary_phone: String,
+    pub(crate) mobile_phone: String,
+    pub(crate) home_phone: String,
+    pub(crate) business2_phones: Vec<String>,
+    pub(crate) company_name: String,
+    pub(crate) title: String,
+    pub(crate) department_name: String,
+    pub(crate) postal_address: String,
+    pub(crate) street_address: String,
+    pub(crate) locality: String,
+    pub(crate) state_or_province: String,
+    pub(crate) country: String,
+    pub(crate) postal_code: String,
+    pub(crate) phonetic_given_name: String,
+    pub(crate) phonetic_surname: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -5289,6 +5312,7 @@ impl ExchangeStore for Storage {
                     entry_kind: ExchangeAddressBookEntryKind::Account,
                     directory_kind: directory_kind_from_storage(row.get("directory_kind")),
                     member_emails: Vec::new(),
+                    details: ExchangeAddressBookEntryDetails::default(),
                 })
                 .collect::<Vec<_>>();
 
@@ -5301,11 +5325,12 @@ impl ExchangeStore for Storage {
                     })
                     .map(|contact| ExchangeAddressBookEntry {
                         id: contact.id,
-                        display_name: contact.name,
-                        email: contact.email,
+                        display_name: contact.name.clone(),
+                        email: contact.email.clone(),
                         entry_kind: ExchangeAddressBookEntryKind::Contact,
                         directory_kind: ExchangeAddressBookDirectoryKind::Person,
                         member_emails: Vec::new(),
+                        details: address_book_details_from_contact(&contact),
                     }),
             );
             let group_rows = sqlx::query(
@@ -5331,6 +5356,7 @@ impl ExchangeStore for Storage {
                     entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                     directory_kind: ExchangeAddressBookDirectoryKind::Person,
                     member_emails: vec![target],
+                    details: ExchangeAddressBookEntryDetails::default(),
                 }
             }));
             entries.sort_by(|left, right| {
@@ -8042,6 +8068,83 @@ fn directory_kind_from_storage(value: String) -> ExchangeAddressBookDirectoryKin
         "equipment" => ExchangeAddressBookDirectoryKind::Equipment,
         _ => ExchangeAddressBookDirectoryKind::Person,
     }
+}
+
+fn address_book_details_from_contact(
+    contact: &AccessibleContact,
+) -> ExchangeAddressBookEntryDetails {
+    ExchangeAddressBookEntryDetails {
+        given_name: contact.structured_name.given.clone(),
+        surname: contact.structured_name.family.clone(),
+        nickname: contact.structured_name.nickname.clone(),
+        primary_phone: contact.phone.clone(),
+        mobile_phone: contact_phone_by_label(contact, &["mobile", "cell"]),
+        home_phone: contact_phone_by_label(contact, &["home"]),
+        business2_phones: contact_phone_values_by_label(contact, &["work2", "business2"]),
+        company_name: contact.organization_name.clone(),
+        title: contact.job_title.clone(),
+        department_name: contact.team.clone(),
+        postal_address: contact_address_value(contact, &["full", "address"]),
+        street_address: contact_address_value(contact, &["street", "streetAddress", "address"]),
+        locality: contact_address_value(contact, &["city", "locality"]),
+        state_or_province: contact_address_value(contact, &["state", "region", "stateOrProvince"]),
+        country: contact_address_value(contact, &["country"]),
+        postal_code: contact_address_value(contact, &["postcode", "postalCode", "zip"]),
+        phonetic_given_name: contact.structured_name.phonetic_given.clone(),
+        phonetic_surname: contact.structured_name.phonetic_family.clone(),
+    }
+}
+
+fn contact_phone_by_label(contact: &AccessibleContact, labels: &[&str]) -> String {
+    contact_phone_values_by_label(contact, labels)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
+fn contact_phone_values_by_label(contact: &AccessibleContact, labels: &[&str]) -> Vec<String> {
+    contact_labeled_json_values(&contact.phones_json, "phone", labels)
+}
+
+fn contact_labeled_json_values(
+    value: &serde_json::Value,
+    key: &str,
+    labels: &[&str],
+) -> Vec<String> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            let label = item
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            labels
+                .iter()
+                .any(|expected| label.eq_ignore_ascii_case(expected))
+        })
+        .filter_map(|item| item.get(key).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn contact_address_value(contact: &AccessibleContact, keys: &[&str]) -> String {
+    contact
+        .addresses_json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find_map(|item| {
+            keys.iter()
+                .filter_map(|key| item.get(*key).and_then(serde_json::Value::as_str))
+                .map(str::trim)
+                .find(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_default()
 }
 
 fn address_book_group_display_name(source: &str, target: &str) -> String {

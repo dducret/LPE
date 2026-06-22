@@ -60,8 +60,9 @@ use crate::{
         EwsMessageTrackingEvent, EwsMessageTrackingReport, EwsMessageTrackingReportDetail,
         EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry,
         EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
+        ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
+        MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
         MapiFolderProfilePropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
         MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
@@ -1679,6 +1680,51 @@ fn test_message_flags(email: &JmapEmail) -> u32 {
     flags
 }
 
+fn fake_contact_phone_by_label(contact: &AccessibleContact, labels: &[&str]) -> String {
+    fake_contact_phone_values_by_label(contact, labels)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
+fn fake_contact_phone_values_by_label(contact: &AccessibleContact, labels: &[&str]) -> Vec<String> {
+    contact
+        .phones_json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            let label = item
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            labels
+                .iter()
+                .any(|expected| label.eq_ignore_ascii_case(expected))
+        })
+        .filter_map(|item| item.get("phone").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn fake_contact_address_value(contact: &AccessibleContact, keys: &[&str]) -> String {
+    contact
+        .addresses_json
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find_map(|item| {
+            keys.iter()
+                .filter_map(|key| item.get(*key).and_then(serde_json::Value::as_str))
+                .map(str::trim)
+                .find(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_default()
+}
+
 fn jmap_search_matches(email: &JmapEmail, search_text: &str) -> bool {
     let needle = search_text.trim().to_ascii_lowercase();
     if needle.is_empty() {
@@ -1826,6 +1872,7 @@ impl FakeStore {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }
     }
@@ -2400,6 +2447,7 @@ impl ExchangeStore for FakeStore {
                     modseq: 40,
                     total_emails: 0,
                     unread_emails: 0,
+                    size_octets: 0,
                     is_subscribed: input.is_subscribed,
                 };
                 self.mailboxes.lock().unwrap().push(mailbox.clone());
@@ -4440,6 +4488,7 @@ impl ExchangeStore for FakeStore {
                 entry_kind: ExchangeAddressBookEntryKind::Account,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: Vec::new(),
+                details: ExchangeAddressBookEntryDetails::default(),
             })
             .collect::<Vec<_>>();
         let principal_account_id = principal_account
@@ -4472,6 +4521,38 @@ impl ExchangeStore for FakeStore {
                     entry_kind: ExchangeAddressBookEntryKind::Contact,
                     directory_kind: ExchangeAddressBookDirectoryKind::Person,
                     member_emails: Vec::new(),
+                    details: ExchangeAddressBookEntryDetails {
+                        given_name: contact.structured_name.given.clone(),
+                        surname: contact.structured_name.family.clone(),
+                        nickname: contact.structured_name.nickname.clone(),
+                        primary_phone: contact.phone.clone(),
+                        mobile_phone: fake_contact_phone_by_label(contact, &["mobile", "cell"]),
+                        home_phone: fake_contact_phone_by_label(contact, &["home"]),
+                        business2_phones: fake_contact_phone_values_by_label(
+                            contact,
+                            &["work2", "business2"],
+                        ),
+                        company_name: contact.organization_name.clone(),
+                        title: contact.job_title.clone(),
+                        department_name: contact.team.clone(),
+                        postal_address: fake_contact_address_value(contact, &["full", "address"]),
+                        street_address: fake_contact_address_value(
+                            contact,
+                            &["street", "streetAddress", "address"],
+                        ),
+                        locality: fake_contact_address_value(contact, &["city", "locality"]),
+                        state_or_province: fake_contact_address_value(
+                            contact,
+                            &["state", "region", "stateOrProvince"],
+                        ),
+                        country: fake_contact_address_value(contact, &["country"]),
+                        postal_code: fake_contact_address_value(
+                            contact,
+                            &["postcode", "postalCode", "zip"],
+                        ),
+                        phonetic_given_name: contact.structured_name.phonetic_given.clone(),
+                        phonetic_surname: contact.structured_name.phonetic_family.clone(),
+                    },
                 }),
         );
         let group_alias_members = self.group_alias_members.lock().unwrap().clone();
@@ -4483,6 +4564,7 @@ impl ExchangeStore for FakeStore {
                 entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: group_alias_members.get(id).cloned().unwrap_or_default(),
+                details: ExchangeAddressBookEntryDetails::default(),
             },
         ));
         let extra_entry_tenants = self
@@ -5703,6 +5785,7 @@ impl ExchangeStore for FakeStore {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: input.is_subscribed,
         };
         self.mailboxes.lock().unwrap().push(mailbox.clone());

@@ -56,8 +56,8 @@ use crate::{
         EwsMessageTrackingReportDetail, EwsNonIndexableReport, EwsRetentionPolicyTag,
         EwsSearchableMailbox, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
         EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
-        ExchangeAddressBookEntryKind, ExchangeStore, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -12144,6 +12144,7 @@ fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddress
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
         member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
     }
 }
 
@@ -15760,6 +15761,7 @@ fn rpc_proxy_principal_address_book_entry(
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
         member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
     }
 }
 

@@ -237,6 +237,7 @@ pub(crate) fn virtual_special_mailbox(folder_id: u64) -> Option<JmapMailbox> {
         modseq: change_number_for_store_id(folder_id),
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     })
 }
@@ -4993,6 +4994,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = test_email();
@@ -5052,6 +5054,7 @@ mod tests {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let trash = JmapMailbox {
@@ -5063,6 +5066,7 @@ mod tests {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -5090,6 +5094,7 @@ mod tests {
             modseq: 51,
             total_emails: 7,
             unread_emails: 7,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -5115,6 +5120,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -5199,6 +5205,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = test_email();
@@ -5286,6 +5293,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let buffer = sync_manifest_buffer_with_attachments(
@@ -5353,6 +5361,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let buffer = sync_manifest_buffer_with_attachments(
@@ -5509,6 +5518,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let requested_property_tags = [PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT];
@@ -5585,6 +5595,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = test_email();
@@ -5694,6 +5705,7 @@ mod tests {
             modseq: 37,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         });
         let buffer = sync_manifest_buffer_with_attachments(
@@ -5810,6 +5822,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let buffer = sync_manifest_buffer_with_attachments(
@@ -5851,6 +5864,7 @@ mod tests {
             modseq: 42,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let buffer = sync_manifest_buffer_with_attachments(
@@ -6025,6 +6039,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let child = JmapMailbox {
@@ -6036,6 +6051,7 @@ mod tests {
             modseq: 43,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let buffer = sync_manifest_buffer_with_attachments(
@@ -6465,6 +6481,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = test_email();
@@ -6516,6 +6533,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = test_email();

@@ -75,6 +75,7 @@ pub struct JmapMailbox {
     pub modseq: u64,
     pub total_emails: u32,
     pub unread_emails: u32,
+    pub size_octets: u64,
     pub is_subscribed: bool,
 }
 
@@ -1082,6 +1083,7 @@ impl Storage {
                 mb.modseq,
                 mb.total_messages::bigint AS total_emails,
                 mb.unread_messages::bigint AS unread_emails,
+                COALESCE(folder_sizes.size_octets, 0)::bigint AS size_octets,
                 COALESCE(ms.is_subscribed, TRUE) AS is_subscribed
             FROM mailboxes mb
             LEFT JOIN mailbox_subscriptions ms
@@ -1089,6 +1091,17 @@ impl Storage {
              AND ms.mailbox_account_id = mb.account_id
              AND ms.mailbox_id = mb.id
              AND ms.subscriber_account_id = $2
+            LEFT JOIN LATERAL (
+                SELECT SUM(m.size_octets)::bigint AS size_octets
+                FROM mailbox_messages mm
+                JOIN messages m
+                  ON m.tenant_id = mm.tenant_id
+                 AND m.id = mm.message_id
+                WHERE mm.tenant_id = mb.tenant_id
+                  AND mm.account_id = mb.account_id
+                  AND mm.mailbox_id = mb.id
+                  AND mm.visibility <> 'expunged'
+            ) folder_sizes ON TRUE
             WHERE mb.tenant_id = $1
               AND mb.account_id = $2
             ORDER BY mb.sort_order ASC, lower(mb.display_name) ASC
@@ -1111,6 +1124,7 @@ impl Storage {
                         .map_err(|_| anyhow!("mailbox modseq is out of range"))?,
                     total_emails: row.total_emails.max(0) as u32,
                     unread_emails: row.unread_emails.max(0) as u32,
+                    size_octets: row.size_octets.max(0) as u64,
                     is_subscribed: row.is_subscribed,
                 })
             })

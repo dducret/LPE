@@ -2176,6 +2176,7 @@ mod tests {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }
     }

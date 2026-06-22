@@ -114,6 +114,8 @@ pub(crate) const QUICK_STEP_SETTINGS_FOLDER_ID: u64 =
     mapi_store_id(QUICK_STEP_SETTINGS_FOLDER_COUNTER);
 pub(crate) const PUBLIC_FOLDERS_ROOT_FOLDER_ID: u64 =
     mapi_store_id(PUBLIC_FOLDERS_ROOT_FOLDER_COUNTER);
+pub(crate) const CONVERSATION_MEMBERS_CONTENTS_TABLE_ID: u64 =
+    mapi_store_id(FIRST_RESERVED_HIGH_GLOBAL_COUNTER + 0x80);
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID

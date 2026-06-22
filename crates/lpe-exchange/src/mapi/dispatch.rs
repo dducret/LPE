@@ -10,7 +10,9 @@ use super::tables::*;
 use super::transport::*;
 use super::wire::{MapiPropertyType, MapiSyncType, RopId};
 use super::*;
-use crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
+use crate::mapi::identity::{
+    CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,
+};
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiFolderProfilePropertyValue,
     MapiIdentityObjectKind, MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint,
@@ -12119,6 +12121,7 @@ fn sync_mailboxes_with_collaboration_counts(
                 modseq: mapi_mailstore::change_number_for_store_id(folder.id),
                 total_emails: folder.item_count,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             });
         }
@@ -13781,6 +13784,14 @@ where
                     continue;
                 }
                 let associated = table_flags & 0x02 != 0;
+                let contents_folder_id = if table_flags & 0x80 != 0
+                    && folder_id == ROOT_FOLDER_ID
+                    && snapshot.public_folder_for_id(folder_id).is_none()
+                {
+                    CONVERSATION_MEMBERS_CONTENTS_TABLE_ID
+                } else {
+                    folder_id
+                };
                 if !snapshot
                     .folder_access_for_principal(folder_id, principal.account_id)
                     .map(|access| access.may_read)
@@ -13796,7 +13807,7 @@ where
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::ContentsTable {
-                        folder_id,
+                        folder_id: contents_folder_id,
                         associated,
                         columns: Vec::new(),
                         columns_set: false,
@@ -13812,14 +13823,14 @@ where
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 let row_count = if associated {
-                    associated_folder_message_count(folder_id, snapshot)
+                    associated_folder_message_count(contents_folder_id, snapshot)
                 } else {
-                    folder_message_count(folder_id, mailboxes, emails, snapshot)
+                    folder_message_count(contents_folder_id, mailboxes, emails, snapshot)
                 };
                 log_outlook_contents_table_open(
                     principal,
                     &request,
-                    folder_id,
+                    contents_folder_id,
                     table_flags,
                     associated,
                     row_count,
@@ -26633,6 +26644,7 @@ mod tests {
             modseq: 42,
             total_emails: 221,
             unread_emails: 17,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -27135,6 +27147,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 1,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -27146,6 +27159,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 1,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
         ];
@@ -27221,6 +27235,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = JmapEmail {
@@ -27345,6 +27360,7 @@ mod tests {
             modseq: 42,
             total_emails: 18,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
@@ -27420,6 +27436,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -29848,6 +29865,7 @@ mod tests {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let quick_step_folder = MapiObject::Folder {

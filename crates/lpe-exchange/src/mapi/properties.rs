@@ -12,6 +12,7 @@ use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiAttachment, MapiCommonViewNamedViewMessage,
     MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
+use crate::store::ExchangeAddressBookEntryDetails;
 use anyhow::bail;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
@@ -368,6 +369,8 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
 pub(in crate::mapi) const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
 pub(in crate::mapi) const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
 pub(in crate::mapi) const PID_TAG_IMPORTANCE: u32 = 0x0017_0003;
+pub(in crate::mapi) const PID_TAG_PRIORITY: u32 = 0x0026_0003;
+pub(in crate::mapi) const PID_TAG_SENSITIVITY: u32 = 0x0036_0003;
 pub(in crate::mapi) const PID_TAG_ORIGINAL_MESSAGE_CLASS_W: u32 = 0x004B_001F;
 pub(in crate::mapi) const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
 pub(in crate::mapi) const PID_TAG_DISPLAY_BCC_W: u32 = 0x0E02_001F;
@@ -652,6 +655,8 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY: u32 = 0x0000_825F;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_SEARCH_KEY: u32 = 0x0000_8584;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_ENTRY: u32 = 0x0000_8585;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
 pub(in crate::mapi) const PID_LID_EMAIL1_ADDRESS_TYPE: u32 = 0x0000_8082;
 pub(in crate::mapi) const PID_LID_EMAIL1_EMAIL_ADDRESS: u32 = 0x0000_8083;
@@ -726,6 +731,8 @@ pub(in crate::mapi) const PID_LID_TASK_START_DATE_TAG: u32 = 0x8104_0040;
 pub(in crate::mapi) const PID_LID_TASK_DUE_DATE_TAG: u32 = 0x8105_0040;
 pub(in crate::mapi) const PID_LID_COMPANIES_TAG: u32 = 0x8539_101F;
 pub(in crate::mapi) const PID_LID_CONTACTS_TAG: u32 = 0x853A_101F;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_SEARCH_KEY_TAG: u32 = 0x8584_0102;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_ENTRY_TAG: u32 = 0x8585_0102;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_W_TAG: u32 = 0x8586_001F;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_STRING8_TAG: u32 = 0x8586_001E;
 pub(in crate::mapi) const PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG: u32 = 0x8082_001F;
@@ -847,6 +854,8 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_EMAIL3_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
             (PID_LID_COMPANIES, PSETID_COMMON_GUID),
             (PID_LID_CONTACTS, PSETID_COMMON_GUID),
+            (PID_LID_CONTACT_LINK_SEARCH_KEY, PSETID_COMMON_GUID),
+            (PID_LID_CONTACT_LINK_ENTRY, PSETID_COMMON_GUID),
             (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
             (
                 PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID,
@@ -1210,6 +1219,7 @@ pub(in crate::mapi) fn sent_representing_entry_id(email: &JmapEmail) -> Vec<u8> 
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
         member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
     };
     super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
@@ -1455,6 +1465,9 @@ fn recipient_property_value(recipient: &MapiRecipient<'_>, property_tag: u32) ->
         .unwrap_or(&recipient.address.address);
     match property_tag {
         PID_TAG_RECIPIENT_TYPE => Some(MapiValue::U32(u32::from(recipient.recipient_type))),
+        PID_TAG_RECIPIENT_ORDER => Some(MapiValue::U32(recipient.order)),
+        PID_TAG_RECIPIENT_FLAGS => Some(MapiValue::U32(1)),
+        PID_TAG_RECIPIENT_TRACK_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_DISPLAY_NAME_W | PID_TAG_RECIPIENT_DISPLAY_NAME_W => {
             Some(MapiValue::String(display_name.to_string()))
         }
@@ -1658,6 +1671,10 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mapi_mailbox_display_name(mailbox))),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(mailbox.size_octets as i64)),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => {
+            Some(mapi_message_size_extended_value(mailbox.size_octets as i64))
+        }
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(mailbox_has_subfolders(mailbox, mailboxes))),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(
             if mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_")
@@ -1875,6 +1892,7 @@ pub(in crate::mapi) fn search_folder_definition_message_property_value(
         )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(MapiValue::I64(128)),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
@@ -1922,6 +1940,13 @@ fn search_folder_definition_message_id(definition: &SearchFolderDefinition) -> O
 }
 
 fn search_folder_template_id(definition: &SearchFolderDefinition) -> u32 {
+    if let Some(value) = definition
+        .restriction_json
+        .get("pidTagSearchFolderTemplateId")
+        .and_then(serde_json::Value::as_u64)
+    {
+        return value.min(u64::from(u32::MAX)) as u32;
+    }
     match definition.role.as_str() {
         "todo_search" => 10,
         _ if definition.is_builtin => 2,
@@ -1930,16 +1955,34 @@ fn search_folder_template_id(definition: &SearchFolderDefinition) -> u32 {
 }
 
 fn search_folder_storage_type(definition: &SearchFolderDefinition) -> u32 {
-    if definition
+    if let Some(value) = definition
+        .restriction_json
+        .get("pidTagSearchFolderStorageType")
+        .and_then(serde_json::Value::as_u64)
+    {
+        return value.min(u64::from(u32::MAX)) as u32;
+    }
+    if let Some(value) = definition
         .restriction_json
         .get("pidTagSearchFolderDefinition")
         .and_then(serde_json::Value::as_str)
-        .is_some()
+        .and_then(|value| BASE64_STANDARD.decode(value).ok())
+        .and_then(|blob| {
+            blob.get(4..8)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)
+        })
     {
-        0
-    } else {
-        0x48
+        return value;
     }
+    let mut storage_type = 0x48;
+    if search_folder_text_search(definition).is_some() {
+        storage_type |= 0x02;
+    }
+    if search_folder_numerical_search(definition).is_some() {
+        storage_type |= 0x01;
+    }
+    storage_type
 }
 
 fn search_folder_definition_blob(definition: &SearchFolderDefinition) -> Vec<u8> {
@@ -1954,8 +1997,8 @@ fn search_folder_definition_blob(definition: &SearchFolderDefinition) -> Vec<u8>
     let mut blob = Vec::new();
     blob.extend_from_slice(&0x0000_1004u32.to_le_bytes());
     blob.extend_from_slice(&search_folder_storage_type(definition).to_le_bytes());
-    blob.extend_from_slice(&0u32.to_le_bytes());
-    blob.push(0);
+    blob.extend_from_slice(&search_folder_numerical_search(definition).unwrap_or([0; 4]));
+    write_search_folder_text_search(&mut blob, search_folder_text_search(definition).as_deref());
     blob.extend_from_slice(&0u32.to_le_bytes());
     blob.extend_from_slice(
         &(definition
@@ -1971,6 +2014,62 @@ fn search_folder_definition_blob(definition: &SearchFolderDefinition) -> Vec<u8>
     blob
 }
 
+fn search_folder_text_search(definition: &SearchFolderDefinition) -> Option<String> {
+    definition
+        .restriction_json
+        .get("pidTagSearchFolderTextSearch")
+        .or_else(|| definition.restriction_json.get("textSearch"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(u16::MAX as usize).collect())
+}
+
+fn search_folder_numerical_search(definition: &SearchFolderDefinition) -> Option<[u8; 4]> {
+    if let Some(age) = definition
+        .restriction_json
+        .get("pidTagSearchFolderNumericalSearchAge")
+    {
+        let unit = age
+            .get("unit")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|unit| match unit {
+                "days" => Some(0u32),
+                "weeks" => Some(1u32),
+                "months" => Some(2u32),
+                _ => None,
+            })?;
+        let amount = age
+            .get("amount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default()
+            .min(u64::from(u16::MAX)) as u32;
+        return Some(((unit << 16) | amount).to_be_bytes());
+    }
+
+    definition
+        .restriction_json
+        .get("pidTagSearchFolderNumericalSearch")
+        .or_else(|| definition.restriction_json.get("numericalSearch"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|value| (value.min(u64::from(u32::MAX)) as u32).to_le_bytes())
+}
+
+fn write_search_folder_text_search(blob: &mut Vec<u8>, text: Option<&str>) {
+    let Some(text) = text else {
+        blob.push(0);
+        return;
+    };
+    let char_count = text.chars().count().min(u16::MAX as usize);
+    if char_count > 254 {
+        blob.push(255);
+        blob.extend_from_slice(&(char_count as u16).to_le_bytes());
+    } else {
+        blob.push(char_count as u8);
+    }
+    blob.extend_from_slice(text.as_bytes());
+}
+
 fn search_folder_last_used() -> u32 {
     214_089_600
 }
@@ -1980,6 +2079,13 @@ fn search_folder_expiration() -> u32 {
 }
 
 fn search_folder_tag(definition: &SearchFolderDefinition) -> u32 {
+    if let Some(value) = definition
+        .restriction_json
+        .get("pidTagSearchFolderTag")
+        .and_then(serde_json::Value::as_u64)
+    {
+        return value.min(u64::from(u32::MAX)) as u32;
+    }
     let bytes = definition.id.as_bytes();
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
 }
@@ -2373,6 +2479,8 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
         PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
+        PID_TAG_PRIORITY | PID_TAG_SENSITIVITY => Some(MapiValue::U32(0)),
+        PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(String::new())),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
@@ -2407,7 +2515,8 @@ pub(in crate::mapi) fn email_property_value(
             .reminder_at
             .as_deref()
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(email.size_octets)),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(email.size_octets)),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(email_sender_name(email).to_string())),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
@@ -2538,6 +2647,7 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(MapiValue::I64(128)),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
@@ -2654,6 +2764,7 @@ fn navigation_shortcut_owner_entry_id(account_id: Uuid) -> Vec<u8> {
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
         member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
     };
     super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
@@ -2693,6 +2804,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(MapiValue::I64(128)),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
@@ -3020,7 +3132,12 @@ fn write_view_column_packet(
     value.extend_from_slice(&width.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     value.extend_from_slice(&flags.to_le_bytes());
-    value.extend_from_slice(&[0; 12]);
+    match kind {
+        ViewColumnKind::Id => value.extend_from_slice(&[0; 12]),
+        ViewColumnKind::NamedId { .. } | ViewColumnKind::NamedString { .. } => {
+            value.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0x34, 0x01, 0x9A, 0x11]);
+        }
+    }
     match kind {
         ViewColumnKind::Id => {
             value.extend_from_slice(&0u32.to_le_bytes());
@@ -3033,7 +3150,7 @@ fn write_view_column_packet(
         }
         ViewColumnKind::NamedString { guid, name } => {
             value.extend_from_slice(&1u32.to_le_bytes());
-            value.extend_from_slice(&0u32.to_le_bytes());
+            value.extend_from_slice(&0x0022_A764u32.to_le_bytes());
             value.extend_from_slice(&guid);
             let mut buffer = Vec::new();
             for unit in name.encode_utf16() {
@@ -3273,6 +3390,9 @@ pub(in crate::mapi) fn conversation_action_property_value(
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(
             conversation_action_size(action).min(i32::MAX as usize) as i32,
         )),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+            conversation_action_size(action).min(i64::MAX as usize) as i64,
+        )),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
@@ -3442,10 +3562,13 @@ pub(in crate::mapi) fn conversation_id_from_index(value: &[u8]) -> Option<Uuid> 
 pub(in crate::mapi) fn conversation_action_subject(
     action: &lpe_storage::ConversationAction,
 ) -> String {
-    if action.subject.trim().is_empty() {
+    let subject = action.subject.trim();
+    if subject.is_empty() {
         "Conv.Action".to_string()
+    } else if subject.starts_with("Conv.Action") {
+        subject.to_string()
     } else {
-        action.subject.clone()
+        format!("Conv.Action: {subject}")
     }
 }
 
@@ -3566,7 +3689,10 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(contact_size(contact))),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(contact_size(contact))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => {
+            Some(mapi_message_size_extended_value(contact_size(contact)))
+        }
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
         )),
@@ -3749,7 +3875,8 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(event_size(event))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(event_size(event))),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(calendar_organizer_name(event))),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(calendar_organizer_email(event))),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(calendar_display_to(event))),
@@ -4103,7 +4230,8 @@ pub(in crate::mapi) fn task_property_value_with_reminder(
         PID_LID_PERCENT_COMPLETE_TAG => Some(MapiValue::F64(task_percent_complete(task).to_bits())),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!task.recurrence_rule.trim().is_empty())),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(task_size(task))),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(task_size(task))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(task_size(task))),
         PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&task.updated_at),
         )),
@@ -4210,7 +4338,8 @@ pub(in crate::mapi) fn note_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(note_size(note))),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(note_size(note))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(note_size(note))),
         PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&note.updated_at),
         )),
@@ -4267,7 +4396,10 @@ pub(in crate::mapi) fn journal_entry_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(journal_entry_size(entry))),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(journal_entry_size(entry))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => {
+            Some(mapi_message_size_extended_value(journal_entry_size(entry)))
+        }
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
         )),
@@ -4319,10 +4451,12 @@ pub(in crate::mapi) fn journal_entry_named_property_value(
             &entry.contacts_json,
         ))),
         PID_LID_CONTACT_LINK_NAME_W_TAG | PID_LID_CONTACT_LINK_NAME_STRING8_TAG => {
-            json_string_array(&entry.contacts_json)
-                .into_iter()
-                .next()
-                .map(MapiValue::String)
+            let names = json_string_array(&entry.contacts_json);
+            (!names.is_empty()).then(|| MapiValue::String(names.join("; ")))
+        }
+        PID_LID_CONTACT_LINK_ENTRY_TAG => Some(MapiValue::Binary(empty_contact_link_entry_blob())),
+        PID_LID_CONTACT_LINK_SEARCH_KEY_TAG => {
+            Some(MapiValue::Binary(empty_contact_link_search_key_blob()))
         }
         PID_LID_LOG_TYPE_W_TAG | PID_LID_LOG_TYPE_STRING8_TAG => {
             Some(MapiValue::String(entry.entry_type.clone()))
@@ -4360,20 +4494,42 @@ fn json_string_array(value: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
 }
 
+fn contact_names_from_link_name(value: &str) -> Vec<String> {
+    value
+        .split(';')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn empty_contact_link_entry_blob() -> Vec<u8> {
+    0u32.to_le_bytes().to_vec()
+}
+
+fn empty_contact_link_search_key_blob() -> Vec<u8> {
+    0u16.to_le_bytes().to_vec()
+}
+
+fn json_from_mapi_multi_string_value(
+    properties: &HashMap<u32, MapiValue>,
+    tag: u32,
+) -> Option<String> {
+    match properties.get(&tag) {
+        Some(MapiValue::MultiString(values)) => serde_json::to_string(values).ok(),
+        Some(MapiValue::String(value)) if !value.trim().is_empty() => {
+            serde_json::to_string(&vec![value.clone()]).ok()
+        }
+        _ => None,
+    }
+}
+
 fn json_from_mapi_multi_string(
     properties: &HashMap<u32, MapiValue>,
     tag: u32,
     existing: &str,
 ) -> String {
-    match properties.get(&tag) {
-        Some(MapiValue::MultiString(values)) => {
-            serde_json::to_string(values).unwrap_or_else(|_| existing.to_string())
-        }
-        Some(MapiValue::String(value)) if !value.trim().is_empty() => {
-            serde_json::to_string(&vec![value.clone()]).unwrap_or_else(|_| existing.to_string())
-        }
-        _ => existing.to_string(),
-    }
+    json_from_mapi_multi_string_value(properties, tag).unwrap_or_else(|| existing.to_string())
 }
 
 pub(in crate::mapi) fn note_size(note: &ClientNote) -> i64 {
@@ -4418,6 +4574,14 @@ fn email_percent_complete(email: &JmapEmail) -> f64 {
     }
 }
 
+pub(in crate::mapi) fn mapi_message_size_value(size_octets: i64) -> MapiValue {
+    MapiValue::U32(size_octets.clamp(0, i64::from(u32::MAX)) as u32)
+}
+
+pub(in crate::mapi) fn mapi_message_size_extended_value(size_octets: i64) -> MapiValue {
+    MapiValue::I64(size_octets.max(0))
+}
+
 pub(in crate::mapi) fn attachment_property_value(
     attachment: &MapiAttachment,
     property_tag: u32,
@@ -4432,7 +4596,9 @@ pub(in crate::mapi) fn attachment_property_value(
             &attachment.file_name,
         ))),
         PID_TAG_ATTACH_MIME_TAG_W => Some(MapiValue::String(attachment.media_type.clone())),
-        PID_TAG_ATTACH_SIZE => Some(MapiValue::U64(attachment.size_octets)),
+        PID_TAG_ATTACH_SIZE => Some(MapiValue::U32(
+            attachment.size_octets.min(u64::from(u32::MAX)) as u32,
+        )),
         PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(ATTACH_BY_VALUE)),
         PID_TAG_RENDERING_POSITION => Some(MapiValue::U32(u32::MAX)),
         PID_TAG_ATTACHMENT_FLAGS | PID_TAG_ATTACHMENT_LINK_ID => Some(MapiValue::U32(0)),
@@ -5888,11 +6054,22 @@ pub(in crate::mapi) fn journal_entry_input_from_mapi(
             PID_LID_COMPANIES_TAG,
             &existing.companies_json,
         ),
-        contacts_json: json_from_mapi_multi_string(
-            properties,
-            PID_LID_CONTACTS_TAG,
-            &existing.contacts_json,
-        ),
+        contacts_json: json_from_mapi_multi_string_value(properties, PID_LID_CONTACTS_TAG)
+            .or_else(|| {
+                optional_pending_text_property(
+                    properties,
+                    &[
+                        PID_LID_CONTACT_LINK_NAME_W_TAG,
+                        PID_LID_CONTACT_LINK_NAME_STRING8_TAG,
+                    ],
+                )
+                .and_then(|value| {
+                    let names = contact_names_from_link_name(&value);
+                    (!names.is_empty()).then(|| serde_json::to_string(&names).ok())
+                })
+                .flatten()
+            })
+            .unwrap_or_else(|| existing.contacts_json.clone()),
     }
 }
 
@@ -5919,6 +6096,10 @@ fn reject_unsupported_mapi_journal_entry_properties(
                 | PID_LID_LOG_TYPE_DESC_STRING8_TAG
                 | PID_LID_COMPANIES_TAG
                 | PID_LID_CONTACTS_TAG
+                | PID_LID_CONTACT_LINK_NAME_W_TAG
+                | PID_LID_CONTACT_LINK_NAME_STRING8_TAG
+                | PID_LID_CONTACT_LINK_ENTRY_TAG
+                | PID_LID_CONTACT_LINK_SEARCH_KEY_TAG
         );
         if !supported {
             return Err(anyhow!(
@@ -8586,6 +8767,7 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi::wire::MapiRestrictionType;
     use crate::mapi_store::{
         MapiCollaborationFolder, MapiCollaborationFolderKind, MapiPublicFolder,
     };
@@ -8604,6 +8786,7 @@ mod tests {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }
     }
@@ -8963,6 +9146,90 @@ mod tests {
         assert_ne!(source_key, predecessor);
     }
 
+    #[test]
+    fn microsoft_oxocfg_conversation_action_example_projects_fai_properties() {
+        let conversation_id = Uuid::from_bytes([
+            0xB7, 0xA2, 0xB5, 0xC4, 0xAA, 0x65, 0x1C, 0xF2, 0xD3, 0x8C, 0x62, 0x8C, 0x0E, 0xAF,
+            0x56, 0xC4,
+        ]);
+        let move_folder_entry_id =
+            hex_to_bytes("000000000C99F4EDA2F1E441B15B9B2510913E9D02810000").unwrap();
+        let move_store_entry_id = hex_to_bytes(
+            "0000000038A1BB1005E5101AA1BB08002B2A56C200006D737073742E646C6C00\
+             000000004E495441F9BFB80100AA0037D96E0000000043003A005C0044006F00\
+             630075006D0065006E0074007300200061006E00640020005300650074007400\
+             69006E00670073005C0061006A0061006D00650073005C004C006F0063006100\
+             6C002000530065007400740069006E00670073005C004100700070006C006900\
+             63006100740069006F006E00200044006100740061005C004D00690063007200\
+             6F0073006F00660074005C004F00750074006C006F006F006B005C0041007200\
+             63006800690076006500640020004D00610069006C002E007000730074000000",
+        )
+        .unwrap();
+        let action = lpe_storage::ConversationAction {
+            id: Uuid::from_u128(0x4301),
+            conversation_id,
+            subject: "Solidifying our proposal to Fabrikam, Inc.".to_string(),
+            categories_json: "[\"Fabrikam\",\"Business Proposals\"]".to_string(),
+            move_folder_entry_id: Some(move_folder_entry_id.clone()),
+            move_store_entry_id: Some(move_store_entry_id.clone()),
+            move_target_mailbox_id: None,
+            max_delivery_time: Some("2009-02-17T23:31:42Z".to_string()),
+            last_applied_time: Some("2009-02-17T23:51:11Z".to_string()),
+            version: lpe_storage::CONVERSATION_ACTION_VERSION,
+            processed: 1,
+            created_at: "2009-02-17T23:51:11Z".to_string(),
+            updated_at: "2009-02-17T23:51:11Z".to_string(),
+        };
+        let message = MapiConversationActionMessage {
+            id: crate::mapi::identity::mapi_store_id(0x4301),
+            folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            canonical_id: action.id,
+            action,
+        };
+
+        assert_eq!(
+            conversation_action_property_value(&message, PID_TAG_SUBJECT_W),
+            Some(MapiValue::String(
+                "Conv.Action: Solidifying our proposal to Fabrikam, Inc.".to_string()
+            ))
+        );
+        assert_eq!(
+            conversation_action_property_value(&message, PID_TAG_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.ConversationAction".to_string()))
+        );
+        assert_eq!(
+            conversation_action_property_value(&message, PID_TAG_CONVERSATION_INDEX),
+            Some(MapiValue::Binary(
+                hex_to_bytes("010000000000B7A2B5C4AA651CF2D38C628C0EAF56C4").unwrap()
+            ))
+        );
+        assert_eq!(
+            conversation_action_property_value(
+                &message,
+                PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG
+            ),
+            Some(MapiValue::Binary(move_folder_entry_id))
+        );
+        assert_eq!(
+            conversation_action_property_value(
+                &message,
+                PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG
+            ),
+            Some(MapiValue::Binary(move_store_entry_id))
+        );
+        assert_eq!(
+            conversation_action_property_value(&message, PID_LID_CONVERSATION_ACTION_VERSION_TAG),
+            Some(MapiValue::I32(0x003C_CCCC))
+        );
+        assert_eq!(
+            conversation_action_property_value(&message, PID_NAME_KEYWORDS_TAG),
+            Some(MapiValue::MultiString(vec![
+                "Fabrikam".to_string(),
+                "Business Proposals".to_string()
+            ]))
+        );
+    }
+
     fn round_trip(property_tag: u32, value: &MapiValue) -> MapiValue {
         let mut encoded = Vec::new();
         write_mapi_value(&mut encoded, property_tag, value);
@@ -9009,6 +9276,26 @@ mod tests {
         assert_eq!(
             mailbox_property_value_with_context(&child, &mailboxes, PID_TAG_SUBFOLDERS),
             Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn microsoft_oxcfold_folder_message_size_projects_32_and_64_bit_values() {
+        let mut inbox = mailbox(
+            "11111111-1111-1111-1111-111111111111",
+            None,
+            "inbox",
+            "Inbox",
+        );
+        inbox.size_octets = u64::from(u32::MAX) + 10;
+
+        assert_eq!(
+            mailbox_property_value_with_context(&inbox, &[], PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(u32::MAX))
+        );
+        assert_eq!(
+            mailbox_property_value_with_context(&inbox, &[], PID_TAG_MESSAGE_SIZE_EXTENDED),
+            Some(MapiValue::I64(i64::from(u32::MAX) + 10))
         );
     }
 
@@ -9417,6 +9704,223 @@ mod tests {
             &[0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00]
         );
         assert_eq!(&blob[17..21], &[0x01, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn microsoft_oxosrch_stored_definition_blob_projects_storage_type() {
+        let definition_id = Uuid::parse_str("757154c8-c1df-c14c-91de-09c2044d2d1c").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(124),
+        );
+        let stored_blob = vec![
+            0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let definition = SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376),
+            role: "unread_mail".to_string(),
+            display_name: "Unread Mail".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_unread_mail",
+                "pidTagSearchFolderTag": 1045439171u32,
+                "pidTagSearchFolderDefinition": BASE64_STANDARD.encode(&stored_blob)
+            }),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        };
+
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_STORAGE_TYPE
+            ),
+            Some(MapiValue::U32(0x48))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_DEFINITION
+            ),
+            Some(MapiValue::Binary(stored_blob))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_ID
+            ),
+            Some(MapiValue::Binary(definition_id.as_bytes().to_vec()))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_MESSAGE_CLASS_W
+            ),
+            Some(MapiValue::String(
+                "IPM.Microsoft.WunderBar.SFInfo".to_string()
+            ))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_DISPLAY_NAME_W
+            ),
+            Some(MapiValue::String("Unread Mail".to_string()))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_LAST_USED
+            ),
+            Some(MapiValue::U32(214_089_600))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_EXPIRATION
+            ),
+            Some(MapiValue::U32(214_089_641))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_TEMPLATE_ID
+            ),
+            Some(MapiValue::U32(2))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_TAG
+            ),
+            Some(MapiValue::U32(1_045_439_171))
+        );
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_EFP_FLAGS
+            ),
+            Some(MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn microsoft_oxosrch_large_messages_template_projects_text_and_numerical_search() {
+        let definition_id = Uuid::from_u128(0x757154c8_c1df_c14c_91de_09c2044d2d1c);
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(125),
+        );
+        let definition = SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376),
+            role: "large_messages".to_string(),
+            display_name: "Large Messages".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({
+                "scope": "top_of_personal_folders",
+                "recursive": true
+            }),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_large_messages",
+                "pidTagSearchFolderTemplateId": 10,
+                "pidTagSearchFolderTextSearch": "larger than 1024 KB",
+                "pidTagSearchFolderNumericalSearch": 1024
+            }),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        };
+
+        let Some(MapiValue::Binary(blob)) = search_folder_definition_message_property_value(
+            &definition,
+            Uuid::nil(),
+            PID_TAG_SEARCH_FOLDER_DEFINITION,
+        ) else {
+            panic!("expected PidTagSearchFolderDefinition");
+        };
+
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_TEMPLATE_ID
+            ),
+            Some(MapiValue::U32(10))
+        );
+        assert_eq!(&blob[4..8], &0x4Bu32.to_le_bytes());
+        assert_eq!(&blob[8..12], &1024u32.to_le_bytes());
+        assert_eq!(blob[12], "larger than 1024 KB".len() as u8);
+        assert_eq!(&blob[13..32], b"larger than 1024 KB");
+        assert_eq!(&blob[32..36], &0u32.to_le_bytes());
+        assert_eq!(&blob[36..40], &1u32.to_le_bytes());
+    }
+
+    #[test]
+    fn microsoft_oxosrch_old_mail_template_projects_big_endian_age_numerical_search() {
+        let definition_id = Uuid::from_u128(0x857154c8_c1df_c14c_91de_09c2044d2d1c);
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(126),
+        );
+        let definition = SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376),
+            role: "old_mail".to_string(),
+            display_name: "Old Mail".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({
+                "scope": "top_of_personal_folders",
+                "recursive": true
+            }),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_old_mail",
+                "pidTagSearchFolderTemplateId": 11,
+                "pidTagSearchFolderStorageType": 0x00002049u32,
+                "pidTagSearchFolderNumericalSearchAge": {
+                    "unit": "weeks",
+                    "amount": 42
+                }
+            }),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        };
+
+        let Some(MapiValue::Binary(blob)) = search_folder_definition_message_property_value(
+            &definition,
+            Uuid::nil(),
+            PID_TAG_SEARCH_FOLDER_DEFINITION,
+        ) else {
+            panic!("expected PidTagSearchFolderDefinition");
+        };
+
+        assert_eq!(
+            search_folder_definition_message_property_value(
+                &definition,
+                Uuid::nil(),
+                PID_TAG_SEARCH_FOLDER_TEMPLATE_ID
+            ),
+            Some(MapiValue::U32(11))
+        );
+        assert_eq!(&blob[4..8], &0x0000_2049u32.to_le_bytes());
+        assert_eq!(&blob[8..12], &[0x00, 0x01, 0x00, 0x2A]);
+        assert_eq!(blob[12], 0);
+        assert_eq!(&blob[13..17], &0u32.to_le_bytes());
+        assert_eq!(&blob[17..21], &1u32.to_le_bytes());
     }
 
     #[test]
@@ -9887,6 +10391,102 @@ mod tests {
     }
 
     #[test]
+    fn microsoft_oxprops_message_size_projects_integer32_property() {
+        assert_eq!(mapi_message_size_value(512), MapiValue::U32(512));
+        assert_eq!(
+            mapi_message_size_value(i64::from(u32::MAX) + 10),
+            MapiValue::U32(u32::MAX)
+        );
+        assert_eq!(mapi_message_size_value(-1), MapiValue::U32(0));
+        assert_eq!(
+            round_trip(PID_TAG_MESSAGE_SIZE, &mapi_message_size_value(512)),
+            MapiValue::I32(512)
+        );
+        assert_eq!(
+            mapi_message_size_extended_value(i64::from(u32::MAX) + 10),
+            MapiValue::I64(i64::from(u32::MAX) + 10)
+        );
+        assert_eq!(mapi_message_size_extended_value(-1), MapiValue::I64(0));
+        assert_eq!(
+            round_trip(
+                PID_TAG_MESSAGE_SIZE_EXTENDED,
+                &mapi_message_size_extended_value(i64::from(u32::MAX) + 10),
+            ),
+            MapiValue::I64(i64::from(u32::MAX) + 10)
+        );
+
+        let account_id = Uuid::from_u128(0x33333333_3333_4333_8333_333333333333);
+        let mut contact = default_contact_for_mapping(account_id, "default");
+        contact.name = "Ada".to_string();
+        assert!(matches!(
+            contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(_))
+        ));
+        assert!(matches!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_TAG_MESSAGE_SIZE_EXTENDED
+            ),
+            Some(MapiValue::I64(_))
+        ));
+
+        let mut event = default_event_for_mapping(account_id, "default");
+        event.title = "Standup".to_string();
+        assert!(matches!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(_))
+        ));
+        assert!(matches!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_MESSAGE_SIZE_EXTENDED),
+            Some(MapiValue::I64(_))
+        ));
+
+        let mut task = default_task_for_mapping(account_id, "default");
+        task.title = "Follow up".to_string();
+        assert!(matches!(
+            task_property_value(&task, 1, TASKS_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(_))
+        ));
+        assert!(matches!(
+            task_property_value(&task, 1, TASKS_FOLDER_ID, PID_TAG_MESSAGE_SIZE_EXTENDED),
+            Some(MapiValue::I64(_))
+        ));
+
+        let note = ClientNote {
+            title: "Note".to_string(),
+            ..default_note_for_mapping()
+        };
+        assert!(matches!(
+            note_property_value(&note, 1, NOTES_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(_))
+        ));
+        assert!(matches!(
+            note_property_value(&note, 1, NOTES_FOLDER_ID, PID_TAG_MESSAGE_SIZE_EXTENDED),
+            Some(MapiValue::I64(_))
+        ));
+
+        let journal = JournalEntry {
+            subject: "Call".to_string(),
+            ..default_journal_entry_for_mapping()
+        };
+        assert!(matches!(
+            journal_entry_property_value(&journal, 1, JOURNAL_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
+            Some(MapiValue::U32(_))
+        ));
+        assert!(matches!(
+            journal_entry_property_value(
+                &journal,
+                1,
+                JOURNAL_FOLDER_ID,
+                PID_TAG_MESSAGE_SIZE_EXTENDED,
+            ),
+            Some(MapiValue::I64(_))
+        ));
+    }
+
+    #[test]
     fn binary_property_uses_rop_u16_length_prefix() {
         let mut encoded = Vec::new();
         write_mapi_value(
@@ -9900,6 +10500,29 @@ mod tests {
             parse_mapi_property_value(&mut Cursor::new(&encoded), PID_TAG_ATTACH_DATA_BINARY)
                 .unwrap(),
             MapiValue::Binary(vec![0xDE, 0xAD, 0xBE, 0xEF])
+        );
+    }
+
+    #[test]
+    fn microsoft_oxcmsg_attachment_size_projects_integer32_property() {
+        let attachment = MapiAttachment {
+            attach_num: 1,
+            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+            file_reference: "attachment:message:one".to_string(),
+            file_name: "test.txt".to_string(),
+            media_type: "text/plain".to_string(),
+            disposition: None,
+            content_id: None,
+            size_octets: 512,
+        };
+
+        assert_eq!(
+            attachment_property_value(&attachment, PID_TAG_ATTACH_SIZE),
+            Some(MapiValue::U32(512))
+        );
+        assert_eq!(
+            round_trip(PID_TAG_ATTACH_SIZE, &MapiValue::U32(512)),
+            MapiValue::I32(512)
         );
     }
 
@@ -9953,7 +10576,15 @@ mod tests {
         );
         journal_properties.insert(
             PID_LID_CONTACTS_TAG,
-            MapiValue::MultiString(vec!["Adam Barr".into()]),
+            MapiValue::MultiString(vec!["Adam Barr".into(), "Ryan Gregg".into()]),
+        );
+        journal_properties.insert(
+            PID_LID_CONTACT_LINK_ENTRY_TAG,
+            MapiValue::Binary(empty_contact_link_entry_blob()),
+        );
+        journal_properties.insert(
+            PID_LID_CONTACT_LINK_SEARCH_KEY_TAG,
+            MapiValue::Binary(empty_contact_link_search_key_blob()),
         );
         let journal = journal_entry_input_from_mapi(
             Uuid::nil(),
@@ -9967,7 +10598,20 @@ mod tests {
         assert_eq!(journal.entry_type, "Phone call");
         assert_eq!(journal.message_class, "IPM.Activity");
         assert_eq!(journal.companies_json, "[\"Contoso\"]");
-        assert_eq!(journal.contacts_json, "[\"Adam Barr\"]");
+        assert_eq!(journal.contacts_json, "[\"Adam Barr\",\"Ryan Gregg\"]");
+
+        let mut link_name_properties = HashMap::new();
+        link_name_properties.insert(
+            PID_LID_CONTACT_LINK_NAME_W_TAG,
+            MapiValue::String("Adam Barr; Ryan Gregg".into()),
+        );
+        let journal = journal_entry_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(3)),
+            &default_journal_entry_for_mapping(),
+            &link_name_properties,
+        );
+        assert_eq!(journal.contacts_json, "[\"Adam Barr\",\"Ryan Gregg\"]");
     }
 
     #[test]
@@ -10024,6 +10668,20 @@ mod tests {
             }),
             Some(PID_LID_LOG_TYPE as u16)
         );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_CONTACT_LINK_ENTRY),
+            }),
+            Some(PID_LID_CONTACT_LINK_ENTRY as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_CONTACT_LINK_SEARCH_KEY),
+            }),
+            Some(PID_LID_CONTACT_LINK_SEARCH_KEY as u16)
+        );
 
         let note = ClientNote {
             color: "pink".to_string(),
@@ -10038,7 +10696,7 @@ mod tests {
             entry_type: "Phone call".to_string(),
             starts_at: Some("2026-05-19T10:00:00Z".to_string()),
             companies_json: "[\"Contoso\"]".to_string(),
-            contacts_json: "[\"Adam Barr\"]".to_string(),
+            contacts_json: "[\"Adam Barr\",\"Ryan Gregg\"]".to_string(),
             ..default_journal_entry_for_mapping()
         };
         assert_eq!(
@@ -10056,7 +10714,32 @@ mod tests {
                 JOURNAL_FOLDER_ID,
                 PID_LID_CONTACT_LINK_NAME_W_TAG
             ),
-            Some(MapiValue::String("Adam Barr".to_string()))
+            Some(MapiValue::String("Adam Barr; Ryan Gregg".to_string()))
+        );
+        assert_eq!(
+            journal_entry_property_value(&journal, 1, JOURNAL_FOLDER_ID, PID_LID_CONTACTS_TAG),
+            Some(MapiValue::MultiString(vec![
+                "Adam Barr".to_string(),
+                "Ryan Gregg".to_string()
+            ]))
+        );
+        assert_eq!(
+            journal_entry_property_value(
+                &journal,
+                1,
+                JOURNAL_FOLDER_ID,
+                PID_LID_CONTACT_LINK_ENTRY_TAG
+            ),
+            Some(MapiValue::Binary(empty_contact_link_entry_blob()))
+        );
+        assert_eq!(
+            journal_entry_property_value(
+                &journal,
+                1,
+                JOURNAL_FOLDER_ID,
+                PID_LID_CONTACT_LINK_SEARCH_KEY_TAG
+            ),
+            Some(MapiValue::Binary(empty_contact_link_search_key_blob()))
         );
     }
 
@@ -10168,6 +10851,141 @@ mod tests {
         );
         assert!(!restriction_matches(Some(&restriction), |property_tag| {
             event_property_value(&one_off, 1, CALENDAR_FOLDER_ID, property_tag)
+        }));
+    }
+
+    #[test]
+    fn microsoft_oxcdata_reminder_restriction_example_parses_and_matches() {
+        const MSGFLAG_SUBMIT: u32 = 0x0000_0004;
+
+        let account_id = Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376);
+        let calendar_parent_entry_id =
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, CALENDAR_FOLDER_ID)
+                .expect("calendar entry id");
+
+        fn push_property_restriction(
+            restriction: &mut Vec<u8>,
+            relop: u8,
+            property_tag: u32,
+            value: &MapiValue,
+        ) {
+            restriction.push(MapiRestrictionType::Property as u8);
+            restriction.push(relop);
+            restriction.extend_from_slice(&property_tag.to_le_bytes());
+            restriction.extend_from_slice(&property_tag.to_le_bytes());
+            write_mapi_value(restriction, property_tag, value);
+        }
+
+        fn push_content_restriction(
+            restriction: &mut Vec<u8>,
+            property_tag: u32,
+            fuzzy_level_low: u16,
+            value: &str,
+        ) {
+            restriction.push(MapiRestrictionType::Content as u8);
+            restriction.extend_from_slice(&fuzzy_level_low.to_le_bytes());
+            restriction.extend_from_slice(&0u16.to_le_bytes());
+            restriction.extend_from_slice(&property_tag.to_le_bytes());
+            restriction.extend_from_slice(&property_tag.to_le_bytes());
+            write_utf16z(restriction, value);
+        }
+
+        fn push_exist_restriction(restriction: &mut Vec<u8>, property_tag: u32) {
+            restriction.push(MapiRestrictionType::Exist as u8);
+            restriction.extend_from_slice(&property_tag.to_le_bytes());
+        }
+
+        let mut restriction = vec![MapiRestrictionType::And as u8];
+        restriction.extend_from_slice(&2u16.to_le_bytes());
+
+        restriction.push(MapiRestrictionType::And as u8);
+        restriction.extend_from_slice(&8u16.to_le_bytes());
+        for folder_id in [
+            TRASH_FOLDER_ID,
+            JUNK_FOLDER_ID,
+            DRAFTS_FOLDER_ID,
+            OUTBOX_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+            SYNC_ISSUES_FOLDER_ID,
+        ] {
+            let entry_id =
+                crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
+                    .expect("excluded folder entry id");
+            push_property_restriction(
+                &mut restriction,
+                0x05,
+                PID_TAG_PARENT_ENTRY_ID,
+                &MapiValue::Binary(entry_id),
+            );
+        }
+
+        restriction.push(MapiRestrictionType::And as u8);
+        restriction.extend_from_slice(&3u16.to_le_bytes());
+        restriction.push(MapiRestrictionType::Not as u8);
+        restriction.push(MapiRestrictionType::And as u8);
+        restriction.extend_from_slice(&2u16.to_le_bytes());
+        push_exist_restriction(&mut restriction, PID_TAG_MESSAGE_CLASS_W);
+        push_content_restriction(
+            &mut restriction,
+            PID_TAG_MESSAGE_CLASS_W,
+            0x0002,
+            "IPM.Schedule",
+        );
+        restriction.push(MapiRestrictionType::Bitmask as u8);
+        restriction.push(0);
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_FLAGS.to_le_bytes());
+        restriction.extend_from_slice(&MSGFLAG_SUBMIT.to_le_bytes());
+        restriction.push(MapiRestrictionType::Or as u8);
+        restriction.extend_from_slice(&2u16.to_le_bytes());
+        push_property_restriction(
+            &mut restriction,
+            0x04,
+            PID_LID_REMINDER_SET_TAG,
+            &MapiValue::Bool(true),
+        );
+        restriction.push(MapiRestrictionType::And as u8);
+        restriction.extend_from_slice(&2u16.to_le_bytes());
+        push_exist_restriction(&mut restriction, PID_LID_RECURRING_TAG);
+        push_property_restriction(
+            &mut restriction,
+            0x04,
+            PID_LID_RECURRING_TAG,
+            &MapiValue::Bool(true),
+        );
+
+        let parsed = parse_mapi_restriction(&restriction).unwrap();
+        let MapiRestriction::And(top_level) = &parsed else {
+            panic!("expected top-level AndRestriction");
+        };
+        assert_eq!(top_level.len(), 2);
+        assert!(matches!(
+            &top_level[0],
+            MapiRestriction::And(children) if children.len() == 8
+        ));
+        assert!(matches!(
+            &top_level[1],
+            MapiRestriction::And(children) if children.len() == 3
+        ));
+
+        let mut recurring = default_event_for_mapping(Uuid::nil(), "default");
+        recurring.recurrence_rule = "FREQ=DAILY;COUNT=2".to_string();
+        assert!(restriction_matches(Some(&parsed), |property_tag| {
+            if property_tag == PID_TAG_PARENT_ENTRY_ID {
+                Some(MapiValue::Binary(calendar_parent_entry_id.clone()))
+            } else {
+                event_property_value(&recurring, 1, CALENDAR_FOLDER_ID, property_tag)
+            }
+        }));
+
+        let one_off = default_event_for_mapping(Uuid::nil(), "default");
+        assert!(!restriction_matches(Some(&parsed), |property_tag| {
+            if property_tag == PID_TAG_PARENT_ENTRY_ID {
+                Some(MapiValue::Binary(calendar_parent_entry_id.clone()))
+            } else {
+                event_property_value(&one_off, 1, CALENDAR_FOLDER_ID, property_tag)
+            }
         }));
     }
 
@@ -10301,7 +11119,19 @@ mod tests {
         );
         assert_eq!(
             email_property_value(&delegated, PID_TAG_MESSAGE_SIZE),
-            Some(MapiValue::I64(128))
+            Some(MapiValue::U32(128))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_PRIORITY),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SENSITIVITY),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SUBJECT_PREFIX_W),
+            Some(MapiValue::String(String::new()))
         );
         assert_eq!(
             email_property_value(&email, PID_LID_POST_RSS_ITEM_GUID_W_TAG),
@@ -12558,12 +13388,56 @@ mod tests {
                     width: 0x12,
                     flags: 0x0000_7B20,
                     kind: 1,
-                    id: 0,
+                    id: 0x0022_A764,
                     guid: Some(PS_PUBLIC_STRINGS_GUID),
                     name: Some("Keywords".to_string()),
                 },
             ]
         );
+    }
+
+    #[test]
+    fn microsoft_oxocfg_view_definition_binary_matches_protocol_example() {
+        let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Messages"));
+        let expected = hex_to_bytes(
+            "\
+            00000000000000000800000002000000\
+            000000000b0000000800000000000000\
+            00000000000000000000000000000000\
+            00000000000000000000000001000400\
+            07000000\
+            00000000280000000000000000000000\
+            00000000000000000400000003001700\
+            12000000000000004a2f000000000000\
+            00000000000000000000000017000000\
+            0b0003851200000000000000403f0000\
+            000000000000000034019a1100000000\
+            038500000820060000000000c0000000\
+            000000461e001a001200000000000000\
+            0a270000000000000000000000000000\
+            000000001a0000000300901012000000\
+            000000004a2f00000000000000000000\
+            0000000000000000901000000b001b0e\
+            12000000000000004a2f000000000000\
+            0000000000000000000000001b0e0000\
+            1e0042000c00000000000000002f0000\
+            00000000000000000000000000000000\
+            420000001e0037001100000000000000\
+            002f0000000000000000000000000000\
+            00000000370000004000060e10000000\
+            00000000402f00000000000000000000\
+            0000000000000000060e00000300080e\
+            0c000000000000004027000000000000\
+            000000000000000000000000080e0000\
+            1e1000001200000000000000207b0000\
+            000000000000000034019a1101000000\
+            64a722002903020000000000c0000000\
+            00000046120000004b00650079007700\
+            6f007200640073000000",
+        )
+        .expect("MS-OXOCFG 4.2.1 view descriptor binary hex is valid");
+
+        assert_eq!(descriptor, expected);
     }
 
     #[test]

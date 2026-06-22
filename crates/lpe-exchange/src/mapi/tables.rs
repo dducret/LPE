@@ -6,9 +6,9 @@ use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi::identity::{
-    QUICK_STEP_SETTINGS_FOLDER_ID, RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
-    RECOVERABLE_ITEMS_PURGES_FOLDER_ID, RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
-    RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
+    CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,
+    RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID, RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
+    RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiCommonViewsMessage,
@@ -48,6 +48,9 @@ pub(in crate::mapi) fn folder_message_count(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
+    if folder_id == CONVERSATION_MEMBERS_CONTENTS_TABLE_ID {
+        return emails.len().min(u32::MAX as usize) as u32;
+    }
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return match folder.kind {
             MapiCollaborationFolderKind::Contacts => snapshot
@@ -335,6 +338,28 @@ fn restriction_matches_email_in_snapshot(
             .attachments_for_message(folder_id, mapi_message_id(email))
             .unwrap_or_default(),
     )
+}
+
+fn restriction_matches_conversation_member_in_snapshot(
+    restriction: Option<&MapiRestriction>,
+    email: &JmapEmail,
+    snapshot: &MapiMailStoreSnapshot,
+) -> bool {
+    restriction_matches_email_in_snapshot(
+        restriction,
+        email,
+        mapi_folder_id_for_email(email),
+        snapshot,
+    )
+}
+
+fn restriction_matches_public_folder_item(
+    restriction: Option<&MapiRestriction>,
+    item: &MapiPublicFolderItem,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        public_folder_item_property_value(item, property_tag)
+    })
 }
 
 fn is_top_level_count_restriction(restriction: Option<&MapiRestriction>) -> bool {
@@ -1877,10 +1902,29 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     Vec::new()
                 }
             } else if snapshot.public_folder_for_id(*folder_id).is_some() {
-                snapshot
-                    .public_folder_items_for_folder(*folder_id)
-                    .into_iter()
+                let mut rows = snapshot.public_folder_items_for_folder(*folder_id);
+                retain_rows_by_restriction(&mut rows, restriction.as_ref(), |item, restriction| {
+                    restriction_matches_public_folder_item(restriction, item)
+                });
+                rows.into_iter()
                     .map(|item| serialize_public_folder_item_row(item, &columns))
+                    .collect::<Vec<_>>()
+            } else if *folder_id == CONVERSATION_MEMBERS_CONTENTS_TABLE_ID {
+                let mut rows = emails.iter().collect::<Vec<_>>();
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |email, restriction| {
+                        restriction_matches_conversation_member_in_snapshot(
+                            restriction,
+                            email,
+                            snapshot,
+                        )
+                    },
+                );
+                sort_emails(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|email| serialize_message_row(email, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows = calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
@@ -3077,7 +3121,9 @@ pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiS
                     left.received_at.cmp(&right.received_at)
                 }
                 PID_TAG_MESSAGE_FLAGS => message_flags(left).cmp(&message_flags(right)),
-                PID_TAG_MESSAGE_SIZE => left.size_octets.cmp(&right.size_octets),
+                PID_TAG_MESSAGE_SIZE | PID_TAG_MESSAGE_SIZE_EXTENDED => {
+                    left.size_octets.cmp(&right.size_octets)
+                }
                 PID_TAG_HAS_ATTACHMENTS => left.has_attachments.cmp(&right.has_attachments),
                 PID_TAG_MID => mapi_message_id(left).cmp(&mapi_message_id(right)),
                 _ => Ordering::Equal,
@@ -3121,7 +3167,9 @@ pub(in crate::mapi) fn sort_mapi_messages(
                 PID_TAG_MESSAGE_FLAGS => {
                     message_flags(&left.email).cmp(&message_flags(&right.email))
                 }
-                PID_TAG_MESSAGE_SIZE => left.email.size_octets.cmp(&right.email.size_octets),
+                PID_TAG_MESSAGE_SIZE | PID_TAG_MESSAGE_SIZE_EXTENDED => {
+                    left.email.size_octets.cmp(&right.email.size_octets)
+                }
                 PID_TAG_HAS_ATTACHMENTS => {
                     left.email.has_attachments.cmp(&right.email.has_attachments)
                 }
@@ -3330,7 +3378,9 @@ pub(in crate::mapi) fn sort_recoverable_items(
                 PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
                     left.item.received_at.cmp(&right.item.received_at)
                 }
-                PID_TAG_MESSAGE_SIZE => left.item.size_octets.cmp(&right.item.size_octets),
+                PID_TAG_MESSAGE_SIZE | PID_TAG_MESSAGE_SIZE_EXTENDED => {
+                    left.item.size_octets.cmp(&right.item.size_octets)
+                }
                 PID_TAG_HAS_ATTACHMENTS => {
                     left.item.has_attachments.cmp(&right.item.has_attachments)
                 }
@@ -4866,6 +4916,25 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_find_row_no_match_response(request);
                 }
+            } else if snapshot.public_folder_for_id(*folder_id).is_some() {
+                let mut rows = snapshot.public_folder_items_for_folder(*folder_id);
+                retain_rows_by_restriction(
+                    &mut rows,
+                    table_restriction.as_ref(),
+                    |item, restriction| restriction_matches_public_folder_item(restriction, item),
+                );
+                if let Some((index, item)) = find_row(rows.as_slice(), *position, request, |item| {
+                    restriction_matches_public_folder_item(Some(&restriction), item)
+                }) {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_public_folder_item_row(item, &columns),
+                    );
+                } else {
+                    return rop_find_row_no_match_response(request);
+                }
             } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
                 let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
                 sort_recoverable_items(&mut rows, sort_orders);
@@ -5268,8 +5337,28 @@ pub(in crate::mapi) fn table_position_and_count(
                         restriction_matches_journal_entry(restriction.as_ref(), &entry.entry)
                     })
                     .count()
+            } else if snapshot.public_folder_for_id(*folder_id).is_some() {
+                let mut rows = snapshot.public_folder_items_for_folder(*folder_id);
+                retain_rows_by_restriction(&mut rows, restriction.as_ref(), |item, restriction| {
+                    restriction_matches_public_folder_item(restriction, item)
+                });
+                rows.len()
             } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
                 snapshot.recoverable_items_for_folder(*folder_id).len()
+            } else if *folder_id == CONVERSATION_MEMBERS_CONTENTS_TABLE_ID {
+                let mut rows = emails.iter().collect::<Vec<_>>();
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |email, restriction| {
+                        restriction_matches_conversation_member_in_snapshot(
+                            restriction,
+                            email,
+                            snapshot,
+                        )
+                    },
+                );
+                rows.len()
             } else if *category_count > 0 {
                 let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
                 retain_rows_by_restriction(
@@ -7031,6 +7120,7 @@ mod tests {
             modseq: 1,
             total_emails: 18,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let mailboxes = [inbox];
@@ -7092,6 +7182,7 @@ mod tests {
             modseq: 1,
             total_emails: 18,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let mailboxes = [inbox];
@@ -7237,6 +7328,7 @@ mod tests {
             modseq: 1,
             total_emails: 18,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let mailboxes = [inbox];
@@ -7320,6 +7412,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
@@ -7406,6 +7499,7 @@ mod tests {
             modseq: 1,
             total_emails: 2,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
@@ -7504,6 +7598,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
@@ -7612,6 +7707,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333334").unwrap();
@@ -7713,6 +7809,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
@@ -7808,6 +7905,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
@@ -7903,6 +8001,7 @@ mod tests {
             modseq: 1,
             total_emails: 4,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let first_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
@@ -8436,6 +8535,7 @@ mod tests {
             modseq: 1,
             total_emails: 2,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![first, second];
@@ -8606,6 +8706,7 @@ mod tests {
             modseq: 1,
             total_emails: 18,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -8614,6 +8715,39 @@ mod tests {
 
         assert!(utf16_position(&row, "INBOX").is_none());
         assert_response_contains_utf16(&row, "Inbox");
+    }
+
+    #[test]
+    fn microsoft_oxcfold_hierarchy_row_projects_folder_message_size_columns() {
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 18,
+            unread_emails: 0,
+            size_octets: u64::from(u32::MAX) + 10,
+            is_subscribed: true,
+        };
+
+        let row = serialize_folder_row_with_context(
+            &inbox,
+            &[],
+            &[PID_TAG_MESSAGE_SIZE, PID_TAG_MESSAGE_SIZE_EXTENDED],
+            Uuid::nil(),
+        );
+        let mut cursor = Cursor::new(&row);
+
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE).unwrap(),
+            MapiValue::I32(-1)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE_EXTENDED).unwrap(),
+            MapiValue::I64(i64::from(u32::MAX) + 10)
+        );
     }
 
     #[test]
@@ -8717,6 +8851,7 @@ mod tests {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -8880,6 +9015,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -8891,6 +9027,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -8902,6 +9039,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -8913,6 +9051,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -8924,6 +9063,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -8935,6 +9075,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
         ];
@@ -9082,6 +9223,7 @@ mod tests {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let mailboxes = [quick_step];
@@ -9120,6 +9262,7 @@ mod tests {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -9183,6 +9326,7 @@ mod tests {
             modseq: 40,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let mailboxes = [quick_step];
@@ -10604,6 +10748,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             }],
             Vec::new(),
@@ -12178,8 +12323,11 @@ mod tests {
         let columns = [
             PID_TAG_CREATION_TIME,
             PID_TAG_IMPORTANCE,
+            PID_TAG_PRIORITY,
+            PID_TAG_SENSITIVITY,
             PID_LID_REMINDER_SET_TAG,
             PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_PREFIX_W,
             PID_TAG_FLAG_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENDER_NAME_W,
@@ -12189,6 +12337,7 @@ mod tests {
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_MESSAGE_SIZE,
+            PID_TAG_MESSAGE_SIZE_EXTENDED,
             PID_NAME_KEYWORDS_TAG,
             PID_NAME_CONTENT_CLASS_W_TAG,
         ];
@@ -12205,12 +12354,24 @@ mod tests {
             MapiValue::I32(1)
         );
         assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_PRIORITY).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SENSITIVITY).unwrap(),
+            MapiValue::I32(0)
+        );
+        assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_LID_REMINDER_SET_TAG).unwrap(),
             MapiValue::Bool(true)
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
             MapiValue::String("IPM.Note".to_string())
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_SUBJECT_PREFIX_W).unwrap(),
+            MapiValue::String(String::new())
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_FLAG_STATUS).unwrap(),
@@ -12249,6 +12410,10 @@ mod tests {
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE).unwrap(),
             MapiValue::I32(2048)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_SIZE_EXTENDED).unwrap(),
+            MapiValue::I64(2048)
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_NAME_KEYWORDS_TAG).unwrap(),
@@ -12311,6 +12476,7 @@ mod tests {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
 
@@ -12903,6 +13069,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![email];
@@ -13358,6 +13525,11 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, mapi_parent_folder_id(mailbox)),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
+            PID_TAG_MESSAGE_SIZE => write_u32(
+                &mut row,
+                mailbox.size_octets.min(u64::from(u32::MAX)) as u32,
+            ),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => write_u64(&mut row, mailbox.size_octets),
             PID_TAG_SUBFOLDERS => row.push(mailbox_has_subfolders(mailbox, mailboxes) as u8),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, folder_type(mailbox)),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
@@ -13510,11 +13682,14 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
             PID_TAG_ACCESS_LEVEL => write_u32(&mut row, 1),
             PID_TAG_IMPORTANCE => write_u32(&mut row, 1),
+            PID_TAG_PRIORITY | PID_TAG_SENSITIVITY => write_u32(&mut row, 0),
+            PID_TAG_SUBJECT_PREFIX_W => write_utf16z(&mut row, ""),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_READ => row.push((!email.unread) as u8),
             PID_TAG_MESSAGE_SIZE => {
                 write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)
             }
+            PID_TAG_MESSAGE_SIZE_EXTENDED => write_u64(&mut row, email.size_octets.max(0) as u64),
             PID_TAG_SENDER_NAME_W => write_utf16z(&mut row, email_sender_name(email)),
             PID_TAG_SENDER_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
@@ -13593,6 +13768,13 @@ pub(in crate::mapi) fn serialize_public_folder_item_row(
                     .saturating_add(item.item.subject.len())
                     .min(u32::MAX as usize) as u32,
             ),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => write_u64(
+                &mut row,
+                body_text
+                    .len()
+                    .saturating_add(item.item.subject.len())
+                    .min(i64::MAX as usize) as u64,
+            ),
             PID_TAG_HAS_ATTACHMENTS => row.push(0),
             PID_TAG_BODY_W => write_utf16z(&mut row, body_text),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
@@ -13622,6 +13804,61 @@ pub(in crate::mapi) fn serialize_public_folder_item_row(
     row
 }
 
+fn public_folder_item_size(item: &MapiPublicFolderItem) -> i64 {
+    item.item
+        .body_text
+        .len()
+        .saturating_add(item.item.subject.len())
+        .min(i64::MAX as usize) as i64
+}
+
+fn public_folder_item_property_value(
+    item: &MapiPublicFolderItem,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(item.id);
+    let message_class = if item.item.message_class.trim().is_empty() {
+        "IPM.Post"
+    } else {
+        item.item.message_class.as_str()
+    };
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(item.id)),
+        PID_TAG_INSTANCE_NUM | PID_TAG_DEPTH => Some(MapiValue::U32(0)),
+        PID_TAG_ROW_TYPE => Some(MapiValue::U32(TABLE_LEAF_ROW)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(item.item.subject.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(message_class.to_string())),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_READ => Some(MapiValue::Bool(item.item.is_read)),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(public_folder_item_size(item))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+            public_folder_item_size(item),
+        )),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_BODY_W => Some(MapiValue::String(item.item.body_text.clone())),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item.id),
+        )),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(item.folder_id),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            item.id,
+        ))),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
 pub(in crate::mapi) fn serialize_recoverable_item_row(
     item: &crate::mapi_store::MapiRecoverableItemMessage,
     columns: &[u32],
@@ -13647,6 +13884,9 @@ pub(in crate::mapi) fn serialize_recoverable_item_row(
                 &mut row,
                 item.item.size_octets.clamp(0, u32::MAX as i64) as u32,
             ),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => {
+                write_u64(&mut row, item.item.size_octets.max(0) as u64)
+            }
             PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => {
                 write_utf16z(&mut row, &item.item.sender_address)
             }
@@ -13712,6 +13952,9 @@ fn recoverable_item_property_value(
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::U32(
             item.item.size_octets.clamp(0, u32::MAX as i64) as u32,
         )),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => {
+            Some(mapi_message_size_extended_value(item.item.size_octets))
+        }
         PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => {
             Some(MapiValue::String(item.item.sender_address.clone()))
         }
@@ -13931,6 +14174,15 @@ fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
     }
 }
 
+fn associated_config_message_size(message: &MapiAssociatedConfigMessage) -> i64 {
+    message
+        .subject
+        .len()
+        .saturating_add(message.message_class.len())
+        .saturating_add(message.properties_json.to_string().len())
+        .min(i64::MAX as usize) as i64
+}
+
 pub(in crate::mapi) fn associated_config_property_value(
     message: &MapiAssociatedConfigMessage,
     property_tag: u32,
@@ -13971,13 +14223,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
             PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
             PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
-            PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
-                message
-                    .subject
-                    .len()
-                    .saturating_add(message.message_class.len())
-                    .saturating_add(message.properties_json.to_string().len())
-                    .min(i64::MAX as usize) as i64,
+            PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(associated_config_message_size(
+                message,
+            ))),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+                associated_config_message_size(message),
             )),
             PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
             PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
@@ -14299,6 +14549,16 @@ fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {
     hash.max(1)
 }
 
+fn delegate_freebusy_message_size(message: &MapiDelegateFreeBusyMessage) -> i64 {
+    message
+        .message
+        .subject
+        .len()
+        .saturating_add(message.message.body_text.len())
+        .saturating_add(message.message.payload_json.len())
+        .min(i64::MAX as usize) as i64
+}
+
 pub(in crate::mapi) fn delegate_freebusy_property_value(
     message: &MapiDelegateFreeBusyMessage,
     property_tag: u32,
@@ -14322,14 +14582,11 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
         )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
-            message
-                .message
-                .subject
-                .len()
-                .saturating_add(message.message.body_text.len())
-                .saturating_add(message.message.payload_json.len())
-                .min(i64::MAX as usize) as i64,
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(delegate_freebusy_message_size(
+            message,
+        ))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+            delegate_freebusy_message_size(message),
         )),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
@@ -14812,7 +15069,10 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_DISPLAY_BCC_W | PID_TAG_DISPLAY_CC_W | PID_TAG_DISPLAY_TO_W => {
                 Some(MapiValue::String(String::new()))
             }
-            PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(pending_message_size(properties))),
+            PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(pending_message_size(properties))),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+                pending_message_size(properties),
+            )),
             PID_TAG_CREATION_TIME | PID_TAG_LAST_MODIFICATION_TIME => properties
                 .get(&PID_TAG_CREATION_TIME)
                 .cloned()
@@ -15053,19 +15313,22 @@ pub(in crate::mapi) fn display_bcc(email: &JmapEmail) -> String {
 
 pub(in crate::mapi) struct MapiRecipient<'a> {
     pub(in crate::mapi) recipient_type: u8,
+    pub(in crate::mapi) order: u32,
     pub(in crate::mapi) address: &'a JmapEmailAddress,
 }
 
 pub(in crate::mapi) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient<'_>> {
-    email
+    let recipients = email
         .to
         .iter()
         .map(|address| MapiRecipient {
             recipient_type: 0x01,
+            order: 0,
             address,
         })
         .chain(email.cc.iter().map(|address| MapiRecipient {
             recipient_type: 0x02,
+            order: 0,
             address,
         }))
         .chain(
@@ -15075,9 +15338,18 @@ pub(in crate::mapi) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipien
                 .flatten()
                 .map(|address| MapiRecipient {
                     recipient_type: 0x03,
+                    order: 0,
                     address,
                 }),
         )
+        .collect::<Vec<_>>();
+    recipients
+        .into_iter()
+        .enumerate()
+        .map(|(order, mut recipient)| {
+            recipient.order = order.min(u32::MAX as usize) as u32;
+            recipient
+        })
         .collect()
 }
 

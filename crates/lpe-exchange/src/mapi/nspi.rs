@@ -6,6 +6,7 @@ use super::session::*;
 use super::transport::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
+use crate::store::ExchangeAddressBookEntryDetails;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
@@ -250,6 +251,45 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
     0x3A20_001E, // PidTagTransmittableDisplayName string8
     0x3A20_001F, // PidTagTransmittableDisplayName
+    0x3A06_001E, // PidTagGivenName string8
+    0x3A06_001F, // PidTagGivenName
+    0x3A0B_001E, // PidTagSurname string8
+    0x3A0B_001F, // PidTagSurname
+    0x3A4F_001E, // PidTagNickname string8
+    0x3A4F_001F, // PidTagNickname
+    0x3A08_001E, // PidTagBusinessTelephoneNumber string8
+    0x3A08_001F, // PidTagBusinessTelephoneNumber
+    0x3A09_001E, // PidTagHomeTelephoneNumber string8
+    0x3A09_001F, // PidTagHomeTelephoneNumber
+    0x3A1A_001E, // PidTagPrimaryTelephoneNumber string8
+    0x3A1A_001F, // PidTagPrimaryTelephoneNumber
+    0x3A1B_001E, // PidTagBusiness2TelephoneNumber string8
+    0x3A1B_001F, // PidTagBusiness2TelephoneNumber
+    0x3A1B_101F, // PidTagBusiness2TelephoneNumbers
+    0x3A1C_001E, // PidTagMobileTelephoneNumber string8
+    0x3A1C_001F, // PidTagMobileTelephoneNumber
+    0x3A16_001E, // PidTagCompanyName string8
+    0x3A16_001F, // PidTagCompanyName
+    0x3A17_001E, // PidTagTitle string8
+    0x3A17_001F, // PidTagTitle
+    0x3A18_001E, // PidTagDepartmentName string8
+    0x3A18_001F, // PidTagDepartmentName
+    0x3A15_001E, // PidTagPostalAddress string8
+    0x3A15_001F, // PidTagPostalAddress
+    0x3A26_001E, // PidTagCountry string8
+    0x3A26_001F, // PidTagCountry
+    0x3A27_001E, // PidTagLocality string8
+    0x3A27_001F, // PidTagLocality
+    0x3A28_001E, // PidTagStateOrProvince string8
+    0x3A28_001F, // PidTagStateOrProvince
+    0x3A29_001E, // PidTagStreetAddress string8
+    0x3A29_001F, // PidTagStreetAddress
+    0x3A2A_001E, // PidTagPostalCode string8
+    0x3A2A_001F, // PidTagPostalCode
+    0x3A8D_001E, // PidTagAddressBookPhoneticGivenName string8
+    0x3A8D_001F, // PidTagAddressBookPhoneticGivenName
+    0x3A8E_001E, // PidTagAddressBookPhoneticSurname string8
+    0x3A8E_001F, // PidTagAddressBookPhoneticSurname
     0x3F08_0003, // PidTagInitialDetailsPane
     0x3900_0003, // PidTagDisplayType
     0x803C_001E, // PidTagAddressBookObjectDistinguishedName string8
@@ -291,49 +331,11 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
 ];
 
 const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
-    (0x3A06_001E, "PidTagGivenName"),
-    (0x3A06_001F, "PidTagGivenName"),
-    (0x3A08_001E, "PidTagBusinessTelephoneNumber"),
-    (0x3A08_001F, "PidTagBusinessTelephoneNumber"),
-    (0x3A09_001E, "PidTagHomeTelephoneNumber"),
-    (0x3A09_001F, "PidTagHomeTelephoneNumber"),
-    (0x3A0B_001E, "PidTagSurname"),
-    (0x3A0B_001F, "PidTagSurname"),
-    (0x3A15_001E, "PidTagPostalAddress"),
-    (0x3A15_001F, "PidTagPostalAddress"),
-    (0x3A16_001E, "PidTagCompanyName"),
-    (0x3A16_001F, "PidTagCompanyName"),
-    (0x3A17_001E, "PidTagTitle"),
-    (0x3A17_001F, "PidTagTitle"),
-    (0x3A18_001E, "PidTagDepartmentName"),
-    (0x3A18_001F, "PidTagDepartmentName"),
     (0x3A19_001E, "PidTagOfficeLocation"),
     (0x3A19_001F, "PidTagOfficeLocation"),
-    (0x3A1A_001E, "PidTagPrimaryTelephoneNumber"),
-    (0x3A1A_001F, "PidTagPrimaryTelephoneNumber"),
-    (0x3A1B_001F, "PidTagBusiness2TelephoneNumbers"),
-    (0x3A1B_101F, "PidTagBusiness2TelephoneNumbers"),
-    (0x3A1C_001E, "PidTagMobileTelephoneNumber"),
-    (0x3A1C_001F, "PidTagMobileTelephoneNumber"),
-    (0x3A26_001E, "PidTagCountry"),
-    (0x3A26_001F, "PidTagCountry"),
-    (0x3A27_001E, "PidTagLocality"),
-    (0x3A27_001F, "PidTagLocality"),
-    (0x3A28_001E, "PidTagStateOrProvince"),
-    (0x3A28_001F, "PidTagStateOrProvince"),
-    (0x3A29_001E, "PidTagStreetAddress"),
-    (0x3A29_001F, "PidTagStreetAddress"),
-    (0x3A2A_001E, "PidTagPostalCode"),
-    (0x3A2A_001F, "PidTagPostalCode"),
-    (0x3A4F_001E, "PidTagNickname"),
-    (0x3A4F_001F, "PidTagNickname"),
     (0x3A71_001F, "PidTagSendRichInfo"),
     (0x3A8C_001E, "PidTagAddressBookPhoneticDisplayName"),
     (0x3A8C_001F, "PidTagAddressBookPhoneticDisplayName"),
-    (0x3A8D_001E, "PidTagAddressBookPhoneticGivenName"),
-    (0x3A8D_001F, "PidTagAddressBookPhoneticGivenName"),
-    (0x3A8E_001E, "PidTagAddressBookPhoneticSurname"),
-    (0x3A8E_001F, "PidTagAddressBookPhoneticSurname"),
     (0x3A8F_001E, "PidTagAddressBookPhoneticCompanyName"),
     (0x3A8F_001F, "PidTagAddressBookPhoneticCompanyName"),
     (0x3A4E_001E, "PidTagManagerName"),
@@ -1682,6 +1684,34 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
         0x3002_001F | 0x3002_001E => NspiValue::String("EX"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
         0x3A20_001F | 0x3A20_001E => NspiValue::String(&entry.display_name),
+        0x3A06_001F | 0x3A06_001E => NspiValue::String(&entry.details.given_name),
+        0x3A0B_001F | 0x3A0B_001E => NspiValue::String(&entry.details.surname),
+        0x3A4F_001F | 0x3A4F_001E => NspiValue::String(&entry.details.nickname),
+        0x3A08_001F | 0x3A08_001E | 0x3A1A_001F | 0x3A1A_001E => {
+            NspiValue::String(&entry.details.primary_phone)
+        }
+        0x3A09_001F | 0x3A09_001E => NspiValue::String(&entry.details.home_phone),
+        0x3A1B_001F | 0x3A1B_001E => NspiValue::OwnedString(
+            entry
+                .details
+                .business2_phones
+                .first()
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        0x3A1B_101F => NspiValue::MultiString(entry.details.business2_phones.clone()),
+        0x3A1C_001F | 0x3A1C_001E => NspiValue::String(&entry.details.mobile_phone),
+        0x3A16_001F | 0x3A16_001E => NspiValue::String(&entry.details.company_name),
+        0x3A17_001F | 0x3A17_001E => NspiValue::String(&entry.details.title),
+        0x3A18_001F | 0x3A18_001E => NspiValue::String(&entry.details.department_name),
+        0x3A15_001F | 0x3A15_001E => NspiValue::String(&entry.details.postal_address),
+        0x3A26_001F | 0x3A26_001E => NspiValue::String(&entry.details.country),
+        0x3A27_001F | 0x3A27_001E => NspiValue::String(&entry.details.locality),
+        0x3A28_001F | 0x3A28_001E => NspiValue::String(&entry.details.state_or_province),
+        0x3A29_001F | 0x3A29_001E => NspiValue::String(&entry.details.street_address),
+        0x3A2A_001F | 0x3A2A_001E => NspiValue::String(&entry.details.postal_code),
+        0x3A8D_001F | 0x3A8D_001E => NspiValue::String(&entry.details.phonetic_given_name),
+        0x3A8E_001F | 0x3A8E_001E => NspiValue::String(&entry.details.phonetic_surname),
         0x3F08_0003 => NspiValue::U32(0),
         0x803C_001F | 0x803C_001E => NspiValue::OwnedString(nspi_entry_unprefixed_legacy_dn(entry)),
         0x800F_101F | 0x800F_101E => NspiValue::MultiString(vec![format!("SMTP:{}", entry.email)]),
@@ -1884,6 +1914,7 @@ pub(in crate::mapi) fn principal_address_book_entry(
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
         member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
     }
 }
 
@@ -2553,15 +2584,151 @@ mod tests {
         for tag in NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS {
             assert!(nspi_property_tag_is_supported(*tag));
         }
-        assert_eq!(
-            nspi_known_unsupported_property_tag_name(0x3A06_001F),
-            Some("PidTagGivenName")
-        );
+        assert_eq!(nspi_known_unsupported_property_tag_name(0x3A06_001F), None);
         assert_eq!(nspi_known_unsupported_property_tag_name(0x0FF8_0102), None);
         assert_eq!(nspi_known_unsupported_property_tag_name(0x3A20_001F), None);
+        assert_eq!(nspi_known_unsupported_property_tag_name(0x3A1B_101F), None);
+    }
+
+    #[test]
+    fn microsoft_oxprops_contact_address_book_fields_project_to_nspi_rows() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let entry = ExchangeAddressBookEntry {
+            id: Uuid::parse_str("26b8ebbd-63a5-4741-b8d6-d7eda9c31c3d").unwrap(),
+            display_name: "Bob Contact".to_string(),
+            email: "bob.contact@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails {
+                given_name: "Bob".to_string(),
+                surname: "Contact".to_string(),
+                nickname: "Bobby".to_string(),
+                primary_phone: "+41 22 555 0100".to_string(),
+                mobile_phone: "+41 79 555 0100".to_string(),
+                home_phone: "+41 22 555 0199".to_string(),
+                business2_phones: vec![
+                    "+41 22 555 0101".to_string(),
+                    "+41 22 555 0102".to_string(),
+                ],
+                company_name: "Fabrikam".to_string(),
+                title: "Architect".to_string(),
+                department_name: "Engineering".to_string(),
+                postal_address: "1 Example Way, Geneva 1201".to_string(),
+                street_address: "1 Example Way".to_string(),
+                locality: "Geneva".to_string(),
+                state_or_province: "GE".to_string(),
+                country: "Switzerland".to_string(),
+                postal_code: "1201".to_string(),
+                phonetic_given_name: "Bahb".to_string(),
+                phonetic_surname: "Kontaakt".to_string(),
+            },
+        };
+
+        for tag in [
+            0x3A06_001F,
+            0x3A0B_001F,
+            0x3A4F_001F,
+            0x3A08_001F,
+            0x3A09_001F,
+            0x3A1A_001F,
+            0x3A1B_001F,
+            0x3A1B_101F,
+            0x3A1C_001F,
+            0x3A16_001F,
+            0x3A17_001F,
+            0x3A18_001F,
+            0x3A15_001F,
+            0x3A26_001F,
+            0x3A27_001F,
+            0x3A28_001F,
+            0x3A29_001F,
+            0x3A2A_001F,
+            0x3A8D_001F,
+            0x3A8E_001F,
+        ] {
+            assert!(nspi_property_tag_is_supported(tag));
+            assert_eq!(nspi_known_unsupported_property_tag_name(tag), None);
+        }
         assert_eq!(
-            nspi_known_unsupported_property_tag_name(0x3A1B_101F),
-            Some("PidTagBusiness2TelephoneNumbers")
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A06_001F)),
+            "Bob"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A0B_001F)),
+            "Contact"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A4F_001F)),
+            "Bobby"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A08_001F)),
+            "+41 22 555 0100"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A1A_001F)),
+            "+41 22 555 0100"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A09_001F)),
+            "+41 22 555 0199"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A1B_001F)),
+            "+41 22 555 0101"
+        );
+        assert_eq!(
+            nspi_multistring_value(nspi_entry_value(account_id, &entry, 0x3A1B_101F)),
+            vec!["+41 22 555 0101".to_string(), "+41 22 555 0102".to_string()]
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A1C_001F)),
+            "+41 79 555 0100"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A16_001F)),
+            "Fabrikam"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A17_001F)),
+            "Architect"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A18_001F)),
+            "Engineering"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A15_001F)),
+            "1 Example Way, Geneva 1201"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A26_001F)),
+            "Switzerland"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A27_001F)),
+            "Geneva"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A28_001F)),
+            "GE"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A29_001F)),
+            "1 Example Way"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A2A_001F)),
+            "1201"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A8D_001F)),
+            "Bahb"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A8E_001F)),
+            "Kontaakt"
         );
     }
 
@@ -2575,6 +2742,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
         let legacy_dn = nspi_entry_unprefixed_legacy_dn(&entry);
         let permanent_entry_id = nspi_entry_permanent_entry_id(&entry);
@@ -2746,6 +2914,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
         let account = ExchangeAddressBookEntry {
             id: Uuid::from_bytes([0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
@@ -2754,6 +2923,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
 
         let filtered =
@@ -2782,6 +2952,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
 
         let summary = format_nspi_entry_summaries_for_debug(account_id, &[entry]);
@@ -2799,6 +2970,7 @@ mod tests {
                 entry_kind: ExchangeAddressBookEntryKind::Contact,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: Vec::new(),
+                details: ExchangeAddressBookEntryDetails::default(),
             },
             ExchangeAddressBookEntry {
                 id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
@@ -2807,6 +2979,7 @@ mod tests {
                 entry_kind: ExchangeAddressBookEntryKind::Contact,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: Vec::new(),
+                details: ExchangeAddressBookEntryDetails::default(),
             },
         ];
 
@@ -2826,6 +2999,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
         let second = ExchangeAddressBookEntry {
             id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
@@ -2834,6 +3008,7 @@ mod tests {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         };
 
         assert_eq!(
@@ -2882,6 +3057,13 @@ mod tests {
             NspiValue::String(value) => value.to_string(),
             NspiValue::OwnedString(value) => value,
             _ => panic!("expected string NSPI value"),
+        }
+    }
+
+    fn nspi_multistring_value(value: NspiValue<'_>) -> Vec<String> {
+        match value {
+            NspiValue::MultiString(value) => value,
+            _ => panic!("expected multistring NSPI value"),
         }
     }
 

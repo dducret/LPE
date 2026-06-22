@@ -2567,6 +2567,7 @@ async fn expand_dl_projects_same_tenant_directory_group_members() {
                 "mallory@example.test".to_string(),
                 "hidden@example.test".to_string(),
             ],
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: carol_id,
@@ -2575,6 +2576,7 @@ async fn expand_dl_projects_same_tenant_directory_group_members() {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: foreign_id,
@@ -2583,6 +2585,7 @@ async fn expand_dl_projects_same_tenant_directory_group_members() {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: hidden_id,
@@ -2591,6 +2594,7 @@ async fn expand_dl_projects_same_tenant_directory_group_members() {
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
     ]));
     let store = FakeStore {
@@ -4485,6 +4489,7 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Room,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: equipment_id,
@@ -4493,6 +4498,7 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Equipment,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: person_id,
@@ -4501,6 +4507,7 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: hidden_room_id,
@@ -4509,6 +4516,7 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Room,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
         ExchangeAddressBookEntry {
             id: foreign_room_id,
@@ -4517,6 +4525,7 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Room,
             member_emails: Vec::new(),
+            details: ExchangeAddressBookEntryDetails::default(),
         },
     ]));
     let extra_address_book_entry_tenants = Arc::new(Mutex::new(HashMap::from([(
@@ -5222,6 +5231,7 @@ async fn ucs_distribution_list_membership_stays_tenant_scoped() {
                 entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: vec!["bob@example.test".to_string()],
+                details: ExchangeAddressBookEntryDetails::default(),
             },
             ExchangeAddressBookEntry {
                 id: foreign_dl_id,
@@ -5230,6 +5240,7 @@ async fn ucs_distribution_list_membership_stays_tenant_scoped() {
                 entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 member_emails: vec!["mallory@other.test".to_string()],
+                details: ExchangeAddressBookEntryDetails::default(),
             },
         ])),
         extra_address_book_entry_tenants: Arc::new(Mutex::new(HashMap::from([(

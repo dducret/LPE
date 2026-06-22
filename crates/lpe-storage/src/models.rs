@@ -64,6 +64,7 @@ pub(crate) struct JmapMailboxRow {
     pub(crate) modseq: i64,
     pub(crate) total_emails: i64,
     pub(crate) unread_emails: i64,
+    pub(crate) size_octets: i64,
     pub(crate) is_subscribed: bool,
 }
 

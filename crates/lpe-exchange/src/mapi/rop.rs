@@ -6114,7 +6114,7 @@ impl RopRequest {
     pub(in crate::mapi) fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
-            0x0B | 0x7A => 2,
+            0x0B | 0x0E | 0x7A => 2,
             _ => 3,
         };
         if self.payload.len() < start {
@@ -8229,6 +8229,18 @@ mod tests {
     use super::super::transport::MAPI_SESSION_MAX_AGE_SECONDS;
     use super::*;
 
+    fn test_hex_bytes(value: &str) -> Vec<u8> {
+        let hex = value
+            .chars()
+            .filter(|character| !character.is_ascii_whitespace())
+            .collect::<String>();
+        assert_eq!(hex.len() % 2, 0);
+        (0..hex.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+            .collect()
+    }
+
     #[test]
     fn split_rop_buffer_accepts_microsoft_spec_framing_examples() {
         let empty = [0x02, 0x00];
@@ -8342,6 +8354,169 @@ mod tests {
     }
 
     #[test]
+    fn microsoft_oxcmsg_core_request_examples_parse_expected_fields() {
+        let create_message_golden = vec![
+            0x06, 0x00, 0x00, 0x01, 0xFF, 0x0F, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x79, 0x93,
+            0x00,
+        ];
+        let mut create_message_cursor = Cursor::new(&create_message_golden);
+        let create_message = read_rop_request(&mut create_message_cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(create_message.rop_id),
+            Some(RopId::CreateMessage)
+        );
+        assert_eq!(create_message.input_handle_index, Some(0));
+        assert_eq!(create_message.output_handle_index, Some(1));
+        assert_eq!(
+            create_message.payload,
+            vec![0x01, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x79, 0x93, 0x00]
+        );
+        assert!(!create_message.create_message_associated());
+        assert_eq!(create_message_cursor.remaining(), 0);
+
+        let attachment_table_golden = vec![0x21, 0x00, 0x00, 0x01, 0x00];
+        let mut attachment_table_cursor = Cursor::new(&attachment_table_golden);
+        let attachment_table = read_rop_request(&mut attachment_table_cursor).unwrap();
+
+        assert_eq!(
+            attachment_table.typed(),
+            TypedRopRequest::OpenTable(RopOpenTableRequest {
+                rop_id: RopId::GetAttachmentTable.as_u8(),
+                input_handle_index: 0,
+                output_handle_index: 1,
+                table_flags: 0,
+            })
+        );
+        assert_eq!(
+            serialize_rop_request(&attachment_table).unwrap(),
+            attachment_table_golden
+        );
+        assert_eq!(attachment_table_cursor.remaining(), 0);
+
+        let save_message_golden = vec![0x0C, 0x00, 0x00, 0x01, 0x0A];
+        let mut save_message_cursor = Cursor::new(&save_message_golden);
+        let save_message = read_rop_request(&mut save_message_cursor).unwrap();
+
+        assert_eq!(
+            save_message.typed(),
+            TypedRopRequest::SaveChangesMessage(RopSaveChangesMessageRequest {
+                response_handle_index: 0,
+                input_handle_index: 1,
+                save_flags: 0x0A,
+            })
+        );
+        assert_eq!(
+            serialize_rop_request(&save_message).unwrap(),
+            save_message_golden
+        );
+        assert_eq!(save_message_cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxcmsg_attachment_request_examples_parse_expected_fields() {
+        for (golden, output_handle_index) in [
+            (vec![0x23, 0x00, 0x00, 0x01], 1),
+            (vec![0x23, 0x00, 0x00, 0x03], 3),
+        ] {
+            let mut cursor = Cursor::new(&golden);
+            let request = read_rop_request(&mut cursor).unwrap();
+
+            assert_eq!(
+                RopId::from_u8(request.rop_id),
+                Some(RopId::CreateAttachment)
+            );
+            assert_eq!(request.input_handle_index, Some(0));
+            assert_eq!(request.output_handle_index, Some(output_handle_index));
+            assert!(request.payload.is_empty());
+            assert_eq!(cursor.remaining(), 0);
+        }
+
+        for (golden, response_handle_index, input_handle_index) in [
+            (vec![0x25, 0x00, 0x01, 0x00, 0x0A], 1, 0),
+            (vec![0x25, 0x00, 0x02, 0x01, 0x0A], 2, 1),
+        ] {
+            let mut cursor = Cursor::new(&golden);
+            let request = read_rop_request(&mut cursor).unwrap();
+
+            assert_eq!(
+                RopId::from_u8(request.rop_id),
+                Some(RopId::SaveChangesAttachment)
+            );
+            assert_eq!(request.input_handle_index, Some(input_handle_index));
+            assert_eq!(request.output_handle_index, Some(response_handle_index));
+            assert_eq!(request.payload, vec![0x0A]);
+            assert_eq!(request.response_handle_index(), response_handle_index);
+            assert_eq!(cursor.remaining(), 0);
+        }
+    }
+
+    #[test]
+    fn microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row() {
+        let golden = test_hex_bytes(
+            "\
+            0e00080c000300fe0f030000391f00ff391f00fe390300713a030005391f00f6\
+            5f0300fd5f0300ff5f0300de5f0300df5f0201f75f010000000000012701\
+            51065a00557365723200750073006500720032000000750073006500720032000000\
+            0c0000060000000000000075007300650072003200000075007300650072003200\
+            400073007a0066006b0075006b002d0064006f006d002e006500780074006500\
+            730074002e006d006900630072006f0073006f00660074002e0063006f006d00\
+            000000000000000000407500730065007200320000000100000000000000000000\
+            00000000007c0000000000dca740c8c042101ab4b908002b2fe1820100000000\
+            0000002f6f3d4669727374204f7267616e697a6174696f6e2f6f753d45786368\
+            616e67652041646d696e6973747261746976652047726f757020284659444942\
+            4f484632335350444c54292f636e3d526563697069656e74732f636e3d757365\
+            723200",
+        );
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(request.rop_id),
+            Some(RopId::ModifyRecipients)
+        );
+        assert_eq!(request.input_handle_index, Some(8));
+        assert_eq!(request.output_handle_index, None);
+        assert_eq!(request.property_tags().len(), 12);
+        assert_eq!(
+            request.property_tags(),
+            vec![
+                0x0FFE_0003,
+                0x3900_0003,
+                0x39FF_001F,
+                0x39FE_001F,
+                0x3A71_0003,
+                0x3905_0003,
+                0x5FF6_001F,
+                0x5FFD_0003,
+                0x5FFF_0003,
+                0x5FDE_0003,
+                0x5FDF_0003,
+                0x5FF7_0102,
+            ]
+        );
+
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let changes = request.modify_recipients(&principal, &[]).unwrap();
+
+        assert_eq!(changes.len(), 1);
+        let PendingRecipientChange::Upsert(recipient) = &changes[0] else {
+            panic!("MS-OXCMSG 4.7 row should upsert one recipient");
+        };
+        assert_eq!(recipient.recipient_type, 1);
+        assert_eq!(recipient.address, "user2@szfkuk-dom.extest.microsoft.com");
+        assert_eq!(recipient.display_name.as_deref(), Some("user2"));
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
     fn folder_create_and_hierarchy_table_responses_match_microsoft_folder_examples() {
         let create = RopRequest {
             rop_id: RopId::CreateFolder.as_u8(),
@@ -8421,6 +8596,202 @@ mod tests {
             rop_simple_success_response(&set_search),
             vec![0x30, 0x01, 0, 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn microsoft_oxcfold_create_and_hierarchy_examples_parse_through_typed_parser() {
+        let create_golden = vec![
+            0x1C, 0x00, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x46, 0x00, 0x6F, 0x00, 0x6C, 0x00,
+            0x64, 0x00, 0x65, 0x00, 0x72, 0x00, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let mut create_cursor = Cursor::new(&create_golden);
+        let create = read_rop_request(&mut create_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(create.rop_id), Some(RopId::CreateFolder));
+        assert_eq!(create.input_handle_index, Some(0));
+        assert_eq!(create.output_handle_index, Some(1));
+        assert_eq!(create.create_folder_type(), 1);
+        assert!(!create.create_folder_open_existing());
+        assert_eq!(create.create_folder_reserved(), 0);
+        assert_eq!(create.create_folder_display_name(), "Folder1");
+        assert_eq!(create.payload.get(13..15), Some(&[0x00, 0x00][..]));
+        assert_eq!(create_cursor.remaining(), 0);
+
+        let hierarchy_golden = vec![0x04, 0x00, 0x01, 0x02, 0x00];
+        let mut hierarchy_cursor = Cursor::new(&hierarchy_golden);
+        let hierarchy = read_rop_request(&mut hierarchy_cursor).unwrap();
+
+        assert_eq!(
+            hierarchy.typed(),
+            TypedRopRequest::OpenTable(RopOpenTableRequest {
+                rop_id: RopId::GetHierarchyTable.as_u8(),
+                input_handle_index: 1,
+                output_handle_index: 2,
+                table_flags: 0,
+            })
+        );
+        assert_eq!(serialize_rop_request(&hierarchy).unwrap(), hierarchy_golden);
+        assert_eq!(hierarchy_cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxcfold_folder_mutation_examples_parse_expected_fields() {
+        let delete_folder_golden = vec![
+            0x1D, 0x00, 0x01, 0x05, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xDF, 0x36,
+        ];
+        let mut delete_folder_cursor = Cursor::new(&delete_folder_golden);
+        let delete_folder = read_rop_request(&mut delete_folder_cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(delete_folder.rop_id),
+            Some(RopId::DeleteFolder)
+        );
+        assert_eq!(delete_folder.input_handle_index, Some(1));
+        assert_eq!(delete_folder.delete_folder_flags(), Some(0x05));
+        assert_eq!(
+            delete_folder.payload,
+            vec![0x05, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xDF, 0x36]
+        );
+        assert_eq!(delete_folder_cursor.remaining(), 0);
+
+        let delete_messages_golden = vec![
+            0x1E, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xF1,
+            0x48, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xC3, 0x02,
+        ];
+        let mut delete_messages_cursor = Cursor::new(&delete_messages_golden);
+        let delete_messages = read_rop_request(&mut delete_messages_cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(delete_messages.rop_id),
+            Some(RopId::DeleteMessages)
+        );
+        assert_eq!(delete_messages.input_handle_index, Some(0));
+        assert_eq!(delete_messages.delete_messages_want_asynchronous(), Some(0));
+        assert_eq!(delete_messages.delete_messages_notify_non_read(), Some(1));
+        assert_eq!(&delete_messages.payload[..4], &[0x00, 0x01, 0x02, 0x00]);
+        assert_eq!(delete_messages.payload.len(), 20);
+        assert_eq!(delete_messages_cursor.remaining(), 0);
+
+        let move_copy_messages_golden = vec![
+            0x33, 0x00, 0x00, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xEC, 0x5D,
+            0x00, 0x00,
+        ];
+        let mut move_copy_messages_cursor = Cursor::new(&move_copy_messages_golden);
+        let move_copy_messages = read_rop_request(&mut move_copy_messages_cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(move_copy_messages.rop_id),
+            Some(RopId::MoveCopyMessages)
+        );
+        assert_eq!(move_copy_messages.input_handle_index, Some(0));
+        assert_eq!(move_copy_messages.output_handle_index, Some(1));
+        assert_eq!(move_copy_messages.move_copy_want_asynchronous(), Some(0));
+        assert_eq!(move_copy_messages.move_copy_want_copy_raw(), Some(0));
+        assert!(!move_copy_messages.move_copy_want_copy());
+        assert_eq!(
+            move_copy_messages.payload,
+            vec![0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xEC, 0x5D, 0x00, 0x00]
+        );
+        assert_eq!(move_copy_messages_cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxcfold_folder_move_copy_and_search_examples_parse_expected_fields() {
+        let move_folder_golden = vec![
+            0x35, 0x00, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xDF, 0x36,
+            0x46, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x64, 0x00, 0x65, 0x00, 0x72, 0x00, 0x31, 0x00,
+            0x00, 0x00,
+        ];
+        let mut move_folder_cursor = Cursor::new(&move_folder_golden);
+        let move_folder = read_rop_request(&mut move_folder_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(move_folder.rop_id), Some(RopId::MoveFolder));
+        assert_eq!(move_folder.input_handle_index, Some(1));
+        assert_eq!(move_folder.output_handle_index, Some(2));
+        assert_eq!(move_folder.folder_move_copy_want_asynchronous(), Some(1));
+        assert_eq!(move_folder.folder_move_copy_use_unicode(), Some(1));
+        assert_eq!(move_folder.folder_move_copy_display_name(), "Folder1");
+        assert_eq!(move_folder_cursor.remaining(), 0);
+
+        let copy_folder_golden = vec![
+            0x36, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x0E, 0x8E, 0xDF,
+            0x36, 0x46, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x64, 0x00, 0x65, 0x00, 0x72, 0x00, 0x31,
+            0x00, 0x00, 0x00,
+        ];
+        let mut copy_folder_cursor = Cursor::new(&copy_folder_golden);
+        let copy_folder = read_rop_request(&mut copy_folder_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(copy_folder.rop_id), Some(RopId::CopyFolder));
+        assert_eq!(copy_folder.input_handle_index, Some(0));
+        assert_eq!(copy_folder.output_handle_index, Some(1));
+        assert_eq!(copy_folder.folder_move_copy_want_asynchronous(), Some(1));
+        assert_eq!(copy_folder.folder_move_copy_want_recursive(), Some(1));
+        assert_eq!(copy_folder.folder_move_copy_use_unicode(), Some(1));
+        assert_eq!(copy_folder.folder_move_copy_display_name(), "Folder1");
+        assert_eq!(copy_folder_cursor.remaining(), 0);
+
+        let get_search_golden = vec![0x31, 0x00, 0x00, 0x01, 0x01, 0x00];
+        let mut get_search_cursor = Cursor::new(&get_search_golden);
+        let get_search = read_rop_request(&mut get_search_cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(get_search.rop_id),
+            Some(RopId::GetSearchCriteria)
+        );
+        assert_eq!(get_search.input_handle_index, Some(0));
+        assert!(get_search.get_search_criteria_use_unicode());
+        assert!(get_search.get_search_criteria_include_restriction());
+        assert!(!get_search.get_search_criteria_include_folders());
+        assert_eq!(get_search_cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxcfold_set_search_criteria_example_parses_scope_and_flags() {
+        let golden = vec![
+            0x30, 0x00, 0x01, 0x29, 0x01, 0x00, 0x02, 0x00, 0x00, 0x07, 0x00, 0x02, 0x03, 0x02,
+            0x00, 0x01, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49, 0x00, 0x50,
+            0x00, 0x4D, 0x00, 0x2E, 0x00, 0x41, 0x00, 0x70, 0x00, 0x70, 0x00, 0x6F, 0x00, 0x69,
+            0x00, 0x6E, 0x00, 0x74, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x00,
+            0x00, 0x02, 0x03, 0x02, 0x00, 0x01, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A,
+            0x00, 0x49, 0x00, 0x50, 0x00, 0x4D, 0x00, 0x2E, 0x00, 0x43, 0x00, 0x6F, 0x00, 0x6E,
+            0x00, 0x74, 0x00, 0x61, 0x00, 0x63, 0x00, 0x74, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02,
+            0x00, 0x01, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49, 0x00, 0x50,
+            0x00, 0x4D, 0x00, 0x2E, 0x00, 0x44, 0x00, 0x69, 0x00, 0x73, 0x00, 0x74, 0x00, 0x4C,
+            0x00, 0x69, 0x00, 0x73, 0x00, 0x74, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x01,
+            0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49, 0x00, 0x50, 0x00, 0x4D,
+            0x00, 0x2E, 0x00, 0x41, 0x00, 0x63, 0x00, 0x74, 0x00, 0x69, 0x00, 0x76, 0x00, 0x69,
+            0x00, 0x74, 0x00, 0x79, 0x00, 0x00, 0x00, 0x02, 0x03, 0x02, 0x00, 0x01, 0x00, 0x1F,
+            0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49, 0x00, 0x50, 0x00, 0x4D, 0x00, 0x2E,
+            0x00, 0x53, 0x00, 0x74, 0x00, 0x69, 0x00, 0x63, 0x00, 0x6B, 0x00, 0x79, 0x00, 0x4E,
+            0x00, 0x6F, 0x00, 0x74, 0x00, 0x65, 0x00, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x01,
+            0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49, 0x00, 0x50, 0x00, 0x4D,
+            0x00, 0x2E, 0x00, 0x54, 0x00, 0x61, 0x00, 0x73, 0x00, 0x6B, 0x00, 0x00, 0x00, 0x02,
+            0x03, 0x02, 0x00, 0x01, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x1F, 0x00, 0x1A, 0x00, 0x49,
+            0x00, 0x50, 0x00, 0x4D, 0x00, 0x2E, 0x00, 0x54, 0x00, 0x61, 0x00, 0x73, 0x00, 0x6B,
+            0x00, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x04, 0x03, 0x00, 0x17, 0x00,
+            0x03, 0x00, 0x17, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x14, 0x88, 0x2A, 0x00, 0x02, 0x00,
+        ];
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(request.rop_id),
+            Some(RopId::SetSearchCriteria)
+        );
+        assert_eq!(request.input_handle_index, Some(1));
+        assert_eq!(request.payload.get(..2), Some(&[0x29, 0x01][..]));
+        assert_eq!(request.payload.get(299..301), Some(&[0x01, 0x00][..]));
+        assert_eq!(
+            request.payload.get(301..309),
+            Some(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x88][..])
+        );
+        assert_eq!(
+            request.payload.get(309..313),
+            Some(&[0x2A, 0x00, 0x02, 0x00][..])
+        );
+        assert_eq!(request.payload.len(), 313);
+        assert_eq!(cursor.remaining(), 0);
     }
 
     #[test]
@@ -8555,6 +8926,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![JmapEmail {
@@ -9884,6 +10256,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![JmapEmail {
@@ -10002,6 +10375,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![JmapEmail {
@@ -10207,6 +10581,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }];
         let emails = vec![JmapEmail {
@@ -10712,6 +11087,7 @@ mod tests {
             modseq: 42,
             total_emails: 221,
             unread_emails: 17,
+            size_octets: 0,
             is_subscribed: true,
         };
         let object = MapiObject::Folder {
@@ -10836,6 +11212,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
@@ -10896,6 +11273,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let object = MapiObject::Folder {
@@ -10939,6 +11317,7 @@ mod tests {
             modseq: 42,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
@@ -11609,6 +11988,138 @@ mod tests {
         );
         assert_eq!(serialize_rop_request(&request).unwrap(), golden);
         assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxctabl_get_contents_table_example_round_trips_through_typed_parser() {
+        let golden = vec![0x05, 0x00, 0x00, 0x01, 0x00];
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            request.typed(),
+            TypedRopRequest::OpenTable(RopOpenTableRequest {
+                rop_id: RopId::GetContentsTable.as_u8(),
+                input_handle_index: 0,
+                output_handle_index: 1,
+                table_flags: 0,
+            })
+        );
+        assert_eq!(serialize_rop_request(&request).unwrap(), golden);
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxctabl_set_columns_example_round_trips_through_typed_parser() {
+        let golden = vec![
+            0x12, 0x00, 0x01, 0x00, 0x06, 0x00, 0x14, 0x00, 0x48, 0x67, 0x14, 0x00, 0x4A, 0x67,
+            0x14, 0x00, 0x4D, 0x67, 0x03, 0x00, 0x4E, 0x67, 0x1F, 0x00, 0x37, 0x00, 0x40, 0x00,
+            0x06, 0x0E,
+        ];
+
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            request.typed(),
+            TypedRopRequest::SetColumns(RopSetColumnsRequest {
+                input_handle_index: 1,
+                flags: 0,
+                property_tags: vec![
+                    0x6748_0014,
+                    0x674A_0014,
+                    0x674D_0014,
+                    0x674E_0003,
+                    0x0037_001F,
+                    0x0E06_0040,
+                ],
+            })
+        );
+        assert_eq!(serialize_rop_request(&request).unwrap(), golden);
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxctabl_sort_and_query_rows_examples_parse_through_typed_parser() {
+        let sort_golden = vec![
+            0x13, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x06, 0x0E,
+            0x01,
+        ];
+        let mut sort_cursor = Cursor::new(&sort_golden);
+        let sort = read_rop_request(&mut sort_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(sort.rop_id), Some(RopId::SortTable));
+        assert_eq!(sort.input_handle_index, Some(1));
+        assert_eq!(sort.sort_orders().len(), 1);
+        assert_eq!(sort.sort_orders()[0].property_tag, 0x0E06_0040);
+        assert_eq!(sort.sort_orders()[0].order, 1);
+        assert_eq!(sort.sort_category_count(), 0);
+        assert_eq!(sort_cursor.remaining(), 0);
+
+        let query_golden = vec![0x15, 0x00, 0x01, 0x00, 0x01, 0x32, 0x00];
+        let mut query_cursor = Cursor::new(&query_golden);
+        let query = read_rop_request(&mut query_cursor).unwrap();
+
+        assert_eq!(
+            query.typed(),
+            TypedRopRequest::QueryRows(RopQueryRowsRequest {
+                input_handle_index: 1,
+                flags: 0,
+                forward_read: true,
+                row_count: 0x32,
+            })
+        );
+        assert_eq!(serialize_rop_request(&query).unwrap(), query_golden);
+        assert_eq!(query_cursor.remaining(), 0);
+    }
+
+    #[test]
+    fn microsoft_oxctabl_category_examples_parse_expected_fields() {
+        let sort_golden = vec![
+            0x13, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00, 0x01, 0x00, 0x1F, 0x30, 0x08, 0x80,
+            0x00, 0x40, 0x00, 0x06, 0x0E, 0x01,
+        ];
+        let mut sort_cursor = Cursor::new(&sort_golden);
+        let sort = read_rop_request(&mut sort_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(sort.rop_id), Some(RopId::SortTable));
+        assert_eq!(sort.input_handle_index, Some(0));
+        assert_eq!(sort.sort_category_count(), 1);
+        assert_eq!(sort.sort_expanded_count(), 1);
+        assert_eq!(sort.sort_orders().len(), 2);
+        assert_eq!(sort.sort_orders()[0].property_tag, 0x8008_301F);
+        assert_eq!(sort.sort_orders()[0].order, 0);
+        assert_eq!(sort.sort_orders()[1].property_tag, 0x0E06_0040);
+        assert_eq!(sort.sort_orders()[1].order, 1);
+        assert_eq!(sort_cursor.remaining(), 0);
+
+        let expand_golden = vec![
+            0x59, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF1, 0x88, 0xBD,
+        ];
+        let mut expand_cursor = Cursor::new(&expand_golden);
+        let expand = read_rop_request(&mut expand_cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(expand.rop_id), Some(RopId::ExpandRow));
+        assert_eq!(expand.input_handle_index, Some(1));
+        assert_eq!(expand.expand_max_row_count(), 0);
+        assert_eq!(expand.category_id(), Some(0xBD88_F100_0000_0001));
+        assert_eq!(expand_cursor.remaining(), 0);
+
+        let query_golden = vec![0x15, 0x00, 0x00, 0x00, 0x01, 0x32, 0x00];
+        let mut query_cursor = Cursor::new(&query_golden);
+        let query = read_rop_request(&mut query_cursor).unwrap();
+
+        assert_eq!(
+            query.typed(),
+            TypedRopRequest::QueryRows(RopQueryRowsRequest {
+                input_handle_index: 0,
+                flags: 0,
+                forward_read: true,
+                row_count: 0x32,
+            })
+        );
+        assert_eq!(serialize_rop_request(&query).unwrap(), query_golden);
+        assert_eq!(query_cursor.remaining(), 0);
     }
 
     #[test]

@@ -2470,6 +2470,7 @@ fn mapi_search_folder_definition_to_folder(
             modseq: crate::mapi::identity::global_counter_from_store_id(id).unwrap_or(1),
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         },
     })
@@ -3334,6 +3335,7 @@ mod tests {
             modseq: 1,
             total_emails: 3,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }
     }
@@ -4325,6 +4327,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             }],
             Vec::new(),
@@ -4371,6 +4374,7 @@ mod tests {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             }],
             Vec::new(),
@@ -4891,6 +4895,7 @@ mod tests {
             modseq: 40,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = JmapEmail {
@@ -5672,6 +5677,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = JmapEmail {
@@ -5798,6 +5804,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = JmapEmail {
@@ -5986,6 +5993,7 @@ mod tests {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         };
         let email = JmapEmail {
