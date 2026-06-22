@@ -7175,6 +7175,7 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_SWAPPED_TODO_STORE
             | PID_TAG_SWAPPED_TODO_DATA
             | PID_TAG_MESSAGE_SIZE
+            | OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG
             | PID_TAG_SENDER_NAME_W
             | PID_TAG_SENDER_ADDRESS_TYPE_W
             | PID_TAG_SENDER_EMAIL_ADDRESS_W
@@ -26617,7 +26618,7 @@ mod tests {
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x0000101e"
+            "visible_column_tags=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x12130003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
     }
@@ -26650,10 +26651,10 @@ mod tests {
         assert!(contract.contains("phase=setcolumns"));
         assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
         assert!(contract
-            .contains("descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b"));
+            .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
         assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b"));
+        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
         assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
@@ -26691,8 +26692,7 @@ mod tests {
         assert!(contract.contains("0x0e1b000b"));
         assert!(contract.contains("0x0042001f"));
         assert!(
-            contract
-                .contains("selected_missing_descriptor_columns=0x8503000b,0x10900003,0x0e080003"),
+            contract.ends_with("selected_missing_descriptor_columns="),
             "{contract}"
         );
     }
@@ -28994,9 +28994,14 @@ mod tests {
             let summary = normal_message_table_column_support_summary(&columns);
 
             assert!(
-                summary.ends_with("defaulted=;named_or_dynamic="),
-                "{view_name} view has unsupported message-table columns: {summary}"
+                summary.contains(";defaulted=;"),
+                "{view_name} view has defaulted message-table columns: {summary}"
             );
+            if view_name == "Compact" {
+                assert!(summary.ends_with("named_or_dynamic=0x8514000b,0x9000101e"));
+            } else {
+                assert!(summary.ends_with("named_or_dynamic=0x8503000b,0x9000101e"));
+            }
         }
     }
 
@@ -29026,20 +29031,16 @@ mod tests {
 
         assert!(summary.contains("0x00410102"));
         assert!(!summary.contains("defaulted=0x00410102"));
-        assert!(summary.contains("defaulted=0x12130003"));
+        assert!(!summary.contains("defaulted=0x12130003"));
         assert!(summary.contains("named_or_dynamic=0x8514000b,0x8017000b,0x801f001f"));
     }
 
     #[test]
-    fn normal_message_defaulted_column_detail_reports_undocumented_1213_wire_shape() {
+    fn normal_message_column_support_backs_outlook_auxiliary_flags() {
         let detail =
             normal_message_defaulted_column_detail(&[PID_TAG_SUBJECT_W, 0x1213_0003, 0x801f_001f]);
 
-        assert!(detail.contains("tag=0x12130003"));
-        assert!(detail.contains("property_id=0x1213"));
-        assert!(detail.contains("property_type=0x0003:Integer32"));
-        assert!(detail.contains("default_wire_bytes=00000000"));
-        assert!(detail.contains("ms_oxprops=not_found_in_cached_2025_05_20"));
+        assert!(!detail.contains("tag=0x12130003"));
         assert!(!detail.contains("0x0037001f"));
         assert!(!detail.contains("0x801f001f"));
     }

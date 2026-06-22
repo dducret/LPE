@@ -720,6 +720,7 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_T
     0x825F_0102;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
+pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514_TAG: u32 = 0x8514_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_OVERRIDE_TAG: u32 = 0x851C_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND_TAG: u32 = 0x851E_000B;
@@ -748,6 +749,7 @@ pub(in crate::mapi) const PID_LID_CONVERSATION_PROCESSED_TAG: u32 = 0x85C9_0003;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG: u32 = 0x85CA_0040;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_VERSION_TAG: u32 = 0x85CB_0003;
 pub(in crate::mapi) const PID_NAME_KEYWORDS_TAG: u32 = 0x9000_101F;
+pub(in crate::mapi) const OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG: u32 = 0x1213_0003;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_W_TAG: u32 = 0x8700_001F;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_STRING8_TAG: u32 = 0x8700_001E;
 pub(in crate::mapi) const PID_LID_LOG_START_TAG: u32 = 0x8706_0040;
@@ -2485,6 +2487,7 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
+        PID_LID_OUTLOOK_COMMON_8514_TAG => Some(MapiValue::Bool(false)),
         PID_LID_PERCENT_COMPLETE_TAG => {
             Some(MapiValue::F64(email_percent_complete(email).to_bits()))
         }
@@ -2517,6 +2520,7 @@ pub(in crate::mapi) fn email_property_value(
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(email.size_octets)),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(email.size_octets)),
+        OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG => Some(MapiValue::U32(0)),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(email_sender_name(email).to_string())),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
@@ -2986,11 +2990,11 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
         columns: vec![
             view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
             view_named_id_column(
-                PID_LID_REMINDER_SET_TAG,
+                PID_LID_OUTLOOK_COMMON_8514_TAG,
                 0x12,
                 0x0000_3F40,
                 PSETID_COMMON_GUID,
-                PID_LID_REMINDER_SET,
+                PID_LID_OUTLOOK_COMMON_8514,
                 "Reminder",
             ),
             view_column(
@@ -2999,7 +3003,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 0x0000_270A,
                 "Icon",
             ),
-            view_column(PID_TAG_FLAG_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
             view_column(PID_TAG_HAS_ATTACHMENTS, 0x12, 0x0000_2F4A, "Attachment"),
             view_column(
                 string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
@@ -3014,7 +3018,12 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 "Subject",
             ),
             view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
-            view_column(PID_TAG_MESSAGE_SIZE, 0x0C, 0x0000_2740, "Size"),
+            view_column(
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+                0x0C,
+                0x0000_2740,
+                "Size",
+            ),
             view_named_string_column(
                 multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
                 0x12,
