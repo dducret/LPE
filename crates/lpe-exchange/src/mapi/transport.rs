@@ -1397,6 +1397,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::ConversationAction { .. } => "conversation_action",
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
         MapiObject::CommonViewNamedView { .. } => "common_view_named_view",
+        MapiObject::SearchFolderDefinitionMessage { .. } => "search_folder_definition_message",
         MapiObject::AssociatedConfig { .. } => "associated_config",
         MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
         MapiObject::RecoverableItem { .. } => "recoverable_item",

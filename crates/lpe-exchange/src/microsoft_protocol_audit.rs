@@ -274,8 +274,8 @@ const REPORT_ROWS: &[ReportRow] = &[
         spec: "MS-OXCDATA property data types",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/0c77892e-288e-435a-9c49-be1c20c7afdb",
         anchor: "`crates/lpe-exchange/src/microsoft_protocol_audit.rs::PROPERTY_TYPE_GAP_MANIFEST`",
-        implemented: "Implemented scalar and multivalue property types are manifest-checked.",
-        gaps: "`PtypUnspecified`, `PtypNull`, floating/currency/object/serverId/restriction/ruleAction and related multivalue forms are explicitly `KnownUnsupported`.",
+        implemented: "Implemented scalar and multivalue property types are manifest-checked. `RopGetPropertiesSpecific` has targeted `PtypUnspecified` typed-value projection for the MS-OXCDATA PropertyRow example.",
+        gaps: "Generic `PtypUnspecified` columns remain unsupported outside targeted GetPropertiesSpecific projection. `PtypNull`, floating/currency/object/serverId/restriction/ruleAction and related multivalue forms are explicitly `KnownUnsupported`.",
     },
     ReportRow {
         surface: "FastTransfer/ICS markers",

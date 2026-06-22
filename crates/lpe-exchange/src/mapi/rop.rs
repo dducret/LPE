@@ -1192,6 +1192,39 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 &columns,
             )
         }
+        Some(MapiObject::SearchFolderDefinitionMessage {
+            folder_id,
+            message_id,
+        }) => {
+            let Some(definition) = (folder_id == &COMMON_VIEWS_FOLDER_ID)
+                .then(|| {
+                    snapshot.common_views_table_messages().find_map(|message| {
+                        if let crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
+                            definition,
+                        ) = message
+                        {
+                            (crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+                                == Some(*message_id))
+                            .then_some(definition)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .flatten()
+            else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_search_folder_definition_row_with_mailbox_guid(
+                &definition,
+                principal.account_id,
+                &columns,
+            )
+        }
         Some(MapiObject::AssociatedConfig {
             folder_id,
             config_id,
@@ -3086,6 +3119,14 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{view_id:#018x}"),
         ),
+        Some(MapiObject::SearchFolderDefinitionMessage {
+            folder_id,
+            message_id,
+        }) => (
+            "search_folder_definition_message",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}"),
+        ),
         Some(MapiObject::AssociatedConfig {
             folder_id,
             config_id,
@@ -3442,6 +3483,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
         PID_TAG_SEARCH_FOLDER_ID => "PidTagSearchFolderId",
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => "PidTagSearchFolderStorageType",
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS => "PidTagSearchFolderEfpFlags",
+        PID_TAG_SEARCH_FOLDER_DEFINITION => "PidTagSearchFolderDefinition",
         PID_TAG_ARCHIVE_TAG => "PidTagArchiveTag",
         PID_TAG_POLICY_TAG => "PidTagPolicyTag",
         PID_TAG_RETENTION_PERIOD => "PidTagRetentionPeriod",
@@ -5087,6 +5131,14 @@ impl RopRequest {
         Some(u32::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    pub(in crate::mapi) fn read_recipients_reserved(&self) -> Option<u16> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::ReadRecipients)) {
+            return None;
+        }
+        let bytes = self.payload.get(4..6)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
     pub(in crate::mapi) fn attach_num(&self) -> Option<u32> {
         let bytes = if self.rop_id == 0x24 {
             self.payload.get(..4)?
@@ -5486,6 +5538,11 @@ impl RopRequest {
             && self.payload.get(1).copied().unwrap_or(0) != 0
     }
 
+    pub(in crate::mapi) fn get_search_criteria_use_unicode(&self) -> bool {
+        matches!(RopId::from_u8(self.rop_id), Some(RopId::GetSearchCriteria))
+            && self.payload.first().copied().unwrap_or(0) != 0
+    }
+
     pub(in crate::mapi) fn get_search_criteria_include_folders(&self) -> bool {
         matches!(RopId::from_u8(self.rop_id), Some(RopId::GetSearchCriteria))
             && self.payload.get(2).copied().unwrap_or(0) != 0
@@ -5575,6 +5632,26 @@ impl RopRequest {
             .take(count)
             .filter_map(crate::mapi::identity::object_id_from_wire_id)
             .collect()
+    }
+
+    pub(in crate::mapi) fn delete_messages_want_asynchronous(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages)
+        ) {
+            return None;
+        }
+        self.payload.first().copied()
+    }
+
+    pub(in crate::mapi) fn delete_messages_notify_non_read(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages)
+        ) {
+            return None;
+        }
+        self.payload.get(1).copied()
     }
 
     pub(in crate::mapi) fn status_message_id(&self) -> Option<u64> {
@@ -6210,6 +6287,7 @@ fn parse_simple_pending_recipient_row(
         .and_then(MapiValue::as_i64)
         .and_then(|value| u8::try_from(value).ok())
         .unwrap_or(fallback_recipient_type);
+    let recipient_type = normalize_recipient_type(recipient_type)?;
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .and_then(super::properties::normalize_mapi_submit_address)
@@ -6302,6 +6380,7 @@ fn parse_wrapped_pending_recipient_row(
         .and_then(MapiValue::as_i64)
         .and_then(|value| u8::try_from(value).ok())
         .unwrap_or(fallback_recipient_type);
+    let recipient_type = normalize_recipient_type(recipient_type)?;
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .or(email_address)
@@ -6338,6 +6417,16 @@ fn recipient_display_name_from_values(values: &HashMap<u32, MapiValue>) -> Optio
             PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W,
         ],
     )
+}
+
+fn normalize_recipient_type(recipient_type: u8) -> Result<u8> {
+    let base_type = recipient_type & 0x0F;
+    let flags = recipient_type & !0x0F;
+    if matches!(base_type, 0x01..=0x03) && flags & !0x90 == 0 {
+        Ok(base_type)
+    } else {
+        Err(anyhow!("invalid recipient type {recipient_type:#04x}"))
+    }
 }
 
 fn legacy_dn_recipient_address(
@@ -6440,6 +6529,16 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
                 value,
             })
         }
+        Some(MapiRestrictionType::CompareProperties) => {
+            let relop = cursor.read_u8()?;
+            let left_property_tag = cursor.read_u32()?;
+            let right_property_tag = cursor.read_u32()?;
+            Ok(MapiRestriction::CompareProperties {
+                relop,
+                left_property_tag,
+                right_property_tag,
+            })
+        }
         Some(MapiRestrictionType::Bitmask) => {
             let rel_bmr = cursor.read_u8()?;
             let property_tag = cursor.read_u32()?;
@@ -6463,6 +6562,33 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
         Some(MapiRestrictionType::Exist) => {
             let property_tag = cursor.read_u32()?;
             Ok(MapiRestriction::Exist { property_tag })
+        }
+        Some(MapiRestrictionType::SubObject) => {
+            let subobject = cursor.read_u32()?;
+            let child = parse_mapi_restriction_from(cursor)?;
+            Ok(MapiRestriction::SubObject {
+                subobject,
+                child: Box::new(child),
+            })
+        }
+        Some(MapiRestrictionType::Comment) => {
+            let count = cursor.read_u8()? as usize;
+            for _ in 0..count {
+                parse_tagged_property(cursor)?;
+            }
+            match cursor.read_u8()? {
+                0x00 => Ok(MapiRestriction::And(Vec::new())),
+                0x01 => parse_mapi_restriction_from(cursor),
+                _ => Err(anyhow!("comment restriction has invalid present flag")),
+            }
+        }
+        Some(MapiRestrictionType::Count) => {
+            let count = cursor.read_u32()?;
+            let child = parse_mapi_restriction_from(cursor)?;
+            Ok(MapiRestriction::Count {
+                count,
+                child: Box::new(child),
+            })
         }
         _ => {
             tracing::warn!(
@@ -7581,7 +7707,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
-            let _reserved = cursor.read_u16()?;
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -9027,6 +9153,22 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_ASSOCIATED_SHARING_PROVIDER),
             "PidTagAssociatedSharingProvider"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SEARCH_FOLDER_ID),
+            "PidTagSearchFolderId"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SEARCH_FOLDER_STORAGE_TYPE),
+            "PidTagSearchFolderStorageType"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SEARCH_FOLDER_EFP_FLAGS),
+            "PidTagSearchFolderEfpFlags"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SEARCH_FOLDER_DEFINITION),
+            "PidTagSearchFolderDefinition"
         );
         assert_eq!(property_tag_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
         assert_eq!(

@@ -243,6 +243,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         view_id: u64,
     },
+    SearchFolderDefinitionMessage {
+        folder_id: u64,
+        message_id: u64,
+    },
     AssociatedConfig {
         folder_id: u64,
         config_id: u64,
@@ -1458,6 +1462,7 @@ impl MapiObject {
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
             | MapiObject::CommonViewNamedView { folder_id, .. }
+            | MapiObject::SearchFolderDefinitionMessage { folder_id, .. }
             | MapiObject::AssociatedConfig { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
             | MapiObject::RecoverableItem { folder_id, .. }

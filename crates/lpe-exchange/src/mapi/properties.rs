@@ -9,8 +9,8 @@ use crate::mapi::identity::{
     RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
 use crate::mapi_store::{
-    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
-    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
+    MapiAssociatedConfigMessage, MapiAttachment, MapiCommonViewNamedViewMessage,
+    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
 use anyhow::bail;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -55,6 +55,11 @@ pub(in crate::mapi) enum MapiRestriction {
         property_tag: u32,
         value: MapiValue,
     },
+    CompareProperties {
+        relop: u8,
+        left_property_tag: u32,
+        right_property_tag: u32,
+    },
     Bitmask {
         property_tag: u32,
         mask: u32,
@@ -67,6 +72,14 @@ pub(in crate::mapi) enum MapiRestriction {
     },
     Exist {
         property_tag: u32,
+    },
+    Count {
+        count: u32,
+        child: Box<MapiRestriction>,
+    },
+    SubObject {
+        subobject: u32,
+        child: Box<MapiRestriction>,
     },
 }
 
@@ -351,6 +364,8 @@ pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_ENTRY_ID: u32 = 0x0041_0102;
 pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
 pub(in crate::mapi) const PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W: u32 = 0x0065_001F;
 pub(in crate::mapi) const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
+pub(in crate::mapi) const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
+pub(in crate::mapi) const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
 pub(in crate::mapi) const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
 pub(in crate::mapi) const PID_TAG_IMPORTANCE: u32 = 0x0017_0003;
 pub(in crate::mapi) const PID_TAG_ORIGINAL_MESSAGE_CLASS_W: u32 = 0x004B_001F;
@@ -1252,6 +1267,9 @@ pub(in crate::mapi) fn rop_read_recipients_response(
             .collect::<Vec<_>>(),
         _ => return rop_error_response(0x0F, input_handle_index, 0x0000_04B9),
     };
+    if available_rows.is_empty() {
+        return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+    }
     let start_index = if start == 0 {
         0
     } else if let Some(index) = available_rows
@@ -1345,9 +1363,110 @@ pub(in crate::mapi) fn restriction_matches_email(
     restriction: Option<&MapiRestriction>,
     email: &JmapEmail,
 ) -> bool {
-    restriction_matches(restriction, |property_tag| {
-        email_property_value(email, property_tag)
-    })
+    restriction_matches_email_with_attachments(restriction, email, &[])
+}
+
+pub(in crate::mapi) fn restriction_matches_email_with_attachments(
+    restriction: Option<&MapiRestriction>,
+    email: &JmapEmail,
+    attachments: &[MapiAttachment],
+) -> bool {
+    let Some(restriction) = restriction else {
+        return true;
+    };
+    match restriction {
+        MapiRestriction::InvalidTableRestriction => false,
+        MapiRestriction::And(children) => children.iter().all(|child| {
+            restriction_matches_email_with_attachments(Some(child), email, attachments)
+        }),
+        MapiRestriction::Or(children) => children.iter().any(|child| {
+            restriction_matches_email_with_attachments(Some(child), email, attachments)
+        }),
+        MapiRestriction::Not(child) => {
+            !restriction_matches_email_with_attachments(Some(child), email, attachments)
+        }
+        MapiRestriction::SubObject { subobject, child } => {
+            match canonical_property_storage_tag(*subobject) {
+                PID_TAG_MESSAGE_RECIPIENTS => message_recipients(email).iter().any(|recipient| {
+                    restriction_matches(Some(child), |property_tag| {
+                        recipient_property_value(recipient, property_tag)
+                    })
+                }),
+                PID_TAG_MESSAGE_ATTACHMENTS => attachments
+                    .iter()
+                    .any(|attachment| restriction_matches_attachment(Some(child), attachment)),
+                _ => false,
+            }
+        }
+        MapiRestriction::Count { count, child } => {
+            *count > 0
+                && restriction_matches_email_with_attachments(Some(child), email, attachments)
+        }
+        MapiRestriction::Content {
+            property_tag,
+            value,
+            fuzzy_level_low,
+            fuzzy_level_high,
+        } => email_property_value(email, *property_tag)
+            .and_then(|property| property.into_text())
+            .is_some_and(|property| {
+                content_restriction_matches(&property, value, *fuzzy_level_low, *fuzzy_level_high)
+            }),
+        MapiRestriction::Property {
+            relop,
+            property_tag,
+            value,
+        } => email_property_value(email, *property_tag)
+            .is_some_and(|property| compare_mapi_values(&property, value, *relop)),
+        MapiRestriction::CompareProperties {
+            relop,
+            left_property_tag,
+            right_property_tag,
+        } => email_property_value(email, *left_property_tag).is_some_and(|left| {
+            email_property_value(email, *right_property_tag)
+                .is_some_and(|right| compare_mapi_values(&left, &right, *relop))
+        }),
+        MapiRestriction::Bitmask {
+            property_tag,
+            mask,
+            must_be_nonzero,
+        } => email_property_value(email, *property_tag)
+            .and_then(|value| value.into_u32())
+            .is_some_and(|value| ((value & mask) != 0) == *must_be_nonzero),
+        MapiRestriction::Size {
+            relop,
+            property_tag,
+            size,
+        } => email_property_value(email, *property_tag)
+            .map(|value| value.size() as i64)
+            .is_some_and(|actual| compare_i64(actual, *size as i64, *relop)),
+        MapiRestriction::Exist { property_tag } => {
+            email_property_value(email, *property_tag).is_some()
+        }
+    }
+}
+
+fn recipient_property_value(recipient: &MapiRecipient<'_>, property_tag: u32) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let display_name = recipient
+        .address
+        .display_name
+        .as_deref()
+        .unwrap_or(&recipient.address.address);
+    match property_tag {
+        PID_TAG_RECIPIENT_TYPE => Some(MapiValue::U32(u32::from(recipient.recipient_type))),
+        PID_TAG_DISPLAY_NAME_W | PID_TAG_RECIPIENT_DISPLAY_NAME_W => {
+            Some(MapiValue::String(display_name.to_string()))
+        }
+        PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(recipient.address.address.clone()))
+        }
+        PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W => {
+            Some(MapiValue::String(display_name.to_string()))
+        }
+        0x3002_001F => Some(MapiValue::String("SMTP".to_string())),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn restriction_matches_contact_in_folder(
@@ -1462,6 +1581,14 @@ pub(in crate::mapi) fn restriction_matches(
             value,
         } => value_for(*property_tag)
             .is_some_and(|property| compare_mapi_values(&property, value, *relop)),
+        MapiRestriction::CompareProperties {
+            relop,
+            left_property_tag,
+            right_property_tag,
+        } => value_for(*left_property_tag).is_some_and(|left| {
+            value_for(*right_property_tag)
+                .is_some_and(|right| compare_mapi_values(&left, &right, *relop))
+        }),
         MapiRestriction::Bitmask {
             property_tag,
             mask,
@@ -1477,6 +1604,10 @@ pub(in crate::mapi) fn restriction_matches(
             .map(|value| value.size() as i64)
             .is_some_and(|actual| compare_i64(actual, *size as i64, *relop)),
         MapiRestriction::Exist { property_tag } => value_for(*property_tag).is_some(),
+        MapiRestriction::Count { count, child } => {
+            *count > 0 && restriction_matches(Some(child), value_for)
+        }
+        MapiRestriction::SubObject { .. } => false,
     }
 }
 
@@ -1821,15 +1952,22 @@ fn search_folder_definition_blob(definition: &SearchFolderDefinition) -> Vec<u8>
         return value;
     }
     let mut blob = Vec::new();
-    blob.extend_from_slice(&0x0410_0000u32.to_be_bytes());
-    blob.extend_from_slice(&search_folder_storage_type(definition).to_be_bytes());
-    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0x0000_1004u32.to_le_bytes());
+    blob.extend_from_slice(&search_folder_storage_type(definition).to_le_bytes());
+    blob.extend_from_slice(&0u32.to_le_bytes());
     blob.push(0);
-    blob.extend_from_slice(&0u32.to_be_bytes());
-    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_le_bytes());
+    blob.extend_from_slice(
+        &(definition
+            .scope_json
+            .get("recursive")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(definition.is_builtin) as u32)
+            .to_le_bytes(),
+    );
     blob.push(0);
-    blob.extend_from_slice(&0u32.to_be_bytes());
-    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_le_bytes());
+    blob.extend_from_slice(&0u32.to_le_bytes());
     blob
 }
 
@@ -1838,7 +1976,7 @@ fn search_folder_last_used() -> u32 {
 }
 
 fn search_folder_expiration() -> u32 {
-    u32::MAX
+    214_089_641
 }
 
 fn search_folder_tag(definition: &SearchFolderDefinition) -> u32 {
@@ -2484,6 +2622,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         ),
         PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => Some(
             MapiValue::Binary(mapi_mailstore::private_store_entry_id(account_id)),
+        ),
+        PID_TAG_WLINK_CLIENT_ID if navigation_shortcut_targets_calendar(message) => Some(
+            MapiValue::Binary(wlink_save_stamp(message).to_le_bytes().to_vec()),
         ),
         PID_TAG_WLINK_RO_GROUP_TYPE if navigation_shortcut_targets_calendar(message) => {
             Some(MapiValue::I32(-1))
@@ -8689,7 +8830,7 @@ mod tests {
     }
 
     #[test]
-    fn read_recipients_row_zero_on_empty_message_returns_empty_success() {
+    fn read_recipients_row_zero_on_empty_message_returns_not_found() {
         let request = RopRequest {
             rop_id: 0x0F,
             input_handle_index: Some(2),
@@ -8710,7 +8851,7 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        assert_eq!(response, vec![0x0F, 0x02, 0, 0, 0, 0, 0]);
+        assert_eq!(response, vec![0x0F, 0x02, 0x0F, 0x01, 0x04, 0x80]);
     }
 
     #[test]
@@ -9238,6 +9379,44 @@ mod tests {
         assert!(extended_flags
             .windows(expected_subproperty.len())
             .any(|window| window == expected_subproperty.as_slice()));
+    }
+
+    #[test]
+    fn microsoft_oxosrch_search_folder_definition_blob_header_is_little_endian() {
+        let definition_id = Uuid::from_u128(0x12345678_9abc_4def_8123_456789abcdef);
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(123),
+        );
+        let definition = SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376),
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({
+                "scope": "top_of_personal_folders",
+                "recursive": true
+            }),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        };
+
+        let Some(MapiValue::Binary(blob)) = search_folder_definition_message_property_value(
+            &definition,
+            Uuid::nil(),
+            PID_TAG_SEARCH_FOLDER_DEFINITION,
+        ) else {
+            panic!("expected PidTagSearchFolderDefinition");
+        };
+
+        assert_eq!(
+            &blob[0..8],
+            &[0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(&blob[17..21], &[0x01, 0x00, 0x00, 0x00]);
     }
 
     #[test]
@@ -11912,6 +12091,10 @@ mod tests {
             )))
         );
         assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CLIENT_ID),
+            Some(MapiValue::Binary(0x1234_5678u32.to_le_bytes().to_vec()))
+        );
+        assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_RO_GROUP_TYPE),
             Some(MapiValue::I32(-1))
         );
@@ -12032,6 +12215,93 @@ mod tests {
 
     fn descriptor_column_property_tags(descriptor: &[u8]) -> Vec<u32> {
         view_descriptor_property_tags(descriptor)
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct TestViewColumnPacket {
+        property_type: u16,
+        property_id: u16,
+        width: u32,
+        flags: u32,
+        kind: u32,
+        id: u32,
+        guid: Option<[u8; 16]>,
+        name: Option<String>,
+    }
+
+    fn descriptor_column_packets(descriptor: &[u8]) -> Vec<TestViewColumnPacket> {
+        let Some(column_count) = descriptor
+            .get(20..24)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .and_then(|count| usize::try_from(count).ok())
+        else {
+            return Vec::new();
+        };
+
+        let mut offset = 60usize;
+        let mut packets = Vec::with_capacity(column_count);
+        for _ in 0..column_count {
+            let Some(packet) = descriptor.get(offset..offset + 36) else {
+                break;
+            };
+            let property_type = u16::from_le_bytes([packet[0], packet[1]]);
+            let property_id = u16::from_le_bytes([packet[2], packet[3]]);
+            let width = u32::from_le_bytes([packet[4], packet[5], packet[6], packet[7]]);
+            let flags = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
+            let kind = u32::from_le_bytes([packet[28], packet[29], packet[30], packet[31]]);
+            let id = u32::from_le_bytes([packet[32], packet[33], packet[34], packet[35]]);
+            offset += 36;
+
+            let mut guid = None;
+            let mut name = None;
+            if flags & 0x0000_1000 != 0 {
+                let Some(guid_bytes) = descriptor.get(offset..offset + 16) else {
+                    break;
+                };
+                guid = Some(
+                    guid_bytes
+                        .try_into()
+                        .expect("slice length checked for view descriptor guid"),
+                );
+                offset += 16;
+
+                if kind == 1 {
+                    let Some(length_bytes) = descriptor.get(offset..offset + 4) else {
+                        break;
+                    };
+                    let buffer_length = u32::from_le_bytes(
+                        length_bytes
+                            .try_into()
+                            .expect("slice length checked for view descriptor name length"),
+                    ) as usize;
+                    offset += 4;
+                    let Some(buffer) = descriptor.get(offset..offset + buffer_length) else {
+                        break;
+                    };
+                    let units = buffer
+                        .chunks_exact(2)
+                        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+                        .take_while(|unit| *unit != 0)
+                        .collect::<Vec<_>>();
+                    name = Some(String::from_utf16(&units).expect("valid UTF-16 view name"));
+                    offset += buffer_length;
+                }
+            }
+
+            packets.push(TestViewColumnPacket {
+                property_type,
+                property_id,
+                width,
+                flags,
+                kind,
+                id,
+                guid,
+                name,
+            });
+        }
+
+        packets
     }
 
     #[test]
@@ -12155,6 +12425,7 @@ mod tests {
         let definition = outlook_mail_view_definition("Messages");
         let descriptor = view_descriptor_binary(&definition);
 
+        assert_eq!(descriptor.len(), 510);
         assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
         assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
         assert_eq!(&descriptor[20..24], &11u32.to_le_bytes());
@@ -12176,6 +12447,121 @@ mod tests {
                 PID_TAG_MESSAGE_DELIVERY_TIME,
                 PID_TAG_MESSAGE_SIZE,
                 0x0000_101E,
+            ]
+        );
+        assert_eq!(
+            descriptor_column_packets(&descriptor),
+            vec![
+                TestViewColumnPacket {
+                    property_type: 0x0001,
+                    property_id: 0x0004,
+                    width: 0x07,
+                    flags: 0x0000_0028,
+                    kind: 0,
+                    id: 0x0004,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x0003,
+                    property_id: 0x0017,
+                    width: 0x12,
+                    flags: 0x0000_2F4A,
+                    kind: 0,
+                    id: 0x0017,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x000B,
+                    property_id: 0x8503,
+                    width: 0x12,
+                    flags: 0x0000_3F40,
+                    kind: 0,
+                    id: 0x8503,
+                    guid: Some(PSETID_COMMON_GUID),
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x001E,
+                    property_id: 0x001A,
+                    width: 0x12,
+                    flags: 0x0000_270A,
+                    kind: 0,
+                    id: 0x001A,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x0003,
+                    property_id: 0x1090,
+                    width: 0x12,
+                    flags: 0x0000_2F4A,
+                    kind: 0,
+                    id: 0x1090,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x000B,
+                    property_id: 0x0E1B,
+                    width: 0x12,
+                    flags: 0x0000_2F4A,
+                    kind: 0,
+                    id: 0x0E1B,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x001E,
+                    property_id: 0x0042,
+                    width: 0x0C,
+                    flags: 0x0000_2F00,
+                    kind: 0,
+                    id: 0x0042,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x001E,
+                    property_id: 0x0037,
+                    width: 0x11,
+                    flags: 0x0000_2F00,
+                    kind: 0,
+                    id: 0x0037,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x0040,
+                    property_id: 0x0E06,
+                    width: 0x10,
+                    flags: 0x0000_2F40,
+                    kind: 0,
+                    id: 0x0E06,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x0003,
+                    property_id: 0x0E08,
+                    width: 0x0C,
+                    flags: 0x0000_2740,
+                    kind: 0,
+                    id: 0x0E08,
+                    guid: None,
+                    name: None,
+                },
+                TestViewColumnPacket {
+                    property_type: 0x101E,
+                    property_id: 0x0000,
+                    width: 0x12,
+                    flags: 0x0000_7B20,
+                    kind: 1,
+                    id: 0,
+                    guid: Some(PS_PUBLIC_STRINGS_GUID),
+                    name: Some("Keywords".to_string()),
+                },
             ]
         );
     }

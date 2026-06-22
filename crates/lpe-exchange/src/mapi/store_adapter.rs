@@ -1960,6 +1960,13 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
                 push_unique(&mut plan.object_ids, *view_id);
             }
         }
+        MapiObject::SearchFolderDefinitionMessage {
+            folder_id,
+            message_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *message_id);
+        }
         MapiObject::AssociatedConfig {
             folder_id,
             config_id,

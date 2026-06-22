@@ -24,16 +24,36 @@ use lpe_storage::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::cmp::Ordering;
+use std::{
+    cmp::Ordering,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
 const EC_SEARCH_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_SEARCH_NOT_FOUND: u32 = 0x8004_010F;
+const EC_SEARCH_SCOPE_VIOLATION: u32 = 0x0000_0490;
 const EC_SEARCH_ACCESS_DENIED: u32 = 0x8007_0005;
+const EC_SEARCH_NOT_INITIALIZED: u32 = 0x8004_0605;
 const EC_SEARCH_INVALID_PARAMETER: u32 = 0x8007_0057;
 const SEARCH_RUNNING_FLAG: u32 = 0x0000_0001;
 const SEARCH_RECURSIVE_FLAG: u32 = 0x0000_0004;
+const SET_SEARCH_STOP_FLAG: u32 = 0x0000_0001;
+const SET_SEARCH_RESTART_FLAG: u32 = 0x0000_0002;
+const SET_SEARCH_SHALLOW_FLAG: u32 = 0x0000_0008;
+const SET_SEARCH_BACKGROUND_FLAG: u32 = 0x0000_0020;
+const SET_SEARCH_CONTENT_INDEXED_FLAG: u32 = 0x0001_0000;
+const SET_SEARCH_NON_CONTENT_INDEXED_FLAG: u32 = 0x0002_0000;
+const SET_SEARCH_STATIC_FLAG: u32 = 0x0004_0000;
+const SET_SEARCH_VALID_FLAGS: u32 = SET_SEARCH_STOP_FLAG
+    | SET_SEARCH_RESTART_FLAG
+    | SEARCH_RECURSIVE_FLAG
+    | SET_SEARCH_SHALLOW_FLAG
+    | SET_SEARCH_BACKGROUND_FLAG
+    | SET_SEARCH_CONTENT_INDEXED_FLAG
+    | SET_SEARCH_NON_CONTENT_INDEXED_FLAG
+    | SET_SEARCH_STATIC_FLAG;
 const EC_RULE_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_RULE_NOT_FOUND: u32 = 0x8004_010F;
 const EC_RULE_INVALID_PARAMETER: u32 = 0x8007_0057;
@@ -92,6 +112,24 @@ fn synthetic_folder_allows_create_message(folder_id: u64) -> bool {
             | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
             | QUICK_STEP_SETTINGS_FOLDER_ID
     )
+}
+
+fn current_mapi_filetime() -> u64 {
+    const FILETIME_UNIX_EPOCH_SECONDS: u64 = 11_644_473_600;
+    const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
+
+    let unix_ticks = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| {
+            duration
+                .as_secs()
+                .saturating_mul(FILETIME_TICKS_PER_SECOND)
+                .saturating_add(u64::from(duration.subsec_nanos() / 100))
+        })
+        .unwrap_or(0);
+    FILETIME_UNIX_EPOCH_SECONDS
+        .saturating_mul(FILETIME_TICKS_PER_SECOND)
+        .saturating_add(unix_ticks)
 }
 
 fn advertised_special_folder_container_class(folder_id: u64) -> Option<&'static str> {
@@ -535,6 +573,8 @@ fn public_folder_per_user_patches(data: &[u8]) -> Option<Vec<PublicFolderPerUser
 
 fn bounded_search_criteria_from_rop(
     request: &RopRequest,
+    search_folder_id: u64,
+    previous_definition: Option<&SearchFolderDefinition>,
     mailboxes: &[JmapMailbox],
 ) -> Result<BoundedSearchCriteria, u32> {
     let restriction_bytes = request
@@ -545,50 +585,123 @@ fn bounded_search_criteria_from_rop(
     } else {
         Some(parse_mapi_restriction(restriction_bytes).map_err(|_| EC_SEARCH_UNSUPPORTED)?)
     };
-    let clauses = match restriction {
-        Some(restriction) => bounded_search_restriction_clauses(&restriction)?,
-        None => Vec::new(),
-    };
-    if clauses.is_empty() {
-        return Err(EC_SEARCH_INVALID_PARAMETER);
-    }
     let folder_ids = request
         .search_criteria_folder_ids()
         .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
     let flags = request
         .search_criteria_flags()
         .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
-    let mut canonical_folder_ids = Vec::new();
-    let mut folder_roles = Vec::new();
-    for folder_id in folder_ids {
-        if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
-            canonical_folder_ids.push(mailbox.id.to_string());
-            if !mailbox.role.is_empty() {
-                folder_roles.push(mailbox.role.clone());
-            }
-        } else if let Some(role) = role_for_folder_id(folder_id) {
-            folder_roles.push(role.to_string());
-        } else {
-            return Err(EC_SEARCH_NOT_FOUND);
-        }
+    if !set_search_criteria_flags_are_valid(flags) {
+        return Err(EC_SEARCH_INVALID_PARAMETER);
     }
-    folder_roles.sort();
-    folder_roles.dedup();
-    let scope_json = json!({
-        "kind": "mapi_bounded",
-        "scope": "folders",
-        "recursive": flags & SEARCH_RECURSIVE_FLAG != 0,
-        "folderIds": canonical_folder_ids,
-        "folderRoles": folder_roles
-    });
-    let restriction_json = json!({
-        "kind": "mapi_bounded",
-        "all": clauses
-    });
+
+    let restriction_json = if let Some(restriction) = restriction {
+        if microsoft_oxcdata_reminders_restriction(&restriction) {
+            json!({
+                "kind": "exchange_reminders",
+                "match": "reminder_set_or_recurring",
+                "recurrenceHorizonDays": 90,
+                "occurrenceDismissals": true
+            })
+        } else {
+            let clauses = bounded_search_restriction_clauses(&restriction)?;
+            if clauses.is_empty() {
+                return Err(EC_SEARCH_INVALID_PARAMETER);
+            }
+            json!({
+                "kind": "mapi_bounded",
+                "all": clauses
+            })
+        }
+    } else {
+        previous_mapi_bounded_restriction_json(previous_definition)
+            .ok_or(EC_SEARCH_NOT_INITIALIZED)?
+    };
+
+    let scope_json = if folder_ids.is_empty() {
+        let mut scope = previous_mapi_bounded_scope_json(previous_definition)
+            .ok_or(EC_SEARCH_NOT_INITIALIZED)?;
+        if let Some(scope) = scope.as_object_mut() {
+            scope.insert(
+                "recursive".to_string(),
+                Value::Bool(flags & SEARCH_RECURSIVE_FLAG != 0),
+            );
+        }
+        scope
+    } else {
+        let mut canonical_folder_ids = Vec::new();
+        let mut folder_roles = Vec::new();
+        for folder_id in folder_ids {
+            if folder_id == search_folder_id {
+                return Err(EC_SEARCH_SCOPE_VIOLATION);
+            }
+            if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
+                canonical_folder_ids.push(mailbox.id.to_string());
+                if !mailbox.role.is_empty() {
+                    folder_roles.push(mailbox.role.clone());
+                }
+            } else if let Some(role) = role_for_folder_id(folder_id) {
+                folder_roles.push(role.to_string());
+            } else {
+                return Err(EC_SEARCH_NOT_FOUND);
+            }
+        }
+        folder_roles.sort();
+        folder_roles.dedup();
+        json!({
+            "kind": "mapi_bounded",
+            "scope": "folders",
+            "recursive": flags & SEARCH_RECURSIVE_FLAG != 0,
+            "folderIds": canonical_folder_ids,
+            "folderRoles": folder_roles
+        })
+    };
     Ok(BoundedSearchCriteria {
         scope_json,
         restriction_json,
     })
+}
+
+fn previous_mapi_bounded_restriction_json(
+    definition: Option<&SearchFolderDefinition>,
+) -> Option<Value> {
+    let restriction = &definition?.restriction_json;
+    if restriction.get("kind").and_then(Value::as_str) != Some("mapi_bounded")
+        || restriction
+            .get("all")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return None;
+    }
+    Some(restriction.clone())
+}
+
+fn previous_mapi_bounded_scope_json(definition: Option<&SearchFolderDefinition>) -> Option<Value> {
+    let scope = &definition?.scope_json;
+    if scope.get("kind").and_then(Value::as_str) != Some("mapi_bounded")
+        || (scope
+            .get("folderIds")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+            && scope
+                .get("folderRoles")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty))
+    {
+        return None;
+    }
+    Some(scope.clone())
+}
+
+fn set_search_criteria_flags_are_valid(flags: u32) -> bool {
+    flags & !SET_SEARCH_VALID_FLAGS == 0
+        && flags & (SET_SEARCH_STOP_FLAG | SET_SEARCH_RESTART_FLAG)
+            != (SET_SEARCH_STOP_FLAG | SET_SEARCH_RESTART_FLAG)
+        && flags & (SEARCH_RECURSIVE_FLAG | SET_SEARCH_SHALLOW_FLAG)
+            != (SEARCH_RECURSIVE_FLAG | SET_SEARCH_SHALLOW_FLAG)
+        && flags & (SET_SEARCH_CONTENT_INDEXED_FLAG | SET_SEARCH_NON_CONTENT_INDEXED_FLAG)
+            != (SET_SEARCH_CONTENT_INDEXED_FLAG | SET_SEARCH_NON_CONTENT_INDEXED_FLAG)
 }
 
 fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<Vec<Value>, u32> {
@@ -634,6 +747,132 @@ fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<V
         }
         _ => Err(EC_SEARCH_UNSUPPORTED),
     }
+}
+
+fn microsoft_oxcdata_reminders_restriction(restriction: &MapiRestriction) -> bool {
+    match restriction {
+        MapiRestriction::And(children) => {
+            children
+                .iter()
+                .any(microsoft_oxcdata_excluded_parent_folders_restriction)
+                && children
+                    .iter()
+                    .any(microsoft_oxcdata_reminder_core_restriction)
+        }
+        _ => microsoft_oxcdata_reminder_core_restriction(restriction),
+    }
+}
+
+fn microsoft_oxcdata_excluded_parent_folders_restriction(restriction: &MapiRestriction) -> bool {
+    match restriction {
+        MapiRestriction::And(children) if children.len() >= 4 => children.iter().all(|child| {
+            matches!(
+                child,
+                MapiRestriction::Property {
+                    relop: 0x05,
+                    property_tag,
+                    value: MapiValue::Binary(_),
+                } if canonical_property_storage_tag(*property_tag) == PID_TAG_PARENT_ENTRY_ID
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn microsoft_oxcdata_reminder_core_restriction(restriction: &MapiRestriction) -> bool {
+    const MSGFLAG_SUBMIT: u32 = 0x0000_0004;
+
+    let MapiRestriction::And(children) = restriction else {
+        return false;
+    };
+
+    children
+        .iter()
+        .any(microsoft_oxcdata_not_schedule_message_class)
+        && children.iter().any(|child| {
+            matches!(
+                child,
+                MapiRestriction::Bitmask {
+                    property_tag,
+                    mask: MSGFLAG_SUBMIT,
+                    must_be_nonzero: false,
+                } if canonical_property_storage_tag(*property_tag) == PID_TAG_MESSAGE_FLAGS
+            )
+        })
+        && children.iter().any(microsoft_oxcdata_reminder_or_recurring)
+}
+
+fn microsoft_oxcdata_not_schedule_message_class(restriction: &MapiRestriction) -> bool {
+    let MapiRestriction::Not(child) = restriction else {
+        return false;
+    };
+    let MapiRestriction::And(children) = child.as_ref() else {
+        return false;
+    };
+    children.iter().any(|child| {
+        matches!(
+            child,
+            MapiRestriction::Exist { property_tag }
+                if canonical_property_storage_tag(*property_tag) == PID_TAG_MESSAGE_CLASS_W
+        )
+    }) && children.iter().any(|child| {
+        matches!(
+            child,
+            MapiRestriction::Content {
+                property_tag,
+                value,
+                fuzzy_level_low: 0x0002,
+                ..
+            } if canonical_property_storage_tag(*property_tag) == PID_TAG_MESSAGE_CLASS_W
+                && value.eq_ignore_ascii_case("IPM.Schedule")
+        )
+    })
+}
+
+fn microsoft_oxcdata_reminder_or_recurring(restriction: &MapiRestriction) -> bool {
+    let MapiRestriction::Or(children) = restriction else {
+        return false;
+    };
+
+    children
+        .iter()
+        .any(microsoft_oxcdata_reminder_set_true_property)
+        && children
+            .iter()
+            .any(microsoft_oxcdata_recurring_exists_and_true)
+}
+
+fn microsoft_oxcdata_reminder_set_true_property(restriction: &MapiRestriction) -> bool {
+    matches!(
+        restriction,
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag,
+            value: MapiValue::Bool(true),
+        } if canonical_property_storage_tag(*property_tag) == PID_LID_REMINDER_SET_TAG
+    )
+}
+
+fn microsoft_oxcdata_recurring_exists_and_true(restriction: &MapiRestriction) -> bool {
+    let MapiRestriction::And(children) = restriction else {
+        return false;
+    };
+    children.iter().any(|child| {
+        matches!(
+            child,
+            MapiRestriction::Exist { property_tag }
+                if canonical_property_storage_tag(*property_tag) == PID_LID_RECURRING_TAG
+        )
+    }) && children.iter().any(|child| {
+        matches!(
+            child,
+            MapiRestriction::Property {
+                relop: 0x04,
+                property_tag,
+                value: MapiValue::Bool(true),
+            } if canonical_property_storage_tag(*property_tag) == PID_LID_RECURRING_TAG
+        )
+    })
 }
 
 fn bounded_search_content_clause(
@@ -751,6 +990,7 @@ fn bounded_search_property_clause(
 fn bounded_search_criteria_to_rop(
     definition: &lpe_storage::SearchFolderDefinition,
     mailboxes: &[JmapMailbox],
+    use_unicode: bool,
 ) -> Result<(Vec<u8>, Vec<u64>, u32), u32> {
     if definition
         .restriction_json
@@ -767,7 +1007,7 @@ fn bounded_search_criteria_to_rop(
         .ok_or(EC_SEARCH_UNSUPPORTED)?;
     let mut restrictions = Vec::new();
     for clause in clauses {
-        restrictions.push(rop_restriction_from_json_clause(clause)?);
+        restrictions.push(rop_restriction_from_json_clause(clause, use_unicode)?);
     }
     let restriction = if restrictions.is_empty() {
         Vec::new()
@@ -872,19 +1112,19 @@ fn builtin_search_criteria_to_rop_for_folder_id(
     )
 }
 
-fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
+fn rop_restriction_from_json_clause(clause: &Value, use_unicode: bool) -> Result<Vec<u8>, u32> {
     let field = clause
         .get("field")
         .and_then(Value::as_str)
         .ok_or(EC_SEARCH_UNSUPPORTED)?;
     if let Some(value) = clause.get("contains").and_then(Value::as_str) {
         return Ok(rop_content_restriction(
-            property_tag_for_search_field(field)?,
+            property_tag_for_search_field(field, use_unicode)?,
             value,
         ));
     }
     if let Some(value) = clause.get("equals") {
-        return rop_property_restriction(field, 0x04, value);
+        return rop_property_restriction(field, 0x04, value, use_unicode);
     }
     for (key, fuzzy_level_low) in [("notEquals", 0x0000), ("notPrefix", 0x0002)] {
         if let Some(value) = clause.get(key).and_then(Value::as_str) {
@@ -892,7 +1132,7 @@ fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
                 return Err(EC_SEARCH_UNSUPPORTED);
             }
             return Ok(rop_not_content_restriction(
-                PID_TAG_MESSAGE_CLASS_W,
+                string_search_property_tag(PID_TAG_MESSAGE_CLASS_W, use_unicode),
                 fuzzy_level_low,
                 value,
             ));
@@ -900,7 +1140,7 @@ fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
     }
     for (key, relop) in [("beforeOrAt", 0x01), ("afterOrAt", 0x03)] {
         if let Some(value) = clause.get(key) {
-            return rop_property_restriction(field, relop, value);
+            return rop_property_restriction(field, relop, value, use_unicode);
         }
     }
     Err(EC_SEARCH_UNSUPPORTED)
@@ -934,8 +1174,13 @@ fn rop_not_content_restriction(property_tag: u32, fuzzy_level_low: u16, value: &
     bytes
 }
 
-fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec<u8>, u32> {
-    let property_tag = property_tag_for_search_field(field)?;
+fn rop_property_restriction(
+    field: &str,
+    relop: u8,
+    value: &Value,
+    use_unicode: bool,
+) -> Result<Vec<u8>, u32> {
+    let property_tag = property_tag_for_search_field(field, use_unicode)?;
     let mapi_value = match field {
         "unread" => MapiValue::Bool(!value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?),
         "flagged" => MapiValue::U32(if value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)? {
@@ -967,19 +1212,44 @@ fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec
     Ok(bytes)
 }
 
-fn property_tag_for_search_field(field: &str) -> Result<u32, u32> {
+fn property_tag_for_search_field(field: &str, use_unicode: bool) -> Result<u32, u32> {
     match field {
-        "subject" => Ok(PID_TAG_SUBJECT_W),
-        "body" => Ok(PID_TAG_BODY_W),
-        "sender" => Ok(PID_TAG_SENDER_EMAIL_ADDRESS_W),
-        "category" => Ok(PID_NAME_KEYWORDS_TAG),
+        "subject" => Ok(string_search_property_tag(PID_TAG_SUBJECT_W, use_unicode)),
+        "body" => Ok(string_search_property_tag(PID_TAG_BODY_W, use_unicode)),
+        "sender" => Ok(string_search_property_tag(
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            use_unicode,
+        )),
+        "category" => Ok(multiple_string_search_property_tag(
+            PID_NAME_KEYWORDS_TAG,
+            use_unicode,
+        )),
         "unread" => Ok(PID_TAG_READ),
         "flagged" => Ok(PID_TAG_FLAG_STATUS),
         "hasAttachment" => Ok(PID_TAG_HAS_ATTACHMENTS),
         "receivedAt" => Ok(PID_TAG_MESSAGE_DELIVERY_TIME),
         "importance" => Ok(PID_TAG_IMPORTANCE),
-        "messageClass" => Ok(PID_TAG_MESSAGE_CLASS_W),
+        "messageClass" => Ok(string_search_property_tag(
+            PID_TAG_MESSAGE_CLASS_W,
+            use_unicode,
+        )),
         _ => Err(EC_SEARCH_UNSUPPORTED),
+    }
+}
+
+fn string_search_property_tag(property_tag: u32, use_unicode: bool) -> u32 {
+    if use_unicode {
+        property_tag
+    } else {
+        (property_tag & 0xFFFF_0000) | 0x001E
+    }
+}
+
+fn multiple_string_search_property_tag(property_tag: u32, use_unicode: bool) -> u32 {
+    if use_unicode {
+        property_tag
+    } else {
+        (property_tag & 0xFFFF_0000) | 0x101E
     }
 }
 
@@ -2591,6 +2861,9 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
         Some(MapiObject::CommonViewNamedView { .. }) => "common_view_named_view",
+        Some(MapiObject::SearchFolderDefinitionMessage { .. }) => {
+            "search_folder_definition_message"
+        }
         Some(MapiObject::AssociatedConfig { .. }) => "associated_config",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
         Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
@@ -4187,6 +4460,10 @@ fn set_property_debug_name(tag: u32) -> &'static str {
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => "PidTagAdditionalRenEntryIdsEx",
         PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
+        PID_TAG_SEARCH_FOLDER_ID => "PidTagSearchFolderId",
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => "PidTagSearchFolderStorageType",
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS => "PidTagSearchFolderEfpFlags",
+        PID_TAG_SEARCH_FOLDER_DEFINITION => "PidTagSearchFolderDefinition",
         tag if property_ids_match(tag, PID_TAG_WLINK_SAVE_STAMP) => "PidTagWlinkSaveStamp",
         tag if property_ids_match(tag, PID_TAG_WLINK_TYPE) => "PidTagWlinkType",
         tag if property_ids_match(tag, PID_TAG_WLINK_FLAGS) => "PidTagWlinkFlags",
@@ -6535,6 +6812,29 @@ fn common_view_named_view_message_for_open(
             .filter(|message| message.folder_id == folder_id);
     }
     snapshot.default_folder_named_view_message(folder_id, message_id)
+}
+
+fn search_folder_definition_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<SearchFolderDefinition> {
+    (folder_id == COMMON_VIEWS_FOLDER_ID)
+        .then(|| {
+            snapshot.common_views_table_messages().find_map(|message| {
+                if let crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
+                    definition,
+                ) = message
+                {
+                    (crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+                        == Some(message_id))
+                    .then_some(definition)
+                } else {
+                    None
+                }
+            })
+        })
+        .flatten()
 }
 
 fn format_debug_property_tags(tags: &[u32]) -> String {
@@ -8907,10 +9207,7 @@ fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
         .map(u32::from_le_bytes);
     let all_column_tags = view_descriptor_all_property_tags(descriptor);
     let visible_column_tags = view_descriptor_property_tags(descriptor);
-    let expected_column_bytes = column_count
-        .and_then(|count| usize::try_from(count).ok())
-        .map(|count| 60usize.saturating_add(count.saturating_mul(36)))
-        .unwrap_or(60);
+    let expected_column_bytes = view_descriptor_column_payload_len(descriptor).unwrap_or(60);
     let restriction_bytes = descriptor.len().saturating_sub(expected_column_bytes);
 
     format!(
@@ -8943,6 +9240,29 @@ fn view_descriptor_column_count(descriptor: &[u8]) -> Option<u32> {
         .get(20..24)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u32::from_le_bytes)
+}
+
+fn view_descriptor_column_payload_len(descriptor: &[u8]) -> Option<usize> {
+    let column_count = view_descriptor_column_count(descriptor)? as usize;
+    let mut offset = 60usize;
+    for _ in 0..column_count {
+        let packet = descriptor.get(offset..offset + 36)?;
+        let flags = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
+        let kind = u32::from_le_bytes([packet[28], packet[29], packet[30], packet[31]]);
+        offset = offset.checked_add(36)?;
+        if flags & 0x0000_1000 == 0 {
+            continue;
+        }
+        offset = offset.checked_add(16)?;
+        if kind == 1 {
+            let buffer_length = descriptor
+                .get(offset..offset + 4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)? as usize;
+            offset = offset.checked_add(4)?.checked_add(buffer_length)?;
+        }
+    }
+    Some(offset)
 }
 
 fn view_descriptor_all_property_tags(descriptor: &[u8]) -> Vec<u32> {
@@ -9959,10 +10279,40 @@ fn missing_debug_property_tags(required: &[u32], present: &[u32]) -> String {
     required
         .iter()
         .copied()
-        .filter(|tag| !present.contains(tag))
+        .filter(|tag| !debug_property_tag_present(*tag, present))
         .map(|tag| format!("0x{tag:08x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn debug_property_tag_present(required: u32, present: &[u32]) -> bool {
+    if present.contains(&required) {
+        return true;
+    }
+    let required_id = required >> 16;
+    let required_type = required & 0xFFFF;
+    if matches!(required_type, 0x001E | 0x001F | 0x101E | 0x101F)
+        && present.iter().copied().any(|tag| {
+            let present_id = tag >> 16;
+            let present_type = tag & 0xFFFF;
+            present_id == required_id
+                && matches!(
+                    (required_type, present_type),
+                    (0x001E | 0x001F, 0x001E | 0x001F) | (0x101E | 0x101F, 0x101E | 0x101F)
+                )
+        })
+    {
+        return true;
+    }
+    if required != 0x0000_101E {
+        return false;
+    }
+    present.iter().copied().any(|tag| {
+        let property_id = (tag >> 16) as u16;
+        let property_type = (tag & 0xFFFF) as u16;
+        property_id >= FIRST_NAMED_PROPERTY_ID
+            && matches!(property_type, 0x001E | 0x001F | 0x101E | 0x101F)
+    })
 }
 
 fn format_ipm_configuration_row_contract(
@@ -10078,7 +10428,11 @@ fn collect_restriction_property_tags(restriction: &MapiRestriction, tags: &mut V
                 collect_restriction_property_tags(child, tags);
             }
         }
-        MapiRestriction::Not(child) => collect_restriction_property_tags(child, tags),
+        MapiRestriction::Not(child)
+        | MapiRestriction::Count { child, .. }
+        | MapiRestriction::SubObject { child, .. } => {
+            collect_restriction_property_tags(child, tags)
+        }
         MapiRestriction::Content { property_tag, .. }
         | MapiRestriction::Property { property_tag, .. }
         | MapiRestriction::Bitmask { property_tag, .. }
@@ -10086,6 +10440,17 @@ fn collect_restriction_property_tags(restriction: &MapiRestriction, tags: &mut V
         | MapiRestriction::Exist { property_tag } => {
             if !tags.contains(property_tag) {
                 tags.push(*property_tag);
+            }
+        }
+        MapiRestriction::CompareProperties {
+            left_property_tag,
+            right_property_tag,
+            ..
+        } => {
+            for property_tag in [left_property_tag, right_property_tag] {
+                if !tags.contains(property_tag) {
+                    tags.push(*property_tag);
+                }
             }
         }
     }
@@ -10138,6 +10503,13 @@ fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
         MapiRestriction::Not(child) => {
             format!("not({})", format_debug_parsed_restriction(child))
         }
+        MapiRestriction::Count { count, child } => {
+            format!("count;count={count};child={}", format_debug_parsed_restriction(child))
+        }
+        MapiRestriction::SubObject { subobject, child } => format!(
+            "subobject;subobject=0x{subobject:08x};child={}",
+            format_debug_parsed_restriction(child)
+        ),
         MapiRestriction::Content {
             property_tag,
             value,
@@ -10154,6 +10526,13 @@ fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
         } => format!(
             "property;relop=0x{relop:02x};property_tag=0x{property_tag:08x};value={}",
             format_debug_mapi_value(value)
+        ),
+        MapiRestriction::CompareProperties {
+            relop,
+            left_property_tag,
+            right_property_tag,
+        } => format!(
+            "compare_properties;relop=0x{relop:02x};left_property_tag=0x{left_property_tag:08x};right_property_tag=0x{right_property_tag:08x}"
         ),
         MapiRestriction::Bitmask {
             property_tag,
@@ -13018,6 +13397,23 @@ where
                         0,
                     ));
                     output_handles.push(handle);
+                } else if let Some(definition) =
+                    search_folder_definition_message_for_open(snapshot, folder_id, message_id)
+                {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::SearchFolderDefinitionMessage {
+                            folder_id,
+                            message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &definition.display_name,
+                        0,
+                    ));
+                    output_handles.push(handle);
                 } else if folder_id == COMMON_VIEWS_FOLDER_ID {
                     if let Some(message) =
                         navigation_shortcut_message_for_open(snapshot, folder_id, message_id)
@@ -13525,6 +13921,13 @@ where
                     continue;
                 }
 
+                let created_at = current_mapi_filetime();
+                let initial_message_properties = || {
+                    HashMap::from([
+                        (PID_TAG_CREATION_TIME, MapiValue::U64(created_at)),
+                        (PID_TAG_LAST_MODIFICATION_TIME, MapiValue::U64(created_at)),
+                    ])
+                };
                 let pending_object = if request.create_message_associated()
                     && !matches!(
                         folder_id,
@@ -13532,7 +13935,7 @@ where
                     ) {
                     MapiObject::PendingAssociatedMessage {
                         folder_id,
-                        properties: HashMap::new(),
+                        properties: initial_message_properties(),
                     }
                 } else {
                     match snapshot
@@ -13541,49 +13944,49 @@ where
                     {
                         Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                         },
                         _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
                             MapiObject::PendingConversationAction {
                                 folder_id,
-                                properties: HashMap::new(),
+                                properties: initial_message_properties(),
                             }
                         }
                         _ if folder_id == FREEBUSY_DATA_FOLDER_ID => {
                             MapiObject::PendingAssociatedMessage {
                                 folder_id,
-                                properties: HashMap::new(),
+                                properties: initial_message_properties(),
                             }
                         }
                         _ if folder_id == COMMON_VIEWS_FOLDER_ID => {
                             MapiObject::PendingNavigationShortcut {
                                 folder_id,
-                                properties: HashMap::new(),
+                                properties: initial_message_properties(),
                             }
                         }
                         _ => MapiObject::PendingMessage {
                             folder_id,
-                            properties: HashMap::new(),
+                            properties: initial_message_properties(),
                             recipients: Vec::new(),
                         },
                     }
@@ -15665,6 +16068,14 @@ where
                 }
             }
             Some(RopId::ReadRecipients) => {
+                if request.read_recipients_reserved() != Some(0) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0F,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_read_recipients_response(
                     &request,
                     input_object(session, &handle_slots, &request),
@@ -17192,12 +17603,10 @@ where
             Some(RopId::MoveFolder | RopId::CopyFolder) => {
                 let rop_id = request.rop_id;
                 let response_handle_index = request.response_handle_index();
-                if !matches!(
-                    request.folder_move_copy_want_asynchronous(),
-                    Some(0x00 | 0x01)
-                ) || !matches!(request.folder_move_copy_use_unicode(), Some(0x00 | 0x01))
+                if request.folder_move_copy_want_asynchronous().is_none()
+                    || request.folder_move_copy_use_unicode().is_none()
                     || (rop_id == RopId::CopyFolder.as_u8()
-                        && !matches!(request.folder_move_copy_want_recursive(), Some(0x00 | 0x01)))
+                        && request.folder_move_copy_want_recursive().is_none())
                 {
                     responses.extend_from_slice(&rop_error_response(
                         rop_id,
@@ -17367,6 +17776,16 @@ where
                 ));
             }
             Some(RopId::DeleteMessages | RopId::HardDeleteMessages) => {
+                if request.delete_messages_want_asynchronous().is_none()
+                    || request.delete_messages_notify_non_read().is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
@@ -17936,13 +18355,19 @@ where
 
                 let attach_num =
                     next_pending_attachment_num(session, folder_id, message_id, snapshot);
+                let created_at = current_mapi_filetime();
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::PendingAttachment {
                         folder_id,
                         message_id,
                         attach_num,
-                        properties: HashMap::new(),
+                        properties: HashMap::from([
+                            (PID_TAG_ATTACH_SIZE, MapiValue::U32(0)),
+                            (PID_TAG_ACCESS_LEVEL, MapiValue::U32(0)),
+                            (PID_TAG_CREATION_TIME, MapiValue::U64(created_at)),
+                            (PID_TAG_LAST_MODIFICATION_TIME, MapiValue::U64(created_at)),
+                        ]),
                         data: Vec::new(),
                     },
                 );
@@ -18049,14 +18474,6 @@ where
                     .and_then(MapiValue::as_i64)
                     .unwrap_or(5);
                 if attach_method != 5 {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x46,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                if open_mode == 0 {
                     responses.extend_from_slice(&rop_error_response(
                         0x46,
                         request.response_handle_index(),
@@ -19493,8 +19910,8 @@ where
                 }
             }
             Some(RopId::MoveCopyMessages) => {
-                if !matches!(request.move_copy_want_asynchronous(), Some(0x00 | 0x01))
-                    || !matches!(request.move_copy_want_copy_raw(), Some(0x00 | 0x01))
+                if request.move_copy_want_asynchronous().is_none()
+                    || request.move_copy_want_copy_raw().is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
                         0x33,
@@ -19990,7 +20407,12 @@ where
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                     continue;
                 }
-                let criteria = match bounded_search_criteria_from_rop(&request, mailboxes) {
+                let criteria = match bounded_search_criteria_from_rop(
+                    &request,
+                    *folder_id,
+                    Some(definition),
+                    mailboxes,
+                ) {
                     Ok(criteria) => criteria,
                     Err(error) => {
                         tracing::info!(
@@ -20089,8 +20511,12 @@ where
                     ));
                     continue;
                 };
-                match bounded_search_criteria_to_rop(definition, mailboxes)
-                    .or_else(|error| builtin_search_criteria_to_rop(definition).ok_or(error))
+                match bounded_search_criteria_to_rop(
+                    definition,
+                    mailboxes,
+                    request.get_search_criteria_use_unicode(),
+                )
+                .or_else(|error| builtin_search_criteria_to_rop(definition).ok_or(error))
                 {
                     Ok((restriction, folder_ids, flags)) => {
                         responses.extend_from_slice(&rop_get_search_criteria_response(
@@ -20175,7 +20601,7 @@ where
                         continue;
                     }
                 };
-                if !matches!(request.want_asynchronous(), Some(0x00 | 0x01))
+                if request.want_asynchronous().is_none()
                     || !read_flags_are_valid(request.read_flags(), true)
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -22691,11 +23117,8 @@ where
                 ));
             }
             Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders) => {
-                if !matches!(request.empty_folder_want_asynchronous(), Some(0x00 | 0x01))
-                    || !matches!(
-                        request.empty_folder_want_delete_associated(),
-                        Some(0x00 | 0x01)
-                    )
+                if request.empty_folder_want_asynchronous().is_none()
+                    || request.empty_folder_want_delete_associated().is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
@@ -25848,12 +26271,12 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=6"));
-        assert!(summary.contains("sort_column=4"));
+        assert!(summary.contains("column_count=11"));
+        assert!(summary.contains("sort_column=8"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x0e070003"
+            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
     }
@@ -25923,10 +26346,14 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("descriptor_columns=0x0e1b000b"));
+        assert!(contract.contains("descriptor_columns=0x00170003"));
+        assert!(contract.contains("0x0e1b000b"));
         assert!(contract.contains("0x0042001f"));
-        assert!(contract.contains("selected_missing_descriptor_columns="));
-        assert!(!contract.contains("selected_missing_descriptor_columns=0x"));
+        assert!(
+            contract
+                .contains("selected_missing_descriptor_columns=0x8503000b,0x10900003,0x0e080003"),
+            "{contract}"
+        );
     }
 
     #[test]
@@ -29254,7 +29681,8 @@ mod tests {
             payload,
         };
 
-        let error = bounded_search_criteria_from_rop(&request, &[]).unwrap_err();
+        let error =
+            bounded_search_criteria_from_rop(&request, INBOX_FOLDER_ID, None, &[]).unwrap_err();
 
         assert_eq!(error, EC_SEARCH_INVALID_PARAMETER);
     }
@@ -29543,6 +29971,22 @@ mod tests {
         assert_eq!(
             set_property_debug_name(PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS),
             "PidTagExtendedRuleMessageActions"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_SEARCH_FOLDER_ID),
+            "PidTagSearchFolderId"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_SEARCH_FOLDER_STORAGE_TYPE),
+            "PidTagSearchFolderStorageType"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_SEARCH_FOLDER_EFP_FLAGS),
+            "PidTagSearchFolderEfpFlags"
+        );
+        assert_eq!(
+            set_property_debug_name(PID_TAG_SEARCH_FOLDER_DEFINITION),
+            "PidTagSearchFolderDefinition"
         );
         assert_eq!(
             set_property_debug_name(PID_TAG_WLINK_ENTRY_ID),

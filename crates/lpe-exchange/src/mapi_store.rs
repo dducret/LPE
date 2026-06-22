@@ -225,6 +225,8 @@ const OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS: &str =
     "IPM.Configuration.MessageListSettings";
 const OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
+const OUTLOOK_INBOX_MRM_CONFIG_CLASS: &str = "IPM.Configuration.MRM";
+const OUTLOOK_INBOX_MRM_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE1);
 const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS: &str = "IPM.Configuration.UMOLK.UserOptions";
 const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
@@ -293,6 +295,7 @@ pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> boo
             | OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID
+            | OUTLOOK_INBOX_MRM_CONFIG_ID
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID
             | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
             | OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID
@@ -307,6 +310,7 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
         item_id,
         OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
+            | OUTLOOK_INBOX_MRM_CONFIG_ID
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID
             | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
@@ -408,6 +412,14 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             properties_json: serde_json::json!({}),
         },
         MapiAssociatedConfigMessage {
+            id: OUTLOOK_INBOX_MRM_CONFIG_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_6d72_6d43_8000_000000000001),
+            message_class: OUTLOOK_INBOX_MRM_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_MRM_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
+        MapiAssociatedConfigMessage {
             id: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
             folder_id,
             canonical_id: Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001),
@@ -471,6 +483,7 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
     if !matches!(
         message_class,
         "IPM.Configuration.ELC"
+            | OUTLOOK_INBOX_MRM_CONFIG_CLASS
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
             | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
@@ -560,6 +573,7 @@ fn log_outlook_inbox_associated_config_bootstrap(
     let virtual_only_defaults = [
         OUTLOOK_INBOX_EAS_CONFIG_CLASS,
         OUTLOOK_INBOX_ELC_CONFIG_CLASS,
+        OUTLOOK_INBOX_MRM_CONFIG_CLASS,
         OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
         OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS,
         OUTLOOK_INBOX_SHARING_INDEX_CLASS,

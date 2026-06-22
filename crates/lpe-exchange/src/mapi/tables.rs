@@ -322,6 +322,44 @@ fn restriction_matches_event(restriction: Option<&MapiRestriction>, event: &Mapi
     })
 }
 
+fn restriction_matches_email_in_snapshot(
+    restriction: Option<&MapiRestriction>,
+    email: &JmapEmail,
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> bool {
+    restriction_matches_email_with_attachments(
+        restriction,
+        email,
+        snapshot
+            .attachments_for_message(folder_id, mapi_message_id(email))
+            .unwrap_or_default(),
+    )
+}
+
+fn is_top_level_count_restriction(restriction: Option<&MapiRestriction>) -> bool {
+    matches!(restriction, Some(MapiRestriction::Count { .. }))
+}
+
+fn retain_rows_by_restriction<T>(
+    rows: &mut Vec<T>,
+    restriction: Option<&MapiRestriction>,
+    mut matches_restriction: impl FnMut(&T, Option<&MapiRestriction>) -> bool,
+) {
+    if let Some(MapiRestriction::Count { count, child }) = restriction {
+        let mut remaining = *count as usize;
+        rows.retain(|row| {
+            if remaining == 0 || !matches_restriction(row, Some(child)) {
+                return false;
+            }
+            remaining -= 1;
+            true
+        });
+    } else {
+        rows.retain(|row| matches_restriction(row, restriction));
+    }
+}
+
 pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
     vec![
         PID_TAG_DISPLAY_NAME_W,
@@ -644,6 +682,11 @@ pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
         PID_TAG_WLINK_GROUP_CLSID,
         PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
+        PID_TAG_WLINK_CALENDAR_COLOR,
+        PID_TAG_WLINK_ADDRESS_BOOK_EID,
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+        PID_TAG_WLINK_CLIENT_ID,
+        PID_TAG_WLINK_RO_GROUP_TYPE,
         PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
     ]
 }
@@ -1946,9 +1989,18 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .collect::<Vec<_>>()
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 let mut rows = snapshot.tracked_mail_processing_messages();
-                rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |message, restriction| {
+                        restriction_matches_email_in_snapshot(
+                            restriction,
+                            &message.email,
+                            *folder_id,
+                            snapshot,
+                        )
+                    },
+                );
                 sort_mapi_messages(&mut rows, sort_orders);
                 rows.into_iter()
                     .map(|message| serialize_message_row(&message.email, &columns))
@@ -1994,12 +2046,17 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 } else {
                     start_position.saturating_sub(request.query_row_count().unwrap_or(0))
                 };
-                if let Some((_, window_emails)) = snapshot.content_table_window_emails(
-                    *folder_id,
-                    table_view_signature(sort_orders, restriction.as_ref()),
-                    window_offset,
-                    request.query_row_count().unwrap_or(0),
-                ) {
+                let window_emails = if is_top_level_count_restriction(restriction.as_ref()) {
+                    None
+                } else {
+                    snapshot.content_table_window_emails(
+                        *folder_id,
+                        table_view_signature(sort_orders, restriction.as_ref()),
+                        window_offset,
+                        request.query_row_count().unwrap_or(0),
+                    )
+                };
+                if let Some((_, window_emails)) = window_emails {
                     position_base = window_offset;
                     start_position = if request.query_forward_read() {
                         0
@@ -2026,7 +2083,18 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     }
                 } else {
                     let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                    rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+                    retain_rows_by_restriction(
+                        &mut rows,
+                        restriction.as_ref(),
+                        |email, restriction| {
+                            restriction_matches_email_in_snapshot(
+                                restriction,
+                                email,
+                                *folder_id,
+                                snapshot,
+                            )
+                        },
+                    );
                     sort_emails(&mut rows, sort_orders);
                     if *category_count > 0 {
                         categorized_email_rows(
@@ -2068,9 +2136,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();
-            rows.retain(|attachment| {
-                restriction_matches_attachment(restriction.as_ref(), attachment)
-            });
+            retain_rows_by_restriction(
+                &mut rows,
+                restriction.as_ref(),
+                |attachment, restriction| restriction_matches_attachment(restriction, attachment),
+            );
             sort_attachments(&mut rows, sort_orders);
             rows.into_iter()
                 .map(|attachment| serialize_attachment_row(attachment, &columns))
@@ -2140,11 +2210,6 @@ pub(in crate::mapi) fn rop_query_rows_response(
             .collect::<Vec<_>>();
         (selected, position_base.saturating_add(selected_start))
     };
-    let response_origin_position = if forward_read {
-        position_base.saturating_add(start_position)
-    } else {
-        next_position
-    };
     if !request.query_no_advance() {
         if let Some(
             MapiObject::HierarchyTable { position, .. }
@@ -2157,10 +2222,14 @@ pub(in crate::mapi) fn rop_query_rows_response(
             *position = next_position;
         }
     }
-    let response_origin = if response_origin_position == 0 {
+    let response_origin = if forward_read {
+        if next_position >= total_row_count {
+            0x02
+        } else {
+            0x01
+        }
+    } else if next_position == 0 {
         0x00
-    } else if response_origin_position >= total_row_count {
-        0x02
     } else {
         0x01
     };
@@ -2387,7 +2456,14 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             ..
         }) if !*associated && *folder_id == INBOX_FOLDER_ID => {
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-            rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+            rows.retain(|email| {
+                restriction_matches_email_in_snapshot(
+                    restriction.as_ref(),
+                    email,
+                    *folder_id,
+                    snapshot,
+                )
+            });
             sort_emails(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -2727,7 +2803,7 @@ pub(in crate::mapi) fn rop_expand_row_response(
     object: Option<&mut MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    _snapshot: &MapiMailStoreSnapshot,
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let Some(category_id) = request.category_id() else {
         return rop_error_response(0x59, request.response_handle_index(), 0x8004_0102);
@@ -2756,7 +2832,9 @@ pub(in crate::mapi) fn rop_expand_row_response(
 
     let columns = columns.clone();
     let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
-    source_rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+    source_rows.retain(|email| {
+        restriction_matches_email_in_snapshot(restriction.as_ref(), email, *folder_id, snapshot)
+    });
     sort_emails(&mut source_rows, sort_orders);
     let rows = categorized_email_rows(
         *folder_id,
@@ -2794,7 +2872,7 @@ pub(in crate::mapi) fn rop_collapse_row_response(
     object: Option<&mut MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    _snapshot: &MapiMailStoreSnapshot,
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let Some(category_id) = request.category_id() else {
         return rop_error_response(0x5A, request.response_handle_index(), 0x8004_0102);
@@ -2823,7 +2901,9 @@ pub(in crate::mapi) fn rop_collapse_row_response(
 
     let columns = columns.clone();
     let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
-    source_rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+    source_rows.retain(|email| {
+        restriction_matches_email_in_snapshot(restriction.as_ref(), email, *folder_id, snapshot)
+    });
     sort_emails(&mut source_rows, sort_orders);
     let rows = categorized_email_rows(
         *folder_id,
@@ -3640,6 +3720,16 @@ pub(in crate::mapi) fn table_view_signature(
                 push_bytes(hash, b"not");
                 push_restriction(hash, child);
             }
+            MapiRestriction::Count { count, child } => {
+                push_bytes(hash, b"count");
+                push_bytes(hash, &count.to_le_bytes());
+                push_restriction(hash, child);
+            }
+            MapiRestriction::SubObject { subobject, child } => {
+                push_bytes(hash, b"subobject");
+                push_bytes(hash, &subobject.to_le_bytes());
+                push_restriction(hash, child);
+            }
             MapiRestriction::Content {
                 property_tag,
                 value,
@@ -3661,6 +3751,16 @@ pub(in crate::mapi) fn table_view_signature(
                 push_bytes(hash, &[*relop]);
                 push_bytes(hash, &property_tag.to_le_bytes());
                 push_bytes(hash, format!("{value:?}").as_bytes());
+            }
+            MapiRestriction::CompareProperties {
+                relop,
+                left_property_tag,
+                right_property_tag,
+            } => {
+                push_bytes(hash, b"compare_properties");
+                push_bytes(hash, &[*relop]);
+                push_bytes(hash, &left_property_tag.to_le_bytes());
+                push_bytes(hash, &right_property_tag.to_le_bytes());
             }
             MapiRestriction::Bitmask {
                 property_tag,
@@ -4134,6 +4234,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         return matches!(
             message.message_class.as_str(),
             "IPM.Configuration.ELC"
+                | "IPM.Configuration.MRM"
                 | "IPM.Configuration.UMOLK.UserOptions"
                 | "IPM.RuleOrganizer"
                 | "IPM.Sharing.Configuration"
@@ -4672,13 +4773,27 @@ pub(in crate::mapi) fn rop_find_row_response(
                 }
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 let mut rows = snapshot.tracked_mail_processing_messages();
-                rows.retain(|message| {
-                    restriction_matches_email(table_restriction.as_ref(), &message.email)
-                });
+                retain_rows_by_restriction(
+                    &mut rows,
+                    table_restriction.as_ref(),
+                    |message, restriction| {
+                        restriction_matches_email_in_snapshot(
+                            restriction,
+                            &message.email,
+                            *folder_id,
+                            snapshot,
+                        )
+                    },
+                );
                 sort_mapi_messages(&mut rows, sort_orders);
                 if let Some((index, message)) =
                     find_row(rows.as_slice(), *position, request, |message| {
-                        restriction_matches_email(Some(&restriction), &message.email)
+                        restriction_matches_email_in_snapshot(
+                            Some(&restriction),
+                            &message.email,
+                            *folder_id,
+                            snapshot,
+                        )
                     })
                 {
                     *position = index;
@@ -4770,16 +4885,25 @@ pub(in crate::mapi) fn rop_find_row_response(
                 }
             } else {
                 let view_signature = table_view_signature(sort_orders, table_restriction.as_ref());
-                let window_emails = snapshot.content_table_window_emails_containing(
-                    *folder_id,
-                    view_signature,
-                    *position,
-                );
+                let window_emails = if is_top_level_count_restriction(table_restriction.as_ref()) {
+                    None
+                } else {
+                    snapshot.content_table_window_emails_containing(
+                        *folder_id,
+                        view_signature,
+                        *position,
+                    )
+                };
                 if let Some((offset, _total, window_emails)) = window_emails {
                     let local_position = position.saturating_sub(offset);
                     if let Some((index, email)) =
                         find_row(window_emails.as_slice(), local_position, request, |email| {
-                            restriction_matches_email(Some(&restriction), email)
+                            restriction_matches_email_in_snapshot(
+                                Some(&restriction),
+                                email,
+                                *folder_id,
+                                snapshot,
+                            )
                         })
                     {
                         *position = offset.saturating_add(index);
@@ -4790,16 +4914,32 @@ pub(in crate::mapi) fn rop_find_row_response(
                         );
                     } else {
                         let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                        rows.retain(|email| {
-                            restriction_matches_email(table_restriction.as_ref(), email)
-                        });
+                        retain_rows_by_restriction(
+                            &mut rows,
+                            table_restriction.as_ref(),
+                            |email, restriction| {
+                                restriction_matches_email_in_snapshot(
+                                    restriction,
+                                    email,
+                                    *folder_id,
+                                    snapshot,
+                                )
+                            },
+                        );
                         sort_emails(&mut rows, sort_orders);
-                        let complete_rows_available = snapshot
-                            .content_table_total(*folder_id, view_signature)
-                            .is_some_and(|total| total == rows.len());
+                        let complete_rows_available =
+                            !is_top_level_count_restriction(table_restriction.as_ref())
+                                && snapshot
+                                    .content_table_total(*folder_id, view_signature)
+                                    .is_some_and(|total| total == rows.len());
                         let found = complete_rows_available.then(|| {
                             find_row(rows.as_slice(), *position, request, |email| {
-                                restriction_matches_email(Some(&restriction), email)
+                                restriction_matches_email_in_snapshot(
+                                    Some(&restriction),
+                                    email,
+                                    *folder_id,
+                                    snapshot,
+                                )
                             })
                         });
                         if let Some(Some((index, email))) = found {
@@ -4815,13 +4955,27 @@ pub(in crate::mapi) fn rop_find_row_response(
                     }
                 } else {
                     let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                    rows.retain(|email| {
-                        restriction_matches_email(table_restriction.as_ref(), email)
-                    });
+                    retain_rows_by_restriction(
+                        &mut rows,
+                        table_restriction.as_ref(),
+                        |email, restriction| {
+                            restriction_matches_email_in_snapshot(
+                                restriction,
+                                email,
+                                *folder_id,
+                                snapshot,
+                            )
+                        },
+                    );
                     sort_emails(&mut rows, sort_orders);
                     if let Some((index, email)) =
                         find_row(rows.as_slice(), *position, request, |email| {
-                            restriction_matches_email(Some(&restriction), email)
+                            restriction_matches_email_in_snapshot(
+                                Some(&restriction),
+                                email,
+                                *folder_id,
+                                snapshot,
+                            )
                         })
                     {
                         *position = index;
@@ -5055,39 +5209,57 @@ pub(in crate::mapi) fn table_position_and_count(
                     })
                     .count()
             } else if *folder_id == TODO_SEARCH_FOLDER_ID {
-                snapshot
+                let mut message_rows = snapshot
                     .todo_search_messages()
                     .into_iter()
-                    .filter(|message| {
-                        restriction_matches_email(restriction.as_ref(), &message.email)
-                    })
-                    .count()
+                    .collect::<Vec<_>>();
+                retain_rows_by_restriction(
+                    &mut message_rows,
+                    restriction.as_ref(),
+                    |message, restriction| restriction_matches_email(restriction, &message.email),
+                );
+                message_rows.len()
                     + snapshot
                         .todo_search_results()
                         .into_iter()
                         .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
                         .count()
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
-                snapshot
+                let mut rows = snapshot
                     .tracked_mail_processing_messages()
                     .into_iter()
-                    .filter(|message| {
-                        restriction_matches_email(restriction.as_ref(), &message.email)
-                    })
-                    .count()
+                    .collect::<Vec<_>>();
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |message, restriction| {
+                        restriction_matches_email_in_snapshot(
+                            restriction,
+                            &message.email,
+                            *folder_id,
+                            snapshot,
+                        )
+                    },
+                );
+                rows.len()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 snapshot
                     .reminder_tasks()
                     .into_iter()
                     .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
                     .count()
-                    + snapshot
-                        .reminder_messages()
-                        .into_iter()
-                        .filter(|message| {
-                            restriction_matches_email(restriction.as_ref(), &message.email)
-                        })
-                        .count()
+                    + {
+                        let mut message_rows =
+                            snapshot.reminder_messages().into_iter().collect::<Vec<_>>();
+                        retain_rows_by_restriction(
+                            &mut message_rows,
+                            restriction.as_ref(),
+                            |message, restriction| {
+                                restriction_matches_email(restriction, &message.email)
+                            },
+                        );
+                        message_rows.len()
+                    }
             } else if *folder_id == JOURNAL_FOLDER_ID {
                 snapshot
                     .journal_entries_for_folder(*folder_id)
@@ -5100,7 +5272,18 @@ pub(in crate::mapi) fn table_position_and_count(
                 snapshot.recoverable_items_for_folder(*folder_id).len()
             } else if *category_count > 0 {
                 let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |email, restriction| {
+                        restriction_matches_email_in_snapshot(
+                            restriction,
+                            email,
+                            *folder_id,
+                            snapshot,
+                        )
+                    },
+                );
                 sort_emails(&mut rows, sort_orders);
                 categorized_email_rows(
                     *folder_id,
@@ -5112,17 +5295,30 @@ pub(in crate::mapi) fn table_position_and_count(
                 )
                 .len()
             } else {
-                snapshot
-                    .content_table_total(
+                if is_top_level_count_restriction(restriction.as_ref()) {
+                    None
+                } else {
+                    snapshot.content_table_total(
                         *folder_id,
                         table_view_signature(sort_orders, restriction.as_ref()),
                     )
-                    .unwrap_or_else(|| {
-                        emails_for_folder(*folder_id, mailboxes, emails)
-                            .into_iter()
-                            .filter(|email| restriction_matches_email(restriction.as_ref(), email))
-                            .count()
-                    })
+                }
+                .unwrap_or_else(|| {
+                    let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                    retain_rows_by_restriction(
+                        &mut rows,
+                        restriction.as_ref(),
+                        |email, restriction| {
+                            restriction_matches_email_in_snapshot(
+                                restriction,
+                                email,
+                                *folder_id,
+                                snapshot,
+                            )
+                        },
+                    );
+                    rows.len()
+                })
             };
             (*position, total)
         }
@@ -5132,17 +5328,19 @@ pub(in crate::mapi) fn table_position_and_count(
             position,
             restriction,
             ..
-        }) => (
-            *position,
-            snapshot
+        }) => {
+            let mut rows = snapshot
                 .attachments_for_message(*folder_id, *message_id)
                 .unwrap_or_default()
                 .iter()
-                .filter(|attachment| {
-                    restriction_matches_attachment(restriction.as_ref(), attachment)
-                })
-                .count(),
-        ),
+                .collect::<Vec<_>>();
+            retain_rows_by_restriction(
+                &mut rows,
+                restriction.as_ref(),
+                |attachment, restriction| restriction_matches_attachment(restriction, attachment),
+            );
+            (*position, rows.len())
+        }
         Some(MapiObject::PermissionTable {
             folder_id,
             position,
@@ -5327,9 +5525,18 @@ pub(in crate::mapi) fn table_row_keys(
             }
             if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 let mut rows = snapshot.tracked_mail_processing_messages();
-                rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
+                retain_rows_by_restriction(
+                    &mut rows,
+                    restriction.as_ref(),
+                    |message, restriction| {
+                        restriction_matches_email_in_snapshot(
+                            restriction,
+                            &message.email,
+                            *folder_id,
+                            snapshot,
+                        )
+                    },
+                );
                 sort_mapi_messages(&mut rows, sort_orders);
                 return rows.into_iter().map(|message| message.id).collect();
             }
@@ -5354,13 +5561,16 @@ pub(in crate::mapi) fn table_row_keys(
                 sort_recoverable_items(&mut rows, sort_orders);
                 return rows.into_iter().map(|item| item.id).collect();
             }
-            if let Some((offset, total, window_emails)) = snapshot
-                .content_table_window_emails_containing(
+            let window_emails = if is_top_level_count_restriction(restriction.as_ref()) {
+                None
+            } else {
+                snapshot.content_table_window_emails_containing(
                     *folder_id,
                     table_view_signature(sort_orders, restriction.as_ref()),
                     *position,
                 )
-            {
+            };
+            if let Some((offset, total, window_emails)) = window_emails {
                 let mut row_keys = vec![0; total];
                 for (index, email) in window_emails.into_iter().enumerate() {
                     let row_index = offset.saturating_add(index);
@@ -5370,14 +5580,21 @@ pub(in crate::mapi) fn table_row_keys(
                 }
                 return row_keys;
             }
-            if let Some(total) = snapshot.content_table_total(
-                *folder_id,
-                table_view_signature(sort_orders, restriction.as_ref()),
-            ) {
+            let total = if is_top_level_count_restriction(restriction.as_ref()) {
+                None
+            } else {
+                snapshot.content_table_total(
+                    *folder_id,
+                    table_view_signature(sort_orders, restriction.as_ref()),
+                )
+            };
+            if let Some(total) = total {
                 return vec![0; total];
             }
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-            rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+            retain_rows_by_restriction(&mut rows, restriction.as_ref(), |email, restriction| {
+                restriction_matches_email_in_snapshot(restriction, email, *folder_id, snapshot)
+            });
             sort_emails(&mut rows, sort_orders);
             rows.into_iter().map(mapi_message_id).collect()
         }
@@ -5393,9 +5610,11 @@ pub(in crate::mapi) fn table_row_keys(
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();
-            rows.retain(|attachment| {
-                restriction_matches_attachment(restriction.as_ref(), attachment)
-            });
+            retain_rows_by_restriction(
+                &mut rows,
+                restriction.as_ref(),
+                |attachment, restriction| restriction_matches_attachment(restriction, attachment),
+            );
             sort_attachments(&mut rows, sort_orders);
             rows.into_iter()
                 .map(|attachment| u64::from(attachment.attach_num))
@@ -7052,7 +7271,7 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(response[6], 0x00);
+        assert_eq!(response[6], 0x01);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
         assert_eq!(table_position(&table), Some(1));
 
@@ -7068,7 +7287,7 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert_eq!(response[6], 0x01);
+        assert_eq!(response[6], 0x02);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
         assert_eq!(table_position(&table), Some(3));
 
@@ -7170,7 +7389,7 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(response[6], 0x01);
+        assert_eq!(response[6], 0x02);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
         assert_eq!(table_position(&table), Some(4));
     }
@@ -9141,6 +9360,11 @@ mod tests {
 
         assert!(columns.contains(&PID_TAG_WLINK_ENTRY_ID));
         assert!(columns.contains(&PID_TAG_WLINK_FOLDER_TYPE));
+        assert!(columns.contains(&PID_TAG_WLINK_CALENDAR_COLOR));
+        assert!(columns.contains(&PID_TAG_WLINK_ADDRESS_BOOK_EID));
+        assert!(columns.contains(&PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID));
+        assert!(columns.contains(&PID_TAG_WLINK_CLIENT_ID));
+        assert!(columns.contains(&PID_TAG_WLINK_RO_GROUP_TYPE));
         assert!(
             columns.contains(&PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG)
         );
@@ -10932,6 +11156,55 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
         assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_some());
+    }
+
+    #[test]
+    fn microsoft_oxocfg_inbox_mrm_configuration_uses_xml_stream() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_ROAMING_DATATYPES,
+                PID_TAG_ROAMING_XML_STREAM,
+            ],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                order: 1,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.Configuration.MRM".to_string()),
+            }),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 2, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert!(utf16_position(&response, "IPM.Configuration.MRM").is_some());
+        assert!(response
+            .windows(4)
+            .any(|window| window == 2u32.to_le_bytes()));
+        assert!(response
+            .windows(b"RetentionHold".len())
+            .any(|window| window == b"RetentionHold"));
     }
 
     #[test]
@@ -13464,7 +13737,7 @@ fn serialize_common_views_row_with_mailbox_guid(
     }
 }
 
-fn serialize_search_folder_definition_row_with_mailbox_guid(
+pub(in crate::mapi) fn serialize_search_folder_definition_row_with_mailbox_guid(
     message: &SearchFolderDefinition,
     mailbox_guid: Uuid,
     columns: &[u32],
@@ -13730,6 +14003,10 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
                     .then(|| MapiValue::Binary(minimal_category_list_roaming_xml_stream()))
             }
+            PID_TAG_ROAMING_XML_STREAM if message.message_class == "IPM.Configuration.MRM" => {
+                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_mrm_roaming_xml_stream()))
+            }
             PID_TAG_ROAMING_DATATYPES
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
@@ -13928,7 +14205,9 @@ fn configuration_roaming_datatypes(
     }
     if datatypes == 0 {
         match message_class {
-            "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours" => 0x0000_0002,
+            "IPM.Configuration.CategoryList"
+            | "IPM.Configuration.MRM"
+            | "IPM.Configuration.WorkHours" => 0x0000_0002,
             _ => 0x0000_0004,
         }
     } else {
@@ -13950,6 +14229,10 @@ fn minimal_working_hours_roaming_xml_stream() -> Vec<u8> {
 
 fn minimal_category_list_roaming_xml_stream() -> Vec<u8> {
     br#"<?xml version="1.0"?><categories default="Red Category" lastSavedSession="0" lastSavedTime="1601-01-01T00:00:00.000" xmlns="CategoryList.xsd"><category name="Red Category" color="0" keyboardShortcut="0" usageCount="0" lastTimeUsedNotes="1601-01-01T00:00:00.000" lastTimeUsedJournal="1601-01-01T00:00:00.000" lastTimeUsedContacts="1601-01-01T00:00:00.000" lastTimeUsedTasks="1601-01-01T00:00:00.000" lastTimeUsedCalendar="1601-01-01T00:00:00.000" lastTimeUsedMail="1601-01-01T00:00:00.000" lastTimeUsed="1601-01-01T00:00:00.000" lastSessionUsed="0" guid="{2B7FC69C-7046-44A2-8FF3-007D7467DC82}"/></categories>"#.to_vec()
+}
+
+fn minimal_mrm_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0"?><UserConfiguration><Info version="LPE.1"><Data><RetentionHold Enabled="False" RetentionComment="" RetentionUrl=""/></Data></Info></UserConfiguration>"#.to_vec()
 }
 
 fn property_tag_id_matches(left: u32, right: u32) -> bool {
@@ -14484,9 +14767,19 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_SUBJECT_W => properties.get(&PID_TAG_NORMALIZED_SUBJECT_W).cloned(),
             PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
             PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_UNSENT)),
+            PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+            PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
+            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_UNSENT | MSGFLAG_READ)),
             PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+            PID_TAG_DISPLAY_BCC_W | PID_TAG_DISPLAY_CC_W | PID_TAG_DISPLAY_TO_W => {
+                Some(MapiValue::String(String::new()))
+            }
             PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(pending_message_size(properties))),
+            PID_TAG_CREATION_TIME | PID_TAG_LAST_MODIFICATION_TIME => properties
+                .get(&PID_TAG_CREATION_TIME)
+                .cloned()
+                .or_else(|| properties.get(&PID_TAG_LAST_MODIFICATION_TIME).cloned())
+                .or(Some(MapiValue::U64(0))),
             PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
                 mapi_mailstore::change_key_for_change_number(pending_message_change_number(
                     properties,
@@ -14498,6 +14791,8 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_CHANGE_NUMBER => {
                 Some(MapiValue::U64(pending_message_change_number(properties)))
             }
+            PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(pending_message_search_key(properties))),
+            PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
             PID_TAG_SENDER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(principal.email.clone())),
             _ => None,
@@ -14519,6 +14814,19 @@ fn pending_associated_message_property_value(
                 Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
             }
             _ => pending_message_property_value(principal, properties, property_tag),
+        })
+}
+
+fn pending_message_search_key(properties: &HashMap<u32, MapiValue>) -> Vec<u8> {
+    properties
+        .get(&PID_TAG_MID)
+        .and_then(mapi_value_u64)
+        .filter(|message_id| {
+            crate::mapi::identity::global_counter_from_store_id(*message_id).is_some()
+        })
+        .map(mapi_mailstore::source_key_for_store_id)
+        .unwrap_or_else(|| {
+            mapi_mailstore::change_key_for_change_number(pending_message_change_number(properties))
         })
 }
 

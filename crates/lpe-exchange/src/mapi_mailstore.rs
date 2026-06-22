@@ -2793,7 +2793,11 @@ fn content_fai_debug_configuration_property(tag: u32) -> bool {
             | 0x6850_0102
             | 0x6851_001F
             | 0x6852_0003
+            | 0x6853_0003
+            | 0x6854_0102
+            | 0x6890_0102
             | 0x6891_0102
+            | 0x6892_0003
             | 0x7C06_0003
             | 0x7C07_0102
             | 0x7C08_0102
@@ -3211,7 +3215,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         0x6850_0048 | 0x6850_0102 => "PidTagWlinkGroupClsid",
         0x6851_001F => "PidTagWlinkGroupName",
         0x6852_0003 => "PidTagWlinkSection",
+        0x6853_0003 => "PidTagWlinkCalendarColor",
+        0x6854_0102 => "PidTagWlinkAddressBookEid",
+        0x6890_0102 => "PidTagWlinkClientId",
         0x6891_0102 => "PidTagWlinkAddressBookStoreEid",
+        0x6892_0003 => "PidTagWlinkROGroupType",
         0x7C06_0003 => "PidTagRoamingDatatypes",
         0x7C07_0102 => "PidTagRoamingDictionary",
         0x7C08_0102 => "PidTagRoamingXmlStream",
