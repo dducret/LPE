@@ -2811,7 +2811,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
-                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
@@ -2838,7 +2837,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
-                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
@@ -10824,14 +10822,6 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
             OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
         ));
-        assert!(!fallback_default_specific_property(
-            Some(&folder),
-            &principal,
-            &[],
-            &[],
-            &MapiMailStoreSnapshot::empty(),
-            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-        ));
 
         let response = rop_get_properties_specific_response(
             &request,
@@ -10844,6 +10834,42 @@ mod tests {
 
         assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
         assert_eq!(&response[7..], &[0x00, 0x00]);
+
+        let calendar = MapiObject::Folder {
+            folder_id: CALENDAR_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let mut default_view_payload = Vec::new();
+        default_view_payload.extend_from_slice(&4096u16.to_le_bytes());
+        default_view_payload.extend_from_slice(&1u16.to_le_bytes());
+        default_view_payload.extend_from_slice(&PID_TAG_DEFAULT_VIEW_ENTRY_ID.to_le_bytes());
+        let default_view_request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: default_view_payload,
+        };
+
+        assert!(fallback_default_specific_property(
+            Some(&calendar),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        ));
+
+        let response = rop_get_properties_specific_response(
+            &default_view_request,
+            Some(&calendar),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+        assert_eq!(&response[7..], &[0x0A, 0x0F, 0x01, 0x04, 0x80]);
     }
 
     #[test]
@@ -10952,10 +10978,6 @@ mod tests {
             properties: HashMap::new(),
         };
 
-        assert!(modeled_zero_or_default_property(
-            Some(&folder),
-            PID_TAG_DEFAULT_VIEW_ENTRY_ID
-        ));
         for property_tag in [
             PID_TAG_FOLDER_FORM_FLAGS,
             PID_TAG_FOLDER_WEBVIEWINFO,
