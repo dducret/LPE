@@ -907,6 +907,9 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         "update-lpe.sh MAPI associated configuration compatibility patch",
         UPDATE_LPE_SCRIPT,
         &[
+            "ADD COLUMN IF NOT EXISTS save_stamp BIGINT NOT NULL DEFAULT 0",
+            "mapi_navigation_shortcuts_save_stamp_check",
+            "mapi_shortcut_save_stamp_constraint_count",
             "CREATE TABLE IF NOT EXISTS public.mapi_folder_profile_property_values",
             "mapi_folder_profile_property_values_account_idx",
             "CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages",
@@ -932,6 +935,8 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         "check-lpe.sh MAPI associated configuration compatibility check",
         CHECK_LPE_SCRIPT,
         &[
+            "mapi_shortcut_save_stamp_column_count",
+            "mapi_shortcut_save_stamp_constraint_count",
             "to_regclass('public.mapi_folder_profile_property_values')",
             "to_regclass('public.mapi_associated_config_messages')",
             "mapi_associated_config_shape_constraint_ok",

@@ -127,6 +127,14 @@ mapi_shortcut_target_nullable="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "S
   || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "MAPI navigation shortcut target folder column supports group headers"
 
+mapi_shortcut_save_stamp_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'save_stamp' AND is_nullable = 'NO' AND column_default = '0';")" \
+  || fail "Unable to inspect MAPI navigation shortcut save_stamp column"
+mapi_shortcut_save_stamp_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass AND conname = 'mapi_navigation_shortcuts_save_stamp_check' AND pg_get_constraintdef(oid) LIKE '%save_stamp >= 0%' AND pg_get_constraintdef(oid) LIKE '%4294967295%';")" \
+  || fail "Unable to inspect MAPI navigation shortcut save_stamp constraint"
+[[ "$mapi_shortcut_save_stamp_column_count" == "1" && "$mapi_shortcut_save_stamp_constraint_count" == "1" ]] \
+  || fail "MAPI navigation shortcut save_stamp column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI navigation shortcut save_stamp column is present"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');" | grep -qx 'mapi_associated_config_messages' \
   || fail "Table public.mapi_associated_config_messages is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.mapi_associated_config_messages"

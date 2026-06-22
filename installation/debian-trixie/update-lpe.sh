@@ -337,8 +337,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS search_folders_user_saved_name_idx
 
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN target_folder_id DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS save_stamp BIGINT NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS group_header_id UUID,
   ADD COLUMN IF NOT EXISTS group_name TEXT NOT NULL DEFAULT '';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass
+          AND conname = 'mapi_navigation_shortcuts_save_stamp_check'
+    ) THEN
+        ALTER TABLE public.mapi_navigation_shortcuts
+            ADD CONSTRAINT mapi_navigation_shortcuts_save_stamp_check
+            CHECK (save_stamp >= 0 AND save_stamp <= 4294967295) NOT VALID;
+    END IF;
+END $$;
+
+ALTER TABLE public.mapi_navigation_shortcuts
+  VALIDATE CONSTRAINT mapi_navigation_shortcuts_save_stamp_check;
 
 UPDATE public.mapi_navigation_shortcuts
 SET group_name = ''
@@ -1715,7 +1733,9 @@ SQL
 
 mapi_shortcut_group_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")"
 mapi_shortcut_target_nullable="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")"
-if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" ]]; then
+mapi_shortcut_save_stamp_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'save_stamp' AND is_nullable = 'NO' AND column_default = '0';")"
+mapi_shortcut_save_stamp_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass AND conname = 'mapi_navigation_shortcuts_save_stamp_check' AND pg_get_constraintdef(oid) LIKE '%save_stamp >= 0%' AND pg_get_constraintdef(oid) LIKE '%4294967295%';")"
+if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" || "${mapi_shortcut_save_stamp_column_count}" != "1" || "${mapi_shortcut_save_stamp_constraint_count}" != "1" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected mapi_navigation_shortcuts shape." >&2
   exit 1
 fi
