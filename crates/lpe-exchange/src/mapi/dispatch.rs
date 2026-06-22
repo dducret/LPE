@@ -4207,6 +4207,43 @@ fn log_get_properties_specific_response_debug(
     );
 }
 
+fn log_get_properties_view_response_debug(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_response: &[u8],
+) {
+    let property_tags = request.property_tags();
+    if !property_tags
+        .iter()
+        .copied()
+        .any(is_outlook_view_property_tag_for_debug)
+    {
+        return;
+    }
+    let response_values =
+        get_properties_view_response_values_for_debug(&property_tags, property_response);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        property_tag_count = property_tags.len(),
+        property_tags = %format_debug_property_tags(&property_tags),
+        property_names = %format_set_property_names_for_debug(&property_tags),
+        view_response_values = %response_values,
+        "rca debug mapi outlook view getprops response"
+    );
+}
+
 fn post_hierarchy_getprops_contract(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -4718,11 +4755,53 @@ fn get_properties_specific_value_for_debug(tag: u32, value: &MapiValue) -> Strin
     )
 }
 
+fn is_outlook_view_property_tag_for_debug(tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(tag),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            | PID_TAG_FOLDER_FORM_FLAGS
+            | PID_TAG_FOLDER_WEBVIEWINFO
+            | PID_TAG_FOLDER_XVIEWINFO_E
+            | PID_TAG_FOLDER_VIEWS_ONLY
+            | PID_TAG_FOLDER_VIEWLIST_FLAGS
+            | PID_TAG_VIEWS_ENTRY_ID
+            | PID_TAG_COMMON_VIEWS_ENTRY_ID
+    )
+}
+
+fn get_properties_view_response_values_for_debug(property_tags: &[u32], response: &[u8]) -> String {
+    if response.get(6).copied() != Some(0) {
+        return "not-standard-row".to_string();
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut values = Vec::new();
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        match parse_property_value_for_tag(&mut cursor, *tag) {
+            Ok(value) if is_outlook_view_property_tag_for_debug(storage_tag) => {
+                values.push(get_properties_specific_value_for_debug(storage_tag, &value));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                values.push(format!(
+                    "{storage_tag:#010x}:{}:parse_error={error}",
+                    set_property_debug_name(storage_tag)
+                ));
+                break;
+            }
+        }
+    }
+    values.join(",")
+}
+
 fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> String {
     values
         .iter()
         .filter_map(|(tag, value)| {
             let storage_tag = canonical_property_storage_tag(*tag);
+            if storage_tag == PID_TAG_DEFAULT_VIEW_ENTRY_ID {
+                return Some(default_view_entry_id_for_debug(storage_tag, value));
+            }
             if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
                 return Some(indexed_special_folder_entry_ids_for_debug(
                     storage_tag,
@@ -4771,6 +4850,44 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn default_view_entry_id_for_debug(storage_tag: u32, value: &MapiValue) -> String {
+    let MapiValue::Binary(bytes) = value else {
+        return format!(
+            "{storage_tag:#010x}:PidTagDefaultViewEntryId:value_type={}",
+            mapi_value_debug_shape(value)
+        );
+    };
+    match default_view_entry_id_target_for_debug(bytes) {
+        Some((folder_id, message_id)) => format!(
+            "{storage_tag:#010x}:PidTagDefaultViewEntryId:bytes={}:decoded_folder_id=0x{folder_id:016x}:decoded_folder_name={}:decoded_message_id=0x{message_id:016x}",
+            bytes.len(),
+            post_hierarchy_probe_folder_name(folder_id)
+        ),
+        None => format!(
+            "{storage_tag:#010x}:PidTagDefaultViewEntryId:bytes={}:decode=not_message_entry_id:preview={}",
+            bytes.len(),
+            hex_preview(bytes, 32)
+        ),
+    }
+}
+
+fn default_view_entry_id_target_for_debug(entry_id: &[u8]) -> Option<(u64, u64)> {
+    if entry_id.len() != 70
+        || entry_id[0..4] != [0, 0, 0, 0]
+        || entry_id[20..22] != 0x0007u16.to_le_bytes()
+        || entry_id[44..46] != [0, 0]
+        || entry_id[68..70] != [0, 0]
+    {
+        return None;
+    }
+    let folder_counter = crate::mapi::identity::global_counter_from_globcnt(&entry_id[38..44])?;
+    let message_counter = crate::mapi::identity::global_counter_from_globcnt(&entry_id[62..68])?;
+    Some((
+        crate::mapi::identity::mapi_store_id(folder_counter),
+        crate::mapi::identity::mapi_store_id(message_counter),
+    ))
 }
 
 fn additional_ren_entry_ids_ex_for_debug(value: &MapiValue) -> String {
@@ -14352,6 +14469,13 @@ where
                     property_response.len(),
                 );
                 log_get_properties_specific_response_debug(
+                    principal,
+                    request_id,
+                    &request,
+                    object,
+                    &property_response,
+                );
+                log_get_properties_view_response_debug(
                     principal,
                     request_id,
                     &request,
@@ -30311,6 +30435,24 @@ mod tests {
         assert!(debug.contains("persist_name=archive"));
         assert!(debug.contains("decoded_name=archive"));
         assert!(debug.contains("matches_expected=true"));
+    }
+
+    #[test]
+    fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let entry_id =
+            default_folder_view_entry_id(mailbox_guid, INBOX_FOLDER_ID, "IPF.Note").unwrap();
+
+        let debug =
+            default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
+
+        assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
+        assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(debug.contains("decoded_folder_name=inbox"));
+        assert!(debug.contains(&format!(
+            "decoded_message_id=0x{:016x}",
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        )));
     }
 
     #[test]
