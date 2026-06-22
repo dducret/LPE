@@ -9896,10 +9896,6 @@ fn log_outlook_hierarchy_table_query_rows_response(
     else {
         return;
     };
-    if !matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
-        return;
-    }
-
     let response_origin = response.get(6).copied().unwrap_or(0xff);
     let row_count = response
         .get(7..9)
@@ -9923,7 +9919,7 @@ fn log_outlook_hierarchy_table_query_rows_response(
         .map(|bytes| hex_preview(bytes, 160))
         .unwrap_or_default();
 
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
