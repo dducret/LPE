@@ -662,6 +662,7 @@ fn mapi_navigation_shortcuts_persist_group_header_links() {
     for required in [
         "target_folder_id BIGINT CHECK (target_folder_id IS NULL OR target_folder_id > 0)",
         "shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295)",
+        "save_stamp BIGINT NOT NULL DEFAULT 0 CHECK (save_stamp >= 0 AND save_stamp <= 4294967295)",
         "group_header_id UUID",
         "group_name TEXT NOT NULL DEFAULT ''",
     ] {

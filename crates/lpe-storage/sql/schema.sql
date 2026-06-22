@@ -2231,6 +2231,7 @@ CREATE TABLE mapi_navigation_shortcuts (
     target_folder_id BIGINT CHECK (target_folder_id IS NULL OR target_folder_id > 0),
     shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295),
     flags BIGINT NOT NULL DEFAULT 0 CHECK (flags >= 0 AND flags <= 4294967295),
+    save_stamp BIGINT NOT NULL DEFAULT 0 CHECK (save_stamp >= 0 AND save_stamp <= 4294967295),
     section BIGINT NOT NULL DEFAULT 0 CHECK (section >= 0 AND section <= 4294967295),
     ordinal BIGINT NOT NULL DEFAULT 0 CHECK (ordinal >= 0 AND ordinal <= 4294967295),
     group_header_id UUID,

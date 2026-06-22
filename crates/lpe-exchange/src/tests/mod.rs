@@ -547,6 +547,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
             shortcut_type: 0,
             flags: 0,
+            save_stamp: 0,
             section: 1,
             ordinal: 127,
             group_header_id: None,
@@ -563,6 +564,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
             shortcut_type: 0,
             flags: 8,
+            save_stamp: 0,
             section: 1,
             ordinal: 191,
             group_header_id: None,
@@ -583,6 +585,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
             shortcut_type: 0,
             flags: 8,
+            save_stamp: 0,
             section: 1,
             ordinal: 191,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
@@ -610,6 +613,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
             shortcut_type: 0,
             flags: 0,
+            save_stamp: 0,
             section: 3,
             ordinal: 127,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
@@ -628,6 +632,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
             shortcut_type: 0,
             flags: 0,
+            save_stamp: 0,
             section: 3,
             ordinal: 127,
             group_header_id: Some(outlook_calendar_group_id),
@@ -1707,6 +1712,32 @@ impl FakeDetector {
                 description: "PDF document".to_string(),
                 group: "document".to_string(),
                 extensions: vec!["pdf".to_string()],
+                score: Some(0.99),
+            },
+        }
+    }
+
+    fn png() -> Self {
+        Self {
+            detection: MagikaDetection {
+                label: "png".to_string(),
+                mime_type: "image/png".to_string(),
+                description: "PNG image".to_string(),
+                group: "image".to_string(),
+                extensions: vec!["png".to_string()],
+                score: Some(0.99),
+            },
+        }
+    }
+
+    fn text() -> Self {
+        Self {
+            detection: MagikaDetection {
+                label: "txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                description: "Plain text".to_string(),
+                group: "text".to_string(),
+                extensions: vec!["txt".to_string()],
                 score: Some(0.99),
             },
         }
@@ -3942,6 +3973,49 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn fetch_all_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>> {
+        Box::pin(async move {
+            let mut values = self
+                .mapi_custom_property_values
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(
+                    |(
+                        (
+                            stored_account_id,
+                            stored_object_kind,
+                            stored_canonical_id,
+                            property_tag,
+                            property_type,
+                        ),
+                        property_value,
+                    )| {
+                        if *stored_account_id == account_id
+                            && *stored_object_kind == object_kind
+                            && *stored_canonical_id == canonical_id
+                        {
+                            Some(MapiCustomPropertyValue {
+                                property_tag: *property_tag,
+                                property_type: *property_type,
+                                property_value: property_value.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    },
+                )
+                .collect::<Vec<_>>();
+            values.sort_by_key(|value| (value.property_tag, value.property_type));
+            Ok(values)
+        })
+    }
+
     fn delete_mapi_custom_property_values<'a>(
         &'a self,
         account_id: Uuid,
@@ -5404,6 +5478,7 @@ impl ExchangeStore for FakeStore {
                 target_folder_id: input.target_folder_id,
                 shortcut_type: input.shortcut_type,
                 flags: input.flags,
+                save_stamp: input.save_stamp,
                 section: input.section,
                 ordinal: input.ordinal,
                 group_header_id: input.group_header_id,
@@ -6010,6 +6085,8 @@ impl ExchangeStore for FakeStore {
             message_id,
             file_name: attachment.file_name.clone(),
             media_type: attachment.media_type.clone(),
+            disposition: attachment.disposition.clone(),
+            content_id: attachment.content_id.clone(),
             size_octets: attachment.blob_bytes.len() as u64,
             file_reference: file_reference.clone(),
         };
@@ -6649,6 +6726,63 @@ async fn fake_store_custom_property_values_survive_restart_style_clone() {
         .unwrap();
     assert_eq!(fetched.len(), 1);
     assert_eq!(fetched[0].property_tag, second_tag);
+}
+
+#[tokio::test]
+async fn fake_store_all_custom_property_values_are_scoped_to_one_mapi_object() {
+    let store = FakeStore::default();
+    let restarted = store.clone();
+    let account_id = FakeStore::account().account_id;
+    let source_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let other_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    store
+        .upsert_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Message,
+            source_id,
+            &[
+                MapiCustomPropertyValue {
+                    property_tag: 0x8002_0102,
+                    property_type: 0x0102,
+                    property_value: vec![2, 0, 0x44, 0x55],
+                },
+                MapiCustomPropertyValue {
+                    property_tag: 0x8001_001F,
+                    property_type: 0x001F,
+                    property_value: utf16z("source opaque"),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+    store
+        .upsert_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Message,
+            other_id,
+            &[MapiCustomPropertyValue {
+                property_tag: 0x8003_001F,
+                property_type: 0x001F,
+                property_value: utf16z("other opaque"),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let fetched = restarted
+        .fetch_all_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Message,
+            source_id,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(fetched.len(), 2);
+    assert_eq!(fetched[0].property_tag, 0x8001_001F);
+    assert_eq!(fetched[0].property_value, utf16z("source opaque"));
+    assert_eq!(fetched[1].property_tag, 0x8002_0102);
+    assert_eq!(fetched[1].property_value, vec![2, 0, 0x44, 0x55]);
 }
 
 fn bearer_headers() -> HeaderMap {
@@ -8968,14 +9102,16 @@ fn append_rop_get_search_criteria(rops: &mut Vec<u8>, input: u8) {
 
 fn append_search_content(restriction: &mut Vec<u8>, property_tag: u32, value: &str) {
     restriction.push(0x03);
-    restriction.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     append_mapi_utf16_property(restriction, property_tag, value);
 }
 
 fn append_search_content_string8(restriction: &mut Vec<u8>, property_tag: u32, value: &str) {
     restriction.push(0x03);
-    restriction.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     append_mapi_string8_property(restriction, property_tag, value);
 }

@@ -1362,6 +1362,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             folder_id,
             message_id,
             saved_email,
+            ..
         } => {
             let message = message_for_id(*folder_id, *message_id, mailboxes, emails)
                 .or(saved_email.as_ref().map(|saved| &saved.email))?
@@ -1770,6 +1771,7 @@ mod tests {
                 target_folder_id: Some(target_folder_id),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal,
                 group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
@@ -1959,6 +1961,8 @@ mod tests {
                 file_reference: "calendar-attachment:ref".to_string(),
                 file_name: "agenda.pdf".to_string(),
                 media_type: "application/pdf".to_string(),
+                disposition: None,
+                content_id: None,
                 size_octets: 12,
             }],
         };
@@ -2160,6 +2164,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 0,
                 ordinal: 0x81,
                 group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
@@ -2220,6 +2225,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0x81,
                 group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
@@ -2261,6 +2267,7 @@ mod tests {
                 target_folder_id: None,
                 shortcut_type: 4,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0x80,
                 group_header_id: Some(group_id),
@@ -2515,6 +2522,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 127,
                 group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),

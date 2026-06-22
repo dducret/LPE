@@ -51,6 +51,8 @@ pub struct ActiveSyncAttachment {
     pub message_id: Uuid,
     pub file_name: String,
     pub media_type: String,
+    pub disposition: Option<String>,
+    pub content_id: Option<String>,
     pub size_octets: u64,
     pub file_reference: String,
 }
@@ -5077,7 +5079,8 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT a.id, a.message_id, a.file_name, a.domain_id, a.blob_id, a.size_octets
+            SELECT a.id, a.message_id, a.file_name, a.disposition, a.content_id,
+                   a.domain_id, a.blob_id, a.size_octets
             FROM attachments a
             JOIN mailbox_messages mm
               ON mm.tenant_id = a.tenant_id
@@ -5120,6 +5123,8 @@ impl Storage {
                 message_id,
                 file_name: row.try_get("file_name")?,
                 media_type: blob.media_type,
+                disposition: row.try_get("disposition")?,
+                content_id: row.try_get("content_id")?,
                 size_octets: row
                     .try_get::<i64, _>("size_octets")
                     .unwrap_or(blob.size_octets)

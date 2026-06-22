@@ -2,7 +2,7 @@ use super::properties::*;
 use super::session::*;
 use super::sync::*;
 use super::tables::*;
-use super::wire::{MapiError, MapiRestrictionType, RopId};
+use super::wire::{MapiError, MapiPropertyType, MapiRestrictionType, RopId};
 use super::*;
 use sha2::{Digest, Sha256};
 
@@ -10,7 +10,24 @@ pub(in crate::mapi) fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])>
     if let Some(payload) = rpc_header_ext_payload(buffer) {
         return split_rop_payload_spec(payload);
     }
-    split_rop_payload_legacy(buffer)
+    split_rop_payload_best_effort(buffer)
+}
+
+fn split_rop_payload_best_effort(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
+    let spec = split_rop_payload_spec(buffer);
+    let legacy = split_rop_payload_legacy(buffer);
+    match (spec, legacy) {
+        (Some(spec), Some(legacy)) => {
+            if spec.1.len() % 4 == 0 && legacy.1.len() % 4 != 0 {
+                Some(spec)
+            } else {
+                Some(legacy)
+            }
+        }
+        (Some(spec), None) => Some(spec),
+        (None, Some(legacy)) => Some(legacy),
+        (None, None) => None,
+    }
 }
 
 pub(in crate::mapi) fn split_rop_payload_spec(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -178,14 +195,33 @@ pub(in crate::mapi) fn rop_open_folder_response(request: &RopRequest, is_ghosted
 pub(in crate::mapi) fn rop_open_message_response(
     request: &RopRequest,
     subject: &str,
-    _recipient_count: usize,
+    recipient_count: usize,
 ) -> Vec<u8> {
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(0);
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, subject);
+    response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
+    response.push(0);
+    response
+}
+
+pub(in crate::mapi) fn rop_open_embedded_message_response(
+    request: &RopRequest,
+    message_id: u64,
+    subject: &str,
+    recipient_count: usize,
+) -> Vec<u8> {
+    let mut response = vec![0x46, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response.push(0);
+    write_object_id(&mut response, message_id);
+    response.push(0);
+    write_typed_string(&mut response, "");
+    write_typed_string(&mut response, subject);
+    response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -198,11 +234,12 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    let subject = match object {
+    let (subject, recipient_count) = match object {
         Some(MapiObject::Message {
             folder_id,
             message_id,
             saved_email,
+            ..
         }) => match message_for_id(*folder_id, *message_id, mailboxes, emails)
             .or_else(|| {
                 search_folder_message_for_id(snapshot, *folder_id, *message_id)
@@ -210,54 +247,76 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
             })
             .or(saved_email.as_ref().map(|saved| &saved.email))
         {
-            Some(email) => email.subject.clone(),
+            Some(email) => (email.subject.clone(), message_recipients(email).len()),
             None => {
                 return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
             }
         },
-        Some(MapiObject::PendingMessage { properties, .. }) => pending_text_property(
+        Some(MapiObject::PendingMessage {
             properties,
-            &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+            recipients,
+            ..
+        }) => (
+            pending_text_property(
+                properties,
+                &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+            ),
+            recipients.len(),
         ),
-        Some(MapiObject::PendingContact { properties, .. }) => pending_text_property(
-            properties,
-            &[
-                PID_TAG_DISPLAY_NAME_W,
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-            ],
+        Some(MapiObject::PendingContact { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_DISPLAY_NAME_W,
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                ],
+            ),
+            0,
         ),
-        Some(MapiObject::PendingEvent { properties, .. }) => pending_text_property(
-            properties,
-            &[
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-                PID_TAG_DISPLAY_NAME_W,
-            ],
+        Some(MapiObject::PendingEvent { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
         ),
-        Some(MapiObject::PendingTask { properties, .. }) => pending_text_property(
-            properties,
-            &[
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-                PID_TAG_DISPLAY_NAME_W,
-            ],
+        Some(MapiObject::PendingTask { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
         ),
-        Some(MapiObject::PendingNote { properties, .. }) => pending_text_property(
-            properties,
-            &[
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-                PID_TAG_DISPLAY_NAME_W,
-            ],
+        Some(MapiObject::PendingNote { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
         ),
-        Some(MapiObject::PendingJournalEntry { properties, .. }) => pending_text_property(
-            properties,
-            &[
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-                PID_TAG_DISPLAY_NAME_W,
-            ],
+        Some(MapiObject::PendingJournalEntry { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
         ),
         _ => return rop_error_response(0x10, request.response_handle_index(), 0x0000_04B9),
     };
@@ -267,7 +326,7 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     response.push(0);
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, &subject);
-    response.extend_from_slice(&0u16.to_le_bytes());
+    response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -277,7 +336,10 @@ pub(in crate::mapi) fn rop_message_status_response(
     request: &RopRequest,
     old_status: u32,
 ) -> Vec<u8> {
-    let mut response = vec![request.rop_id, request.response_handle_index()];
+    let mut response = vec![
+        RopId::SetMessageStatus.as_u8(),
+        request.response_handle_index(),
+    ];
     write_u32(&mut response, 0);
     write_u32(&mut response, old_status);
     response
@@ -318,13 +380,9 @@ pub(in crate::mapi) fn rop_get_contents_table_response(
     response
 }
 
-pub(in crate::mapi) fn rop_get_attachment_table_response(
-    request: &RopRequest,
-    row_count: u32,
-) -> Vec<u8> {
+pub(in crate::mapi) fn rop_get_attachment_table_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x21, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u32(&mut response, row_count);
     response
 }
 
@@ -819,41 +877,35 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
 ) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x09, request.response_handle_index(), 0x8004_0102);
+    };
     let tags = match object {
-        Some(MapiObject::Logon) => default_store_property_tags(),
-        Some(MapiObject::Folder {
+        MapiObject::Logon => default_store_property_tags(),
+        MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
             ..
-        }) => default_folder_property_tags_with_identity(),
-        Some(
-            MapiObject::Attachment { .. }
-            | MapiObject::PendingAttachment { .. }
-            | MapiObject::SavedAttachment { .. },
-        ) => default_attachment_columns(),
-        Some(MapiObject::Contact { .. }) | Some(MapiObject::PendingContact { .. }) => {
+        } => default_folder_property_tags_with_identity(),
+        MapiObject::Attachment { .. }
+        | MapiObject::PendingAttachment { .. }
+        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
+        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
             default_contact_property_tags()
         }
-        Some(MapiObject::Event { .. }) | Some(MapiObject::PendingEvent { .. }) => {
-            default_event_property_tags()
-        }
-        Some(MapiObject::Task { .. }) | Some(MapiObject::PendingTask { .. }) => {
-            default_task_property_tags()
-        }
-        Some(MapiObject::Note { .. }) | Some(MapiObject::PendingNote { .. }) => {
-            default_note_property_tags()
-        }
-        Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
+        MapiObject::Event { .. } | MapiObject::PendingEvent { .. } => default_event_property_tags(),
+        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
+        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
+        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
             default_journal_entry_property_tags()
         }
-        Some(MapiObject::ConversationAction { .. })
-        | Some(MapiObject::PendingConversationAction { .. }) => {
+        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
             default_conversation_action_property_tags()
         }
-        Some(MapiObject::Message { .. })
-        | Some(MapiObject::AssociatedConfig { .. })
-        | Some(MapiObject::PublicFolderItem { .. })
-        | Some(MapiObject::PendingAssociatedMessage { .. })
-        | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
+        MapiObject::Message { .. }
+        | MapiObject::AssociatedConfig { .. }
+        | MapiObject::PublicFolderItem { .. }
+        | MapiObject::PendingAssociatedMessage { .. }
+        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
         _ => default_folder_property_tags(),
     };
     let mut response = vec![0x09, request.response_handle_index()];
@@ -901,6 +953,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         object, principal, mailboxes, emails, snapshot, &columns,
     );
     unsupported_tags.retain(|tag| !custom_values.contains_key(tag));
+    let size_limited_tags = size_limited_specific_property_tags(
+        request,
+        object,
+        principal,
+        mailboxes,
+        emails,
+        snapshot,
+        &columns,
+        custom_values,
+    );
     let row = match object {
         Some(MapiObject::Logon) => {
             log_get_properties_specific_debug(
@@ -918,6 +980,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             folder_id,
             message_id,
             saved_email,
+            ..
         }) => {
             let Some(_email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
                 .or_else(|| {
@@ -1250,6 +1313,8 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             file_reference,
             file_name,
             media_type,
+            disposition,
+            content_id,
             size_octets,
             ..
         }) => serialize_saved_attachment_row(
@@ -1257,6 +1322,8 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             file_reference,
             file_name,
             media_type,
+            disposition.as_deref(),
+            content_id.as_deref(),
             *size_octets,
             &columns,
         ),
@@ -1292,7 +1359,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
     log_get_properties_specific_debug(
         request, object, principal, &columns, mailboxes, emails, snapshot,
     );
-    if unsupported_tags.is_empty() {
+    if unsupported_tags.is_empty()
+        && size_limited_tags.is_empty()
+        && !columns
+            .iter()
+            .any(|tag| get_properties_specific_typed_value_tag(*tag).is_some())
+    {
         write_standard_property_row(&mut response, &row);
     } else {
         write_flagged_property_row(
@@ -1304,6 +1376,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             snapshot,
             &columns,
             &unsupported_tags,
+            &size_limited_tags,
         );
     }
     response
@@ -1324,7 +1397,12 @@ fn serialize_object_property_row_with_custom(
             row.extend_from_slice(value);
         } else {
             row.extend_from_slice(&serialize_object_property(
-                object, principal, mailboxes, emails, snapshot, *tag,
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                get_properties_specific_value_tag(*tag),
             ));
         }
     }
@@ -1351,6 +1429,50 @@ fn unsupported_specific_property_tags(
         .collect()
 }
 
+fn size_limited_specific_property_tags(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    custom_values: &HashMap<u32, Vec<u8>>,
+) -> Vec<u32> {
+    let size_limit = request_property_size_limit(request);
+    if size_limit == 0 {
+        return Vec::new();
+    }
+    columns
+        .iter()
+        .copied()
+        .filter(|tag| {
+            let value_len = custom_values.get(tag).map(Vec::len).unwrap_or_else(|| {
+                serialize_object_property(
+                    object,
+                    principal,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    get_properties_specific_value_tag(*tag),
+                )
+                .len()
+            });
+            value_len > size_limit
+        })
+        .collect()
+}
+
+fn request_property_size_limit(request: &RopRequest) -> usize {
+    request
+        .payload
+        .get(..2)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .map(usize::from)
+        .unwrap_or(0)
+}
+
 fn fallback_default_specific_property(
     object: Option<&MapiObject>,
     principal: &AccountPrincipal,
@@ -1368,6 +1490,7 @@ fn fallback_default_specific_property(
     ) {
         return false;
     }
+    let tag = get_properties_specific_value_tag(tag);
     let encoded = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
     let mut default_value = Vec::new();
     write_property_default(&mut default_value, tag);
@@ -1383,6 +1506,8 @@ fn flagged_property_error_code(
     tag: u32,
 ) -> u32 {
     if property_is_unsupported_for_object(object, principal, tag) {
+        0x8004_0102
+    } else if property_tag_debug_name(tag) == "unknown" {
         0x8004_0102
     } else if fallback_default_specific_property(
         object, principal, mailboxes, emails, snapshot, tag,
@@ -1402,15 +1527,29 @@ fn write_flagged_property_row(
     snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
     unsupported_tags: &[u32],
+    size_limited_tags: &[u32],
 ) {
     response.push(1);
     for tag in columns {
-        if unsupported_tags.contains(tag) {
-            response.push(0x0A);
-            write_u32(
+        if size_limited_tags.contains(tag) {
+            if let Some((_value_tag, property_type)) = get_properties_specific_typed_value_tag(*tag)
+            {
+                write_u16(response, property_type);
+            }
+            write_flagged_property_error(response, 0x8007_000E);
+        } else if unsupported_tags.contains(tag) {
+            write_flagged_property_error(
                 response,
                 flagged_property_error_code(object, principal, mailboxes, emails, snapshot, *tag),
             );
+        } else if let Some((value_tag, property_type)) =
+            get_properties_specific_typed_value_tag(*tag)
+        {
+            write_u16(response, property_type);
+            response.push(0);
+            response.extend_from_slice(&serialize_object_property(
+                object, principal, mailboxes, emails, snapshot, value_tag,
+            ));
         } else {
             response.push(0);
             response.extend_from_slice(&serialize_object_property(
@@ -1418,6 +1557,11 @@ fn write_flagged_property_row(
             ));
         }
     }
+}
+
+fn write_flagged_property_error(response: &mut Vec<u8>, error_code: u32) {
+    response.push(0x0A);
+    write_u32(response, error_code);
 }
 
 fn log_get_properties_specific_debug(
@@ -1893,6 +2037,7 @@ fn format_message_body_getprops_contract(
         folder_id,
         message_id,
         saved_email,
+        ..
     }) = object
     else {
         return String::new();
@@ -2525,19 +2670,45 @@ fn property_is_unsupported_for_object(
     if canonical_property_storage_tag(tag) == OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C {
         return false;
     }
-    if MapiPropertyTag::new(tag).property_type().is_none() {
+    let value_tag = get_properties_specific_value_tag(tag);
+    if MapiPropertyTag::new(value_tag).property_type().is_none() {
         return true;
     }
     if matches!(
         object,
         Some(MapiObject::Note { .. } | MapiObject::PendingNote { .. })
     ) && matches!(
-        canonical_property_storage_tag(tag),
+        canonical_property_storage_tag(value_tag),
         PID_LID_NOTE_HEIGHT_TAG | PID_LID_NOTE_WIDTH_TAG | PID_LID_NOTE_X_TAG | PID_LID_NOTE_Y_TAG
     ) {
         return true;
     }
-    matches!(object, Some(MapiObject::Logon)) && logon_property_value(principal, tag).is_none()
+    matches!(object, Some(MapiObject::Logon))
+        && logon_property_value(principal, value_tag).is_none()
+}
+
+fn get_properties_specific_value_tag(tag: u32) -> u32 {
+    get_properties_specific_typed_value_tag(tag)
+        .map(|(value_tag, _property_type)| value_tag)
+        .unwrap_or(tag)
+}
+
+fn get_properties_specific_typed_value_tag(tag: u32) -> Option<(u32, u16)> {
+    let requested_type = MapiPropertyTag::new(tag).property_type_code();
+    if requested_type != 0x0000 && requested_type != 0x0001 {
+        return None;
+    }
+    let value_tag = match tag & 0xFFFF_0000 {
+        0x001A_0000 => PID_TAG_MESSAGE_CLASS_W,
+        0x0037_0000 => PID_TAG_SUBJECT_W,
+        0x0E07_0000 => PID_TAG_MESSAGE_FLAGS,
+        0x0E1D_0000 => PID_TAG_NORMALIZED_SUBJECT_W,
+        0x1000_0000 => PID_TAG_BODY_W,
+        0x1013_0000 => PID_TAG_BODY_HTML_W,
+        0x3001_0000 => PID_TAG_DISPLAY_NAME_W,
+        _ => return None,
+    };
+    Some((value_tag, (value_tag & 0xFFFF) as u16))
 }
 
 fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
@@ -3169,6 +3340,17 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
+        PID_TAG_OBJECT_TYPE => "PidTagObjectType",
+        PID_TAG_DISPLAY_TYPE => "PidTagDisplayType",
+        PID_TAG_DISPLAY_TYPE_EX => "PidTagDisplayTypeEx",
+        PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W => "PidTagAddressBookDisplayNamePrintable",
+        PID_TAG_SEND_INTERNET_ENCODING => "PidTagSendInternetEncoding",
+        PID_TAG_RECIPIENT_DISPLAY_NAME_W => "PidTagRecipientDisplayName",
+        PID_TAG_RECIPIENT_ENTRY_ID => "PidTagRecipientEntryId",
+        PID_TAG_RECIPIENT_FLAGS => "PidTagRecipientFlags",
+        PID_TAG_RECIPIENT_ORDER => "PidTagRecipientOrder",
+        PID_TAG_RECIPIENT_TRACK_STATUS => "PidTagRecipientTrackStatus",
+        OUTLOOK_RECIPIENT_5FDE => "OutlookRecipient5FDE",
         PID_TAG_SENDER_ADDRESS_TYPE_W => "PidTagSenderAddressType",
         PID_TAG_SENDER_NAME_W => "PidTagSenderName",
         PID_TAG_SENDER_EMAIL_ADDRESS_W => "PidTagSenderEmailAddress",
@@ -3220,6 +3402,18 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_EXTENDED_RULE_SIZE_LIMIT => "PidTagExtendedRuleSizeLimit",
         PID_TAG_PST_PATH_W => "PidTagPstPath",
         PID_TAG_ATTACH_NUM => "PidTagAttachNumber",
+        PID_TAG_ATTACH_EXTENSION_W => "PidTagAttachExtension",
+        PID_TAG_ATTACH_FILENAME_W => "PidTagAttachFilename",
+        PID_TAG_ATTACH_METHOD => "PidTagAttachMethod",
+        PID_TAG_ATTACH_LONG_FILENAME_W => "PidTagAttachLongFilename",
+        PID_TAG_ATTACH_RENDERING => "PidTagAttachRendering",
+        PID_TAG_RENDERING_POSITION => "PidTagRenderingPosition",
+        PID_TAG_ATTACH_MIME_TAG_W => "PidTagAttachMimeTag",
+        PID_TAG_ATTACH_CONTENT_ID_W => "PidTagAttachContentId",
+        PID_TAG_ATTACH_FLAGS => "PidTagAttachFlags",
+        PID_TAG_ATTACHMENT_LINK_ID => "PidTagAttachmentLinkId",
+        PID_TAG_ATTACHMENT_FLAGS => "PidTagAttachmentFlags",
+        PID_TAG_ATTACHMENT_HIDDEN => "PidTagAttachmentHidden",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 | PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
@@ -3233,6 +3427,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
         PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
+        PID_TAG_SEARCH_FOLDER_ID => "PidTagSearchFolderId",
         PID_TAG_ARCHIVE_TAG => "PidTagArchiveTag",
         PID_TAG_POLICY_TAG => "PidTagPolicyTag",
         PID_TAG_RETENTION_PERIOD => "PidTagRetentionPeriod",
@@ -3369,10 +3564,13 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    if let Some(MapiObject::Event {
+    let Some(object) = object else {
+        return rop_error_response(0x08, request.input_handle_index().unwrap_or(0), 0x8004_0102);
+    };
+    if let MapiObject::Event {
         folder_id,
         event_id,
-    }) = object
+    } = object
     {
         if snapshot.event_for_id(*folder_id, *event_id).is_none() {
             return rop_error_response(
@@ -3384,48 +3582,73 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     }
     let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
+    let size_limit = request_property_size_limit(request);
+    let want_unicode = request_get_properties_all_want_unicode(request);
     let tags = match object {
-        Some(MapiObject::Logon) => default_store_property_tags(),
-        Some(MapiObject::Folder {
+        MapiObject::Logon => default_store_property_tags(),
+        MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
             ..
-        }) => default_folder_property_tags_with_identity(),
-        Some(
-            MapiObject::Attachment { .. }
-            | MapiObject::PendingAttachment { .. }
-            | MapiObject::SavedAttachment { .. },
-        ) => default_attachment_columns(),
-        Some(MapiObject::Message { .. })
-        | Some(MapiObject::PublicFolderItem { .. })
-        | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
-        Some(MapiObject::Contact { .. }) | Some(MapiObject::PendingContact { .. }) => {
+        } => default_folder_property_tags_with_identity(),
+        MapiObject::Attachment { .. }
+        | MapiObject::PendingAttachment { .. }
+        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
+        MapiObject::Message { .. }
+        | MapiObject::PublicFolderItem { .. }
+        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
+        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
             default_contact_property_tags()
         }
-        Some(MapiObject::Event { .. }) | Some(MapiObject::PendingEvent { .. }) => {
-            default_event_property_tags()
-        }
-        Some(MapiObject::Task { .. }) | Some(MapiObject::PendingTask { .. }) => {
-            default_task_property_tags()
-        }
-        Some(MapiObject::Note { .. }) | Some(MapiObject::PendingNote { .. }) => {
-            default_note_property_tags()
-        }
-        Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
+        MapiObject::Event { .. } | MapiObject::PendingEvent { .. } => default_event_property_tags(),
+        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
+        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
+        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
             default_journal_entry_property_tags()
         }
-        Some(MapiObject::ConversationAction { .. })
-        | Some(MapiObject::PendingConversationAction { .. }) => {
+        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
             default_conversation_action_property_tags()
         }
         _ => default_folder_property_tags(),
     };
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
     for tag in tags {
-        write_u32(&mut response, tag);
-        let value = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
-        response.extend_from_slice(&value);
+        let tag = get_properties_all_response_tag(tag, want_unicode);
+        let value =
+            serialize_object_property(Some(object), principal, mailboxes, emails, snapshot, tag);
+        if size_limit != 0 && value.len() > size_limit {
+            write_u32(&mut response, property_error_tag(tag));
+            write_u32(&mut response, 0x8007_000E);
+        } else {
+            write_u32(&mut response, tag);
+            response.extend_from_slice(&value);
+        }
     }
     response
+}
+
+fn request_get_properties_all_want_unicode(request: &RopRequest) -> bool {
+    request
+        .payload
+        .get(2..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(1)
+        != 0
+}
+
+fn get_properties_all_response_tag(property_tag: u32, want_unicode: bool) -> u32 {
+    if want_unicode {
+        return property_tag;
+    }
+    match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::String) => (property_tag & 0xFFFF_0000) | 0x001E,
+        Some(MapiPropertyType::MultipleString) => (property_tag & 0xFFFF_0000) | 0x101E,
+        _ => property_tag,
+    }
+}
+
+fn property_error_tag(property_tag: u32) -> u32 {
+    (property_tag & 0xFFFF_0000) | 0x000A
 }
 
 fn default_folder_property_tags_with_identity() -> Vec<u32> {
@@ -3438,6 +3661,7 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
+    pending_attachment_deletions: &HashSet<(u64, u64, u32)>,
 ) -> Vec<u8> {
     let (folder_id, message_id) = match object {
         Some(MapiObject::Message {
@@ -3459,10 +3683,17 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
     let attachments = snapshot
         .attachments_for_message(folder_id, message_id)
         .unwrap_or_default();
+    let valid_attachments = attachments
+        .iter()
+        .filter(|attachment| {
+            !pending_attachment_deletions.contains(&(folder_id, message_id, attachment.attach_num))
+        })
+        .collect::<Vec<_>>();
     let mut response = vec![0x52, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
-    for attachment in attachments.iter().take(u16::MAX as usize) {
+    response
+        .extend_from_slice(&(valid_attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for attachment in valid_attachments.iter().take(u16::MAX as usize) {
         write_u32(&mut response, attachment.attach_num);
     }
     response
@@ -3531,6 +3762,7 @@ pub(in crate::mapi) fn serialize_object_property(
             folder_id,
             message_id,
             saved_email,
+            ..
         }) => message_for_id(*folder_id, *message_id, mailboxes, emails)
             .or_else(|| {
                 search_folder_message_for_id(snapshot, *folder_id, *message_id)
@@ -3755,6 +3987,8 @@ pub(in crate::mapi) fn serialize_object_property(
             file_reference,
             file_name,
             media_type,
+            disposition,
+            content_id,
             size_octets,
             ..
         }) => serialize_saved_attachment_row(
@@ -3762,6 +3996,8 @@ pub(in crate::mapi) fn serialize_object_property(
             file_reference,
             file_name,
             media_type,
+            disposition.as_deref(),
+            content_id.as_deref(),
             *size_octets,
             &[tag],
         ),
@@ -4099,6 +4335,33 @@ pub(in crate::mapi) fn unsupported_rop_response(rop_id: u8, handle_index: u8) ->
     rop_error_response(rop_id, handle_index, ROP_ERROR_NOT_SUPPORTED)
 }
 
+pub(in crate::mapi) fn rop_copy_to_null_destination_response(request: &RopRequest) -> Vec<u8> {
+    rop_property_copy_null_destination_response(0x39, request)
+}
+
+pub(in crate::mapi) fn rop_copy_properties_null_destination_response(
+    request: &RopRequest,
+) -> Vec<u8> {
+    rop_property_copy_null_destination_response(0x67, request)
+}
+
+pub(in crate::mapi) fn rop_copy_properties_success_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x67, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u16(&mut response, 0);
+    response
+}
+
+fn rop_property_copy_null_destination_response(rop_id: u8, request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0x0000_0503);
+    write_u32(
+        &mut response,
+        request.output_handle_index().map(u32::from).unwrap_or(0),
+    );
+    response
+}
+
 pub(in crate::mapi) fn rop_error_response(
     rop_id: u8,
     handle_index: u8,
@@ -4149,6 +4412,46 @@ pub(in crate::mapi) fn rop_buffer_with_response_spec(
         buffer.extend_from_slice(&handle.to_le_bytes());
     }
     buffer
+}
+
+pub(in crate::mapi) fn rop_buffer_too_small_response(
+    size_needed: usize,
+    request_buffers: &[u8],
+    handle_table: &[u8],
+) -> Vec<u8> {
+    let mut response = Vec::with_capacity(3 + request_buffers.len());
+    response.push(0xFF);
+    response.extend_from_slice(&(size_needed.min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(request_buffers);
+
+    let mut buffer = Vec::with_capacity(2 + response.len() + handle_table.len());
+    let rop_size = response.len().saturating_add(2).min(u16::MAX as usize) as u16;
+    buffer.extend_from_slice(&rop_size.to_le_bytes());
+    buffer.extend_from_slice(&response);
+    buffer.extend_from_slice(handle_table);
+    buffer
+}
+
+#[allow(dead_code)]
+pub(in crate::mapi) fn rop_backoff_response(
+    logon_id: u8,
+    duration_ms: u32,
+    backoff_rops: &[(u8, u32)],
+    additional_data: &[u8],
+) -> Vec<u8> {
+    let mut response = Vec::new();
+    response.push(0xF9);
+    response.push(logon_id);
+    response.extend_from_slice(&duration_ms.to_le_bytes());
+    response.push(backoff_rops.len().min(u8::MAX as usize) as u8);
+    for (rop_id, duration_ms) in backoff_rops.iter().take(u8::MAX as usize) {
+        response.push(*rop_id);
+        response.extend_from_slice(&duration_ms.to_le_bytes());
+    }
+    response
+        .extend_from_slice(&(additional_data.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(&additional_data[..additional_data.len().min(u16::MAX as usize)]);
+    response
 }
 
 pub(in crate::mapi) fn write_u32(body: &mut Vec<u8>, value: u32) {
@@ -4304,6 +4607,7 @@ pub(in crate::mapi) enum TypedRopRequest {
     OpenTable(RopOpenTableRequest),
     CreateMessage(RopCreateMessageRequest),
     SaveChangesMessage(RopSaveChangesMessageRequest),
+    OpenEmbeddedMessage(RopOpenEmbeddedMessageRequest),
     SetColumns(RopSetColumnsRequest),
     Restrict(RopRestrictionRequest),
     QueryRows(RopQueryRowsRequest),
@@ -4356,6 +4660,14 @@ pub(in crate::mapi) struct RopSaveChangesMessageRequest {
     pub(in crate::mapi) response_handle_index: u8,
     pub(in crate::mapi) input_handle_index: u8,
     pub(in crate::mapi) save_flags: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopOpenEmbeddedMessageRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) code_page_id: u16,
+    pub(in crate::mapi) open_mode_flags: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4412,6 +4724,7 @@ impl TypedRopRequest {
             Self::OpenTable(request) => request.rop_id,
             Self::CreateMessage(_) => 0x06,
             Self::SaveChangesMessage(_) => 0x0C,
+            Self::OpenEmbeddedMessage(_) => 0x46,
             Self::SetColumns(_) => 0x12,
             Self::Restrict(request) => request.rop_id,
             Self::QueryRows(_) => 0x15,
@@ -4465,6 +4778,19 @@ impl RopRequest {
                     response_handle_index: self.output_handle_index.unwrap_or(0),
                     input_handle_index: self.input_handle_index.unwrap_or(0),
                     save_flags: self.payload.first().copied().unwrap_or(0),
+                })
+            }
+            Some(RopId::OpenEmbeddedMessage) => {
+                TypedRopRequest::OpenEmbeddedMessage(RopOpenEmbeddedMessageRequest {
+                    input_handle_index: self.input_handle_index.unwrap_or(0),
+                    output_handle_index: self.output_handle_index.unwrap_or(0),
+                    code_page_id: self
+                        .payload
+                        .get(..2)
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .map(u16::from_le_bytes)
+                        .unwrap_or(0),
+                    open_mode_flags: self.payload.get(2).copied().unwrap_or(0),
                 })
             }
             Some(RopId::SetColumns) => TypedRopRequest::SetColumns(RopSetColumnsRequest {
@@ -4531,6 +4857,10 @@ impl RopRequest {
         self.input_handle_index
     }
 
+    pub(in crate::mapi) fn output_handle_index(&self) -> Option<u8> {
+        self.output_handle_index
+    }
+
     pub(in crate::mapi) fn response_handle_index(&self) -> u8 {
         if matches!(
             self.rop_id,
@@ -4549,6 +4879,7 @@ impl RopRequest {
                 | 0x3B
                 | 0x3E
                 | 0x3F
+                | 0x46
                 | 0x4B
                 | 0x4C
                 | 0x4D
@@ -4785,6 +5116,14 @@ impl RopRequest {
             0x11 => self.payload.first().copied(),
             0x66 => self.payload.get(1).copied(),
             _ => None,
+        }
+    }
+
+    pub(in crate::mapi) fn want_asynchronous(&self) -> Option<u8> {
+        if matches!(RopId::from_u8(self.rop_id), Some(RopId::SetReadFlags)) {
+            self.payload.first().copied()
+        } else {
+            None
         }
     }
 
@@ -5274,6 +5613,26 @@ impl RopRequest {
             .is_some_and(|want_copy| *want_copy != 0)
     }
 
+    pub(in crate::mapi) fn move_copy_want_asynchronous(&self) -> Option<u8> {
+        let count = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        self.payload.get(2 + count * 8).copied()
+    }
+
+    pub(in crate::mapi) fn move_copy_want_copy_raw(&self) -> Option<u8> {
+        let count = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        self.payload.get(2 + count * 8 + 1).copied()
+    }
+
     pub(in crate::mapi) fn folder_move_copy_folder_id(&self) -> Option<u64> {
         if !matches!(
             RopId::from_u8(self.rop_id),
@@ -5288,6 +5647,38 @@ impl RopRequest {
         };
         let bytes = self.payload.get(offset..offset + 8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    pub(in crate::mapi) fn folder_move_copy_want_asynchronous(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::MoveFolder | RopId::CopyFolder)
+        ) {
+            return None;
+        }
+        self.payload.first().copied()
+    }
+
+    pub(in crate::mapi) fn folder_move_copy_want_recursive(&self) -> Option<u8> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyFolder)) {
+            return None;
+        }
+        self.payload.get(1).copied()
+    }
+
+    pub(in crate::mapi) fn folder_move_copy_use_unicode(&self) -> Option<u8> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::MoveFolder | RopId::CopyFolder)
+        ) {
+            return None;
+        }
+        let offset = if matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyFolder)) {
+            2
+        } else {
+            1
+        };
+        self.payload.get(offset).copied()
     }
 
     pub(in crate::mapi) fn folder_move_copy_display_name(&self) -> String {
@@ -5333,6 +5724,61 @@ impl RopRequest {
             .get(self.output_handle_index? as usize)
             .copied()
             .filter(|handle| *handle != u32::MAX)
+    }
+
+    pub(in crate::mapi) fn copy_to_want_asynchronous(&self) -> Option<u8> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyTo)) {
+            return None;
+        }
+        self.payload.first().copied()
+    }
+
+    pub(in crate::mapi) fn copy_to_want_subobjects(&self) -> Option<u8> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyTo)) {
+            return None;
+        }
+        self.payload.get(1).copied()
+    }
+
+    pub(in crate::mapi) fn copy_to_excluded_property_tags(&self) -> Vec<u32> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyTo)) {
+            return Vec::new();
+        }
+        let Some(count_bytes) = self.payload.get(3..5) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload
+            .get(5..)
+            .unwrap_or_default()
+            .chunks_exact(4)
+            .take(count)
+            .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            .collect()
+    }
+
+    pub(in crate::mapi) fn copy_properties_want_asynchronous(&self) -> Option<u8> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyProperties)) {
+            return None;
+        }
+        self.payload.first().copied()
+    }
+
+    pub(in crate::mapi) fn copy_properties_property_tags(&self) -> Vec<u32> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyProperties)) {
+            return Vec::new();
+        }
+        let Some(count_bytes) = self.payload.get(2..4) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload
+            .get(4..)
+            .unwrap_or_default()
+            .chunks_exact(4)
+            .take(count)
+            .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            .collect()
     }
 
     pub(in crate::mapi) fn query_row_count(&self) -> Option<usize> {
@@ -5691,7 +6137,7 @@ fn parse_simple_pending_recipient_row(
                     format_property_tags_for_debug(columns)
                 )
             })?;
-    let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
+    let display_name = recipient_display_name_from_values(&values)
         .filter(|value| !value.eq_ignore_ascii_case(&address));
 
     Ok(PendingRecipient {
@@ -5789,7 +6235,7 @@ fn parse_wrapped_pending_recipient_row(
                     format_property_tags_for_debug(columns)
                 )
             })?;
-    let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
+    let display_name = recipient_display_name_from_values(&values)
         .or(display_name)
         .filter(|value| !value.eq_ignore_ascii_case(&address));
 
@@ -5799,6 +6245,17 @@ fn parse_wrapped_pending_recipient_row(
         address,
         display_name,
     })
+}
+
+fn recipient_display_name_from_values(values: &HashMap<u32, MapiValue>) -> Option<String> {
+    optional_mapi_value_text(
+        values,
+        &[
+            PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+            PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W,
+        ],
+    )
 }
 
 fn legacy_dn_recipient_address(
@@ -5878,7 +6335,8 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
             parse_mapi_restriction_from(cursor)?,
         ))),
         Some(MapiRestrictionType::Content) => {
-            let _fuzzy_level = cursor.read_u32()?;
+            let fuzzy_level_low = cursor.read_u16()?;
+            let fuzzy_level_high = cursor.read_u16()?;
             let property_tag = cursor.read_u32()?;
             let value = parse_tagged_property_value(cursor)?
                 .into_text()
@@ -5886,6 +6344,8 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
             Ok(MapiRestriction::Content {
                 property_tag,
                 value,
+                fuzzy_level_low,
+                fuzzy_level_high,
             })
         }
         Some(MapiRestrictionType::Property) => {
@@ -6094,6 +6554,19 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
+        Some(RopId::OpenEmbeddedMessage) => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
         Some(RopId::GetPropertiesAll) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -6176,6 +6649,34 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 input_handle_index: Some(source_handle_index),
                 output_handle_index: Some(dest_handle_index),
                 payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        Some(RopId::CopyTo) => {
+            let source_handle_index = cursor.read_u8()?;
+            let dest_handle_index = cursor.read_u8()?;
+            let mut payload = vec![cursor.read_u8()?, cursor.read_u8()?, cursor.read_u8()?];
+            let excluded_tag_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(excluded_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(excluded_tag_count * 4)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(source_handle_index),
+                output_handle_index: Some(dest_handle_index),
+                payload,
+            })
+        }
+        Some(RopId::CopyProperties) => {
+            let source_handle_index = cursor.read_u8()?;
+            let dest_handle_index = cursor.read_u8()?;
+            let mut payload = vec![cursor.read_u8()?, cursor.read_u8()?];
+            let property_tag_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(source_handle_index),
+                output_handle_index: Some(dest_handle_index),
+                payload,
             })
         }
         Some(RopId::CloneStream) => {
@@ -7450,6 +7951,12 @@ pub(in crate::mapi) fn serialize_rop_request(request: &RopRequest) -> Result<Vec
             buffer.push(request.input_handle_index);
             buffer.push(request.save_flags);
         }
+        TypedRopRequest::OpenEmbeddedMessage(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.output_handle_index);
+            write_u16(&mut buffer, request.code_page_id);
+            buffer.push(request.open_mode_flags);
+        }
         TypedRopRequest::SetColumns(request) => {
             buffer.push(request.input_handle_index);
             buffer.push(request.flags);
@@ -7514,6 +8021,429 @@ mod tests {
     use super::*;
 
     #[test]
+    fn split_rop_buffer_accepts_microsoft_spec_framing_examples() {
+        let empty = [0x02, 0x00];
+        let (requests, handles) = split_rop_buffer(&empty).unwrap();
+        assert!(requests.is_empty());
+        assert!(handles.is_empty());
+
+        let single = [
+            0x09, 0x00, 0x15, 0x01, 0x01, 0x02, 0x01, 0xFF, 0x0F, 0x6D, 0x00, 0x00, 0x00, 0x56,
+            0x00, 0x00, 0x00,
+        ];
+        let (requests, handles) = split_rop_buffer(&single).unwrap();
+        assert_eq!(requests, &[0x15, 0x01, 0x01, 0x02, 0x01, 0xFF, 0x0F]);
+        assert_eq!(handles, &[0x6D, 0x00, 0x00, 0x00, 0x56, 0x00, 0x00, 0x00]);
+
+        let multiple = [
+            0x14, 0x00, 0x02, 0x00, 0x00, 0x01, 0x01, 0x00, 0x59, 0x65, 0x73, 0x73, 0x69, 0x72,
+            0x00, 0x04, 0x00, 0x01, 0x02, 0x04, 0x6E, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF,
+        ];
+        let (requests, handles) = split_rop_buffer(&multiple).unwrap();
+        assert_eq!(
+            requests,
+            &[
+                0x02, 0x00, 0x00, 0x01, 0x01, 0x00, 0x59, 0x65, 0x73, 0x73, 0x69, 0x72, 0x00, 0x04,
+                0x00, 0x01, 0x02, 0x04,
+            ]
+        );
+        assert_eq!(
+            handles,
+            &[0x6E, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,]
+        );
+
+        let release = [
+            0x08, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x6F, 0x00, 0x00, 0x00, 0x6E, 0x00,
+            0x00, 0x00,
+        ];
+        let (requests, handles) = split_rop_buffer(&release).unwrap();
+        assert_eq!(requests, &[0x01, 0x00, 0x00, 0x01, 0x00, 0x01]);
+        assert_eq!(handles, &[0x6F, 0x00, 0x00, 0x00, 0x6E, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn split_rop_buffer_preserves_legacy_framing_when_handle_table_is_valid() {
+        let legacy = rop_buffer_with_response(vec![0x01, 0x00, 0x00], &[0x34]);
+        let (requests, handles) = split_rop_buffer(&legacy).unwrap();
+
+        assert_eq!(requests, &[0x01, 0x00, 0x00]);
+        assert_eq!(handles, &[0x34, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn message_create_and_save_responses_match_microsoft_message_examples() {
+        let create = RopRequest {
+            rop_id: RopId::CreateMessage.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_create_message_response(&create),
+            vec![0x06, 0x01, 0, 0, 0, 0, 0]
+        );
+
+        let save = RopRequest {
+            rop_id: RopId::SaveChangesMessage.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: Some(0),
+            payload: vec![0x0A],
+        };
+        assert_eq!(
+            rop_save_changes_message_response(&save, 0x3986_F000_0000_0101),
+            vec![0x0C, 0x00, 0, 0, 0, 0, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0xF0, 0x86, 0x39,]
+        );
+    }
+
+    #[test]
+    fn attachment_create_and_save_responses_match_microsoft_message_examples() {
+        let table = RopRequest {
+            rop_id: RopId::GetAttachmentTable.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0x00],
+        };
+        assert_eq!(
+            rop_get_attachment_table_response(&table),
+            vec![0x21, 0x01, 0, 0, 0, 0]
+        );
+
+        let create = RopRequest {
+            rop_id: RopId::CreateAttachment.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(3),
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_create_attachment_response(&create, 1),
+            vec![0x23, 0x03, 0, 0, 0, 0, 1, 0, 0, 0]
+        );
+
+        let save = RopRequest {
+            rop_id: RopId::SaveChangesAttachment.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: Some(2),
+            payload: vec![0x0A],
+        };
+        assert_eq!(
+            rop_simple_success_response(&save),
+            vec![0x25, 0x02, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn contents_table_responses_match_microsoft_table_examples() {
+        let open = RopRequest {
+            rop_id: RopId::GetContentsTable.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0],
+        };
+        assert_eq!(
+            rop_get_contents_table_response(&open, 4),
+            vec![0x05, 0x01, 0, 0, 0, 0, 4, 0, 0, 0]
+        );
+
+        let set_columns = RopRequest {
+            rop_id: RopId::SetColumns.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_set_columns_response(&set_columns),
+            vec![0x12, 0x01, 0, 0, 0, 0, 0]
+        );
+
+        let sort = RopRequest {
+            rop_id: RopId::SortTable.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        assert_eq!(
+            rop_sort_table_response(&sort),
+            vec![0x13, 0x01, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn expand_row_response_matches_microsoft_category_example() {
+        let request = RopRequest {
+            rop_id: RopId::ExpandRow.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        assert_eq!(
+            rop_expand_row_success_response(&request, 3, Vec::new()),
+            vec![0x59, 0x01, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn buffer_too_small_response_matches_microsoft_rop_layout() {
+        let request = [
+            0x03, 0x00, 0x00, 0x01, 0xFF, 0x0F, 0x01, 0x00, 0x15, 0x89, 0x00, 0x78, 0x27, 0x1E,
+            0x03, 0x01, 0x00, 0x15, 0x89, 0x00, 0x78, 0x2F, 0xBB,
+        ];
+        let handles = [0x12, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF];
+
+        let response = rop_buffer_too_small_response(0x002C, &request, &handles);
+
+        assert_eq!(&response[..3], &[0x1C, 0x00, 0xFF]);
+        assert_eq!(&response[3..5], &0x002Cu16.to_le_bytes());
+        assert_eq!(&response[5..28], request.as_slice());
+        assert_eq!(&response[28..], handles.as_slice());
+    }
+
+    #[test]
+    fn backoff_response_matches_microsoft_logon_example() {
+        let set_columns = RopRequest {
+            rop_id: RopId::SetColumns.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let mut response = rop_set_columns_response(&set_columns);
+        response.extend_from_slice(&rop_backoff_response(0, 0x1234, &[], &[]));
+
+        assert_eq!(
+            rop_buffer_with_response_spec(response, &[0x28]),
+            vec![
+                0x12, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF9, 0x00, 0x34, 0x12, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn backoff_response_matches_microsoft_targeted_rop_example() {
+        let open_folder = RopRequest {
+            rop_id: RopId::OpenFolder.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        let mut response = rop_open_folder_response(&open_folder, false);
+        response.extend_from_slice(&rop_backoff_response(0, 0, &[(0x1C, 0x0004_4F17)], &[]));
+
+        assert_eq!(
+            rop_buffer_with_response_spec(response, &[0x0A, 0x24]),
+            vec![
+                0x18, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF9, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x01, 0x1C, 0x17, 0x4F, 0x04, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
+                0x24, 0x00, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn get_properties_specific_returns_typed_value_for_unspecified_subject() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mailbox_id = Uuid::from_u128(0x11111111111111111111111111111111);
+        let email_id = Uuid::from_u128(0x22222222222222222222222222222222);
+        let message_id = crate::mapi::identity::mapi_store_id(0x2222);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, INBOX_FOLDER_ID);
+        crate::mapi::identity::remember_mapi_identity(email_id, message_id);
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let emails = vec![JmapEmail {
+            id: email_id,
+            thread_id: email_id,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: Vec::new(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            received_at: "2026-06-07T19:56:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "author".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Hello".to_string(),
+            preview: String::new(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 512,
+            internet_message_id: Some("<hello@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        }];
+        let mut payload = Vec::new();
+        write_u16(&mut payload, 4096);
+        write_u16(&mut payload, 2);
+        write_u32(&mut payload, PID_TAG_MESSAGE_FLAGS);
+        write_u32(&mut payload, 0x0037_0001);
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id,
+            saved_email: None,
+            pending_properties: HashMap::new(),
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &mailboxes,
+            &emails,
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0x01]);
+        assert_eq!(response[7], 0);
+        assert_eq!(&response[12..15], &[0x1F, 0x00, 0]);
+        assert_eq!(&response[15..], utf16z_bytes("Hello").as_slice());
+    }
+
+    #[test]
+    fn get_properties_specific_returns_not_enough_memory_for_size_limited_value() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("Large subject".to_string()),
+        );
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties,
+            recipients: Vec::new(),
+        };
+        let mut payload = Vec::new();
+        write_u16(&mut payload, 4);
+        write_u16(&mut payload, 1);
+        write_u32(&mut payload, PID_TAG_SUBJECT_W);
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
+        assert_eq!(response[6], 0x01);
+        assert_eq!(response[7], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response[8..12].try_into().unwrap()),
+            0x8007_000E
+        );
+    }
+
+    #[test]
+    fn get_properties_specific_size_limit_preserves_unspecified_property_type() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("Large subject".to_string()),
+        );
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties,
+            recipients: Vec::new(),
+        };
+        let mut payload = Vec::new();
+        write_u16(&mut payload, 4);
+        write_u16(&mut payload, 1);
+        write_u32(&mut payload, 0x0037_0001);
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
+        assert_eq!(response[6], 0x01);
+        assert_eq!(&response[7..9], &0x001Fu16.to_le_bytes());
+        assert_eq!(response[9], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response[10..14].try_into().unwrap()),
+            0x8007_000E
+        );
+    }
+
+    #[test]
     pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
         let fresh = MapiSession {
@@ -7532,6 +8462,12 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            message_save_generations: HashMap::new(),
+            message_handle_generations: HashMap::new(),
+            pending_attachment_deletions: HashSet::new(),
+            pending_embedded_message_ids: HashMap::new(),
+            pending_embedded_message_attachments: HashMap::new(),
+            saved_embedded_messages: HashMap::new(),
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
@@ -7597,17 +8533,23 @@ mod tests {
         assert_eq!(response[0], RopId::OpenMessage.as_u8());
         assert_eq!(response[1], 2);
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(&response[response.len() - 5..response.len() - 3], &[0, 0]);
+        assert_eq!(&response[response.len() - 5..response.len() - 3], &[3, 0]);
         assert_eq!(&response[response.len() - 3..response.len() - 1], &[0, 0]);
         assert_eq!(response[response.len() - 1], 0);
     }
 
     #[test]
-    fn reload_cached_information_does_not_advertise_missing_recipient_rows() {
-        let request = RopRequest {
+    fn microsoft_reload_cached_information_matches_open_message_shape() {
+        let reload_request = RopRequest {
             rop_id: RopId::ReloadCachedInformation.as_u8(),
             input_handle_index: Some(2),
             output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let open_request = RopRequest {
+            rop_id: RopId::OpenMessage.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: Some(2),
             payload: Vec::new(),
         };
         let object = MapiObject::PendingMessage {
@@ -7622,15 +8564,89 @@ mod tests {
         };
         let snapshot = MapiMailStoreSnapshot::empty();
 
-        let response =
-            rop_reload_cached_information_response(&request, Some(&object), &[], &[], &snapshot);
+        let response = rop_reload_cached_information_response(
+            &reload_request,
+            Some(&object),
+            &[],
+            &[],
+            &snapshot,
+        );
+        let open_response = rop_open_message_response(&open_request, "Subject", 1);
 
         assert_eq!(response[0], RopId::ReloadCachedInformation.as_u8());
         assert_eq!(response[1], 2);
+        assert_eq!(&response[2..], &open_response[2..]);
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(&response[response.len() - 5..response.len() - 3], &[0, 0]);
+        assert_eq!(&response[response.len() - 5..response.len() - 3], &[1, 0]);
         assert_eq!(&response[response.len() - 3..response.len() - 1], &[0, 0]);
         assert_eq!(response[response.len() - 1], 0);
+    }
+
+    #[test]
+    fn modify_recipients_accepts_microsoft_message_example_columns() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let columns = [
+            PID_TAG_OBJECT_TYPE,
+            PID_TAG_DISPLAY_TYPE,
+            PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W,
+            PID_TAG_SMTP_ADDRESS_W,
+            PID_TAG_SEND_INTERNET_ENCODING,
+            PID_TAG_DISPLAY_TYPE_EX,
+            PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+            PID_TAG_RECIPIENT_FLAGS,
+            PID_TAG_RECIPIENT_TRACK_STATUS,
+            OUTLOOK_RECIPIENT_5FDE,
+            PID_TAG_RECIPIENT_ORDER,
+            PID_TAG_RECIPIENT_ENTRY_ID,
+        ];
+        let mut row = Vec::new();
+        write_u16(&mut row, 0x0651);
+        row.push(b'Z');
+        row.push(0);
+        write_ascii_z(&mut row, "User2");
+        write_utf16z(&mut row, "User2");
+        write_utf16z(&mut row, "user2");
+        write_u16(&mut row, columns.len() as u16);
+        row.push(0);
+        for (tag, value) in [
+            (PID_TAG_OBJECT_TYPE, MapiValue::U32(6)),
+            (PID_TAG_DISPLAY_TYPE, MapiValue::U32(0)),
+            (
+                PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W,
+                MapiValue::String("user2".to_string()),
+            ),
+            (
+                PID_TAG_SMTP_ADDRESS_W,
+                MapiValue::String("user2@szfkuk-dom.extest.microsoft.com".to_string()),
+            ),
+            (PID_TAG_SEND_INTERNET_ENCODING, MapiValue::U32(0)),
+            (PID_TAG_DISPLAY_TYPE_EX, MapiValue::U32(0x4000_0000)),
+            (
+                PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+                MapiValue::String("user2".to_string()),
+            ),
+            (PID_TAG_RECIPIENT_FLAGS, MapiValue::U32(1)),
+            (PID_TAG_RECIPIENT_TRACK_STATUS, MapiValue::U32(0)),
+            (OUTLOOK_RECIPIENT_5FDE, MapiValue::U32(0)),
+            (PID_TAG_RECIPIENT_ORDER, MapiValue::U32(0)),
+            (PID_TAG_RECIPIENT_ENTRY_ID, MapiValue::Binary(vec![0; 124])),
+        ] {
+            write_mapi_value(&mut row, tag, &value);
+        }
+
+        let recipient = parse_pending_recipient_row(0, 1, &columns, &row, &principal, &[]).unwrap();
+
+        assert_eq!(recipient.row_id, 0);
+        assert_eq!(recipient.recipient_type, 1);
+        assert_eq!(recipient.address, "user2@szfkuk-dom.extest.microsoft.com");
+        assert_eq!(recipient.display_name.as_deref(), Some("user2"));
     }
 
     #[test]
@@ -8209,6 +9225,111 @@ mod tests {
             .any(|window| window == needle.as_slice())
     }
 
+    fn contains_ascii_z(bytes: &[u8], value: &str) -> bool {
+        let mut needle = value.as_bytes().to_vec();
+        needle.push(0);
+        contains_bytes(bytes, &needle)
+    }
+
+    fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
+        bytes.windows(needle.len()).any(|window| window == needle)
+    }
+
+    #[test]
+    fn get_properties_all_honors_non_unicode_string_request() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("String8 subject".to_string()),
+        );
+        properties.insert(
+            PID_TAG_BODY_W,
+            MapiValue::String("String8 body".to_string()),
+        );
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties,
+            recipients: Vec::new(),
+        };
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesAll.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: [0x00, 0x10, 0x00, 0x00].to_vec(),
+        };
+
+        let response = rop_get_properties_all_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..6], &[0x08, 0x02, 0, 0, 0, 0]);
+        assert!(contains_bytes(
+            &response,
+            &((PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E).to_le_bytes()
+        ));
+        assert!(contains_bytes(
+            &response,
+            &((PID_TAG_BODY_W & 0xFFFF_0000) | 0x001E).to_le_bytes()
+        ));
+        assert!(contains_ascii_z(&response, "String8 subject"));
+        assert!(contains_ascii_z(&response, "String8 body"));
+    }
+
+    #[test]
+    fn get_properties_all_returns_error_tag_for_size_limited_value() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "sender@example.test".to_string(),
+            display_name: "Sender".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_SUBJECT_W,
+            MapiValue::String("Oversized subject".to_string()),
+        );
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties,
+            recipients: Vec::new(),
+        };
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesAll.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: [0x04, 0x00, 0x01, 0x00].to_vec(),
+        };
+
+        let response = rop_get_properties_all_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+        let mut expected = property_error_tag(PID_TAG_SUBJECT_W).to_le_bytes().to_vec();
+        expected.extend_from_slice(&0x8007_000E_u32.to_le_bytes());
+
+        assert_eq!(&response[..6], &[0x08, 0x02, 0, 0, 0, 0]);
+        assert!(contains_bytes(&response, &expected));
+    }
+
     #[test]
     fn calendar_event_getprops_specific_projects_visible_event() {
         let principal = AccountPrincipal {
@@ -8325,6 +9446,7 @@ mod tests {
             &request,
             Some(&object),
             &MapiMailStoreSnapshot::empty(),
+            &HashSet::new(),
         );
 
         assert_eq!(response[0], RopId::GetValidAttachments.as_u8());
@@ -8509,6 +9631,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             message_id: crate::mapi::identity::mapi_store_id(0x99),
             saved_email: None,
+            pending_properties: HashMap::new(),
         };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
@@ -8546,6 +9669,117 @@ mod tests {
         assert!(
             contract.contains("requested_body_tags=0x1000001f,0x10090102,0x10130102,0x10160003")
         );
+    }
+
+    #[test]
+    fn microsoft_oxcdata_property_row_example_streams_oversized_body() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0x8181),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let mailbox_id = Uuid::from_u128(0x9001);
+        let email_id = Uuid::from_u128(0x9002);
+        let message_id = crate::mapi::identity::mapi_store_id(0x9002);
+        crate::mapi::identity::remember_mapi_identity(mailbox_id, INBOX_FOLDER_ID);
+        crate::mapi::identity::remember_mapi_identity(email_id, message_id);
+        let mailboxes = vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let emails = vec![JmapEmail {
+            id: email_id,
+            thread_id: email_id,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: Vec::new(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            received_at: "2026-06-07T19:56:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "author".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Hello".to_string(),
+            preview: "Large body".to_string(),
+            body_text: "Large body ".repeat(32),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: true,
+            size_octets: 4096,
+            internet_message_id: Some("<body-check@example.test>".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        }];
+        let object = MapiObject::Message {
+            folder_id: INBOX_FOLDER_ID,
+            message_id,
+            saved_email: None,
+            pending_properties: HashMap::new(),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&16u16.to_le_bytes());
+        payload.extend_from_slice(&3u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_MESSAGE_FLAGS.to_le_bytes());
+        payload.extend_from_slice(&0x0037_0001u32.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_BODY_W.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &mailboxes,
+            &emails,
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        let mut expected_row = vec![0x00];
+        expected_row.extend_from_slice(&0x13u32.to_le_bytes());
+        expected_row.extend_from_slice(&0x001Fu16.to_le_bytes());
+        expected_row.push(0x00);
+        expected_row.extend_from_slice(&utf16z_bytes("Hello"));
+        expected_row.push(0x0A);
+        expected_row.extend_from_slice(&0x8007_000E_u32.to_le_bytes());
+
+        assert_eq!(&response[..7], &[0x07, 0x02, 0, 0, 0, 0, 1]);
+        assert_eq!(&response[7..], expected_row.as_slice());
     }
 
     #[test]
@@ -8602,6 +9836,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             message_id,
             saved_email: Some(MapiSavedEmail { email }),
+            pending_properties: HashMap::new(),
         };
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
@@ -8716,6 +9951,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             message_id,
             saved_email: None,
+            pending_properties: HashMap::new(),
         };
         let mut payload = Vec::new();
         payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -9546,7 +10782,7 @@ mod tests {
     }
 
     #[test]
-    pub(in crate::mapi) fn get_message_status_response_keeps_get_opcode() {
+    pub(in crate::mapi) fn microsoft_get_message_status_response_uses_set_status_opcode() {
         let request = RopRequest {
             rop_id: RopId::GetMessageStatus.as_u8(),
             input_handle_index: Some(1),
@@ -9558,7 +10794,52 @@ mod tests {
 
         assert_eq!(
             response,
-            vec![RopId::GetMessageStatus.as_u8(), 1, 0, 0, 0, 0, 0, 0, 0, 0]
+            vec![RopId::SetMessageStatus.as_u8(), 1, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn microsoft_open_embedded_message_response_includes_message_id() {
+        let request = RopRequest {
+            rop_id: RopId::OpenEmbeddedMessage.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: Some(4),
+            payload: Vec::new(),
+        };
+        let message_id = crate::mapi::identity::mapi_store_id(0x44);
+
+        let response = rop_open_embedded_message_response(&request, message_id, "Embedded", 0);
+
+        assert_eq!(response[0], RopId::OpenEmbeddedMessage.as_u8());
+        assert_eq!(response[1], 4);
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_eq!(response[6], 0);
+        assert_eq!(
+            crate::mapi::identity::object_id_from_wire_id(&response[7..15]),
+            Some(message_id)
+        );
+        assert!(response
+            .windows(utf16z_bytes("Embedded").len())
+            .any(|window| window == utf16z_bytes("Embedded").as_slice()));
+    }
+
+    #[test]
+    pub(in crate::mapi) fn restriction_parser_preserves_content_fuzzy_levels() {
+        let mut restriction = vec![MapiRestrictionType::Content as u8];
+        restriction.extend_from_slice(&0x0002u16.to_le_bytes());
+        restriction.extend_from_slice(&0x0001u16.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Schedule");
+
+        assert_eq!(
+            parse_mapi_restriction(&restriction).unwrap(),
+            MapiRestriction::Content {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: "IPM.Schedule".to_string(),
+                fuzzy_level_low: 0x0002,
+                fuzzy_level_high: 0x0001,
+            }
         );
     }
 

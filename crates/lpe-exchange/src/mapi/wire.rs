@@ -473,6 +473,7 @@ impl RopId {
                 | Self::AbortSubmit
                 | Self::MoveFolder
                 | Self::CopyFolder
+                | Self::CopyTo
                 | Self::QueryColumnsAll
                 | Self::CreateBookmark
                 | Self::CopyToStream
@@ -519,6 +520,7 @@ impl RopId {
                 | Self::ReadPerUserInformation
                 | Self::WritePerUserInformation
                 | Self::SetReadFlags
+                | Self::CopyProperties
                 | Self::GetReceiveFolderTable
                 | Self::FastTransferSourceCopyProperties
                 | Self::GetCollapseState
@@ -551,20 +553,8 @@ impl RopId {
     }
 
     #[allow(dead_code)]
-    pub(in crate::mapi) fn known_unsupported_name(value: u8) -> Option<&'static str> {
-        match value {
-            0x39 => Some("RopCopyTo"),
-            0x46 => Some("RopOpenEmbeddedMessage"),
-            0x47 => Some("RopSetSpooler"),
-            0x48 => Some("RopSpoolerLockMessage"),
-            0x51 => Some("RopTransportNewMail"),
-            0x59 => Some("RopExpandRow"),
-            0x5A => Some("RopCollapseRow"),
-            0x5B => Some("RopLockRegionStream"),
-            0x5C => Some("RopUnlockRegionStream"),
-            0x86 => Some("RopTellVersion"),
-            _ => None,
-        }
+    pub(in crate::mapi) fn known_unsupported_name(_value: u8) -> Option<&'static str> {
+        None
     }
 }
 
@@ -993,11 +983,8 @@ mod tests {
         assert!(RopId::is_reserved(0x28));
         assert!(!RopId::is_reserved(0x70));
         assert_eq!(RopId::known_unsupported_name(0x34), None);
-        assert_eq!(RopId::known_unsupported_name(0x39), Some("RopCopyTo"));
-        assert_eq!(
-            RopId::known_unsupported_name(0x51),
-            Some("RopTransportNewMail")
-        );
+        assert_eq!(RopId::known_unsupported_name(0x39), None);
+        assert_eq!(RopId::known_unsupported_name(0x51), None);
         assert_eq!(
             MapiPropertyType::from_code(0x001F),
             Some(MapiPropertyType::String)

@@ -31,6 +31,12 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_handle: u32,
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
+    pub(in crate::mapi) message_save_generations: HashMap<(u64, u64), u64>,
+    pub(in crate::mapi) message_handle_generations: HashMap<u32, u64>,
+    pub(in crate::mapi) pending_attachment_deletions: HashSet<(u64, u64, u32)>,
+    pub(in crate::mapi) pending_embedded_message_ids: HashMap<u32, u64>,
+    pub(in crate::mapi) pending_embedded_message_attachments: HashMap<u32, (u64, u64, u32)>,
+    pub(in crate::mapi) saved_embedded_messages: HashMap<(u64, u64, u32), HashMap<u32, MapiValue>>,
     pub(in crate::mapi) saved_search_folder_definitions:
         HashMap<u64, MapiSavedSearchFolderDefinition>,
     pub(in crate::mapi) special_folder_aliases: HashMap<u64, u64>,
@@ -150,6 +156,7 @@ pub(in crate::mapi) enum StreamWriteTarget {
     PendingAssociatedMessageProperty { handle: u32, property_tag: u32 },
     AssociatedConfigProperty { handle: u32, property_tag: u32 },
     PublicFolderItemProperty { handle: u32, property_tag: u32 },
+    VolatileProperty,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -202,6 +209,7 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         message_id: u64,
         saved_email: Option<MapiSavedEmail>,
+        pending_properties: HashMap<u32, MapiValue>,
     },
     Contact {
         folder_id: u64,
@@ -293,6 +301,7 @@ pub(in crate::mapi) enum MapiObject {
     HierarchyTable {
         folder_id: u64,
         columns: Vec<u32>,
+        columns_set: bool,
         sort_orders: Vec<MapiSortOrder>,
         category_count: u16,
         expanded_count: u16,
@@ -307,6 +316,7 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         associated: bool,
         columns: Vec<u32>,
+        columns_set: bool,
         sort_orders: Vec<MapiSortOrder>,
         category_count: u16,
         expanded_count: u16,
@@ -320,6 +330,7 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         message_id: u64,
         columns: Vec<u32>,
+        columns_set: bool,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
         bookmarks: HashMap<Vec<u8>, TableBookmark>,
@@ -329,11 +340,13 @@ pub(in crate::mapi) enum MapiObject {
     PermissionTable {
         folder_id: u64,
         columns: Vec<u32>,
+        columns_set: bool,
         position: usize,
     },
     RuleTable {
         folder_id: u64,
         columns: Vec<u32>,
+        columns_set: bool,
         position: usize,
     },
     Attachment {
@@ -355,6 +368,8 @@ pub(in crate::mapi) enum MapiObject {
         file_reference: String,
         file_name: String,
         media_type: String,
+        disposition: Option<String>,
+        content_id: Option<String>,
         size_octets: u64,
     },
     AttachmentStream {
@@ -514,6 +529,12 @@ pub(in crate::mapi) fn create_session(
         next_handle: 1,
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
+        message_save_generations: HashMap::new(),
+        message_handle_generations: HashMap::new(),
+        pending_attachment_deletions: HashSet::new(),
+        pending_embedded_message_ids: HashMap::new(),
+        pending_embedded_message_attachments: HashMap::new(),
+        saved_embedded_messages: HashMap::new(),
         saved_search_folder_definitions: HashMap::new(),
         special_folder_aliases: HashMap::new(),
         deleted_advertised_special_folders: HashSet::new(),
@@ -836,6 +857,41 @@ impl MapiSession {
         self.post_hierarchy_actions
             .opened_folder_ids
             .push(folder_id);
+    }
+
+    pub(in crate::mapi) fn record_message_handle_generation(
+        &mut self,
+        handle: u32,
+        folder_id: u64,
+        message_id: u64,
+    ) {
+        let generation = self.message_save_generation(folder_id, message_id);
+        self.message_handle_generations.insert(handle, generation);
+    }
+
+    pub(in crate::mapi) fn message_save_generation(&self, folder_id: u64, message_id: u64) -> u64 {
+        self.message_save_generations
+            .get(&(folder_id, message_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn message_handle_generation(&self, handle: u32) -> Option<u64> {
+        self.message_handle_generations.get(&handle).copied()
+    }
+
+    pub(in crate::mapi) fn record_message_saved(
+        &mut self,
+        handle: u32,
+        folder_id: u64,
+        message_id: u64,
+    ) {
+        let generation = self
+            .message_save_generation(folder_id, message_id)
+            .saturating_add(1);
+        self.message_save_generations
+            .insert((folder_id, message_id), generation);
+        self.message_handle_generations.insert(handle, generation);
     }
 
     pub(in crate::mapi) fn record_inbox_open_folder_probe(&mut self) {
@@ -1550,6 +1606,7 @@ pub(in crate::mapi) fn release_handle_slot(
     };
     if *handle != u32::MAX {
         session.handles.remove(handle);
+        session.message_handle_generations.remove(handle);
     }
     *handle = u32::MAX;
 }
@@ -1573,32 +1630,85 @@ pub(in crate::mapi) fn response_handle_table(
     }
 }
 
-pub(in crate::mapi) fn reset_table_position(object: &mut MapiObject) -> bool {
+pub(in crate::mapi) fn reset_table_state(object: &mut MapiObject) -> bool {
     match object {
         MapiObject::HierarchyTable {
-            position,
-            bookmarks,
-            ..
-        }
-        | MapiObject::ContentsTable {
-            position,
-            bookmarks,
-            ..
-        }
-        | MapiObject::AttachmentTable {
+            columns,
+            columns_set,
+            sort_orders,
+            category_count,
+            expanded_count,
+            collapsed_categories,
+            restriction,
             position,
             bookmarks,
             ..
         } => {
+            columns.clear();
+            *columns_set = false;
+            sort_orders.clear();
+            *category_count = 0;
+            *expanded_count = 0;
+            collapsed_categories.clear();
+            *restriction = None;
             *position = 0;
             bookmarks.clear();
             true
         }
-        MapiObject::PermissionTable { position, .. } => {
+        MapiObject::ContentsTable {
+            columns,
+            columns_set,
+            sort_orders,
+            category_count,
+            expanded_count,
+            collapsed_categories,
+            restriction,
+            position,
+            bookmarks,
+            ..
+        } => {
+            columns.clear();
+            *columns_set = false;
+            sort_orders.clear();
+            *category_count = 0;
+            *expanded_count = 0;
+            collapsed_categories.clear();
+            *restriction = None;
             *position = 0;
+            bookmarks.clear();
             true
         }
-        MapiObject::RuleTable { position, .. } => {
+        MapiObject::AttachmentTable {
+            columns,
+            columns_set,
+            sort_orders,
+            restriction,
+            position,
+            bookmarks,
+            ..
+        } => {
+            columns.clear();
+            *columns_set = false;
+            sort_orders.clear();
+            *restriction = None;
+            *position = 0;
+            bookmarks.clear();
+            true
+        }
+        MapiObject::PermissionTable {
+            columns,
+            columns_set,
+            position,
+            ..
+        }
+        | MapiObject::RuleTable {
+            columns,
+            columns_set,
+            position,
+            ..
+        } => {
+            columns.clear();
+            *columns_set = false;
             *position = 0;
             true
         }
@@ -1726,6 +1836,68 @@ mod tests {
         session.record_deleted_advertised_special_folder(QUICK_STEP_SETTINGS_FOLDER_ID);
 
         assert!(session.advertised_special_folder_was_deleted(QUICK_STEP_SETTINGS_FOLDER_ID));
+    }
+
+    #[test]
+    fn reset_table_state_removes_columns_sort_restriction_and_bookmarks() {
+        let mut bookmarks = HashMap::new();
+        bookmarks.insert(
+            b"bookmark".to_vec(),
+            TableBookmark {
+                position: 7,
+                row_key: Some(3),
+            },
+        );
+        let mut collapsed_categories = HashSet::new();
+        collapsed_categories.insert(0x1234);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: vec![PID_TAG_SUBJECT_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_SUBJECT_W,
+                order: 0,
+            }],
+            category_count: 1,
+            expanded_count: 1,
+            collapsed_categories,
+            restriction: Some(MapiRestriction::Exist {
+                property_tag: PID_TAG_SUBJECT_W,
+            }),
+            bookmarks,
+            next_bookmark: 9,
+            position: 4,
+        };
+
+        assert!(reset_table_state(&mut table));
+
+        let MapiObject::ContentsTable {
+            columns,
+            columns_set,
+            sort_orders,
+            category_count,
+            expanded_count,
+            collapsed_categories,
+            restriction,
+            bookmarks,
+            next_bookmark,
+            position,
+            ..
+        } = table
+        else {
+            panic!("expected contents table");
+        };
+        assert!(columns.is_empty());
+        assert!(!columns_set);
+        assert!(sort_orders.is_empty());
+        assert_eq!(category_count, 0);
+        assert_eq!(expanded_count, 0);
+        assert!(collapsed_categories.is_empty());
+        assert!(restriction.is_none());
+        assert!(bookmarks.is_empty());
+        assert_eq!(next_bookmark, 9);
+        assert_eq!(position, 0);
     }
 
     #[test]

@@ -49,6 +49,7 @@ const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
     | MAPI_ACCESS_CREATE_CONTENTS
     | MAPI_ACCESS_CREATE_ASSOCIATED;
 const MSGFLAG_READ: u32 = 0x0000_0001;
+const MSGFLAG_UNMODIFIED: u32 = 0x0000_0002;
 const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
 const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -832,7 +833,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     for object in &special_objects {
         let change_number = change_number_for_store_id(object.item_id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
-        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
             &mut buffer,
             PID_TAG_SOURCE_KEY,
@@ -866,6 +866,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_change_number(&mut buffer, change_number);
         }
+        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
             &mut buffer,
             PID_TAG_PARENT_SOURCE_KEY,
@@ -4623,7 +4624,7 @@ fn write_special_fast_transfer_property_value(
 }
 
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
-    let mut flags = 0u32;
+    let mut flags = MSGFLAG_UNMODIFIED;
     if !email.unread {
         flags |= MSGFLAG_READ;
     }

@@ -88,6 +88,7 @@ pub(crate) struct MapiNavigationShortcutRecord {
     pub(crate) target_folder_id: Option<u64>,
     pub(crate) shortcut_type: u32,
     pub(crate) flags: u32,
+    pub(crate) save_stamp: u32,
     pub(crate) section: u32,
     pub(crate) ordinal: u32,
     pub(crate) group_header_id: Option<Uuid>,
@@ -102,6 +103,7 @@ pub(crate) struct UpsertMapiNavigationShortcutInput {
     pub(crate) target_folder_id: Option<u64>,
     pub(crate) shortcut_type: u32,
     pub(crate) flags: u32,
+    pub(crate) save_stamp: u32,
     pub(crate) section: u32,
     pub(crate) ordinal: u32,
     pub(crate) group_header_id: Option<Uuid>,
@@ -696,6 +698,14 @@ pub trait ExchangeStore: AccountAuthStore {
         object_kind: MapiCustomPropertyObjectKind,
         canonical_id: Uuid,
         property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>>;
+
+    #[allow(dead_code)]
+    fn fetch_all_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
     ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>>;
 
     #[allow(dead_code)]
@@ -4013,6 +4023,38 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_all_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT property_tag, property_type, property_value
+                FROM mapi_custom_property_values
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = $3
+                  AND canonical_id = $4
+                ORDER BY property_tag, property_type
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(object_kind.as_str())
+            .bind(canonical_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_custom_property_value_from_row)
+                .collect()
+        })
+    }
+
     fn delete_mapi_custom_property_values<'a>(
         &'a self,
         account_id: Uuid,
@@ -6030,7 +6072,7 @@ impl ExchangeStore for Storage {
             let rows = sqlx::query(
                 r#"
                 SELECT id, account_id, subject, target_folder_id, shortcut_type,
-                       flags, section, ordinal, group_header_id, group_name
+                       flags, save_stamp, section, ordinal, group_header_id, group_name
                 FROM mapi_navigation_shortcuts
                 WHERE tenant_id = $1 AND account_id = $2
                 ORDER BY section, ordinal, subject, updated_at DESC, id
@@ -6130,22 +6172,23 @@ impl ExchangeStore for Storage {
                 r#"
                 INSERT INTO mapi_navigation_shortcuts (
                     tenant_id, id, account_id, subject, target_folder_id,
-                    shortcut_type, flags, section, ordinal, group_header_id, group_name
+                    shortcut_type, flags, save_stamp, section, ordinal, group_header_id, group_name
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT (tenant_id, id)
                 DO UPDATE SET
                     subject = EXCLUDED.subject,
                     target_folder_id = EXCLUDED.target_folder_id,
                     shortcut_type = EXCLUDED.shortcut_type,
                     flags = EXCLUDED.flags,
+                    save_stamp = EXCLUDED.save_stamp,
                     section = EXCLUDED.section,
                     ordinal = EXCLUDED.ordinal,
                     group_header_id = EXCLUDED.group_header_id,
                     group_name = EXCLUDED.group_name,
                     updated_at = NOW()
                 RETURNING id, account_id, subject, target_folder_id, shortcut_type,
-                          flags, section, ordinal, group_header_id, group_name
+                          flags, save_stamp, section, ordinal, group_header_id, group_name
                 "#,
             )
             .bind(tenant_id)
@@ -6155,6 +6198,7 @@ impl ExchangeStore for Storage {
             .bind(input.target_folder_id.map(|value| value as i64))
             .bind(input.shortcut_type as i64)
             .bind(input.flags as i64)
+            .bind(input.save_stamp as i64)
             .bind(input.section as i64)
             .bind(input.ordinal as i64)
             .bind(input.group_header_id)
@@ -7468,6 +7512,7 @@ fn mapi_navigation_shortcut_from_row(
             .map(|value| value as u64),
         shortcut_type: row.try_get::<i64, _>("shortcut_type")? as u32,
         flags: row.try_get::<i64, _>("flags")? as u32,
+        save_stamp: row.try_get::<i64, _>("save_stamp")? as u32,
         section: row.try_get::<i64, _>("section")? as u32,
         ordinal: row.try_get::<i64, _>("ordinal")? as u32,
         group_header_id: row.try_get("group_header_id")?,

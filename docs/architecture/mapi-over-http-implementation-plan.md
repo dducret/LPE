@@ -245,6 +245,10 @@ non-canonical LPE state.
   Mail named-view descriptor binaries list only real message-table property
   tags used by the visible columns; they must not include synthetic placeholder
   tags or named-property IDs that are not resolvable in the active session.
+  The descriptor column packets follow `[MS-OXOCFG]` section 4.2 by using
+  `PtypString8` / `PtypMultipleString8` for text view columns, while the
+  message table projection accepts and serializes both those ANSI tags and the
+  Unicode tags Outlook also asks for in live traces.
   The bounded Inbox Compact descriptor follows the observed Outlook 2016/2019
   visible-message projection: attachment indicator, sent-representing display
   name, subject, delivery time, and message flags.
@@ -257,8 +261,9 @@ non-canonical LPE state.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
-  EntryID, type, flags, section, ordinal, group header GUID, and group display
-  name. LPE does not synthesize default `WunderBar` rows for fresh profiles:
+  EntryID, type, flags, save stamp, section, ordinal, group header GUID, and
+  group display name. LPE does not synthesize default `WunderBar` rows for
+  fresh profiles:
   `[MS-OXOCFG]` defines navigation shortcuts as Common Views FAI messages that
   clients create, store, and later read, so fresh-profile Common Views content
   ICS can legitimately be empty. Outlook-created `WunderBar` group headers are
@@ -402,6 +407,10 @@ not by itself authorize broad client publication.
   message import/save, draft/send flows, read-state changes, deletes, whole-folder
   canonical mailbox content purges, moves, copies, and attachment reads/writes
   where backed by canonical state.
+- Attachment projection follows `[MS-OXCMSG]` section 4.4 for inline HTML image
+  metadata: `PidTagAttachContentId`, `PidTagAttachFlags`, and
+  `PidTagAttachmentHidden` are preserved across create/save, attachment table
+  reads, attachment property reads, and draft submission into canonical LPE state.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
   accepted as session-local Inbox metadata during cached-mode bootstrap. LPE
   keeps canonical values for the documented indexes and preserves client data at

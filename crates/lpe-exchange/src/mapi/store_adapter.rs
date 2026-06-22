@@ -1403,6 +1403,7 @@ fn simulate_table_access(
                 MapiObject::HierarchyTable {
                     folder_id,
                     columns: default_hierarchy_columns(),
+                    columns_set: false,
                     sort_orders: Vec::new(),
                     category_count: 0,
                     expanded_count: 0,
@@ -1436,6 +1437,7 @@ fn simulate_table_access(
                     folder_id,
                     associated,
                     columns: Vec::new(),
+                    columns_set: false,
                     sort_orders: Vec::new(),
                     category_count: 0,
                     expanded_count: 0,
@@ -1485,10 +1487,14 @@ fn simulate_table_access(
             }
         }
         0x12 => {
-            if let Some(MapiObject::ContentsTable { columns, .. }) =
-                input_handle(handle_slots, request).and_then(|handle| handles.get_mut(&handle))
+            if let Some(MapiObject::ContentsTable {
+                columns,
+                columns_set,
+                ..
+            }) = input_handle(handle_slots, request).and_then(|handle| handles.get_mut(&handle))
             {
                 *columns = request.property_tags();
+                *columns_set = true;
             }
         }
         0x13 => {
@@ -2061,6 +2067,12 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            message_save_generations: HashMap::new(),
+            message_handle_generations: HashMap::new(),
+            pending_attachment_deletions: HashSet::new(),
+            pending_embedded_message_ids: HashMap::new(),
+            pending_embedded_message_attachments: HashMap::new(),
+            saved_embedded_messages: HashMap::new(),
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
@@ -2349,6 +2361,7 @@ mod tests {
                     PID_TAG_DISPLAY_NAME_W,
                     PID_TAG_CONTENT_UNREAD_COUNT,
                 ],
+                columns_set: true,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2390,6 +2403,7 @@ mod tests {
             MapiObject::HierarchyTable {
                 folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
                 columns: default_hierarchy_columns(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2436,6 +2450,7 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 associated: false,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2467,6 +2482,7 @@ mod tests {
                 folder_id: DRAFTS_FOLDER_ID,
                 associated: false,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2519,6 +2535,7 @@ mod tests {
                 folder_id: CALENDAR_FOLDER_ID,
                 associated: false,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2547,6 +2564,7 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 associated: true,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2575,6 +2593,7 @@ mod tests {
                 folder_id: COMMON_VIEWS_FOLDER_ID,
                 associated: true,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2768,6 +2787,7 @@ mod tests {
                 folder_id: CALENDAR_FOLDER_ID,
                 associated: false,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2797,6 +2817,7 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 associated: true,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2831,6 +2852,7 @@ mod tests {
                 folder_id: COMMON_VIEWS_FOLDER_ID,
                 associated: true,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,
@@ -2878,6 +2900,7 @@ mod tests {
                 folder_id: INBOX_FOLDER_ID,
                 associated: false,
                 columns: Vec::new(),
+                columns_set: false,
                 sort_orders: Vec::new(),
                 category_count: 0,
                 expanded_count: 0,

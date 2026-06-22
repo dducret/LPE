@@ -595,7 +595,10 @@ fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<V
         MapiRestriction::Content {
             property_tag,
             value,
-        } => bounded_search_content_clause(*property_tag, value).map(|clause| vec![clause]),
+            fuzzy_level_low,
+            ..
+        } => bounded_search_content_clause(*property_tag, value, *fuzzy_level_low)
+            .map(|clause| vec![clause]),
         MapiRestriction::Property {
             relop,
             property_tag,
@@ -623,16 +626,25 @@ fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<V
     }
 }
 
-fn bounded_search_content_clause(property_tag: u32, value: &str) -> Result<Value, u32> {
+fn bounded_search_content_clause(
+    property_tag: u32,
+    value: &str,
+    fuzzy_level_low: u16,
+) -> Result<Value, u32> {
     let field = match canonical_property_storage_tag(property_tag) {
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => "subject",
         PID_TAG_BODY_W | PID_TAG_BODY_STRING8 | PID_TAG_BODY_HTML_W => "body",
         PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => "sender",
         _ => return Err(EC_SEARCH_UNSUPPORTED),
     };
+    let operator = match fuzzy_level_low {
+        0x0000 => "equals",
+        0x0001 => "contains",
+        _ => return Err(EC_SEARCH_UNSUPPORTED),
+    };
     Ok(json!({
         "field": field,
-        "contains": value
+        operator: value
     }))
 }
 
@@ -848,7 +860,8 @@ fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
 
 fn rop_content_restriction(property_tag: u32, value: &str) -> Vec<u8> {
     let mut bytes = vec![0x03];
-    bytes.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    bytes.extend_from_slice(&0x0001u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0001u16.to_le_bytes());
     bytes.extend_from_slice(&property_tag.to_le_bytes());
     bytes.extend_from_slice(&property_tag.to_le_bytes());
     write_mapi_value(
@@ -1335,6 +1348,12 @@ where
             &session,
             post_hierarchy_observation,
         );
+        let rop_buffer = apply_execute_max_rop_out(
+            request_id,
+            &execute.rop_buffer,
+            rop_buffer,
+            execute.max_rop_out,
+        );
         let response_body = execute_success_body(rop_buffer, Vec::new());
         let response_debug = summarize_response_rop_buffer(
             execute_success_rop_buffer(&response_body).unwrap_or_default(),
@@ -1464,6 +1483,12 @@ where
         &session,
         post_hierarchy_observation,
     );
+    let rop_buffer = apply_execute_max_rop_out(
+        request_id,
+        &execute.rop_buffer,
+        rop_buffer,
+        execute.max_rop_out,
+    );
     let response_body = execute_success_body(rop_buffer, Vec::new());
     let response_debug = summarize_response_rop_buffer(
         execute_success_rop_buffer(&response_body).unwrap_or_default(),
@@ -1491,6 +1516,7 @@ where
 
 pub(in crate::mapi) struct ExecuteRequest {
     rop_buffer: Vec<u8>,
+    max_rop_out: u32,
 }
 
 pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
@@ -1498,10 +1524,41 @@ pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteReque
     let _flags = cursor.read_u32()?;
     let rop_buffer_size = cursor.read_u32()? as usize;
     let rop_buffer = cursor.read_bytes(rop_buffer_size)?.to_vec();
-    let _max_rop_out = cursor.read_u32()?;
+    let max_rop_out = cursor.read_u32()?;
     let auxiliary_buffer_size = cursor.read_u32()? as usize;
     let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
-    Ok(ExecuteRequest { rop_buffer })
+    Ok(ExecuteRequest {
+        rop_buffer,
+        max_rop_out,
+    })
+}
+
+fn apply_execute_max_rop_out(
+    request_id: &str,
+    request_rop_buffer: &[u8],
+    response_rop_buffer: Vec<u8>,
+    max_rop_out: u32,
+) -> Vec<u8> {
+    if max_rop_out == 0 || response_rop_buffer.len() <= max_rop_out as usize {
+        return response_rop_buffer;
+    }
+    let Some((requests, handle_table)) = split_rop_buffer(request_rop_buffer) else {
+        return response_rop_buffer;
+    };
+    let replacement =
+        rop_buffer_too_small_response(response_rop_buffer.len(), requests, handle_table);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        max_rop_out,
+        response_rop_buffer_size = response_rop_buffer.len(),
+        replacement_rop_buffer_size = replacement.len(),
+        "rca debug mapi execute max rop out exceeded"
+    );
+    replacement
 }
 
 fn rop_buffer_is_store_independent_logon(rop_buffer: &[u8]) -> bool {
@@ -2589,6 +2646,7 @@ fn log_message_getprops_response_debug(
         folder_id,
         message_id,
         saved_email,
+        ..
     }) = object
     else {
         return;
@@ -4026,6 +4084,30 @@ fn set_property_debug_name(tag: u32) -> &'static str {
         PID_TAG_SUBJECT_W => "PidTagSubject",
         PID_TAG_SUBJECT_PREFIX_W => "PidTagSubjectPrefix",
         PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
+        PID_TAG_OBJECT_TYPE => "PidTagObjectType",
+        PID_TAG_DISPLAY_TYPE => "PidTagDisplayType",
+        PID_TAG_DISPLAY_TYPE_EX => "PidTagDisplayTypeEx",
+        PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W => "PidTagAddressBookDisplayNamePrintable",
+        PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
+        PID_TAG_SEND_INTERNET_ENCODING => "PidTagSendInternetEncoding",
+        PID_TAG_RECIPIENT_DISPLAY_NAME_W => "PidTagRecipientDisplayName",
+        PID_TAG_RECIPIENT_ENTRY_ID => "PidTagRecipientEntryId",
+        PID_TAG_RECIPIENT_FLAGS => "PidTagRecipientFlags",
+        PID_TAG_RECIPIENT_ORDER => "PidTagRecipientOrder",
+        PID_TAG_RECIPIENT_TRACK_STATUS => "PidTagRecipientTrackStatus",
+        OUTLOOK_RECIPIENT_5FDE => "OutlookRecipient5FDE",
+        PID_TAG_ATTACH_EXTENSION_W => "PidTagAttachExtension",
+        PID_TAG_ATTACH_FILENAME_W => "PidTagAttachFilename",
+        PID_TAG_ATTACH_METHOD => "PidTagAttachMethod",
+        PID_TAG_ATTACH_LONG_FILENAME_W => "PidTagAttachLongFilename",
+        PID_TAG_ATTACH_RENDERING => "PidTagAttachRendering",
+        PID_TAG_RENDERING_POSITION => "PidTagRenderingPosition",
+        PID_TAG_ATTACH_MIME_TAG_W => "PidTagAttachMimeTag",
+        PID_TAG_ATTACH_CONTENT_ID_W => "PidTagAttachContentId",
+        PID_TAG_ATTACH_FLAGS => "PidTagAttachFlags",
+        PID_TAG_ATTACHMENT_LINK_ID => "PidTagAttachmentLinkId",
+        PID_TAG_ATTACHMENT_FLAGS => "PidTagAttachmentFlags",
+        PID_TAG_ATTACHMENT_HIDDEN => "PidTagAttachmentHidden",
         PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
         PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
@@ -5089,6 +5171,7 @@ where
                     PID_TAG_SUBJECT_W,
                     PID_TAG_NORMALIZED_SUBJECT_W,
                     PID_TAG_WLINK_ENTRY_ID,
+                    PID_TAG_WLINK_SAVE_STAMP,
                     PID_TAG_WLINK_TYPE,
                     PID_TAG_WLINK_FLAGS,
                     PID_TAG_WLINK_SECTION,
@@ -5114,6 +5197,7 @@ where
                         target_folder_id: shortcut.target_folder_id,
                         shortcut_type: shortcut.shortcut_type,
                         flags: shortcut.flags,
+                        save_stamp: shortcut.save_stamp,
                         section: shortcut.section,
                         ordinal: shortcut.ordinal,
                         group_header_id: shortcut.group_header_id,
@@ -5172,6 +5256,55 @@ where
         custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
             .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
     upsert_custom_property_values(store, principal, object_kind, canonical_id, custom_values).await
+}
+
+fn stage_message_property_values(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<()> {
+    let handle = input_handle(handle_slots, request).ok_or_else(|| anyhow!("missing handle"))?;
+    let object = session
+        .handles
+        .get_mut(&handle)
+        .ok_or_else(|| anyhow!("missing message object"))?;
+    let MapiObject::Message {
+        pending_properties, ..
+    } = object
+    else {
+        return Err(anyhow!("MAPI object is not a message"));
+    };
+    let (canonical_values, _custom_values) = split_custom_property_values(values.clone());
+    message_followup_update_from_mapi_values(canonical_values)?;
+    apply_mapi_property_values_to_map(pending_properties, values);
+    Ok(())
+}
+
+async fn apply_staged_message_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    message_id: u64,
+    pending_properties: HashMap<u32, MapiValue>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let values = pending_properties.into_iter().collect::<Vec<_>>();
+    let object = MapiObject::Message {
+        folder_id,
+        message_id,
+        saved_email: None,
+        pending_properties: HashMap::new(),
+    };
+    apply_supported_object_property_values(
+        store, principal, &object, values, mailboxes, emails, snapshot,
+    )
+    .await
 }
 
 async fn apply_canonical_public_folder_item_property_values<S>(
@@ -5706,6 +5839,268 @@ where
         .collect())
 }
 
+async fn copy_custom_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<Option<Vec<(usize, u32, u32)>>>
+where
+    S: ExchangeStore,
+{
+    if property_tags.is_empty() || !property_tags.iter().copied().all(is_custom_property_tag) {
+        return Ok(None);
+    }
+    let Some((source_kind, source_id)) =
+        custom_property_object_identity(source, mailboxes, emails, snapshot)
+    else {
+        return Ok(None);
+    };
+    let Some((destination_kind, destination_id)) =
+        custom_property_object_identity(destination, mailboxes, emails, snapshot)
+    else {
+        return Ok(None);
+    };
+    let source_values = store
+        .fetch_mapi_custom_property_values(
+            principal.account_id,
+            source_kind,
+            source_id,
+            property_tags,
+        )
+        .await?
+        .into_iter()
+        .map(|value| (value.property_tag, value))
+        .collect::<HashMap<_, _>>();
+    let mut copied_values = Vec::new();
+    let mut problems = Vec::new();
+    for (index, property_tag) in property_tags.iter().copied().enumerate() {
+        if let Some(value) = source_values.get(&property_tag) {
+            copied_values.push(MapiCustomPropertyValue {
+                property_tag,
+                property_type: value.property_type,
+                property_value: value.property_value.clone(),
+            });
+        } else {
+            problems.push((index, property_tag, 0x8004_010F));
+        }
+    }
+    if !copied_values.is_empty() {
+        store
+            .upsert_mapi_custom_property_values(
+                principal.account_id,
+                destination_kind,
+                destination_id,
+                &copied_values,
+            )
+            .await?;
+    }
+    Ok(Some(problems))
+}
+
+fn copyable_message_followup_property_tag(tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(tag),
+        PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_FLAG_STATUS
+            | PID_TAG_FOLLOWUP_ICON
+            | PID_TAG_TODO_ITEM_FLAGS
+            | PID_TAG_FLAG_COMPLETE_TIME
+            | PID_LID_TASK_START_DATE_TAG
+            | PID_LID_TASK_DUE_DATE_TAG
+            | PID_LID_REMINDER_SET_TAG
+            | PID_LID_REMINDER_TIME_TAG
+            | PID_LID_REMINDER_SIGNAL_TIME_TAG
+            | PID_LID_FLAG_REQUEST_W_TAG
+            | PID_TAG_SWAPPED_TODO_STORE
+            | PID_TAG_SWAPPED_TODO_DATA
+            | PID_NAME_KEYWORDS_TAG
+    )
+}
+
+async fn copy_message_followup_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<Option<Vec<(usize, u32, u32)>>>
+where
+    S: ExchangeStore,
+{
+    if property_tags.is_empty()
+        || !property_tags
+            .iter()
+            .copied()
+            .all(copyable_message_followup_property_tag)
+    {
+        return Ok(None);
+    }
+    let Some(MapiObject::Message {
+        folder_id: source_folder_id,
+        message_id: source_message_id,
+        ..
+    }) = source
+    else {
+        return Ok(None);
+    };
+    let Some(destination_object @ MapiObject::Message { .. }) = destination else {
+        return Ok(None);
+    };
+    let Some(email) = message_for_id(*source_folder_id, *source_message_id, mailboxes, emails)
+    else {
+        return Ok(None);
+    };
+    let mut values = Vec::new();
+    let mut problems = Vec::new();
+    for (index, property_tag) in property_tags.iter().copied().enumerate() {
+        match normal_message_debug_property_value(email, property_tag) {
+            Some(value) => values.push((canonical_property_storage_tag(property_tag), value)),
+            None => problems.push((index, property_tag, 0x8004_010F)),
+        }
+    }
+    if !values.is_empty() {
+        apply_supported_object_property_values(
+            store,
+            principal,
+            destination_object,
+            values,
+            mailboxes,
+            emails,
+            snapshot,
+        )
+        .await?;
+    }
+    Ok(Some(problems))
+}
+
+async fn copy_all_custom_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    excluded_property_tags: &[u32],
+) -> Result<bool>
+where
+    S: ExchangeStore,
+{
+    let Some((source_kind, source_id)) =
+        custom_property_object_identity(source, mailboxes, emails, snapshot)
+    else {
+        return Ok(false);
+    };
+    let Some((destination_kind, destination_id)) =
+        custom_property_object_identity(destination, mailboxes, emails, snapshot)
+    else {
+        return Ok(false);
+    };
+    let excluded = excluded_property_tags
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let values = store
+        .fetch_all_mapi_custom_property_values(principal.account_id, source_kind, source_id)
+        .await?
+        .into_iter()
+        .filter(|value| !excluded.contains(&value.property_tag))
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(false);
+    }
+    store
+        .upsert_mapi_custom_property_values(
+            principal.account_id,
+            destination_kind,
+            destination_id,
+            &values,
+        )
+        .await?;
+    Ok(true)
+}
+
+async fn copy_all_message_followup_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    excluded_property_tags: &[u32],
+) -> Result<bool>
+where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::Message {
+        folder_id: source_folder_id,
+        message_id: source_message_id,
+        ..
+    }) = source
+    else {
+        return Ok(false);
+    };
+    let Some(destination_object @ MapiObject::Message { .. }) = destination else {
+        return Ok(false);
+    };
+    let Some(email) = message_for_id(*source_folder_id, *source_message_id, mailboxes, emails)
+    else {
+        return Ok(false);
+    };
+    let excluded = excluded_property_tags
+        .iter()
+        .copied()
+        .map(canonical_property_storage_tag)
+        .collect::<HashSet<_>>();
+    let mut values = Vec::new();
+    for property_tag in [
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_FOLLOWUP_ICON,
+        PID_TAG_TODO_ITEM_FLAGS,
+        PID_TAG_FLAG_COMPLETE_TIME,
+        PID_LID_TASK_START_DATE_TAG,
+        PID_LID_TASK_DUE_DATE_TAG,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_FLAG_REQUEST_W_TAG,
+        PID_TAG_SWAPPED_TODO_STORE,
+        PID_TAG_SWAPPED_TODO_DATA,
+        PID_NAME_KEYWORDS_TAG,
+    ] {
+        if excluded.contains(&property_tag) {
+            continue;
+        }
+        if let Some(value) = normal_message_debug_property_value(email, property_tag) {
+            values.push((property_tag, value));
+        }
+    }
+    if values.is_empty() {
+        return Ok(false);
+    }
+    apply_supported_object_property_values(
+        store,
+        principal,
+        destination_object,
+        values,
+        mailboxes,
+        emails,
+        snapshot,
+    )
+    .await?;
+    Ok(true)
+}
+
 async fn delete_custom_property_values<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -5821,6 +6216,7 @@ fn custom_property_object_identity(
             folder_id,
             message_id,
             saved_email,
+            ..
         } => message_for_id(*folder_id, *message_id, mailboxes, emails)
             .or(saved_email.as_ref().map(|saved| &saved.email))
             .map(|email| (MapiCustomPropertyObjectKind::Message, email.id)),
@@ -5904,6 +6300,7 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_RECURRING_TAG
             | PID_LID_ALL_ATTENDEES_STRING_W_TAG
             | PID_LID_TO_ATTENDEES_STRING_W_TAG
             | PID_LID_CC_ATTENDEES_STRING_W_TAG
@@ -9666,8 +10063,10 @@ fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
         MapiRestriction::Content {
             property_tag,
             value,
+            fuzzy_level_low,
+            fuzzy_level_high,
         } => format!(
-            "content;property_tag=0x{property_tag:08x};value={}",
+            "content;property_tag=0x{property_tag:08x};fuzzy_low=0x{fuzzy_level_low:04x};fuzzy_high=0x{fuzzy_level_high:04x};value={}",
             format_debug_text_value(value)
         ),
         MapiRestriction::Property {
@@ -10454,6 +10853,7 @@ fn debug_exact_message_class_restriction_value(
         | MapiRestriction::Content {
             property_tag: PID_TAG_MESSAGE_CLASS_W,
             value,
+            ..
         } => Some(value.as_str()),
         _ => None,
     }
@@ -12310,8 +12710,10 @@ where
                             folder_id,
                             message_id,
                             saved_email: None,
+                            pending_properties: HashMap::new(),
                         },
                     );
+                    session.record_message_handle_generation(handle, folder_id, message_id);
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     let response = rop_open_message_response(
                         &request,
@@ -12339,8 +12741,10 @@ where
                             folder_id,
                             message_id,
                             saved_email: None,
+                            pending_properties: HashMap::new(),
                         },
                     );
+                    session.record_message_handle_generation(handle, folder_id, message_id);
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     let response = rop_open_message_response(
                         &request,
@@ -12384,8 +12788,10 @@ where
                             folder_id: handle_folder_id,
                             message_id,
                             saved_email: None,
+                            pending_properties: HashMap::new(),
                         },
                     );
+                    session.record_message_handle_generation(handle, handle_folder_id, message_id);
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     let response = rop_open_message_response(
                         &request,
@@ -12744,6 +13150,7 @@ where
                     MapiObject::HierarchyTable {
                         folder_id,
                         columns,
+                        columns_set: false,
                         sort_orders: Vec::new(),
                         category_count: 0,
                         expanded_count: 0,
@@ -12868,6 +13275,7 @@ where
                         folder_id,
                         associated,
                         columns: Vec::new(),
+                        columns_set: false,
                         sort_orders: Vec::new(),
                         category_count: 0,
                         expanded_count: 0,
@@ -13334,9 +13742,11 @@ where
                     result
                 } else {
                     match set_properties_object.clone() {
+                        Some(MapiObject::Message { .. }) => {
+                            stage_message_property_values(session, &handle_slots, &request, values)
+                        }
                         Some(
-                            object @ (MapiObject::Message { .. }
-                            | MapiObject::Contact { .. }
+                            object @ (MapiObject::Contact { .. }
                             | MapiObject::Event { .. }
                             | MapiObject::Task { .. }
                             | MapiObject::Note { .. }
@@ -14210,6 +14620,7 @@ where
                             target_folder_id: shortcut.target_folder_id,
                             shortcut_type: shortcut.shortcut_type,
                             flags: shortcut.flags,
+                            save_stamp: shortcut.save_stamp,
                             section: shortcut.section,
                             ordinal: shortcut.ordinal,
                             group_header_id: shortcut.group_header_id,
@@ -14274,11 +14685,268 @@ where
                         ));
                         continue;
                     }
+                    Some(MapiObject::PendingMessage { .. })
+                        if session.pending_embedded_message_ids.contains_key(&handle) =>
+                    {
+                        let message_id = session
+                            .pending_embedded_message_ids
+                            .get(&handle)
+                            .copied()
+                            .unwrap_or(0);
+                        if let Some(MapiObject::PendingMessage { properties, .. }) =
+                            session.handles.get(&handle).cloned()
+                        {
+                            if let Some(attachment_key) = session
+                                .pending_embedded_message_attachments
+                                .get(&handle)
+                                .copied()
+                            {
+                                session
+                                    .saved_embedded_messages
+                                    .insert(attachment_key, properties);
+                            }
+                        }
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            message_id,
+                        );
+                        continue;
+                    }
+                    Some(MapiObject::Message {
+                        folder_id,
+                        message_id,
+                        saved_email,
+                        pending_properties,
+                    }) => {
+                        let staged_property_write = !pending_properties.is_empty();
+                        let pending = session
+                            .pending_attachment_deletions
+                            .iter()
+                            .filter_map(|(pending_folder_id, pending_message_id, attach_num)| {
+                                (*pending_folder_id == folder_id
+                                    && *pending_message_id == message_id)
+                                    .then_some(*attach_num)
+                            })
+                            .collect::<Vec<_>>();
+                        let has_pending_changes = staged_property_write || !pending.is_empty();
+                        let force_save = request.payload.first().copied().unwrap_or(0) & 0x04 != 0;
+                        let current_generation =
+                            session.message_save_generation(folder_id, message_id);
+                        let handle_generation = session
+                            .message_handle_generation(handle)
+                            .unwrap_or(current_generation);
+                        if has_pending_changes
+                            && handle_generation != current_generation
+                            && !force_save
+                        {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_0109,
+                            ));
+                            session.handles.insert(
+                                handle,
+                                MapiObject::Message {
+                                    folder_id,
+                                    message_id,
+                                    saved_email,
+                                    pending_properties,
+                                },
+                            );
+                            continue;
+                        }
+                        if staged_property_write
+                            && apply_staged_message_property_values(
+                                store,
+                                principal,
+                                folder_id,
+                                message_id,
+                                pending_properties.clone(),
+                                mailboxes,
+                                emails,
+                                snapshot,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            session.handles.insert(
+                                handle,
+                                MapiObject::Message {
+                                    folder_id,
+                                    message_id,
+                                    saved_email,
+                                    pending_properties,
+                                },
+                            );
+                            continue;
+                        }
+                        let mut delete_failed = false;
+                        for attach_num in pending.iter().copied() {
+                            let Some(attachment) =
+                                snapshot.attachment_for_message(folder_id, message_id, attach_num)
+                            else {
+                                session
+                                    .pending_attachment_deletions
+                                    .remove(&(folder_id, message_id, attach_num));
+                                continue;
+                            };
+                            match store
+                                .delete_message_attachment(
+                                    principal.account_id,
+                                    &attachment.file_reference,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "mapi-delete-attachment".to_string(),
+                                        subject: attachment.file_reference.clone(),
+                                    },
+                                )
+                                .await
+                            {
+                                Ok(Some(_)) => {
+                                    session
+                                        .pending_attachment_deletions
+                                        .remove(&(folder_id, message_id, attach_num));
+                                }
+                                _ => {
+                                    delete_failed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if delete_failed {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
+                        if !pending.is_empty() {
+                            session.record_notification(MapiNotificationEvent::content(
+                                folder_id,
+                                Some(message_id),
+                            ));
+                            record_sync_upload_content_change(
+                                session,
+                                folder_id,
+                                message_id,
+                                mapi_mailstore::change_number_for_store_id(message_id),
+                                false,
+                                true,
+                            );
+                        }
+                        if staged_property_write {
+                            session.record_notification(MapiNotificationEvent::content(
+                                folder_id,
+                                Some(message_id),
+                            ));
+                        }
+                        if has_pending_changes {
+                            session.record_message_saved(handle, folder_id, message_id);
+                        }
+                        session.handles.insert(
+                            handle,
+                            MapiObject::Message {
+                                folder_id,
+                                message_id,
+                                saved_email,
+                                pending_properties: HashMap::new(),
+                            },
+                        );
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            message_id,
+                        );
+                        continue;
+                    }
+                    Some(MapiObject::Event {
+                        folder_id,
+                        event_id,
+                    }) => {
+                        let pending = session
+                            .pending_attachment_deletions
+                            .iter()
+                            .filter_map(|(pending_folder_id, pending_message_id, attach_num)| {
+                                (*pending_folder_id == folder_id && *pending_message_id == event_id)
+                                    .then_some(*attach_num)
+                            })
+                            .collect::<Vec<_>>();
+                        let mut delete_failed = false;
+                        for attach_num in pending.iter().copied() {
+                            let Some(attachment) =
+                                snapshot.attachment_for_message(folder_id, event_id, attach_num)
+                            else {
+                                session
+                                    .pending_attachment_deletions
+                                    .remove(&(folder_id, event_id, attach_num));
+                                continue;
+                            };
+                            match store
+                                .delete_calendar_event_attachment(
+                                    principal.account_id,
+                                    &attachment.file_reference,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "mapi-delete-calendar-attachment".to_string(),
+                                        subject: attachment.file_reference.clone(),
+                                    },
+                                )
+                                .await
+                            {
+                                Ok(Some(_)) => {
+                                    session
+                                        .pending_attachment_deletions
+                                        .remove(&(folder_id, event_id, attach_num));
+                                }
+                                _ => {
+                                    delete_failed = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if delete_failed {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
+                        if !pending.is_empty() {
+                            session.record_notification(MapiNotificationEvent::content(
+                                folder_id,
+                                Some(event_id),
+                            ));
+                            record_sync_upload_content_change(
+                                session,
+                                folder_id,
+                                event_id,
+                                mapi_mailstore::change_number_for_store_id(event_id),
+                                false,
+                                true,
+                            );
+                        }
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            event_id,
+                        );
+                        continue;
+                    }
                     Some(MapiObject::Contact { contact_id, .. })
-                    | Some(MapiObject::Event {
-                        event_id: contact_id,
-                        ..
-                    })
                     | Some(MapiObject::Task {
                         task_id: contact_id,
                         ..
@@ -14574,6 +15242,7 @@ where
                                 folder_id,
                                 message_id,
                                 saved_email: None,
+                                pending_properties: HashMap::new(),
                             },
                         );
                         append_save_changes_message_response(
@@ -14708,6 +15377,7 @@ where
                                 saved_email: Some(MapiSavedEmail {
                                     email: email.clone(),
                                 }),
+                                pending_properties: HashMap::new(),
                             },
                         );
                         let associated = matches!(
@@ -14885,6 +15555,14 @@ where
                     ));
                     continue;
                 };
+                if !read_flags_are_valid(request.read_flags(), false) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x11,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 if let MapiObject::PublicFolderItem {
                     folder_id, item_id, ..
                 } = object
@@ -14936,6 +15614,7 @@ where
                     folder_id,
                     message_id,
                     saved_email,
+                    ..
                 } = object
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -15011,18 +15690,22 @@ where
                 let mut inbox_normal_setcolumns_context = None;
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable {
-                        folder_id, columns, ..
+                        folder_id,
+                        columns,
+                        columns_set,
+                        ..
                     }) => {
-                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                        if !set_columns_request_is_valid(&request) {
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
-                                0x8004_0102,
+                                0x8007_0057,
                             ));
                             break;
                         }
                         let folder_id_value = *folder_id;
                         *columns = normalized_columns.clone();
+                        *columns_set = true;
                         let selected_columns = columns.clone();
                         if folder_id_value == INBOX_FOLDER_ID {
                             session.record_last_inbox_hierarchy_table_context(format!(
@@ -15045,25 +15728,31 @@ where
                         }
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
-                    Some(MapiObject::AttachmentTable { columns, .. }) => {
-                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                    Some(MapiObject::AttachmentTable {
+                        columns,
+                        columns_set,
+                        ..
+                    }) => {
+                        if !set_columns_request_is_valid(&request) {
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
-                                0x8004_0102,
+                                0x8007_0057,
                             ));
                             break;
                         }
                         *columns = normalized_columns.clone();
+                        *columns_set = true;
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
                     Some(MapiObject::ContentsTable {
                         folder_id,
                         associated,
                         columns,
+                        columns_set,
                         ..
                     }) => {
-                        if !property_tags_have_known_wire_types(&request.property_tags()) {
+                        if !set_columns_request_is_valid(&request) {
                             tracing::warn!(
                                 rca_debug = true,
                                 adapter = "mapi",
@@ -15076,17 +15765,18 @@ where
                                 requested_columns = %format_debug_property_tags(&request.property_tags()),
                                 unknown_wire_type_columns =
                                     %format_unknown_wire_type_property_tags(&request.property_tags()),
-                                response_error = "0x80040102",
+                                response_error = "0x80070057",
                                 message = "rca debug mapi contents table set columns rejected",
                             );
                             responses.extend_from_slice(&rop_error_response(
                                 0x12,
                                 request.response_handle_index(),
-                                0x8004_0102,
+                                0x8007_0057,
                             ));
                             break;
                         }
                         *columns = normalized_columns.clone();
+                        *columns_set = true;
                         if !normalized_named_property_context.is_empty() {
                             tracing::info!(
                                 rca_debug = true,
@@ -15147,9 +15837,26 @@ where
                         }
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
-                    Some(MapiObject::PermissionTable { columns, .. })
-                    | Some(MapiObject::RuleTable { columns, .. }) => {
+                    Some(MapiObject::PermissionTable {
+                        columns,
+                        columns_set,
+                        ..
+                    })
+                    | Some(MapiObject::RuleTable {
+                        columns,
+                        columns_set,
+                        ..
+                    }) => {
+                        if !set_columns_request_is_valid(&request) {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x12,
+                                request.response_handle_index(),
+                                0x8007_0057,
+                            ));
+                            break;
+                        }
                         *columns = normalized_columns.clone();
+                        *columns_set = true;
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
                     _ => responses.extend_from_slice(&rop_error_response(
@@ -15193,16 +15900,7 @@ where
                     _ => None,
                 };
                 match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::HierarchyTable {
-                        sort_orders,
-                        category_count,
-                        expanded_count,
-                        collapsed_categories,
-                        position,
-                        bookmarks,
-                        ..
-                    })
-                    | Some(MapiObject::ContentsTable {
+                    Some(MapiObject::ContentsTable {
                         sort_orders,
                         category_count,
                         expanded_count,
@@ -15211,6 +15909,17 @@ where
                         bookmarks,
                         ..
                     }) => {
+                        if !sort_table_request_is_valid(&request) {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x13,
+                                request.response_handle_index(),
+                                0x8007_0057,
+                            ));
+                            if let Some(trace) = sort_trace {
+                                session.record_outlook_view_failure_trace_event(trace);
+                            }
+                            continue;
+                        }
                         *sort_orders = request.sort_orders();
                         *category_count = request.sort_category_count();
                         *expanded_count = request.sort_expanded_count();
@@ -15231,17 +15940,6 @@ where
                         );
                         responses.extend_from_slice(&rop_sort_table_response(&request));
                     }
-                    Some(MapiObject::AttachmentTable {
-                        sort_orders,
-                        position,
-                        bookmarks,
-                        ..
-                    }) => {
-                        *sort_orders = request.sort_orders();
-                        *position = 0;
-                        bookmarks.clear();
-                        responses.extend_from_slice(&rop_sort_table_response(&request));
-                    }
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x13,
                         request.response_handle_index(),
@@ -15253,6 +15951,24 @@ where
                 }
             }
             Some(RopId::Restrict) => {
+                if !input_object(session, &handle_slots, &request)
+                    .is_some_and(restrict_supported_on_object)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x14,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                if !table_async_flags_are_valid(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x14,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let restrict_trace = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::ContentsTable {
                         folder_id,
@@ -15286,12 +16002,6 @@ where
                         position,
                         bookmarks,
                         ..
-                    })
-                    | Some(MapiObject::AttachmentTable {
-                        restriction,
-                        position,
-                        bookmarks,
-                        ..
                     }) => match request.restriction() {
                         Ok(parsed) => {
                             *restriction = parsed;
@@ -15320,8 +16030,7 @@ where
                             break;
                         }
                     },
-                    Some(MapiObject::PermissionTable { position, .. })
-                    | Some(MapiObject::RuleTable { position, .. }) => {
+                    Some(MapiObject::RuleTable { position, .. }) => {
                         *position = 0;
                         responses.extend_from_slice(&rop_restrict_response(&request));
                     }
@@ -16288,6 +16997,20 @@ where
             Some(RopId::MoveFolder | RopId::CopyFolder) => {
                 let rop_id = request.rop_id;
                 let response_handle_index = request.response_handle_index();
+                if !matches!(
+                    request.folder_move_copy_want_asynchronous(),
+                    Some(0x00 | 0x01)
+                ) || !matches!(request.folder_move_copy_use_unicode(), Some(0x00 | 0x01))
+                    || (rop_id == RopId::CopyFolder.as_u8()
+                        && !matches!(request.folder_move_copy_want_recursive(), Some(0x00 | 0x01)))
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 if input_object(session, &handle_slots, &request)
                     .and_then(MapiObject::folder_id)
                     .is_none()
@@ -16825,9 +17548,18 @@ where
                     &request,
                     input_object(session, &handle_slots, &request),
                     snapshot,
+                    &session.pending_attachment_deletions,
                 ))
             }
             Some(RopId::GetAttachmentTable) => {
+                if !get_attachment_table_flags_are_valid(&request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x21,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let (folder_id, message_id, is_calendar_event) =
                     match input_object(session, &handle_slots, &request) {
                         Some(MapiObject::Message {
@@ -16856,16 +17588,13 @@ where
                     ));
                     continue;
                 }
-                let row_count = snapshot
-                    .attachments_for_message(folder_id, message_id)
-                    .unwrap_or_default()
-                    .len() as u32;
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::AttachmentTable {
                         folder_id,
                         message_id,
                         columns: Vec::new(),
+                        columns_set: false,
                         sort_orders: Vec::new(),
                         restriction: None,
                         bookmarks: HashMap::new(),
@@ -16874,8 +17603,7 @@ where
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses
-                    .extend_from_slice(&rop_get_attachment_table_response(&request, row_count));
+                responses.extend_from_slice(&rop_get_attachment_table_response(&request));
                 output_handles.push(handle);
             }
             Some(RopId::OpenAttachment) => {
@@ -16908,6 +17636,17 @@ where
                     continue;
                 }
                 let attach_num = request.attach_num().unwrap_or(u32::MAX);
+                if session
+                    .pending_attachment_deletions
+                    .contains(&(folder_id, message_id, attach_num))
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x22,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
                 if snapshot
                     .attachment_for_message(folder_id, message_id, attach_num)
                     .is_some()
@@ -17063,51 +17802,97 @@ where
                     ));
                     continue;
                 }
-                if is_calendar_event {
-                    match store
-                        .delete_calendar_event_attachment(
-                            principal.account_id,
-                            &attachment.file_reference,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-delete-calendar-attachment".to_string(),
-                                subject: attachment.file_reference.clone(),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(Some(_)) => {
-                            responses.extend_from_slice(&rop_simple_success_response(&request))
-                        }
-                        _ => responses.extend_from_slice(&rop_error_response(
-                            0x24,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        )),
-                    }
-                } else {
-                    match store
-                        .delete_message_attachment(
-                            principal.account_id,
-                            &attachment.file_reference,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-delete-attachment".to_string(),
-                                subject: attachment.file_reference.clone(),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(Some(_)) => {
-                            responses.extend_from_slice(&rop_simple_success_response(&request))
-                        }
-                        _ => responses.extend_from_slice(&rop_error_response(
-                            0x24,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        )),
-                    }
+                let _ = is_calendar_event;
+                let _ = attachment;
+                session
+                    .pending_attachment_deletions
+                    .insert((folder_id, message_id, attach_num));
+                responses.extend_from_slice(&rop_simple_success_response(&request));
+            }
+            Some(RopId::OpenEmbeddedMessage) => {
+                let Some(handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x46,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let Some(MapiObject::PendingAttachment {
+                    folder_id,
+                    message_id,
+                    attach_num,
+                    properties,
+                    ..
+                }) = session.handles.get(&handle).cloned()
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x46,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let open_mode = request.payload.get(2).copied().unwrap_or(0);
+                if open_mode > 0x02 {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x46,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
                 }
+                let attach_method = properties
+                    .get(&PID_TAG_ATTACH_METHOD)
+                    .and_then(MapiValue::as_i64)
+                    .unwrap_or(5);
+                if attach_method != 5 {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x46,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+                if open_mode == 0 {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x46,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+                let embedded_message_id =
+                    transient_embedded_message_id(folder_id, message_id, attach_num);
+                let embedded_handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::PendingMessage {
+                        folder_id,
+                        properties: HashMap::from([(
+                            PID_TAG_MESSAGE_CLASS_W,
+                            MapiValue::String("IPM.Note".to_string()),
+                        )]),
+                        recipients: Vec::new(),
+                    },
+                );
+                session
+                    .pending_embedded_message_ids
+                    .insert(embedded_handle, embedded_message_id);
+                session
+                    .pending_embedded_message_attachments
+                    .insert(embedded_handle, (folder_id, message_id, attach_num));
+                set_handle_slot(
+                    &mut handle_slots,
+                    request.output_handle_index,
+                    embedded_handle,
+                );
+                responses.extend_from_slice(&rop_open_embedded_message_response(
+                    &request,
+                    embedded_message_id,
+                    "",
+                    0,
+                ));
+                output_handles.push(embedded_handle);
             }
             Some(RopId::SaveChangesAttachment) => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
@@ -17166,40 +17951,60 @@ where
                     ));
                     continue;
                 }
-                let attachment = pending_attachment_upload(attach_num, &properties, data);
-                let validation = validator.validate_bytes(
-                    ValidationRequest {
-                        ingress_context: IngressContext::ExchangeAttachment,
-                        declared_mime: Some(attachment.media_type.clone()),
-                        filename: Some(attachment.file_name.clone()),
-                        expected_kind: mapi_expected_attachment_kind(
-                            &attachment.media_type,
-                            &attachment.file_name,
-                        ),
-                    },
-                    &attachment.blob_bytes,
-                );
-                let Ok(outcome) = validation else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                if outcome.policy_decision != PolicyDecision::Accept {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
+                let mut attachment = pending_attachment_upload(attach_num, &properties, data);
+                let attach_method = properties
+                    .get(&PID_TAG_ATTACH_METHOD)
+                    .and_then(MapiValue::as_i64)
+                    .unwrap_or(1);
+                let mut generated_embedded_attachment = false;
+                if attach_method == 5 {
+                    if let Some(embedded_properties) = session
+                        .saved_embedded_messages
+                        .get(&(folder_id, message_id, attach_num))
+                    {
+                        attachment = pending_embedded_message_attachment_upload(
+                            attach_num,
+                            &properties,
+                            embedded_properties,
+                        );
+                        generated_embedded_attachment = true;
+                    }
                 }
                 let mut attachment = attachment;
-                if attachment.media_type == "application/octet-stream"
-                    && !outcome.detected_mime.trim().is_empty()
-                {
-                    attachment.media_type = outcome.detected_mime;
+                if !generated_embedded_attachment {
+                    let validation = validator.validate_bytes(
+                        ValidationRequest {
+                            ingress_context: IngressContext::ExchangeAttachment,
+                            declared_mime: Some(attachment.media_type.clone()),
+                            filename: Some(attachment.file_name.clone()),
+                            expected_kind: mapi_expected_attachment_kind(
+                                &attachment.media_type,
+                                &attachment.file_name,
+                            ),
+                        },
+                        &attachment.blob_bytes,
+                    );
+                    let Ok(outcome) = validation else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x25,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    };
+                    if outcome.policy_decision != PolicyDecision::Accept {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x25,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                    if attachment.media_type == "application/octet-stream"
+                        && !outcome.detected_mime.trim().is_empty()
+                    {
+                        attachment.media_type = outcome.detected_mime;
+                    }
                 }
                 if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
                     match store
@@ -17242,6 +18047,8 @@ where
                                     file_reference: stored.file_reference,
                                     file_name: stored.file_name,
                                     media_type: stored.media_type,
+                                    disposition: stored.disposition,
+                                    content_id: stored.content_id,
                                     size_octets: stored.size_octets,
                                 },
                             );
@@ -17295,6 +18102,8 @@ where
                                         file_reference: stored.file_reference,
                                         file_name: stored.file_name,
                                         media_type: stored.media_type,
+                                        disposition: None,
+                                        content_id: None,
                                         size_octets: stored.size_octets,
                                     },
                                 );
@@ -17790,6 +18599,163 @@ where
                     )),
                 }
             }
+            Some(RopId::CopyTo) => {
+                if !matches!(request.copy_to_want_asynchronous(), Some(0x00 | 0x01))
+                    || !matches!(request.copy_to_want_subobjects(), Some(0x00 | 0x01))
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x39,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
+                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
+                else {
+                    responses.extend_from_slice(&rop_copy_to_null_destination_response(&request));
+                    continue;
+                };
+                let destination_object = session.handles.get(&destination_handle).cloned();
+                if destination_object.is_none() {
+                    responses.extend_from_slice(&rop_copy_to_null_destination_response(&request));
+                    continue;
+                }
+                let source_object = input_object(session, &handle_slots, &request).cloned();
+                if source_object.is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x39,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                if copy_all_custom_property_values_for_request(
+                    store,
+                    principal,
+                    source_object.as_ref(),
+                    destination_object.as_ref(),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &request.copy_to_excluded_property_tags(),
+                )
+                .await
+                .unwrap_or(false)
+                {
+                    responses.extend_from_slice(&rop_set_properties_response(&request));
+                    continue;
+                }
+                if copy_all_message_followup_property_values_for_request(
+                    store,
+                    principal,
+                    source_object.as_ref(),
+                    destination_object.as_ref(),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &request.copy_to_excluded_property_tags(),
+                )
+                .await
+                .unwrap_or(false)
+                {
+                    responses.extend_from_slice(&rop_set_properties_response(&request));
+                    continue;
+                }
+                responses.extend_from_slice(&unsupported_rop_response(
+                    0x39,
+                    request.response_handle_index(),
+                ));
+            }
+            Some(RopId::CopyProperties) => {
+                if !matches!(
+                    request.copy_properties_want_asynchronous(),
+                    Some(0x00 | 0x01)
+                ) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x67,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
+                if input_handle(&handle_slots, &request).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x67,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
+                else {
+                    responses.extend_from_slice(&rop_copy_properties_null_destination_response(
+                        &request,
+                    ));
+                    continue;
+                };
+                if !session.handles.contains_key(&destination_handle) {
+                    responses.extend_from_slice(&rop_copy_properties_null_destination_response(
+                        &request,
+                    ));
+                    continue;
+                }
+                if request.copy_properties_property_tags().is_empty() {
+                    responses.extend_from_slice(&rop_copy_properties_success_response(&request));
+                    continue;
+                }
+                let source_object = input_object(session, &handle_slots, &request).cloned();
+                let destination_object = session.handles.get(&destination_handle).cloned();
+                if let Some(problems) = copy_message_followup_property_values_for_request(
+                    store,
+                    principal,
+                    source_object.as_ref(),
+                    destination_object.as_ref(),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &request.copy_properties_property_tags(),
+                )
+                .await
+                .unwrap_or_default()
+                {
+                    if problems.is_empty() {
+                        responses
+                            .extend_from_slice(&rop_copy_properties_success_response(&request));
+                    } else {
+                        responses.extend_from_slice(&rop_set_properties_problem_response(
+                            &request, &problems,
+                        ));
+                    }
+                    continue;
+                }
+                if let Some(problems) = copy_custom_property_values_for_request(
+                    store,
+                    principal,
+                    source_object.as_ref(),
+                    destination_object.as_ref(),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &request.copy_properties_property_tags(),
+                )
+                .await
+                .unwrap_or_default()
+                {
+                    if problems.is_empty() {
+                        responses
+                            .extend_from_slice(&rop_copy_properties_success_response(&request));
+                    } else {
+                        responses.extend_from_slice(&rop_set_properties_problem_response(
+                            &request, &problems,
+                        ));
+                    }
+                    continue;
+                }
+                responses.extend_from_slice(&unsupported_rop_response(
+                    0x67,
+                    request.response_handle_index(),
+                ));
+            }
             Some(RopId::GetStreamSize) => {
                 let requested_handle = input_handle(&handle_slots, &request);
                 let stream_handle = requested_handle
@@ -17839,12 +18805,45 @@ where
                     )),
                 }
             }
-            Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => responses
-                .extend_from_slice(&rop_error_response(
-                    request.rop_id,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
+            Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => {
+                let requested_handle = input_handle(&handle_slots, &request);
+                match requested_handle.and_then(|handle| session.handles.get(&handle)) {
+                    Some(MapiObject::AttachmentStream { .. }) => {
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
+                }
+            }
+            Some(RopId::SetSpooler) => {
+                if input_handle(&handle_slots, &request).is_some() {
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x47,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                }
+            }
+            Some(
+                RopId::SpoolerLockMessage
+                | RopId::TransportNewMail
+                | RopId::UpdateDeferredActionMessages,
+            ) => {
+                if input_handle(&handle_slots, &request).is_some() {
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                }
+            }
             Some(RopId::CommitStream) => {
                 let requested_handle = input_handle(&handle_slots, &request);
                 let stream_handle = requested_handle
@@ -17970,6 +18969,7 @@ where
                         folder_id,
                         message_id,
                         saved_email,
+                        ..
                     } => {
                         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                             .or(saved_email.as_ref().map(|saved| &saved.email))
@@ -18143,6 +19143,7 @@ where
                                 folder_id: submitted_mapi_folder_id(&submitted, mailboxes),
                                 message_id,
                                 saved_email: None,
+                                pending_properties: HashMap::new(),
                             },
                         );
                         match store
@@ -18282,6 +19283,16 @@ where
                 }
             }
             Some(RopId::MoveCopyMessages) => {
+                if !matches!(request.move_copy_want_asynchronous(), Some(0x00 | 0x01))
+                    || !matches!(request.move_copy_want_copy_raw(), Some(0x00 | 0x01))
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x33,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let source_folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ => {
@@ -18954,6 +19965,16 @@ where
                         continue;
                     }
                 };
+                if !matches!(request.want_asynchronous(), Some(0x00 | 0x01))
+                    || !read_flags_are_valid(request.read_flags(), true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x66,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
                 let unread = unread_from_read_flags(request.read_flags());
                 let mut partial_completion = false;
                 let message_ids = request.message_ids();
@@ -20754,6 +21775,7 @@ where
                             target_folder_id: shortcut.target_folder_id,
                             shortcut_type: shortcut.shortcut_type,
                             flags: shortcut.flags,
+                            save_stamp: shortcut.save_stamp,
                             section: shortcut.section,
                             ordinal: shortcut.ordinal,
                             group_header_id: shortcut.group_header_id,
@@ -20845,6 +21867,7 @@ where
                             folder_id,
                             message_id,
                             saved_email: None,
+                            pending_properties: HashMap::new(),
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -21523,9 +22546,25 @@ where
                 }
             }
             Some(RopId::GetTransportFolder) => {
+                if input_object(session, &handle_slots, &request).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x6D,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_get_transport_folder_response(&request))
             }
             Some(RopId::OptionsData) => {
+                if input_object(session, &handle_slots, &request).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x6F,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_options_data_response(&request))
             }
             Some(RopId::GetReceiveFolderTable) => {
@@ -21911,6 +22950,15 @@ where
             }
             Some(RopId::GetAddressTypes) => {
                 echo_input_handle_table = true;
+                let object = input_object(session, &handle_slots, &request);
+                if object.is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x49,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -21920,11 +22968,7 @@ where
                     request_rop_id = "0x49",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     response_handle_index = request.response_handle_index(),
-                    object_kind = mapi_object_debug_kind(input_object(
-                        session,
-                        &handle_slots,
-                        &request,
-                    )),
+                    object_kind = mapi_object_debug_kind(object),
                     address_type_count = 2,
                     address_types = "EX,SMTP",
                     message = "rca debug mapi get address types",
@@ -22185,6 +23229,7 @@ where
                     MapiObject::PermissionTable {
                         folder_id,
                         columns: default_permission_columns(),
+                        columns_set: false,
                         position: 0,
                     },
                 );
@@ -22215,6 +23260,7 @@ where
                     MapiObject::RuleTable {
                         folder_id,
                         columns: default_rule_columns(),
+                        columns_set: false,
                         position: 0,
                     },
                 );
@@ -22630,9 +23676,38 @@ where
             Some(RopId::GetStoreState) => {
                 responses.extend_from_slice(&rop_get_store_state_response(&request))
             }
+            Some(RopId::Abort) => {
+                let result = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. }) => {
+                        0x8004_0114
+                    }
+                    _ => 0x8004_0102,
+                };
+                responses.extend_from_slice(&rop_error_response(
+                    0x38,
+                    request.response_handle_index(),
+                    result,
+                ));
+            }
+            Some(RopId::Progress) => {
+                let result = if !matches!(request.payload.first().copied(), Some(0x00 | 0x01)) {
+                    0x8007_0057
+                } else {
+                    match input_object(session, &handle_slots, &request) {
+                        Some(
+                            MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. },
+                        ) => 0x8004_0400,
+                        _ => 0x8004_0102,
+                    }
+                };
+                responses.extend_from_slice(&rop_error_response(
+                    0x50,
+                    request.response_handle_index(),
+                    result,
+                ));
+            }
             Some(RopId::ResetTable) => {
-                if input_object_mut(session, &handle_slots, &request)
-                    .is_some_and(reset_table_position)
+                if input_object_mut(session, &handle_slots, &request).is_some_and(reset_table_state)
                 {
                     responses.extend_from_slice(&rop_reset_table_response(&request));
                 } else {
@@ -22895,6 +23970,81 @@ fn property_tags_have_known_wire_types(property_tags: &[u32]) -> bool {
     })
 }
 
+fn restrict_supported_on_object(object: &MapiObject) -> bool {
+    matches!(
+        object,
+        MapiObject::HierarchyTable { .. }
+            | MapiObject::ContentsTable { .. }
+            | MapiObject::RuleTable { .. }
+    )
+}
+
+fn sort_table_request_is_valid(request: &RopRequest) -> bool {
+    let Some(flags) = request.payload.first().copied() else {
+        return false;
+    };
+    if flags & !0x01 != 0 {
+        return false;
+    }
+    let Some(count_bytes) = request.payload.get(1..3) else {
+        return false;
+    };
+    let sort_order_count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]);
+    let category_count = request.sort_category_count();
+    let expanded_count = request.sort_expanded_count();
+    if category_count > sort_order_count || expanded_count > category_count {
+        return false;
+    }
+    if request.payload.len() != 7 + usize::from(sort_order_count) * 5 {
+        return false;
+    }
+    let sort_orders = request.sort_orders();
+    if !sort_orders.iter().all(sort_order_is_valid) {
+        return false;
+    }
+    sort_orders
+        .iter()
+        .take(usize::from(category_count))
+        .filter(|sort_order| sort_order.property_tag & 0x0000_1000 != 0)
+        .count()
+        <= 1
+}
+
+fn sort_order_is_valid(sort_order: &MapiSortOrder) -> bool {
+    if !matches!(sort_order.order, 0x00 | 0x01 | 0x04) {
+        return false;
+    }
+    let property_type = sort_order.property_tag & 0x0000_FFFF;
+    let multivalue = property_type & 0x1000 != 0;
+    let multivalue_instance = property_type & 0x2000 != 0;
+    multivalue == multivalue_instance
+}
+
+fn get_attachment_table_flags_are_valid(request: &RopRequest) -> bool {
+    matches!(request.payload.first().copied().unwrap_or(0), 0x00 | 0x40)
+}
+
+fn table_async_flags_are_valid(request: &RopRequest) -> bool {
+    request
+        .payload
+        .first()
+        .is_some_and(|flags| flags & !0x01 == 0)
+}
+
+fn set_columns_request_is_valid(request: &RopRequest) -> bool {
+    table_async_flags_are_valid(request)
+        && !request.property_tags().is_empty()
+        && set_columns_property_tags_are_valid(&request.property_tags())
+}
+
+fn set_columns_property_tags_are_valid(property_tags: &[u32]) -> bool {
+    property_tags.iter().all(|tag| {
+        let property_type = (*tag & 0xFFFF) as u16;
+        !matches!(property_type, 0x0000 | 0x000A)
+            && MapiPropertyTag::new(*tag).property_type().is_some()
+    })
+}
+
 fn format_unknown_wire_type_property_tags(property_tags: &[u32]) -> String {
     property_tags
         .iter()
@@ -22918,6 +24068,218 @@ mod property_tag_validation_tests {
     fn set_columns_accepts_multi_value_instance_property_types() {
         assert!(property_tags_have_known_wire_types(&[0x8031_3003]));
         assert_eq!(format_unknown_wire_type_property_tags(&[0x8031_3003]), "");
+    }
+
+    #[test]
+    fn set_columns_rejects_microsoft_invalid_column_property_types() {
+        assert!(set_columns_property_tags_are_valid(&[0x8031_3003]));
+        assert!(!set_columns_property_tags_are_valid(&[0x0037_0000]));
+        assert!(!set_columns_property_tags_are_valid(&[0x0037_000A]));
+        assert!(!set_columns_property_tags_are_valid(&[0x0037_801D]));
+    }
+
+    #[test]
+    fn set_columns_request_validation_matches_microsoft_flags_and_count() {
+        fn request(flags: u8, property_tags: &[u32]) -> RopRequest {
+            let mut payload = vec![flags];
+            payload.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
+            for tag in property_tags {
+                payload.extend_from_slice(&tag.to_le_bytes());
+            }
+            RopRequest {
+                rop_id: RopId::SetColumns.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload,
+            }
+        }
+
+        assert!(set_columns_request_is_valid(&request(
+            0x00,
+            &[PID_TAG_SUBJECT_W]
+        )));
+        assert!(set_columns_request_is_valid(&request(
+            0x01,
+            &[PID_TAG_SUBJECT_W]
+        )));
+        assert!(!set_columns_request_is_valid(&request(
+            0x02,
+            &[PID_TAG_SUBJECT_W]
+        )));
+        assert!(!set_columns_request_is_valid(&request(0x00, &[])));
+        assert!(!set_columns_request_is_valid(&request(
+            0x00,
+            &[0x0037_000A]
+        )));
+    }
+
+    #[test]
+    fn restrict_flags_validation_matches_microsoft_async_flags() {
+        fn request(flags: u8) -> RopRequest {
+            RopRequest {
+                rop_id: RopId::Restrict.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![flags, 0, 0],
+            }
+        }
+
+        assert!(table_async_flags_are_valid(&request(0x00)));
+        assert!(table_async_flags_are_valid(&request(0x01)));
+        assert!(!table_async_flags_are_valid(&request(0x02)));
+        assert!(!table_async_flags_are_valid(&request(0x80)));
+    }
+
+    #[test]
+    fn restrict_support_matches_microsoft_table_scope() {
+        let contents = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: Vec::new(),
+            columns_set: false,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let attachment = MapiObject::AttachmentTable {
+            folder_id: INBOX_FOLDER_ID,
+            message_id: 1,
+            columns: Vec::new(),
+            columns_set: false,
+            sort_orders: Vec::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let permission = MapiObject::PermissionTable {
+            folder_id: INBOX_FOLDER_ID,
+            columns: Vec::new(),
+            columns_set: false,
+            position: 0,
+        };
+        let rule = MapiObject::RuleTable {
+            folder_id: INBOX_FOLDER_ID,
+            columns: Vec::new(),
+            columns_set: false,
+            position: 0,
+        };
+
+        assert!(restrict_supported_on_object(&contents));
+        assert!(restrict_supported_on_object(&rule));
+        assert!(!restrict_supported_on_object(&attachment));
+        assert!(!restrict_supported_on_object(&permission));
+    }
+
+    #[test]
+    fn sort_table_request_validation_matches_microsoft_bounds() {
+        fn request_with_orders(
+            flags: u8,
+            category_count: u16,
+            expanded_count: u16,
+            orders: &[(u32, u8)],
+        ) -> RopRequest {
+            let mut payload = vec![flags];
+            let sort_order_count = orders.len() as u16;
+            payload.extend_from_slice(&sort_order_count.to_le_bytes());
+            payload.extend_from_slice(&category_count.to_le_bytes());
+            payload.extend_from_slice(&expanded_count.to_le_bytes());
+            for (property_tag, order) in orders {
+                payload.extend_from_slice(&property_tag.to_le_bytes());
+                payload.push(*order);
+            }
+            RopRequest {
+                rop_id: RopId::SortTable.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload,
+            }
+        }
+        fn request(
+            flags: u8,
+            sort_order_count: u16,
+            category_count: u16,
+            expanded_count: u16,
+        ) -> RopRequest {
+            request_with_orders(
+                flags,
+                category_count,
+                expanded_count,
+                &vec![(PID_TAG_SUBJECT_W, 0); usize::from(sort_order_count)],
+            )
+        }
+
+        assert!(sort_table_request_is_valid(&request(0x00, 1, 0, 0)));
+        assert!(sort_table_request_is_valid(&request(0x01, 1, 0, 0)));
+        assert!(!sort_table_request_is_valid(&request(0x02, 1, 0, 0)));
+        assert!(!sort_table_request_is_valid(&request(0x00, 1, 2, 0)));
+        assert!(!sort_table_request_is_valid(&request(0x00, 1, 1, 2)));
+        assert!(sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            0,
+            0,
+            &[
+                (PID_TAG_SUBJECT_W, 0x01),
+                (PID_TAG_MESSAGE_DELIVERY_TIME, 0x04)
+            ],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            0,
+            0,
+            &[(PID_TAG_SUBJECT_W, 0x02)],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            0,
+            0,
+            &[(0x8001_1003, 0x00)],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            0,
+            0,
+            &[(0x8001_2003, 0x00)],
+        )));
+        assert!(sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            1,
+            0,
+            &[(0x8001_3003, 0x00)],
+        )));
+        assert!(!sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            2,
+            0,
+            &[(0x8001_3003, 0x00), (0x8002_301F, 0x00)],
+        )));
+
+        let mut truncated = request(0x00, 1, 0, 0);
+        truncated.payload.pop();
+        assert!(!sort_table_request_is_valid(&truncated));
+    }
+
+    #[test]
+    fn get_attachment_table_flags_match_microsoft_message_values() {
+        fn request(table_flags: u8) -> RopRequest {
+            RopRequest {
+                rop_id: RopId::GetAttachmentTable.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: Some(1),
+                payload: vec![table_flags],
+            }
+        }
+
+        assert!(get_attachment_table_flags_are_valid(&request(0x00)));
+        assert!(get_attachment_table_flags_are_valid(&request(0x40)));
+        assert!(!get_attachment_table_flags_are_valid(&request(0x01)));
+        assert!(!get_attachment_table_flags_are_valid(&request(0x02)));
+        assert!(!get_attachment_table_flags_are_valid(&request(0x41)));
     }
 }
 
@@ -23100,8 +24462,8 @@ where
         uploads.push(AttachmentUploadInput {
             file_name: content.file_name,
             media_type: content.media_type,
-            disposition: None,
-            content_id: None,
+            disposition: attachment.disposition,
+            content_id: attachment.content_id,
             blob_bytes: content.blob_bytes,
         });
     }
@@ -23641,6 +25003,62 @@ fn transient_associated_message_id(folder_id: u64, properties: &HashMap<u32, Map
         })
 }
 
+fn transient_embedded_message_id(folder_id: u64, message_id: u64, attach_num: u32) -> u64 {
+    let folder_counter =
+        crate::mapi::identity::global_counter_from_store_id(folder_id).unwrap_or(1);
+    let message_counter =
+        crate::mapi::identity::global_counter_from_store_id(message_id).unwrap_or(1);
+    crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER
+            .saturating_add(folder_counter)
+            .saturating_add(message_counter)
+            .saturating_add(u64::from(attach_num))
+            .saturating_add(1),
+    )
+}
+
+fn pending_embedded_message_attachment_upload(
+    attach_num: u32,
+    attachment_properties: &HashMap<u32, MapiValue>,
+    embedded_properties: &HashMap<u32, MapiValue>,
+) -> AttachmentUploadInput {
+    let subject = optional_pending_text_property(
+        embedded_properties,
+        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+    )
+    .unwrap_or_else(|| "Embedded message".to_string());
+    let body =
+        optional_pending_text_property(embedded_properties, &[PID_TAG_BODY_W]).unwrap_or_default();
+    let body_html = optional_pending_text_property(embedded_properties, &[PID_TAG_BODY_HTML_W])
+        .unwrap_or_default();
+    let file_name = optional_pending_text_property(
+        attachment_properties,
+        &[PID_TAG_ATTACH_LONG_FILENAME_W, PID_TAG_ATTACH_FILENAME_W],
+    )
+    .unwrap_or_else(|| format!("{subject}.msg"));
+    let mut payload = Vec::new();
+    payload.extend_from_slice(b"LPE-MAPI-EMBEDDED-MESSAGE\0");
+    payload.extend_from_slice(format!("Subject:{subject}\r\n").as_bytes());
+    payload.extend_from_slice(format!("Body-Length:{}\r\n", body.len()).as_bytes());
+    payload.extend_from_slice(body.as_bytes());
+    payload.extend_from_slice(b"\r\nHtml-Length:");
+    payload.extend_from_slice(body_html.len().to_string().as_bytes());
+    payload.extend_from_slice(b"\r\n");
+    payload.extend_from_slice(body_html.as_bytes());
+
+    AttachmentUploadInput {
+        file_name,
+        media_type: "application/vnd.ms-outlook".to_string(),
+        disposition: Some("attachment".to_string()),
+        content_id: None,
+        blob_bytes: if payload.is_empty() {
+            format!("Embedded message {attach_num}").into_bytes()
+        } else {
+            payload
+        },
+    }
+}
+
 fn transient_client_local_message_id(message_id: u64) -> bool {
     crate::mapi::identity::global_counter_from_store_id(message_id)
         .is_some_and(|counter| counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER)
@@ -23842,6 +25260,42 @@ fn summarize_fast_transfer_get_buffer_response(
 mod tests {
     use super::*;
 
+    #[test]
+    fn execute_max_rop_out_returns_buffer_too_small_response() {
+        let request = [
+            0x09, 0x00, 0x15, 0x01, 0x01, 0x02, 0x01, 0xFF, 0x0F, 0x6D, 0x00, 0x00, 0x00, 0x56,
+            0x00, 0x00, 0x00,
+        ];
+        let response = rop_buffer_with_response_spec(vec![0x15, 0x01, 0, 0, 0, 0, 0, 0], &[0x56]);
+
+        let capped = apply_execute_max_rop_out("test-request", &request, response.clone(), 4);
+
+        assert_ne!(capped, response);
+        assert_eq!(&capped[..3], &[0x0C, 0x00, 0xFF]);
+        assert_eq!(&capped[3..5], &(response.len() as u16).to_le_bytes());
+        assert_eq!(&capped[5..12], &[0x15, 0x01, 0x01, 0x02, 0x01, 0xFF, 0x0F]);
+        assert_eq!(
+            &capped[12..],
+            &[0x6D, 0x00, 0x00, 0x00, 0x56, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn parse_execute_request_keeps_max_rop_out() {
+        let rop_buffer = [0x02, 0x00];
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
+        body.extend_from_slice(&rop_buffer);
+        body.extend_from_slice(&0x1234u32.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+
+        let parsed = parse_execute_request(&body).unwrap();
+
+        assert_eq!(parsed.rop_buffer, rop_buffer);
+        assert_eq!(parsed.max_rop_out, 0x1234);
+    }
+
     #[tokio::test]
     async fn execute_active_session_acquire_waits_for_short_outlook_overlap() {
         let session_id = format!("test-overlap-{}", Uuid::new_v4());
@@ -23927,6 +25381,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             associated: false,
             columns: vec![PID_TAG_SUBJECT_W, 0x801f_001f],
+            columns_set: true,
             sort_orders: Vec::new(),
             category_count: 0,
             expanded_count: 0,
@@ -23989,10 +25444,10 @@ mod tests {
         assert!(contract.contains("phase=setcolumns"));
         assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
         assert!(contract
-            .contains("descriptor_columns=0x00170003,0x8503000b,0x001a001f,0x10900003,0x0e1b000b"));
+            .contains("descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b"));
         assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8503000b,0x001a001f,0x10900003,0x0e1b000b"));
+        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b"));
         assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
@@ -25652,6 +27107,7 @@ mod tests {
                 target_folder_id: None,
                 shortcut_type: 4,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0,
                 group_header_id: Some(header_id),
@@ -25664,6 +27120,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 127,
                 group_header_id: Some(header_id),
@@ -25999,6 +27456,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0x10,
                 group_header_id: Some(default_wlink_group_uuid()),
@@ -26097,6 +27555,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0x10,
                 group_header_id: Some(default_wlink_group_uuid()),
@@ -26143,6 +27602,7 @@ mod tests {
                 target_folder_id: None,
                 shortcut_type: 4,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 0,
                 group_header_id: Some(header_id),
@@ -26155,6 +27615,7 @@ mod tests {
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
+                save_stamp: 0,
                 section: 1,
                 ordinal: 127,
                 group_header_id: Some(header_id),
@@ -26263,6 +27724,7 @@ mod tests {
             folder_id: INBOX_FOLDER_ID,
             associated: false,
             columns: vec![PID_TAG_FOLDER_ID, PID_TAG_MID, PID_TAG_SUBJECT_W],
+            columns_set: true,
             sort_orders: Vec::new(),
             category_count: 0,
             expanded_count: 0,
@@ -27708,6 +29170,7 @@ mod tests {
         let object = MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
             columns: default_hierarchy_columns(),
+            columns_set: false,
             sort_orders: Vec::new(),
             category_count: 0,
             expanded_count: 0,
@@ -28158,6 +29621,12 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            message_save_generations: HashMap::new(),
+            message_handle_generations: HashMap::new(),
+            pending_attachment_deletions: HashSet::new(),
+            pending_embedded_message_ids: HashMap::new(),
+            pending_embedded_message_attachments: HashMap::new(),
+            saved_embedded_messages: HashMap::new(),
             saved_search_folder_definitions: HashMap::new(),
             special_folder_aliases: HashMap::new(),
             deleted_advertised_special_folders: HashSet::new(),
