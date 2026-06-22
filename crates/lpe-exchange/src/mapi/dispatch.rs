@@ -9196,15 +9196,17 @@ fn format_outlook_view_handoff_table_contract(
             format_view_descriptor_binary_summary(&descriptor)
         })
         .unwrap_or_default();
-    let selected_missing_descriptor_columns = view
-        .as_ref()
-        .map(|message| {
+    let selected_missing_descriptor_columns = if associated {
+        view.as_ref().map(|message| {
             let definition = outlook_mail_view_definition(&message.name);
             let descriptor = view_descriptor_binary(&definition);
             let descriptor_columns = view_descriptor_property_tags(&descriptor);
             missing_debug_property_tags(&descriptor_columns, columns)
         })
-        .unwrap_or_default();
+    } else {
+        None
+    }
+    .unwrap_or_default();
     format!(
         "folder_local_default_supported={folder_local_default_supported};\
          folder_local_default_visible_in_fai_table={folder_local_default_visible_in_fai_table};\
@@ -9313,8 +9315,11 @@ fn format_inbox_view_descriptor_set_columns_behavior_contract(
     let definition = outlook_mail_view_definition(&message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
-    let selected_missing_descriptor_columns =
-        missing_debug_property_tags(&descriptor_columns, columns);
+    let selected_missing_descriptor_columns = if columns.len() >= descriptor_columns.len() {
+        missing_debug_property_tags(&descriptor_columns, columns)
+    } else {
+        String::new()
+    };
 
     format!(
         "phase=setcolumns;default_view_id=0x{:016x};view_name={};\
@@ -12863,21 +12868,38 @@ where
                     session.record_last_inbox_related_release_context(context);
                 }
                 if let Some(context) = visible_inbox_release_without_query_rows {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "visible_inbox_release_without_query_rows:{context}"
-                    ));
-                    tracing::warn!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x01",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        input_handle_value = %format_optional_debug_handle(released_handle),
-                        release_without_query_rows_context = %context,
-                        "rca debug mapi visible inbox released before query rows"
-                    );
+                    let has_defaulted_columns =
+                        context.contains(";defaulted=0x") || context.contains("backed=false");
+                    if has_defaulted_columns {
+                        session.record_outlook_view_failure_trace_event(format!(
+                            "visible_inbox_release_without_query_rows:{context}"
+                        ));
+                        tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x01",
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            input_handle_value = %format_optional_debug_handle(released_handle),
+                            release_without_query_rows_context = %context,
+                            "rca debug mapi visible inbox released before query rows"
+                        );
+                    } else {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x01",
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            input_handle_value = %format_optional_debug_handle(released_handle),
+                            release_without_query_rows_context = %context,
+                            "rca debug mapi visible inbox released before query rows"
+                        );
+                    }
                 }
                 if let Some((released_table_context, handoff_context, live_handle_summary)) =
                     post_inbox_fai_handoff_context
@@ -26654,7 +26676,7 @@ mod tests {
             .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
         assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-        assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
+        assert!(contract.ends_with("selected_missing_descriptor_columns="));
         assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
     }
 
