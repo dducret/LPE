@@ -12437,6 +12437,9 @@ mod tests {
             PID_TAG_MESSAGE_SIZE,
             PID_TAG_MESSAGE_SIZE_EXTENDED,
             PID_NAME_KEYWORDS_TAG,
+            PID_LID_OUTLOOK_COMMON_8514_TAG,
+            0x8017_000B,
+            PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG,
             PID_NAME_CONTENT_CLASS_W_TAG,
         ];
 
@@ -12516,6 +12519,18 @@ mod tests {
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_NAME_KEYWORDS_TAG).unwrap(),
             MapiValue::MultiString(vec!["Blue".to_string(), "Customer".to_string()])
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_LID_OUTLOOK_COMMON_8514_TAG).unwrap(),
+            MapiValue::Bool(false)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, 0x8017_000B).unwrap(),
+            MapiValue::Bool(false)
+        );
+        assert_eq!(
+            parse_mapi_property_value(&mut cursor, PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG).unwrap(),
+            MapiValue::Bool(false)
         );
         assert_eq!(
             parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),

@@ -28128,6 +28128,28 @@ mod tests {
     }
 
     #[test]
+    fn table_columns_normalize_outlook_visible_inbox_appointment_alias() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x8017,
+            MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
+            },
+        );
+
+        let columns = normalize_table_property_tags_for_session(
+            &session,
+            vec![0x8017_000b, PID_TAG_SUBJECT_W],
+        );
+
+        assert_eq!(
+            columns,
+            vec![PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG, PID_TAG_SUBJECT_W]
+        );
+    }
+
+    #[test]
     fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
         let mut session = test_mapi_session();
         let property = MapiNamedProperty {

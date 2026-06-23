@@ -662,6 +662,7 @@ pub(in crate::mapi) const PID_LID_TIME_ZONE_STRUCT: u32 = 0x0000_8233;
 pub(in crate::mapi) const PID_LID_TIME_ZONE_DESCRIPTION: u32 = 0x0000_8234;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY: u32 = 0x0000_825E;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY: u32 = 0x0000_825F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_APPOINTMENT_8F07: u32 = 0x0000_8F07;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_SEARCH_KEY: u32 = 0x0000_8584;
@@ -761,6 +762,7 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_RECUR_TAG: u32 = 0x8216_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
 pub(in crate::mapi) const PID_LID_RECURRING_TAG: u32 = 0x8223_000B;
+pub(in crate::mapi) const PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG: u32 = 0x8F07_000B;
 pub(in crate::mapi) const PID_LID_ALL_ATTENDEES_STRING_W_TAG: u32 = 0x8238_001F;
 pub(in crate::mapi) const PID_LID_TO_ATTENDEES_STRING_W_TAG: u32 = 0x823B_001F;
 pub(in crate::mapi) const PID_LID_CC_ATTENDEES_STRING_W_TAG: u32 = 0x823C_001F;
@@ -930,6 +932,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
                 PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY,
                 PSETID_APPOINTMENT_GUID,
             ),
+            (PID_LID_OUTLOOK_APPOINTMENT_8F07, PSETID_APPOINTMENT_GUID),
             (PID_LID_EMAIL1_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL1_ADDRESS_TYPE, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL1_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
@@ -2671,6 +2674,7 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
+        PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG | 0x8017_000B => Some(MapiValue::Bool(false)),
         PID_LID_OUTLOOK_COMMON_8514_TAG => Some(MapiValue::Bool(false)),
         PID_LID_PERCENT_COMPLETE_TAG => {
             Some(MapiValue::F64(email_percent_complete(email).to_bits()))
@@ -14587,6 +14591,17 @@ mod tests {
                 kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
             }),
             Some(PID_LID_APPOINTMENT_COLOR as u16)
+        );
+    }
+
+    #[test]
+    fn outlook_visible_inbox_probe_named_property_maps_to_stable_id() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
+            }),
+            Some(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16)
         );
     }
 
