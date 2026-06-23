@@ -3138,6 +3138,16 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn mapi_folder_is_outlook_contacts_surface(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CONTACTS_FOLDER_ID
+            | SUGGESTED_CONTACTS_FOLDER_ID
+            | QUICK_CONTACTS_FOLDER_ID
+            | IM_CONTACT_LIST_FOLDER_ID
+    )
+}
+
 fn associated_config_debug_fields(
     session: &MapiSession,
     snapshot: &MapiMailStoreSnapshot,
@@ -4287,25 +4297,75 @@ fn log_get_properties_specific_response_debug(
     let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
     let response_values =
         get_properties_specific_response_values_for_debug(&probe.property_tags, property_response);
-    tracing::debug!(
-        rca_debug = true,
-        adapter = "mapi",
-        endpoint = "emsmdb",
-        mailbox = %principal.email,
-        request_type = "Execute",
-        mapi_request_id = request_id,
-        request_rop_id = "0x07",
-        input_handle_index = request.input_handle_index().unwrap_or(0),
-        response_handle_index = request.response_handle_index(),
-        object_kind = mapi_object_debug_kind(object),
-        folder_id = %mapi_object_debug_folder_id(object),
-        property_tag_count = probe.property_tags.len(),
-        property_tags = %format_debug_property_tags(&probe.property_tags),
-        property_names = %format_set_property_names_for_debug(&probe.property_tags),
-        response_shape = %response_shape,
-        response_values = %response_values,
-        "rca debug mapi getprops specific response"
-    );
+    let contacts_associated_named_probe = matches!(
+        object,
+        Some(MapiObject::AssociatedConfig { folder_id, .. })
+            if mapi_folder_is_outlook_contacts_surface(*folder_id)
+    ) && probe
+        .property_tags
+        .iter()
+        .any(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID);
+    if contacts_associated_named_probe {
+        let (config_id, message_class, subject) = match object {
+            Some(MapiObject::AssociatedConfig {
+                config_id,
+                saved_message,
+                ..
+            }) => saved_message
+                .as_ref()
+                .map(|message| {
+                    (
+                        format!("0x{:016x}", message.id),
+                        message.message_class.as_str(),
+                        message.subject.as_str(),
+                    )
+                })
+                .unwrap_or_else(|| (format!("0x{config_id:016x}"), "missing", "missing")),
+            _ => ("none".to_string(), "none", "none"),
+        };
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = "0x07",
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            response_handle_index = request.response_handle_index(),
+            object_kind = mapi_object_debug_kind(object),
+            folder_id = %mapi_object_debug_folder_id(object),
+            associated_config_id = %config_id,
+            associated_config_class = message_class,
+            associated_config_subject = subject,
+            property_tag_count = probe.property_tags.len(),
+            property_tags = %format_debug_property_tags(&probe.property_tags),
+            property_names = %format_set_property_names_for_debug(&probe.property_tags),
+            response_shape = %response_shape,
+            response_values = %response_values,
+            "rca debug mapi contacts associated getprops response"
+        );
+    } else {
+        tracing::debug!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = "0x07",
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            response_handle_index = request.response_handle_index(),
+            object_kind = mapi_object_debug_kind(object),
+            folder_id = %mapi_object_debug_folder_id(object),
+            property_tag_count = probe.property_tags.len(),
+            property_tags = %format_debug_property_tags(&probe.property_tags),
+            property_names = %format_set_property_names_for_debug(&probe.property_tags),
+            response_shape = %response_shape,
+            response_values = %response_values,
+            "rca debug mapi getprops specific response"
+        );
+    }
 }
 
 fn log_get_properties_view_response_debug(
@@ -14110,6 +14170,24 @@ where
                             message.message_class
                         ));
                     }
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x03",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        output_handle_index = request.output_handle_index.unwrap_or(0),
+                        output_handle = handle,
+                        folder_id = format_args!("0x{folder_id:016x}"),
+                        associated_config_id = format_args!("0x{:016x}", message.id),
+                        associated_config_canonical_id = %message.canonical_id,
+                        associated_config_class = %message.message_class,
+                        associated_config_subject = %message.subject,
+                        contacts_surface = mapi_folder_is_outlook_contacts_surface(folder_id),
+                        "rca debug mapi open associated config"
+                    );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(&rop_open_message_response(
                         &request,
