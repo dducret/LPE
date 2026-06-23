@@ -13,8 +13,8 @@ use lpe_storage::{
     PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
     RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
     SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -1680,6 +1680,15 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
+    fn update_jmap_email_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        subject: Option<String>,
+        body_text: Option<String>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
     fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -1692,6 +1701,16 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         mailbox_id: Uuid,
         message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn replace_message_recipients<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        to: &'a [SubmittedRecipientInput],
+        cc: &'a [SubmittedRecipientInput],
+        bcc: &'a [SubmittedRecipientInput],
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
@@ -6996,6 +7015,20 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn update_jmap_email_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        subject: Option<String>,
+        body_text: Option<String>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.update_jmap_email_content(account_id, message_id, subject, body_text, audit)
+                .await
+        })
+    }
+
     fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -7014,6 +7047,21 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.delete_jmap_email_from_mailbox(account_id, mailbox_id, message_id, audit)
+                .await
+        })
+    }
+
+    fn replace_message_recipients<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        to: &'a [SubmittedRecipientInput],
+        cc: &'a [SubmittedRecipientInput],
+        bcc: &'a [SubmittedRecipientInput],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.replace_message_recipients(account_id, message_id, to, cc, bcc, audit)
                 .await
         })
     }

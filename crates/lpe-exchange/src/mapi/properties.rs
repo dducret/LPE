@@ -387,6 +387,7 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 pub(in crate::mapi) const PID_TAG_RTF_IN_SYNC: u32 = 0x0E1F_000B;
+pub(in crate::mapi) const PID_TAG_TRUST_SENDER: u32 = 0x0E79_0003;
 pub(in crate::mapi) const PID_TAG_ASSOCIATED_SHARING_PROVIDER: u32 = 0x0EA0_0048;
 pub(in crate::mapi) const PID_TAG_READ: u32 = 0x0E69_000B;
 pub(in crate::mapi) const PID_TAG_CONVERSATION_TOPIC_W: u32 = 0x0070_001F;
@@ -400,6 +401,10 @@ pub(in crate::mapi) const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 pub(in crate::mapi) const PID_TAG_DEPTH: u32 = 0x3005_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
+pub(in crate::mapi) const PID_TAG_CREATOR_NAME_W: u32 = 0x3FF8_001F;
+pub(in crate::mapi) const PID_TAG_CREATOR_ENTRY_ID: u32 = 0x3FF9_0102;
+pub(in crate::mapi) const PID_TAG_LAST_MODIFIER_NAME_W: u32 = 0x3FFA_001F;
+pub(in crate::mapi) const PID_TAG_LAST_MODIFIER_ENTRY_ID: u32 = 0x3FFB_0102;
 pub(in crate::mapi) const PID_TAG_OBJECT_TYPE: u32 = 0x0FFE_0003;
 pub(in crate::mapi) const PID_TAG_BODY_STRING8: u32 = 0x1000_001E;
 pub(in crate::mapi) const PID_TAG_BODY_W: u32 = 0x1000_001F;
@@ -457,6 +462,8 @@ pub(in crate::mapi) const PID_TAG_USER_ENTRY_ID: u32 = 0x6619_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_ENTRY_ID: u32 = 0x661B_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_NAME_W: u32 = 0x661C_001F;
 pub(in crate::mapi) const PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID: u32 = 0x6631_0102;
+pub(in crate::mapi) const PID_TAG_HAS_NAMED_PROPERTIES: u32 = 0x664A_000B;
+pub(in crate::mapi) const PID_TAG_LOCALE_ID: u32 = 0x66A1_0003;
 pub(in crate::mapi) const PID_TAG_SERVER_TYPE_DISPLAY_NAME_W: u32 = 0x341D_001F;
 pub(in crate::mapi) const PID_TAG_SERVER_CONNECTED_ICON: u32 = 0x341E_0102;
 pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
@@ -533,6 +540,7 @@ pub(in crate::mapi) const PID_TAG_ATTACH_EXTENSION_W: u32 = 0x3703_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
 pub(in crate::mapi) const ATTACH_BY_VALUE: u32 = 1;
+pub(in crate::mapi) const ATTACH_EMBEDDED_MESSAGE: u32 = 5;
 pub(in crate::mapi) const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_RENDERING: u32 = 0x3709_0102;
 pub(in crate::mapi) const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
@@ -1200,7 +1208,7 @@ fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
         .expect("special folders use valid MAPI folder IDs")
 }
 
-fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
+pub(in crate::mapi) fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
     let entry = super::nspi::principal_address_book_entry(principal);
     let legacy_dn = super::nspi::nspi_entry_unprefixed_legacy_dn(&entry);
     let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);
@@ -2984,6 +2992,54 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
             sort_descending: true,
         };
     }
+    if view_name.eq_ignore_ascii_case("Messages") {
+        return ViewDefinition {
+            kind: ViewDefinitionKind::MailCompact,
+            columns: vec![
+                view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
+                view_named_id_column(
+                    PID_LID_REMINDER_SET_TAG,
+                    0x12,
+                    0x0000_3F40,
+                    PSETID_COMMON_GUID,
+                    PID_LID_REMINDER_SET,
+                    "Reminder",
+                ),
+                view_column(
+                    string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                    0x12,
+                    0x0000_270A,
+                    "Icon",
+                ),
+                view_column(PID_TAG_FLAG_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
+                view_column(PID_TAG_HAS_ATTACHMENTS, 0x12, 0x0000_2F4A, "Attachment"),
+                view_column(
+                    string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
+                    0x0C,
+                    0x0000_2F00,
+                    "From",
+                ),
+                view_column(
+                    string8_property_tag(PID_TAG_SUBJECT_W),
+                    0x11,
+                    0x0000_2F00,
+                    "Subject",
+                ),
+                view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
+                view_column(PID_TAG_MESSAGE_SIZE, 0x0C, 0x0000_2740, "Size"),
+                view_named_string_column(
+                    multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
+                    0x12,
+                    0x0000_7B20,
+                    PS_PUBLIC_STRINGS_GUID,
+                    "Keywords",
+                    "Categories",
+                ),
+            ],
+            sort_column: 7,
+            sort_descending: true,
+        };
+    }
 
     ViewDefinition {
         kind: ViewDefinitionKind::MailCompact,
@@ -4608,7 +4664,7 @@ pub(in crate::mapi) fn attachment_property_value(
         PID_TAG_ATTACH_SIZE => Some(MapiValue::U32(
             attachment.size_octets.min(u64::from(u32::MAX)) as u32,
         )),
-        PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(ATTACH_BY_VALUE)),
+        PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(attachment_method_value(attachment))),
         PID_TAG_RENDERING_POSITION => Some(MapiValue::U32(u32::MAX)),
         PID_TAG_ATTACHMENT_FLAGS | PID_TAG_ATTACHMENT_LINK_ID => Some(MapiValue::U32(0)),
         PID_TAG_ATTACH_FLAGS => Some(MapiValue::U32(if attachment.content_id.is_some() {
@@ -4635,6 +4691,39 @@ pub(in crate::mapi) fn attachment_is_inline(attachment: &MapiAttachment) -> bool
         .as_deref()
         .is_some_and(|value| value.eq_ignore_ascii_case("inline"))
         || attachment.content_id.is_some()
+}
+
+pub(in crate::mapi) fn attachment_is_embedded_message(attachment: &MapiAttachment) -> bool {
+    attachment_metadata_is_embedded_message(&attachment.media_type, &attachment.file_name)
+}
+
+pub(in crate::mapi) fn attachment_metadata_is_embedded_message(
+    media_type: &str,
+    file_name: &str,
+) -> bool {
+    media_type
+        .trim()
+        .eq_ignore_ascii_case("application/vnd.ms-outlook")
+        || file_name.trim().to_ascii_lowercase().ends_with(".msg")
+}
+
+pub(in crate::mapi) fn attachment_method_value(attachment: &MapiAttachment) -> u32 {
+    if attachment_is_embedded_message(attachment) {
+        ATTACH_EMBEDDED_MESSAGE
+    } else {
+        ATTACH_BY_VALUE
+    }
+}
+
+pub(in crate::mapi) fn attachment_method_value_from_metadata(
+    media_type: &str,
+    file_name: &str,
+) -> u32 {
+    if attachment_metadata_is_embedded_message(media_type, file_name) {
+        ATTACH_EMBEDDED_MESSAGE
+    } else {
+        ATTACH_BY_VALUE
+    }
 }
 
 pub(in crate::mapi) fn attachment_file_extension(file_name: &str) -> String {
@@ -5046,6 +5135,12 @@ fn is_empty_virtual_rule_organizer_stream(
 fn mapi_value_stream_bytes(property_tag: u32, value: MapiValue) -> Option<Vec<u8>> {
     match value {
         MapiValue::Binary(value) => Some(value),
+        MapiValue::String(value)
+            if canonical_property_storage_tag(property_tag)
+                == PID_TAG_VIEW_DESCRIPTOR_STRINGS_W =>
+        {
+            Some(utf16_bytes(&value))
+        }
         MapiValue::String(value) if property_tag_type(property_tag) == 0x001E => {
             Some(string8z_bytes(&value))
         }
@@ -5182,6 +5277,13 @@ pub(in crate::mapi) fn utf16z_bytes(value: &str) -> Vec<u8> {
         .collect::<Vec<_>>();
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes
+}
+
+fn utf16_bytes(value: &str) -> Vec<u8> {
+    value
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>()
 }
 
 pub(in crate::mapi) fn string8z_bytes(value: &str) -> Vec<u8> {
@@ -7569,6 +7671,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
     mailbox: &JmapMailbox,
     properties: &HashMap<u32, MapiValue>,
     recipients: &[PendingRecipient],
+    attachments: Vec<AttachmentUploadInput>,
 ) -> JmapImportedEmailInput {
     let subject = pending_text_property(
         properties,
@@ -7613,7 +7716,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         size_octets,
         received_at: None,
         thread_id,
-        attachments: Vec::new(),
+        attachments,
     }
 }
 
@@ -7856,8 +7959,45 @@ where
 {
     let email = message_for_id(folder_id, message_id, mailboxes, emails)
         .ok_or_else(|| anyhow!("canonical MAPI message was not found"))?;
-    let update = message_followup_update_from_mapi_values(values)?;
+    let mut subject = None;
+    let mut body_text = None;
+    let mut followup_values = Vec::new();
+    for (tag, value) in values {
+        match tag {
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                subject = Some(
+                    value
+                        .into_text()
+                        .ok_or_else(|| anyhow!("invalid PidTagSubject value"))?,
+                );
+            }
+            PID_TAG_BODY_W => {
+                body_text = Some(
+                    value
+                        .into_text()
+                        .ok_or_else(|| anyhow!("invalid PidTagBody value"))?,
+                );
+            }
+            _ => followup_values.push((tag, value)),
+        }
+    }
 
+    if subject.is_some() || body_text.is_some() {
+        store
+            .update_jmap_email_content(
+                principal.account_id,
+                email.id,
+                subject,
+                body_text,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-set-message-content".to_string(),
+                    subject: format!("message:{}", email.id),
+                },
+            )
+            .await?;
+    }
+    let update = message_followup_update_from_mapi_values(followup_values)?;
     if message_followup_update_is_empty(&update) {
         return Ok(());
     }
@@ -7984,7 +8124,7 @@ pub(in crate::mapi) fn message_followup_update_from_mapi_values(
             PID_NAME_KEYWORDS_TAG => {
                 update.categories = Some(categories_from_mapi_value(value)?);
             }
-            PID_TAG_SOURCE_KEY => {}
+            PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => {}
             _ => return Err(anyhow!("canonical MAPI message property is not mutable")),
         }
     }
@@ -8862,8 +9002,13 @@ mod tests {
             recipient_type: 0x01,
         }];
 
-        let imported =
-            jmap_import_from_pending_message(&principal, &mailbox, &properties, &recipients);
+        let imported = jmap_import_from_pending_message(
+            &principal,
+            &mailbox,
+            &properties,
+            &recipients,
+            Vec::new(),
+        );
         assert_eq!(imported.body_text, "Hello\nWorld & team");
         assert_eq!(
             imported.body_html_sanitized.as_deref(),
@@ -8910,8 +9055,13 @@ mod tests {
             recipient_type: 0x01,
         }];
 
-        let imported =
-            jmap_import_from_pending_message(&principal, &mailbox, &properties, &recipients);
+        let imported = jmap_import_from_pending_message(
+            &principal,
+            &mailbox,
+            &properties,
+            &recipients,
+            Vec::new(),
+        );
         assert_eq!(imported.body_html_sanitized.as_deref(), Some(html));
         assert!(imported.body_text.contains("This is a sample body text"));
 
@@ -13508,6 +13658,9 @@ mod tests {
             message_statuses: std::collections::HashMap::new(),
             message_save_generations: std::collections::HashMap::new(),
             message_handle_generations: std::collections::HashMap::new(),
+            pending_message_recipient_replacements: std::collections::HashMap::new(),
+            pending_message_attachments: std::collections::HashMap::new(),
+            pending_attachment_parent_messages: std::collections::HashMap::new(),
             pending_attachment_deletions: std::collections::HashSet::new(),
             pending_embedded_message_ids: std::collections::HashMap::new(),
             pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -13548,6 +13701,23 @@ mod tests {
         );
         assert_eq!(stream.len(), 510);
         assert!(writable_target.is_none());
+
+        let (strings_stream, writable_target) = property_stream_data(
+            &mut session,
+            1,
+            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+            0,
+            &[],
+            account_id,
+            &snapshot,
+        )
+        .expect("common view descriptor strings stream");
+        assert_eq!(
+            strings_stream,
+            view_descriptor_strings_binary(&outlook_mail_view_definition("Compact"))
+        );
+        assert!(strings_stream.ends_with(&[0x0A, 0x00]));
+        assert!(writable_target.is_none());
     }
 
     #[test]
@@ -13580,6 +13750,9 @@ mod tests {
             message_statuses: std::collections::HashMap::new(),
             message_save_generations: std::collections::HashMap::new(),
             message_handle_generations: std::collections::HashMap::new(),
+            pending_message_recipient_replacements: std::collections::HashMap::new(),
+            pending_message_attachments: std::collections::HashMap::new(),
+            pending_attachment_parent_messages: std::collections::HashMap::new(),
             pending_attachment_deletions: std::collections::HashSet::new(),
             pending_embedded_message_ids: std::collections::HashMap::new(),
             pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -13678,6 +13851,9 @@ mod tests {
             message_statuses: std::collections::HashMap::new(),
             message_save_generations: std::collections::HashMap::new(),
             message_handle_generations: std::collections::HashMap::new(),
+            pending_message_recipient_replacements: std::collections::HashMap::new(),
+            pending_message_attachments: std::collections::HashMap::new(),
+            pending_attachment_parent_messages: std::collections::HashMap::new(),
             pending_attachment_deletions: std::collections::HashSet::new(),
             pending_embedded_message_ids: std::collections::HashMap::new(),
             pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -13804,6 +13980,9 @@ mod tests {
             message_statuses: std::collections::HashMap::new(),
             message_save_generations: std::collections::HashMap::new(),
             message_handle_generations: std::collections::HashMap::new(),
+            pending_message_recipient_replacements: std::collections::HashMap::new(),
+            pending_message_attachments: std::collections::HashMap::new(),
+            pending_attachment_parent_messages: std::collections::HashMap::new(),
             pending_attachment_deletions: std::collections::HashSet::new(),
             pending_embedded_message_ids: std::collections::HashMap::new(),
             pending_embedded_message_attachments: std::collections::HashMap::new(),

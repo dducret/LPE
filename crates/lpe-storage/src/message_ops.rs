@@ -761,6 +761,117 @@ impl Storage {
             .ok_or_else(|| anyhow::anyhow!("updated message not found"))
     }
 
+    pub async fn update_jmap_email_content(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        subject: Option<String>,
+        body_text: Option<String>,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        if subject.is_none() && body_text.is_none() {
+            return self
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("message not found"));
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let message = sqlx::query(
+            r#"
+            SELECT m.domain_id
+            FROM messages m
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id AND mm.message_id = m.id
+            WHERE m.tenant_id = $1 AND mm.account_id = $2 AND m.id = $3
+              AND mm.visibility = 'visible'
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+        let domain_id: Uuid = message.try_get("domain_id")?;
+
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        if let Some(subject) = subject {
+            sqlx::query(
+                r#"
+                UPDATE messages
+                SET normalized_subject = $4, updated_at = NOW()
+                WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(domain_id)
+            .bind(message_id)
+            .bind(crate::normalize_subject(&subject))
+            .execute(&mut *tx)
+            .await?;
+        }
+        if let Some(body_text) = body_text {
+            self.upsert_message_body_in_tx(
+                &mut tx, &tenant_id, domain_id, message_id, &body_text, None,
+            )
+            .await?;
+        }
+        let rows = sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET modseq = $4, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+              AND visibility = 'visible'
+            RETURNING id, mailbox_id, thread_id, imap_uid
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(modseq)
+        .fetch_all(&mut *tx)
+        .await?;
+        if rows.is_empty() {
+            bail!("message not found");
+        }
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        for row in rows {
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(row.try_get("mailbox_id")?),
+                "mailbox_message",
+                row.try_get("id")?,
+                "updated",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                    "imapUid": row.try_get::<i64, _>("imap_uid")?
+                }),
+            )
+            .await?;
+        }
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("updated message not found"))
+    }
+
     pub async fn import_jmap_email(
         &self,
         input: JmapImportedEmailInput,

@@ -16,7 +16,22 @@ const INCR_SYNC_MESSAGE: u32 = FastTransferMarker::IncrSyncMessage.as_u32();
 const INCR_SYNC_READ: u32 = FastTransferMarker::IncrSyncRead.as_u32();
 const INCR_SYNC_STATE_BEGIN: u32 = FastTransferMarker::IncrSyncStateBegin.as_u32();
 const INCR_SYNC_STATE_END: u32 = FastTransferMarker::IncrSyncStateEnd.as_u32();
+const INCR_SYNC_PROGRESS_MODE: u32 = FastTransferMarker::IncrSyncProgressMode.as_u32();
+const INCR_SYNC_PROGRESS_PER_MSG: u32 = FastTransferMarker::IncrSyncProgressPerMsg.as_u32();
+const NEW_ATTACH: u32 = FastTransferMarker::NewAttach.as_u32();
+const START_EMBED: u32 = FastTransferMarker::StartEmbed.as_u32();
+const END_EMBED: u32 = FastTransferMarker::EndEmbed.as_u32();
+const START_RECIP: u32 = FastTransferMarker::StartRecip.as_u32();
+const END_TO_RECIP: u32 = FastTransferMarker::EndToRecip.as_u32();
+const START_TOP_FLD: u32 = FastTransferMarker::StartTopFld.as_u32();
+const START_SUB_FLD: u32 = FastTransferMarker::StartSubFld.as_u32();
+const END_FOLDER: u32 = FastTransferMarker::EndFolder.as_u32();
+const START_MESSAGE: u32 = FastTransferMarker::StartMessage.as_u32();
+const END_MESSAGE: u32 = FastTransferMarker::EndMessage.as_u32();
+const END_ATTACH: u32 = FastTransferMarker::EndAttach.as_u32();
+const START_FAI_MSG: u32 = FastTransferMarker::StartFAIMsg.as_u32();
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
@@ -29,9 +44,21 @@ const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
+const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
+const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
 const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
+const PID_TAG_ATTACH_ENCODING: u32 = 0x3702_0102;
+const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
+const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
+const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
+const PID_TAG_ATTACH_RENDERING: u32 = 0x3709_0102;
+const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
+const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
+const PID_TAG_ATTACH_FLAGS: u32 = 0x3714_0003;
+const PID_TAG_ATTACHMENT_HIDDEN: u32 = 0x7FFE_000B;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
@@ -51,6 +78,8 @@ const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
 const MSGFLAG_READ: u32 = 0x0000_0001;
 const MSGFLAG_UNMODIFIED: u32 = 0x0000_0002;
 const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
+const ATTACH_BY_VALUE: i32 = 1;
+const ATTACH_EMBEDDED_MESSAGE: i32 = 5;
 const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
@@ -75,6 +104,7 @@ const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
 const SYNC_FLAG_FAI: u16 = 0x0010;
 const SYNC_FLAG_NORMAL: u16 = 0x0020;
 const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
+const SYNC_FLAG_PROGRESS: u16 = 0x8000;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const SYNC_EXTRA_FLAG_CHANGE_NUMBER: u32 = 0x0000_0004;
 const SYNC_EXTRA_FLAG_MESSAGE_SIZE: u32 = 0x0000_0008;
@@ -95,6 +125,7 @@ pub(crate) struct AttachmentSyncFact {
     pub(crate) file_name: String,
     pub(crate) media_type: String,
     pub(crate) size_octets: u64,
+    pub(crate) embedded_message_blob: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,11 +731,36 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             .then(left.subject.cmp(&right.subject))
             .then(left.id.cmp(&right.id))
     });
+    let default_include_associated =
+        default_content_sync_includes_associated(emails, special_objects);
+    let mut special_objects = special_objects
+        .iter()
+        .filter(|object| {
+            content_sync_includes_associated(
+                sync_type,
+                sync_flags,
+                object.associated,
+                default_include_associated,
+            )
+        })
+        .collect::<Vec<_>>();
+    special_objects.sort_by(|left, right| {
+        left.folder_id
+            .cmp(&right.folder_id)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.canonical_id.cmp(&right.canonical_id))
+    });
+    if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
+        write_content_sync_progress_mode(&mut buffer, &messages, &special_objects);
+    }
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let message_size = email.size_octets.min(i32::MAX as i64) as i32;
         let source_key = source_key_for_uuid(&email.id);
+        if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
+            write_content_sync_progress_per_message(&mut buffer, message_size, false);
+        }
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
@@ -786,53 +842,21 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
         }
-        if subject_in_scope {
-            if sync_type == SYNC_TYPE_CONTENTS && !sync_property_tags.is_empty() {
-                buffer.extend_from_slice(&0u16.to_le_bytes());
-                buffer.extend_from_slice(&0u16.to_le_bytes());
-            } else {
-                write_visible_recipient_facts(&mut buffer, email);
-                buffer.extend_from_slice(
-                    &(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes(),
-                );
-                let mut attachments = attachments.iter().collect::<Vec<_>>();
-                attachments.sort_by(|left, right| {
-                    left.file_name
-                        .cmp(&right.file_name)
-                        .then(left.media_type.cmp(&right.media_type))
-                        .then(left.id.cmp(&right.id))
-                });
-                for attachment in attachments.into_iter().take(u16::MAX as usize) {
-                    write_prefixed_bytes(&mut buffer, attachment.file_name.as_bytes());
-                    write_prefixed_bytes(&mut buffer, attachment.media_type.as_bytes());
-                    buffer.extend_from_slice(&attachment.size_octets.to_le_bytes());
-                    write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
-                }
-            }
+        if subject_in_scope && (sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty()) {
+            write_fast_transfer_visible_recipients(&mut buffer, email);
+            write_fast_transfer_attachments(&mut buffer, attachments);
         }
     }
 
-    let default_include_associated =
-        default_content_sync_includes_associated(emails, special_objects);
-    let mut special_objects = special_objects
-        .iter()
-        .filter(|object| {
-            content_sync_includes_associated(
-                sync_type,
-                sync_flags,
-                object.associated,
-                default_include_associated,
-            )
-        })
-        .collect::<Vec<_>>();
-    special_objects.sort_by(|left, right| {
-        left.folder_id
-            .cmp(&right.folder_id)
-            .then(left.subject.cmp(&right.subject))
-            .then(left.canonical_id.cmp(&right.canonical_id))
-    });
     for object in &special_objects {
         let change_number = change_number_for_store_id(object.item_id);
+        if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
+            write_content_sync_progress_per_message(
+                &mut buffer,
+                object.message_size.clamp(0, i64::from(i32::MAX)) as i32,
+                object.associated,
+            );
+        }
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(
             &mut buffer,
@@ -2580,6 +2604,22 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                     }
                     in_final_state = false;
                 }
+                NEW_ATTACH | START_EMBED | END_EMBED | END_ATTACH => {
+                    in_final_state = false;
+                }
+                START_RECIP | END_TO_RECIP => {
+                    in_final_state = false;
+                }
+                INCR_SYNC_PROGRESS_MODE | INCR_SYNC_PROGRESS_PER_MSG => {
+                    finish_content_fai_debug_message(
+                        current_message.take(),
+                        &summary.final_cnset_seen_fai_counters,
+                        &mut summary.fai_items,
+                        bytes,
+                        offset,
+                    );
+                    in_final_state = false;
+                }
                 INCR_SYNC_DEL | INCR_SYNC_READ => {
                     finish_content_fai_debug_message(
                         current_message.take(),
@@ -3264,6 +3304,14 @@ fn content_debug_marker(tag: u32) -> bool {
         tag,
         INCR_SYNC_CHG
             | INCR_SYNC_MESSAGE
+            | NEW_ATTACH
+            | START_EMBED
+            | END_EMBED
+            | START_RECIP
+            | END_TO_RECIP
+            | END_ATTACH
+            | INCR_SYNC_PROGRESS_MODE
+            | INCR_SYNC_PROGRESS_PER_MSG
             | INCR_SYNC_DEL
             | INCR_SYNC_READ
             | INCR_SYNC_STATE_BEGIN
@@ -3275,9 +3323,20 @@ fn content_debug_marker(tag: u32) -> bool {
 fn fast_transfer_marker_debug_name(tag: u32) -> &'static str {
     match tag {
         INCR_SYNC_CHG => "IncrSyncChg",
+        INCR_SYNC_MESSAGE => "IncrSyncMessage",
+        NEW_ATTACH => "NewAttach",
+        START_EMBED => "StartEmbed",
+        END_EMBED => "EndEmbed",
+        START_RECIP => "StartRecip",
+        END_TO_RECIP => "EndToRecip",
+        END_ATTACH => "EndAttach",
+        INCR_SYNC_DEL => "IncrSyncDel",
+        INCR_SYNC_READ => "IncrSyncRead",
         INCR_SYNC_STATE_BEGIN => "IncrSyncStateBegin",
         INCR_SYNC_STATE_END => "IncrSyncStateEnd",
         INCR_SYNC_END => "IncrSyncEnd",
+        INCR_SYNC_PROGRESS_MODE => "IncrSyncProgressMode",
+        INCR_SYNC_PROGRESS_PER_MSG => "IncrSyncProgressPerMsg",
         _ => "unknown",
     }
 }
@@ -4564,15 +4623,211 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
     buffer
 }
 
+pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let mut messages = emails.iter().collect::<Vec<_>>();
+    messages.sort_by(|left, right| {
+        left.received_at
+            .cmp(&right.received_at)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.id.cmp(&right.id))
+    });
+    for email in messages {
+        let attachments = attachments_for_message(email.id, attachment_facts);
+        write_u32(&mut buffer, START_MESSAGE);
+        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
+        write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
+        write_fast_transfer_visible_recipients(&mut buffer, email);
+        write_fast_transfer_attachments(&mut buffer, attachments);
+        write_u32(&mut buffer, END_MESSAGE);
+    }
+    buffer
+}
+
+pub(crate) fn fast_transfer_top_folder_buffer_with_attachments(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
+        let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(0);
+        mapi_folder_id_for_mailbox(mailbox, fallback) == folder_id
+    }) {
+        write_fast_transfer_folder_content(
+            &mut buffer,
+            folder_id,
+            mailbox,
+            mailboxes,
+            emails,
+            attachment_facts,
+            true,
+        );
+    } else {
+        write_u32(&mut buffer, START_TOP_FLD);
+        write_u32(&mut buffer, END_FOLDER);
+    }
+    buffer
+}
+
+fn write_fast_transfer_folder_content(
+    buffer: &mut Vec<u8>,
+    folder_id: u64,
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    top_folder: bool,
+) {
+    write_u32(
+        buffer,
+        if top_folder {
+            START_TOP_FLD
+        } else {
+            START_SUB_FLD
+        },
+    );
+    write_fast_transfer_folder_properties(
+        buffer, folder_id, mailbox, mailboxes, emails, top_folder,
+    );
+    let folder_messages = fast_transfer_emails_for_folder(folder_id, mailboxes, emails);
+    buffer.extend_from_slice(&fast_transfer_message_list_buffer_with_attachments(
+        &folder_messages,
+        attachment_facts,
+    ));
+    for child in fast_transfer_child_mailboxes(folder_id, mailboxes) {
+        let child_folder_id = mapi_folder_id_for_mailbox(
+            child,
+            crate::mapi::identity::mapped_mapi_object_id(&child.id).unwrap_or(0),
+        );
+        write_fast_transfer_folder_content(
+            buffer,
+            child_folder_id,
+            child,
+            mailboxes,
+            emails,
+            attachment_facts,
+            false,
+        );
+    }
+    write_u32(buffer, END_FOLDER);
+}
+
+fn write_fast_transfer_folder_properties(
+    buffer: &mut Vec<u8>,
+    folder_id: u64,
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    top_folder: bool,
+) {
+    if !top_folder {
+        write_u32(buffer, PID_TAG_FOLDER_ID);
+        write_object_id(buffer, folder_id);
+        write_utf16_property(
+            buffer,
+            PID_TAG_DISPLAY_NAME_W,
+            mapi_folder_display_name(mailbox),
+        );
+        write_u32(buffer, PID_TAG_PARENT_FOLDER_ID);
+        write_object_id(
+            buffer,
+            mapi_folder_parent_id_for_mailbox(mailbox, mailboxes),
+        );
+    }
+    let (content_count, unread_count, _) =
+        folder_content_counts(folder_id, mailbox, mailboxes, emails);
+    write_utf16_property(
+        buffer,
+        PID_TAG_CONTAINER_CLASS_W,
+        mapi_folder_message_class(mailbox),
+    );
+    write_i32_property(buffer, PID_TAG_CONTENT_COUNT, content_count);
+    write_i32_property(buffer, PID_TAG_CONTENT_UNREAD_COUNT, unread_count);
+    write_i32_property(buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
+    write_bool_property(
+        buffer,
+        PID_TAG_SUBFOLDERS,
+        mapi_folder_has_subfolders(mailbox, mailboxes),
+    );
+}
+
+fn fast_transfer_child_mailboxes<'a>(
+    folder_id: u64,
+    mailboxes: &'a [JmapMailbox],
+) -> Vec<&'a JmapMailbox> {
+    let mut children = mailboxes
+        .iter()
+        .filter(|mailbox| {
+            let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(0);
+            mapi_folder_id_for_mailbox(mailbox, fallback) != folder_id
+                && mapi_folder_parent_id_for_mailbox(mailbox, mailboxes) == folder_id
+        })
+        .collect::<Vec<_>>();
+    children.sort_by(|left, right| {
+        mapi_folder_display_name(left)
+            .cmp(mapi_folder_display_name(right))
+            .then(left.id.cmp(&right.id))
+    });
+    children
+}
+
+fn fast_transfer_emails_for_folder(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Vec<JmapEmail> {
+    let mut messages = emails
+        .iter()
+        .filter(|email| fast_transfer_email_matches_folder(email, folder_id, mailboxes))
+        .cloned()
+        .collect::<Vec<_>>();
+    messages.sort_by(|left, right| {
+        left.received_at
+            .cmp(&right.received_at)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.id.cmp(&right.id))
+    });
+    messages
+}
+
+fn fast_transfer_email_matches_folder(
+    email: &JmapEmail,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> bool {
+    if let Some((role, _, _, _, _)) = virtual_special_folder_metadata(folder_id) {
+        if role.starts_with("__mapi_") {
+            return false;
+        }
+        return email.mailbox_states.iter().any(|state| state.role == role)
+            || email.mailbox_role == role;
+    }
+
+    mailboxes
+        .iter()
+        .find(|mailbox| {
+            let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(0);
+            mapi_folder_id_for_mailbox(mailbox, fallback) == folder_id
+        })
+        .is_some_and(|mailbox| {
+            email
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == mailbox.id)
+                || email.mailbox_id == mailbox.id
+        })
+}
+
 pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
     folder_id: u64,
     objects: &[SpecialMessageSyncFact],
 ) -> Vec<u8> {
-    let mut buffer = b"LPE-MAPI-FASTTRANSFER\0".to_vec();
-    buffer.extend_from_slice(&folder_id.to_le_bytes());
-    buffer.extend_from_slice(&0u32.to_le_bytes());
-    buffer.extend_from_slice(&(objects.len().min(u32::MAX as usize) as u32).to_le_bytes());
-
+    let mut buffer = Vec::new();
     let mut objects = objects.iter().collect::<Vec<_>>();
     objects.sort_by(|left, right| {
         left.last_modified_filetime
@@ -4582,54 +4837,49 @@ pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
     });
     for object in objects {
         let change_number = change_number_for_store_id(object.item_id);
-        write_prefixed_bytes(&mut buffer, &source_key_for_store_id(object.item_id));
-        buffer.extend_from_slice(&change_number.to_le_bytes());
-        let mut flags = 0;
-        if object.read_state.unwrap_or(false) {
-            flags |= MSGFLAG_READ;
-        }
-        buffer.extend_from_slice(&flags.to_le_bytes());
-        buffer.extend_from_slice(&0u32.to_le_bytes());
-        write_prefixed_bytes(&mut buffer, object.subject.as_bytes());
-        write_prefixed_bytes(&mut buffer, object.body_text.as_bytes());
-        write_prefixed_bytes(&mut buffer, object.message_class.as_bytes());
-        write_prefixed_bytes(&mut buffer, &[]);
-        buffer.extend_from_slice(&0u16.to_le_bytes());
-        buffer.extend_from_slice(
-            &(object.named_properties.len().min(u16::MAX as usize) as u16).to_le_bytes(),
+        write_u32(&mut buffer, START_FAI_MSG);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PARENT_SOURCE_KEY,
+            &source_key_for_store_id(folder_id),
         );
-        for (tag, value) in object.named_properties.iter().take(u16::MAX as usize) {
-            buffer.extend_from_slice(&tag.to_le_bytes());
-            write_special_fast_transfer_property_value(&mut buffer, value);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_SOURCE_KEY,
+            &source_key_for_store_id(object.item_id),
+        );
+        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
+        write_i64(&mut buffer, object.last_modified_filetime as i64);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_CHANGE_KEY,
+            &change_key_for_change_number(change_number),
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list(change_number),
+        );
+        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
+        write_u32(&mut buffer, PID_TAG_MID);
+        write_object_id(&mut buffer, object.item_id);
+        write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
+        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
+        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+        write_utf16_property(&mut buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
+        write_utf16_property(&mut buffer, PID_TAG_BODY_W, &object.body_text);
+        write_i32_property(
+            &mut buffer,
+            PID_TAG_MESSAGE_SIZE,
+            object.message_size as i32,
+        );
+        for (tag, value) in &object.named_properties {
+            write_special_message_property(&mut buffer, *tag, value);
         }
+        write_u32(&mut buffer, END_MESSAGE);
     }
 
     buffer
-}
-
-fn write_special_fast_transfer_property_value(
-    buffer: &mut Vec<u8>,
-    value: &SpecialMessagePropertyValue,
-) {
-    match value {
-        SpecialMessagePropertyValue::Binary(value) => write_prefixed_bytes(buffer, value),
-        SpecialMessagePropertyValue::Bool(value) => buffer.push(u8::from(*value)),
-        SpecialMessagePropertyValue::Guid(value) => buffer.extend_from_slice(value),
-        SpecialMessagePropertyValue::I32(value) => buffer.extend_from_slice(&value.to_le_bytes()),
-        SpecialMessagePropertyValue::I64(value) => buffer.extend_from_slice(&value.to_le_bytes()),
-        SpecialMessagePropertyValue::U32(value) => buffer.extend_from_slice(&value.to_le_bytes()),
-        SpecialMessagePropertyValue::U64(value) => buffer.extend_from_slice(&value.to_le_bytes()),
-        SpecialMessagePropertyValue::String(value) => {
-            write_prefixed_bytes(buffer, value.as_bytes())
-        }
-        SpecialMessagePropertyValue::MultiString(values) => {
-            buffer.extend_from_slice(&(values.len().min(u16::MAX as usize) as u16).to_le_bytes());
-            for value in values.iter().take(u16::MAX as usize) {
-                write_prefixed_bytes(buffer, value.as_bytes());
-            }
-        }
-        SpecialMessagePropertyValue::Time(value) => write_prefixed_bytes(buffer, value.as_bytes()),
-    }
 }
 
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
@@ -4677,6 +4927,149 @@ fn write_visible_recipient_facts(buffer: &mut Vec<u8>, email: &JmapEmail) {
                 .as_bytes(),
         );
     }
+}
+
+fn write_fast_transfer_visible_recipients(buffer: &mut Vec<u8>, email: &JmapEmail) {
+    let visible_recipients = email
+        .to
+        .iter()
+        .map(|recipient| (1i32, recipient))
+        .chain(email.cc.iter().map(|recipient| (2i32, recipient)));
+    for (recipient_type, recipient) in visible_recipients {
+        write_u32(buffer, START_RECIP);
+        write_i32_property(buffer, PID_TAG_RECIPIENT_TYPE, recipient_type);
+        write_utf16_property(
+            buffer,
+            PID_TAG_DISPLAY_NAME_W,
+            recipient
+                .display_name
+                .as_deref()
+                .unwrap_or(&recipient.address),
+        );
+        write_utf16_property(buffer, PID_TAG_EMAIL_ADDRESS_W, &recipient.address);
+        write_u32(buffer, END_TO_RECIP);
+    }
+}
+
+fn write_fast_transfer_attachments(buffer: &mut Vec<u8>, attachments: &[AttachmentSyncFact]) {
+    let mut attachments = attachments.iter().collect::<Vec<_>>();
+    attachments.sort_by(|left, right| {
+        left.file_name
+            .cmp(&right.file_name)
+            .then(left.media_type.cmp(&right.media_type))
+            .then(left.id.cmp(&right.id))
+    });
+    for (attach_num, attachment) in attachments.into_iter().enumerate().take(i32::MAX as usize) {
+        let embedded_message = attachment_sync_fact_is_embedded_message(attachment);
+        let attach_method = if embedded_message {
+            ATTACH_EMBEDDED_MESSAGE
+        } else {
+            ATTACH_BY_VALUE
+        };
+        write_u32(buffer, NEW_ATTACH);
+        write_i32_property(buffer, PID_TAG_ATTACH_NUM, attach_num as i32);
+        write_binary_property(buffer, PID_TAG_ATTACH_ENCODING, &[]);
+        write_i32_property(buffer, PID_TAG_RENDERING_POSITION, -1);
+        write_i32_property(
+            buffer,
+            PID_TAG_ATTACH_SIZE,
+            attachment.size_octets.min(i32::MAX as u64) as i32,
+        );
+        write_i32_property(buffer, PID_TAG_ATTACH_METHOD, attach_method);
+        write_binary_property(buffer, PID_TAG_ATTACH_RENDERING, &[]);
+        write_i32_property(buffer, PID_TAG_ATTACH_FLAGS, 0);
+        write_bool_property(buffer, PID_TAG_ATTACHMENT_HIDDEN, false);
+        write_utf16_property(buffer, PID_TAG_ATTACH_FILENAME_W, &attachment.file_name);
+        write_utf16_property(
+            buffer,
+            PID_TAG_ATTACH_LONG_FILENAME_W,
+            &attachment.file_name,
+        );
+        write_utf16_property(buffer, PID_TAG_ATTACH_MIME_TAG_W, &attachment.media_type);
+        if embedded_message {
+            write_fast_transfer_embedded_message(buffer, attachment);
+        }
+        write_u32(buffer, END_ATTACH);
+    }
+}
+
+pub(crate) fn attachment_sync_fact_is_embedded_message(attachment: &AttachmentSyncFact) -> bool {
+    attachment
+        .media_type
+        .trim()
+        .eq_ignore_ascii_case("application/vnd.ms-outlook")
+        || attachment
+            .file_name
+            .trim()
+            .to_ascii_lowercase()
+            .ends_with(".msg")
+}
+
+fn write_fast_transfer_embedded_message(buffer: &mut Vec<u8>, attachment: &AttachmentSyncFact) {
+    let embedded = embedded_message_properties_from_attachment(attachment);
+    write_u32(buffer, START_EMBED);
+    write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, "IPM.Note");
+    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &embedded.subject);
+    if let Some(body) = embedded.body_text.as_deref() {
+        write_utf16_property(buffer, PID_TAG_BODY_W, body);
+    }
+    write_u32(buffer, END_EMBED);
+}
+
+struct EmbeddedMessageFastTransferProperties {
+    subject: String,
+    body_text: Option<String>,
+}
+
+fn embedded_message_properties_from_attachment(
+    attachment: &AttachmentSyncFact,
+) -> EmbeddedMessageFastTransferProperties {
+    let mut properties = attachment
+        .embedded_message_blob
+        .as_deref()
+        .map(embedded_message_properties_from_blob)
+        .unwrap_or_else(|| EmbeddedMessageFastTransferProperties {
+            subject: embedded_message_subject_from_file_name(&attachment.file_name),
+            body_text: None,
+        });
+    if properties.subject.is_empty() {
+        properties.subject = embedded_message_subject_from_file_name(&attachment.file_name);
+    }
+    properties
+}
+
+fn embedded_message_properties_from_blob(blob: &[u8]) -> EmbeddedMessageFastTransferProperties {
+    let text = String::from_utf8_lossy(
+        blob.strip_prefix(b"LPE-MAPI-EMBEDDED-MESSAGE\0")
+            .unwrap_or(blob),
+    );
+    let subject = text
+        .split_once("Subject:")
+        .and_then(|(_, rest)| rest.split_once("\r\n").map(|(value, _)| value))
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let body_text = text
+        .split_once("Body-Length:")
+        .and_then(|(_, rest)| rest.split_once("\r\n").map(|(_, body)| body))
+        .map(|body| {
+            body.split_once("\r\nHtml-Length:")
+                .map(|(value, _)| value)
+                .unwrap_or(body)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    EmbeddedMessageFastTransferProperties { subject, body_text }
+}
+
+fn embedded_message_subject_from_file_name(file_name: &str) -> String {
+    file_name
+        .trim()
+        .strip_suffix(".msg")
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Embedded message")
+        .to_string()
 }
 
 fn attachments_for_message(
@@ -4753,6 +5146,63 @@ fn write_change_number(buffer: &mut Vec<u8>, change_number: u64) {
 fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
     write_u32(buffer, property_tag);
     write_i32(buffer, value);
+}
+
+fn write_content_sync_progress_mode(
+    buffer: &mut Vec<u8>,
+    messages: &[&JmapEmail],
+    special_objects: &[&SpecialMessageSyncFact],
+) {
+    let fai_message_count = special_objects
+        .iter()
+        .filter(|object| object.associated)
+        .count()
+        .min(u32::MAX as usize) as u32;
+    let fai_message_total_size = special_objects
+        .iter()
+        .filter(|object| object.associated)
+        .map(|object| object.message_size.max(0) as u64)
+        .sum::<u64>();
+    let normal_special_count = special_objects
+        .iter()
+        .filter(|object| !object.associated)
+        .count();
+    let normal_message_count = messages
+        .len()
+        .saturating_add(normal_special_count)
+        .min(u32::MAX as usize) as u32;
+    let normal_message_total_size = messages
+        .iter()
+        .map(|message| message.size_octets.max(0) as u64)
+        .sum::<u64>()
+        .saturating_add(
+            special_objects
+                .iter()
+                .filter(|object| !object.associated)
+                .map(|object| object.message_size.max(0) as u64)
+                .sum::<u64>(),
+        );
+    let mut progress = Vec::with_capacity(32);
+    progress.extend_from_slice(&0u16.to_le_bytes());
+    progress.extend_from_slice(&0u16.to_le_bytes());
+    progress.extend_from_slice(&fai_message_count.to_le_bytes());
+    progress.extend_from_slice(&fai_message_total_size.to_le_bytes());
+    progress.extend_from_slice(&normal_message_count.to_le_bytes());
+    progress.extend_from_slice(&0u32.to_le_bytes());
+    progress.extend_from_slice(&normal_message_total_size.to_le_bytes());
+
+    write_u32(buffer, INCR_SYNC_PROGRESS_MODE);
+    write_binary_property(buffer, 0x0000_0102, &progress);
+}
+
+fn write_content_sync_progress_per_message(
+    buffer: &mut Vec<u8>,
+    message_size: i32,
+    associated: bool,
+) {
+    write_u32(buffer, INCR_SYNC_PROGRESS_PER_MSG);
+    write_i32_property(buffer, 0x0000_0003, message_size);
+    write_bool_property(buffer, 0x0000_000B, associated);
 }
 
 fn write_bool_property(buffer: &mut Vec<u8>, property_tag: u32, value: bool) {
@@ -5275,6 +5725,382 @@ mod tests {
             PID_TAG_CHANGE_NUMBER,
             canonical_message_change_number(&test_email()),
         );
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
+        let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let mut email = test_email();
+        email.cc.push(JmapEmailAddress {
+            address: "carol@example.test".to_string(),
+            display_name: Some("Carol".to_string()),
+        });
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            0,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_tag_order(
+            &buffer,
+            &[
+                PID_TAG_SUBJECT_W,
+                START_RECIP,
+                PID_TAG_RECIPIENT_TYPE,
+                PID_TAG_DISPLAY_NAME_W,
+                PID_TAG_EMAIL_ADDRESS_W,
+                END_TO_RECIP,
+                INCR_SYNC_STATE_BEGIN,
+            ],
+        );
+        assert_eq!(
+            buffer
+                .windows(START_RECIP.to_le_bytes().len())
+                .filter(|window| *window == START_RECIP.to_le_bytes())
+                .count(),
+            2
+        );
+        assert_i32_property(&buffer, PID_TAG_RECIPIENT_TYPE, 1);
+        assert_variable_property_present(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Bob"));
+        assert_variable_property_present(
+            &buffer,
+            PID_TAG_EMAIL_ADDRESS_W,
+            &utf16z("bob@example.test"),
+        );
+        assert_variable_property_present(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Carol"));
+        assert_variable_property_present(
+            &buffer,
+            PID_TAG_EMAIL_ADDRESS_W,
+            &utf16z("carol@example.test"),
+        );
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_content_sync_uses_attachment_markers() {
+        let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let mut email = test_email();
+        email.has_attachments = true;
+        email.size_octets = 1024;
+        let attachment = AttachmentSyncFact {
+            id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+            file_reference: "blob-ref".to_string(),
+            file_name: "agenda.txt".to_string(),
+            media_type: "text/plain".to_string(),
+            size_octets: 12,
+            embedded_message_blob: None,
+        };
+        let attachment_facts = [MessageAttachmentSyncFacts {
+            message_id: email_id,
+            attachments: vec![attachment],
+        }];
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            0,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &attachment_facts,
+            &[],
+            1,
+        );
+
+        assert_tag_order(
+            &buffer,
+            &[
+                PID_TAG_SUBJECT_W,
+                START_RECIP,
+                END_TO_RECIP,
+                NEW_ATTACH,
+                PID_TAG_ATTACH_NUM,
+                PID_TAG_ATTACH_ENCODING,
+                PID_TAG_RENDERING_POSITION,
+                PID_TAG_ATTACH_SIZE,
+                PID_TAG_ATTACH_METHOD,
+                PID_TAG_ATTACH_RENDERING,
+                PID_TAG_ATTACH_FLAGS,
+                PID_TAG_ATTACHMENT_HIDDEN,
+                PID_TAG_ATTACH_FILENAME_W,
+                PID_TAG_ATTACH_LONG_FILENAME_W,
+                PID_TAG_ATTACH_MIME_TAG_W,
+                END_ATTACH,
+                INCR_SYNC_STATE_BEGIN,
+            ],
+        );
+        assert_i32_property(&buffer, PID_TAG_ATTACH_NUM, 0);
+        assert_i32_property(&buffer, PID_TAG_ATTACH_SIZE, 12);
+        assert_i32_property(&buffer, PID_TAG_ATTACH_METHOD, ATTACH_BY_VALUE);
+        assert_variable_property_present(&buffer, PID_TAG_ATTACH_FILENAME_W, &utf16z("agenda.txt"));
+        assert_variable_property_present(
+            &buffer,
+            PID_TAG_ATTACH_LONG_FILENAME_W,
+            &utf16z("agenda.txt"),
+        );
+        assert_variable_property_present(&buffer, PID_TAG_ATTACH_MIME_TAG_W, &utf16z("text/plain"));
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_content_sync_uses_embedded_message_markers() {
+        let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let mut email = test_email();
+        email.has_attachments = true;
+        let attachment = AttachmentSyncFact {
+            id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+            file_reference: "embedded-ref".to_string(),
+            file_name: "Embedded child.msg".to_string(),
+            media_type: "application/vnd.ms-outlook".to_string(),
+            size_octets: 512,
+            embedded_message_blob: Some(
+                b"LPE-MAPI-EMBEDDED-MESSAGE\0Subject:Saved child\r\nBody-Length:10\r\nChild body\r\nHtml-Length:0\r\n"
+                    .to_vec(),
+            ),
+        };
+        let attachment_facts = [MessageAttachmentSyncFacts {
+            message_id: email_id,
+            attachments: vec![attachment],
+        }];
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            0,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &attachment_facts,
+            &[],
+            1,
+        );
+
+        assert_tag_sequence(
+            &buffer,
+            &[
+                NEW_ATTACH,
+                PID_TAG_ATTACH_NUM,
+                PID_TAG_ATTACH_METHOD,
+                START_EMBED,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_BODY_W,
+                END_EMBED,
+                END_ATTACH,
+                INCR_SYNC_STATE_BEGIN,
+            ],
+        );
+        assert_i32_property(&buffer, PID_TAG_ATTACH_METHOD, ATTACH_EMBEDDED_MESSAGE);
+        assert_variable_property_present(&buffer, PID_TAG_MESSAGE_CLASS_W, &utf16z("IPM.Note"));
+        assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Saved child"));
+        assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Child body"));
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
+        let email = test_email();
+        let buffer = fast_transfer_message_list_buffer_with_attachments(&[email], &[]);
+
+        assert_tag_sequence(
+            &buffer,
+            &[
+                START_MESSAGE,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_BODY_W,
+                END_MESSAGE,
+            ],
+        );
+        assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
+        assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
+        assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Hello body"));
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_fai_message_marker() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999990").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(90);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            item_id,
+            canonical_id,
+            associated: true,
+            subject: "Outlook Inbox view state".to_string(),
+            body_text: "Client view payload".to_string(),
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            read_state: None,
+            named_properties: vec![(
+                0x7C08_0102,
+                SpecialMessagePropertyValue::Binary(b"view-extra".to_vec()),
+            )],
+        };
+        let buffer = fast_transfer_manifest_buffer_with_special_objects(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[special],
+        );
+
+        assert_tag_sequence(
+            &buffer,
+            &[
+                START_FAI_MSG,
+                PID_TAG_PARENT_SOURCE_KEY,
+                PID_TAG_SOURCE_KEY,
+                PID_TAG_ASSOCIATED,
+                PID_TAG_MID,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_BODY_W,
+                0x7C08_0102,
+                END_MESSAGE,
+            ],
+        );
+        assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
+        assert_bool_property(&buffer, PID_TAG_ASSOCIATED, true);
+        assert_variable_property_present(
+            &buffer,
+            PID_TAG_SUBJECT_W,
+            &utf16z("Outlook Inbox view state"),
+        );
+        assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Client view payload"));
+        assert_variable_property_present(&buffer, 0x7C08_0102, b"view-extra");
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_fast_transfer_copy_folder_uses_top_folder_markers() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let email = test_email();
+        let buffer = fast_transfer_top_folder_buffer_with_attachments(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[mailbox],
+            &[email],
+            &[],
+        );
+
+        assert_tag_sequence(
+            &buffer,
+            &[
+                START_TOP_FLD,
+                PID_TAG_CONTAINER_CLASS_W,
+                PID_TAG_CONTENT_COUNT,
+                PID_TAG_CONTENT_UNREAD_COUNT,
+                PID_TAG_ACCESS,
+                PID_TAG_SUBFOLDERS,
+                START_MESSAGE,
+                PID_TAG_SUBJECT_W,
+                END_MESSAGE,
+                END_FOLDER,
+            ],
+        );
+        assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
+        assert_variable_property_present(&buffer, PID_TAG_CONTAINER_CLASS_W, &utf16z("IPF.Note"));
+        assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
+    }
+
+    #[test]
+    fn microsoft_oxcfxics_fast_transfer_copy_folder_uses_subfolder_markers() {
+        let parent_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        let child_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+        let child_folder_id = crate::mapi::identity::mapi_store_id(600);
+        crate::mapi::identity::remember_mapi_identity(
+            parent_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        crate::mapi::identity::remember_mapi_identity(child_id, child_folder_id);
+        let parent = JmapMailbox {
+            id: parent_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let child = JmapMailbox {
+            id: child_id,
+            parent_id: Some(parent_id),
+            role: String::new(),
+            name: "Project".to_string(),
+            sort_order: 50,
+            modseq: 43,
+            total_emails: 1,
+            unread_emails: 0,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let parent_email = test_email();
+        let mut child_email = test_email();
+        child_email.id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+        child_email.mailbox_id = child_id;
+        child_email.mailbox_role.clear();
+        child_email.mailbox_name = "Project".to_string();
+        child_email.mailbox_ids = vec![child_id];
+        child_email.mailbox_states[0].mailbox_id = child_id;
+        child_email.mailbox_states[0].role.clear();
+        child_email.mailbox_states[0].name = "Project".to_string();
+        child_email.subject = "Child message".to_string();
+        let buffer = fast_transfer_top_folder_buffer_with_attachments(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[parent, child],
+            &[parent_email, child_email],
+            &[],
+        );
+
+        assert_tag_sequence(
+            &buffer,
+            &[
+                START_TOP_FLD,
+                START_MESSAGE,
+                PID_TAG_SUBJECT_W,
+                END_MESSAGE,
+                START_SUB_FLD,
+                PID_TAG_FOLDER_ID,
+                PID_TAG_DISPLAY_NAME_W,
+                PID_TAG_PARENT_FOLDER_ID,
+                START_MESSAGE,
+                PID_TAG_SUBJECT_W,
+                END_MESSAGE,
+                END_FOLDER,
+            ],
+        );
+        assert_variable_property_present(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Project"));
+        assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Child message"));
     }
 
     #[test]
@@ -6124,6 +6950,82 @@ mod tests {
     }
 
     #[test]
+    fn microsoft_oxcfxics_content_sync_progress_markers_follow_progress_flag_example() {
+        let mut email = test_email();
+        email.subject = "Progress message".to_string();
+        email.size_octets = 56;
+        crate::mapi::identity::remember_mapi_identity(
+            email.id,
+            crate::mapi::identity::mapi_store_id(56),
+        );
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL | SYNC_FLAG_PROGRESS,
+            SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            1,
+        );
+
+        assert_tag_order(
+            &buffer,
+            &[
+                INCR_SYNC_PROGRESS_MODE,
+                0x0000_0102,
+                INCR_SYNC_PROGRESS_PER_MSG,
+                0x0000_0003,
+                0x0000_000B,
+                INCR_SYNC_CHG,
+                INCR_SYNC_MESSAGE,
+                INCR_SYNC_STATE_BEGIN,
+                INCR_SYNC_STATE_END,
+                INCR_SYNC_END,
+            ],
+        );
+        let progress_offset = buffer
+            .windows(4)
+            .position(|window| window == 0x0000_0102u32.to_le_bytes())
+            .unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                buffer[progress_offset + 4..progress_offset + 8]
+                    .try_into()
+                    .unwrap()
+            ),
+            32
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                buffer[progress_offset + 24..progress_offset + 28]
+                    .try_into()
+                    .unwrap()
+            ),
+            1
+        );
+        assert_eq!(
+            u64::from_le_bytes(
+                buffer[progress_offset + 32..progress_offset + 40]
+                    .try_into()
+                    .unwrap()
+            ),
+            56
+        );
+    }
+
+    #[test]
     fn content_sync_manifest_starts_fai_message_before_item_properties() {
         let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999997").unwrap();
         let item_id = crate::mapi::identity::mapi_store_id(97);
@@ -6735,6 +7637,15 @@ mod tests {
         assert_eq!(&buffer[offset + 8..offset + 8 + value.len()], value);
     }
 
+    fn assert_variable_property_present(buffer: &[u8], property_tag: u32, value: &[u8]) {
+        let mut expected = property_tag.to_le_bytes().to_vec();
+        expected.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        expected.extend_from_slice(value);
+        assert!(buffer
+            .windows(expected.len())
+            .any(|window| window == expected));
+    }
+
     fn assert_i32_property(buffer: &[u8], property_tag: u32, value: i32) {
         let tag = property_tag.to_le_bytes();
         let offset = buffer
@@ -6786,6 +7697,18 @@ mod tests {
                 assert!(previous < offset);
             }
             previous = Some(offset);
+        }
+    }
+
+    fn assert_tag_sequence(buffer: &[u8], tags: &[u32]) {
+        let mut search_offset = 0;
+        for tag in tags {
+            let tag_bytes = tag.to_le_bytes();
+            let relative_offset = buffer[search_offset..]
+                .windows(tag_bytes.len())
+                .position(|window| window == tag_bytes)
+                .expect("tag is present after previous tag");
+            search_offset += relative_offset + tag_bytes.len();
         }
     }
 

@@ -4,6 +4,7 @@ use super::tables::*;
 use super::*;
 
 use crate::mapi::properties::*;
+use crate::mapi::wire::RopId;
 
 pub(in crate::mapi) use super::identity::{
     long_term_id_from_object_id, ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID,
@@ -1338,6 +1339,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
                         file_name: attachment.file_name.clone(),
                         media_type: attachment.media_type.clone(),
                         size_octets: attachment.size_octets,
+                        embedded_message_blob: None,
                     })
                     .collect(),
             })
@@ -1346,6 +1348,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
 }
 
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
+    rop_id: u8,
     object: &MapiObject,
     account_id: Uuid,
     mailboxes: &[JmapMailbox],
@@ -1354,6 +1357,37 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
 ) -> Option<(u64, Vec<u8>)> {
     match object {
         MapiObject::Folder { folder_id, .. } => {
+            if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder) {
+                let copy_mailboxes = sync_mailboxes_for_excluding_deleted(
+                    *folder_id,
+                    0x02,
+                    mailboxes,
+                    &HashSet::new(),
+                );
+                let mut attachment_facts = Vec::new();
+                for mailbox in &copy_mailboxes {
+                    let copied_folder_id = mapi_folder_id(mailbox);
+                    let folder_messages =
+                        emails_for_folder(copied_folder_id, &copy_mailboxes, emails)
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<_>>();
+                    attachment_facts.extend(sync_attachment_facts_for(
+                        copied_folder_id,
+                        &folder_messages,
+                        snapshot,
+                    ));
+                }
+                return Some((
+                    *folder_id,
+                    mapi_mailstore::fast_transfer_top_folder_buffer_with_attachments(
+                        *folder_id,
+                        &copy_mailboxes,
+                        emails,
+                        &attachment_facts,
+                    ),
+                ));
+            }
             let folder = folder_row_for_id(*folder_id, mailboxes)
                 .cloned()
                 .into_iter()
@@ -2635,6 +2669,7 @@ mod tests {
         };
 
         assert!(fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2654,6 +2689,7 @@ mod tests {
         };
 
         let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2718,6 +2754,7 @@ mod tests {
         };
 
         let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2737,6 +2774,7 @@ mod tests {
         };
 
         let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2756,6 +2794,7 @@ mod tests {
         };
 
         let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2775,6 +2814,7 @@ mod tests {
         };
 
         let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
             &object,
             account_id,
             &[],
@@ -2814,7 +2854,14 @@ mod tests {
             message_id: snapshot.delegate_freebusy_messages()[0].id,
         };
 
-        let manifest = fast_transfer_manifest_for_object(&object, account_id, &[], &[], &snapshot);
+        let manifest = fast_transfer_manifest_for_object(
+            RopId::FastTransferSourceCopyTo.as_u8(),
+            &object,
+            account_id,
+            &[],
+            &[],
+            &snapshot,
+        );
 
         assert!(manifest.is_none());
     }

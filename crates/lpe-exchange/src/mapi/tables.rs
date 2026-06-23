@@ -471,23 +471,6 @@ fn category_id_for_value(folder_id: u64, property_tag: u32, value: &str) -> u64 
     hash | 0x8000_0000_0000_0000
 }
 
-fn category_value_for_email(email: &JmapEmail, property_tag: u32) -> String {
-    let storage_tag = canonical_property_storage_tag(property_tag);
-    if named_property_id_matches(storage_tag, PID_NAME_KEYWORDS_TAG) {
-        return email
-            .categories
-            .iter()
-            .find(|category| !category.trim().is_empty())
-            .map(|category| category.trim().to_string())
-            .unwrap_or_default();
-    }
-    match storage_tag {
-        tag => email_property_value(email, tag)
-            .map(|value| category_value_to_string(&value))
-            .unwrap_or_default(),
-    }
-}
-
 fn category_values_for_email(email: &JmapEmail, property_tag: u32) -> Vec<String> {
     let storage_tag = canonical_property_storage_tag(property_tag);
     if named_property_id_matches(storage_tag, PID_NAME_KEYWORDS_TAG) {
@@ -504,9 +487,28 @@ fn category_values_for_email(email: &JmapEmail, property_tag: u32) -> Vec<String
             values
         }
     } else {
-        match storage_tag {
-            _ => vec![category_value_for_email(email, property_tag)],
+        match email_property_value(email, storage_tag) {
+            Some(value) => category_values_from_mapi_value(value),
+            None => vec![String::new()],
         }
+    }
+}
+
+fn category_values_from_mapi_value(value: MapiValue) -> Vec<String> {
+    match value {
+        MapiValue::MultiString(values) => {
+            let values = values
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                vec![String::new()]
+            } else {
+                values
+            }
+        }
+        value => vec![category_value_to_string(&value)],
     }
 }
 
@@ -3868,7 +3870,7 @@ pub(in crate::mapi) fn serialize_attachment_row(
             PID_TAG_ATTACH_SIZE => {
                 write_u32(&mut row, attachment.size_octets.min(u32::MAX as u64) as u32)
             }
-            PID_TAG_ATTACH_METHOD => write_u32(&mut row, ATTACH_BY_VALUE),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, attachment_method_value(attachment)),
             PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
             PID_TAG_ATTACHMENT_FLAGS | PID_TAG_ATTACHMENT_LINK_ID => write_u32(&mut row, 0),
             PID_TAG_ATTACH_FLAGS => write_u32(
@@ -6448,6 +6450,7 @@ mod tests {
     use super::*;
     use crate::mapi::wire::MapiRestrictionType;
     use crate::mapi::wire::RopId;
+    use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
     use lpe_storage::{
         AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationRights,
         MailboxRule, SearchFolderDefinition,
@@ -6792,7 +6795,7 @@ mod tests {
             ),
             Some(MapiValue::Binary(value))
                 if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
-                    && value.windows(b"OLPrefsVersion".len()).any(|window| window == b"OLPrefsVersion")
+                    && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
         ));
         assert_eq!(
             pending_associated_message_property_value(&principal, &properties, PID_TAG_CHANGE_KEY),
@@ -8620,6 +8623,25 @@ mod tests {
         assert_category_leaf_row(&rows[3].row, &email, 2, "Customer");
     }
 
+    #[test]
+    fn microsoft_oxctabl_category_values_preserve_all_multistring_instances() {
+        assert_eq!(
+            category_values_from_mapi_value(MapiValue::MultiString(vec![
+                " Category1 ".to_string(),
+                String::new(),
+                "Category2".to_string(),
+            ])),
+            vec!["Category1".to_string(), "Category2".to_string()]
+        );
+        assert_eq!(
+            category_values_from_mapi_value(MapiValue::MultiString(vec![
+                String::new(),
+                " ".to_string(),
+            ])),
+            vec![String::new()]
+        );
+    }
+
     fn assert_category_header_row(
         row: &[u8],
         category: &str,
@@ -9408,6 +9430,15 @@ mod tests {
             definition_id,
             crate::mapi::identity::mapi_store_id(123),
         );
+        let mut definition_blob = vec![
+            0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        ];
+        definition_blob.extend_from_slice(&1u32.to_le_bytes());
+        definition_blob.push(0xAA);
+        definition_blob.extend_from_slice(&0u32.to_le_bytes());
+        definition_blob.push(0xBB);
+        definition_blob.extend_from_slice(&0u32.to_le_bytes());
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
             Vec::new(),
@@ -9428,7 +9459,10 @@ mod tests {
             definition_kind: "exchange_builtin".to_string(),
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
-            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_reminders",
+                "pidTagSearchFolderDefinition": BASE64_STANDARD.encode(&definition_blob)
+            }),
             excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }]);
@@ -11636,7 +11670,7 @@ mod tests {
             associated_config_property_value(&message, PID_TAG_ROAMING_DICTIONARY),
             Some(MapiValue::Binary(value))
                 if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
-                    && value.windows(b"OLPrefsVersion".len()).any(|window| window == b"OLPrefsVersion")
+                    && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
                     && value.windows(b"9-1".len()).any(|window| window == b"9-1")
         ));
         assert!(matches!(
@@ -13436,7 +13470,10 @@ pub(in crate::mapi) fn serialize_pending_attachment_row(
             }
             PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, &media_type),
             PID_TAG_ATTACH_SIZE => write_u32(&mut row, size),
-            PID_TAG_ATTACH_METHOD => write_u32(&mut row, ATTACH_BY_VALUE),
+            PID_TAG_ATTACH_METHOD => write_u32(
+                &mut row,
+                attachment_method_value_from_metadata(&media_type, &file_name),
+            ),
             PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
             PID_TAG_ATTACHMENT_FLAGS | PID_TAG_ATTACHMENT_LINK_ID => write_u32(&mut row, 0),
             PID_TAG_ATTACH_FLAGS => {
@@ -14504,7 +14541,7 @@ fn configuration_roaming_datatypes(
 }
 
 pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn minimal_custom_action_roaming_xml_stream() -> Vec<u8> {
@@ -15064,8 +15101,11 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
             PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
             PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
+            PID_TAG_PRIORITY | PID_TAG_SENSITIVITY => Some(MapiValue::U32(0)),
             PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_UNSENT | MSGFLAG_READ)),
             PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+            PID_TAG_TRUST_SENDER => Some(MapiValue::U32(1)),
+            PID_TAG_HAS_NAMED_PROPERTIES => Some(MapiValue::Bool(false)),
             PID_TAG_DISPLAY_BCC_W | PID_TAG_DISPLAY_CC_W | PID_TAG_DISPLAY_TO_W => {
                 Some(MapiValue::String(String::new()))
             }
@@ -15091,6 +15131,13 @@ pub(in crate::mapi) fn pending_message_property_value(
             }
             PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(pending_message_search_key(properties))),
             PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
+            PID_TAG_LOCALE_ID => Some(MapiValue::U32(0x0409)),
+            PID_TAG_CREATOR_NAME_W | PID_TAG_LAST_MODIFIER_NAME_W => {
+                Some(MapiValue::String(principal.display_name.clone()))
+            }
+            PID_TAG_CREATOR_ENTRY_ID | PID_TAG_LAST_MODIFIER_ENTRY_ID => {
+                Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
+            }
             PID_TAG_SENDER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(principal.email.clone())),
             _ => None,

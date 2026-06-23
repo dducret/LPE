@@ -729,6 +729,18 @@ impl MapiSyncType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum FastTransferMarker {
+    NewAttach = 0x4000_0003,
+    StartEmbed = 0x4001_0003,
+    EndEmbed = 0x4002_0003,
+    StartRecip = 0x4003_0003,
+    EndToRecip = 0x4004_0003,
+    StartTopFld = 0x4009_0003,
+    StartSubFld = 0x400A_0003,
+    EndFolder = 0x400B_0003,
+    StartMessage = 0x400C_0003,
+    EndMessage = 0x400D_0003,
+    EndAttach = 0x400E_0003,
+    StartFAIMsg = 0x4010_0003,
     IncrSyncChg = 0x4012_0003,
     IncrSyncDel = 0x4013_0003,
     IncrSyncEnd = 0x4014_0003,
@@ -736,6 +748,8 @@ pub(crate) enum FastTransferMarker {
     IncrSyncRead = 0x402F_0003,
     IncrSyncStateBegin = 0x403A_0003,
     IncrSyncStateEnd = 0x403B_0003,
+    IncrSyncProgressMode = 0x4074_000B,
+    IncrSyncProgressPerMsg = 0x4075_000B,
 }
 
 impl FastTransferMarker {
@@ -746,6 +760,18 @@ impl FastTransferMarker {
     #[allow(dead_code)]
     pub(crate) fn from_u32(value: u32) -> Option<Self> {
         match value {
+            0x4000_0003 => Some(Self::NewAttach),
+            0x4001_0003 => Some(Self::StartEmbed),
+            0x4002_0003 => Some(Self::EndEmbed),
+            0x4003_0003 => Some(Self::StartRecip),
+            0x4004_0003 => Some(Self::EndToRecip),
+            0x4009_0003 => Some(Self::StartTopFld),
+            0x400A_0003 => Some(Self::StartSubFld),
+            0x400B_0003 => Some(Self::EndFolder),
+            0x400C_0003 => Some(Self::StartMessage),
+            0x400D_0003 => Some(Self::EndMessage),
+            0x400E_0003 => Some(Self::EndAttach),
+            0x4010_0003 => Some(Self::StartFAIMsg),
             0x4012_0003 => Some(Self::IncrSyncChg),
             0x4013_0003 => Some(Self::IncrSyncDel),
             0x4014_0003 => Some(Self::IncrSyncEnd),
@@ -753,6 +779,8 @@ impl FastTransferMarker {
             0x402F_0003 => Some(Self::IncrSyncRead),
             0x403A_0003 => Some(Self::IncrSyncStateBegin),
             0x403B_0003 => Some(Self::IncrSyncStateEnd),
+            0x4074_000B => Some(Self::IncrSyncProgressMode),
+            0x4075_000B => Some(Self::IncrSyncProgressPerMsg),
             _ => {
                 let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
@@ -771,21 +799,7 @@ impl FastTransferMarker {
     #[allow(dead_code)]
     pub(crate) fn known_unsupported_name(value: u32) -> Option<&'static str> {
         match value {
-            0x4009_0003 => Some("StartTopFld"),
-            0x400A_0003 => Some("StartSubFld"),
-            0x400B_0003 => Some("EndFolder"),
-            0x400C_0003 => Some("StartMessage"),
-            0x400D_0003 => Some("EndMessage"),
-            0x4010_0003 => Some("StartFAIMsg"),
-            0x4001_0003 => Some("StartEmbed"),
-            0x4002_0003 => Some("EndEmbed"),
-            0x4003_0003 => Some("StartRecip"),
-            0x4004_0003 => Some("EndToRecip"),
-            0x4000_0003 => Some("NewAttach"),
-            0x400E_0003 => Some("EndAttach"),
             0x407D_0003 => Some("IncrSyncChgPartial"),
-            0x4074_000B => Some("IncrSyncProgressMode"),
-            0x4075_000B => Some("IncrSyncProgressPerMsg"),
             0x407B_0102 => Some("IncrSyncGroupInfo"),
             0x4018_0003 => Some("FXErrorInfo"),
             _ => None,
@@ -956,6 +970,18 @@ mod tests {
         }
 
         let markers = [
+            FastTransferMarker::NewAttach,
+            FastTransferMarker::StartEmbed,
+            FastTransferMarker::EndEmbed,
+            FastTransferMarker::StartRecip,
+            FastTransferMarker::EndToRecip,
+            FastTransferMarker::StartTopFld,
+            FastTransferMarker::StartSubFld,
+            FastTransferMarker::EndFolder,
+            FastTransferMarker::StartMessage,
+            FastTransferMarker::EndMessage,
+            FastTransferMarker::EndAttach,
+            FastTransferMarker::StartFAIMsg,
             FastTransferMarker::IncrSyncChg,
             FastTransferMarker::IncrSyncDel,
             FastTransferMarker::IncrSyncEnd,
@@ -963,6 +989,8 @@ mod tests {
             FastTransferMarker::IncrSyncRead,
             FastTransferMarker::IncrSyncStateBegin,
             FastTransferMarker::IncrSyncStateEnd,
+            FastTransferMarker::IncrSyncProgressMode,
+            FastTransferMarker::IncrSyncProgressPerMsg,
         ];
         for marker in markers {
             assert_eq!(FastTransferMarker::from_u32(marker.as_u32()), Some(marker));
@@ -999,16 +1027,64 @@ mod tests {
             Some(FastTransferMarker::IncrSyncChg)
         );
         assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x407D_0003),
+            Some("IncrSyncChgPartial")
+        );
+        assert_eq!(
             FastTransferMarker::known_unsupported_name(0x4009_0003),
-            Some("StartTopFld")
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x400A_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x400B_0003),
+            None
         );
         assert_eq!(
             FastTransferMarker::known_unsupported_name(0x4074_000B),
-            Some("IncrSyncProgressMode")
+            None
         );
         assert_eq!(
             FastTransferMarker::known_unsupported_name(0x4075_000B),
-            Some("IncrSyncProgressPerMsg")
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4003_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4004_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4000_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x400E_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4001_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4002_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x400C_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x400D_0003),
+            None
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4010_0003),
+            None
         );
         assert_eq!(
             FastTransferMarker::known_unsupported_name(0x407B_0102),

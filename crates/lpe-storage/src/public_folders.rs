@@ -69,6 +69,7 @@ pub struct CreatePublicFolderInput {
 pub struct UpdatePublicFolderInput {
     pub account_id: Uuid,
     pub folder_id: Uuid,
+    pub parent_folder_id: Option<Uuid>,
     pub display_name: Option<String>,
     pub folder_class: Option<String>,
     pub sort_order: Option<i32>,
@@ -418,6 +419,55 @@ impl Storage {
         let current = self
             .fetch_public_folder_row(input.account_id, input.folder_id)
             .await?;
+        let target_parent = if let Some(parent_folder_id) = input.parent_folder_id {
+            if current.parent_folder_id.is_none() {
+                bail!("public folder tree root cannot be moved");
+            }
+            if parent_folder_id == input.folder_id {
+                bail!("public folder cannot be moved under itself");
+            }
+            let parent_access = self
+                .public_folder_access(input.account_id, parent_folder_id)
+                .await?;
+            ensure_tree_admin(input.account_id, parent_access)?;
+            let is_descendant = sqlx::query_scalar::<_, i64>(
+                r#"
+                WITH RECURSIVE subtree AS (
+                    SELECT id
+                    FROM public_folders
+                    WHERE tenant_id = $1
+                      AND id = $2
+                      AND lifecycle_state <> 'deleted'
+                    UNION ALL
+                    SELECT child.id
+                    FROM public_folders child
+                    JOIN subtree parent
+                      ON parent.id = child.parent_folder_id
+                    WHERE child.tenant_id = $1
+                      AND child.lifecycle_state <> 'deleted'
+                )
+                SELECT 1::bigint
+                FROM subtree
+                WHERE id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(&access.tenant_id)
+            .bind(input.folder_id)
+            .bind(parent_folder_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .is_some();
+            if is_descendant {
+                bail!("public folder cannot be moved under its descendant");
+            }
+            Some(
+                self.fetch_public_folder_row(input.account_id, parent_folder_id)
+                    .await?,
+            )
+        } else {
+            None
+        };
         let display_name = input
             .display_name
             .as_deref()
@@ -432,7 +482,8 @@ impl Storage {
             .unwrap_or(&current.folder_class);
         let sort_order = input.sort_order.unwrap_or(current.sort_order);
         let display_name_changed = display_name != current.display_name;
-        if display_name_changed {
+        let parent_changed = target_parent.is_some();
+        if display_name_changed && !parent_changed {
             let has_children = sqlx::query_scalar::<_, i64>(
                 r#"
                 SELECT 1::bigint
@@ -452,48 +503,100 @@ impl Storage {
                 bail!("public folder with active children cannot be renamed");
             }
         }
-        let parent_path = if display_name_changed {
+        let path_changed = display_name_changed || parent_changed;
+        let path = if let Some(parent) = target_parent.as_ref() {
+            format!("{}/{}", parent.path.trim_end_matches('/'), display_name)
+        } else if display_name_changed {
             match current.parent_folder_id {
-                Some(parent_folder_id) => Some(
-                    self.fetch_public_folder_row(input.account_id, parent_folder_id)
-                        .await?
-                        .path,
-                ),
-                None => None,
+                Some(parent_folder_id) => {
+                    let parent = self
+                        .fetch_public_folder_row(input.account_id, parent_folder_id)
+                        .await?;
+                    format!("{}/{}", parent.path.trim_end_matches('/'), display_name)
+                }
+                None => format!("/{display_name}"),
             }
-        } else {
-            None
-        };
-        let path = if display_name_changed {
-            parent_path
-                .map(|path| format!("{}/{}", path.trim_end_matches('/'), display_name))
-                .unwrap_or_else(|| format!("/{display_name}"))
         } else {
             current.path.clone()
         };
         let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            r#"
-            UPDATE public_folders
-            SET display_name = $3,
-                folder_class = $4,
-                path = $5,
-                sort_order = $6,
-                change_counter = change_counter + 1,
-                updated_at = NOW()
-            WHERE tenant_id = $1
-              AND id = $2
-              AND lifecycle_state <> 'deleted'
-            "#,
-        )
-        .bind(&access.tenant_id)
-        .bind(input.folder_id)
-        .bind(display_name)
-        .bind(folder_class)
-        .bind(&path)
-        .bind(sort_order)
-        .execute(&mut *tx)
-        .await?;
+        if path_changed {
+            let new_parent_id = target_parent
+                .as_ref()
+                .map(|parent| parent.id)
+                .or(current.parent_folder_id);
+            let new_tree_id = target_parent
+                .as_ref()
+                .map(|parent| parent.tree_id)
+                .unwrap_or(current.tree_id);
+            sqlx::query(
+                r#"
+                WITH RECURSIVE subtree AS (
+                    SELECT id, path
+                    FROM public_folders
+                    WHERE tenant_id = $1
+                      AND id = $2
+                      AND lifecycle_state <> 'deleted'
+                    UNION ALL
+                    SELECT child.id, child.path
+                    FROM public_folders child
+                    JOIN subtree parent
+                      ON parent.id = child.parent_folder_id
+                    WHERE child.tenant_id = $1
+                      AND child.lifecycle_state <> 'deleted'
+                )
+                UPDATE public_folders f
+                SET tree_id = $3,
+                    parent_folder_id = CASE WHEN f.id = $2 THEN $4 ELSE f.parent_folder_id END,
+                    display_name = CASE WHEN f.id = $2 THEN $5 ELSE f.display_name END,
+                    folder_class = CASE WHEN f.id = $2 THEN $6 ELSE f.folder_class END,
+                    path = CASE
+                        WHEN f.id = $2 THEN $7
+                        ELSE $7 || substring(f.path from char_length($8) + 1)
+                    END,
+                    sort_order = CASE WHEN f.id = $2 THEN $9 ELSE f.sort_order END,
+                    change_counter = f.change_counter + 1,
+                    updated_at = NOW()
+                FROM subtree
+                WHERE f.tenant_id = $1
+                  AND f.id = subtree.id
+                "#,
+            )
+            .bind(&access.tenant_id)
+            .bind(input.folder_id)
+            .bind(new_tree_id)
+            .bind(new_parent_id)
+            .bind(display_name)
+            .bind(folder_class)
+            .bind(&path)
+            .bind(&current.path)
+            .bind(sort_order)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE public_folders
+                SET display_name = $3,
+                    folder_class = $4,
+                    path = $5,
+                    sort_order = $6,
+                    change_counter = change_counter + 1,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND id = $2
+                  AND lifecycle_state <> 'deleted'
+                "#,
+            )
+            .bind(&access.tenant_id)
+            .bind(input.folder_id)
+            .bind(display_name)
+            .bind(folder_class)
+            .bind(&path)
+            .bind(sort_order)
+            .execute(&mut *tx)
+            .await?;
+        }
         if current.parent_folder_id.is_none() && display_name_changed {
             sqlx::query(
                 r#"

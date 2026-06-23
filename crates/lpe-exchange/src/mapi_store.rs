@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
@@ -2042,6 +2043,7 @@ impl MapiMailStoreSnapshot {
                 self.search_folder_definitions
                     .clone()
                     .into_iter()
+                    .filter(common_views_search_folder_definition_is_projectable)
                     .map(MapiCommonViewsMessage::SearchFolderDefinition),
             )
             .collect::<Vec<_>>();
@@ -3276,6 +3278,68 @@ fn format_common_views_table_shortcut_debug_summary(messages: &[MapiCommonViewsM
         .map(format_navigation_shortcut_debug_entry)
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn common_views_search_folder_definition_is_projectable(
+    definition: &SearchFolderDefinition,
+) -> bool {
+    definition
+        .restriction_json
+        .get("pidTagSearchFolderDefinition")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| BASE64_STANDARD.decode(value).ok())
+        .is_some_and(|blob| search_folder_definition_blob_has_required_blocks(&blob))
+}
+
+fn search_folder_definition_blob_has_required_blocks(blob: &[u8]) -> bool {
+    if blob.len() < 30 || blob.get(0..4) != Some(&0x0000_1004u32.to_le_bytes()) {
+        return false;
+    }
+    let storage_type = u32::from_le_bytes(blob[4..8].try_into().unwrap());
+    let mut offset = 12usize;
+    let Some(text_len) = blob.get(offset).copied() else {
+        return false;
+    };
+    offset += 1;
+    let text_len = if text_len == u8::MAX {
+        let Some(bytes) = blob.get(offset..offset + 2) else {
+            return false;
+        };
+        offset += 2;
+        u16::from_le_bytes(bytes.try_into().unwrap()) as usize
+    } else {
+        text_len as usize
+    };
+    offset = match offset.checked_add(text_len) {
+        Some(offset) if offset <= blob.len() => offset,
+        _ => return false,
+    };
+    if blob.get(offset..offset + 9).is_none() {
+        return false;
+    }
+    offset += 8;
+    let folder_list_1_len = blob[offset] as usize;
+    offset += 1 + folder_list_1_len;
+    let Some(bytes) = blob.get(offset..offset + 4) else {
+        return false;
+    };
+    let folder_list_2_len = u32::from_le_bytes(bytes.try_into().unwrap()) as usize;
+    offset += 4;
+    if storage_type & 0x40 != 0 && folder_list_2_len == 0 {
+        return false;
+    }
+    offset = match offset.checked_add(folder_list_2_len) {
+        Some(offset) if offset <= blob.len() => offset,
+        _ => return false,
+    };
+    if blob.get(offset..offset + 4).is_none() {
+        return false;
+    }
+    offset += 4;
+    if storage_type & 0x08 != 0 && blob.len().saturating_sub(offset) <= 4 {
+        return false;
+    }
+    blob.get(blob.len().saturating_sub(4)..) == Some(&0u32.to_le_bytes())
 }
 
 fn format_navigation_shortcut_debug_entry(shortcut: &MapiNavigationShortcutMessage) -> String {
@@ -4586,6 +4650,64 @@ mod tests {
                 .common_view_named_view_message_for_id(named_view.id)
                 .is_some());
         }
+    }
+
+    #[test]
+    fn common_views_skips_search_folder_definition_without_protocol_blob() {
+        let definition_id = Uuid::from_u128(0xaaaaaaaa_1111_4111_8111_aaaaaaaaaaaa);
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            SearchFolderDefinition {
+                id: definition_id,
+                account_id: Uuid::nil(),
+                role: "reminders".to_string(),
+                display_name: "Reminders".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "mixed".to_string(),
+                scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+                restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+                excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
+                is_builtin: true,
+            },
+        ]);
+
+        assert!(snapshot
+            .common_views_table_messages()
+            .all(|message| !matches!(message, MapiCommonViewsMessage::SearchFolderDefinition(_))));
+    }
+
+    #[test]
+    fn common_views_projects_search_folder_definition_with_protocol_blob() {
+        let definition_id = Uuid::from_u128(0xbbbbbbbb_1111_4111_8111_bbbbbbbbbbbb);
+        let mut definition_blob = vec![
+            0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        ];
+        definition_blob.extend_from_slice(&1u32.to_le_bytes());
+        definition_blob.push(0xAA);
+        definition_blob.extend_from_slice(&0u32.to_le_bytes());
+        definition_blob.push(0xBB);
+        definition_blob.extend_from_slice(&0u32.to_le_bytes());
+        let snapshot = MapiMailStoreSnapshot::empty().with_search_folder_definitions(vec![
+            SearchFolderDefinition {
+                id: definition_id,
+                account_id: Uuid::nil(),
+                role: "reminders".to_string(),
+                display_name: "Reminders".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "mixed".to_string(),
+                scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+                restriction_json: serde_json::json!({
+                    "kind": "exchange_reminders",
+                    "pidTagSearchFolderDefinition": BASE64_STANDARD.encode(&definition_blob)
+                }),
+                excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
+                is_builtin: true,
+            },
+        ]);
+
+        assert!(snapshot
+            .common_views_table_messages()
+            .any(|message| matches!(message, MapiCommonViewsMessage::SearchFolderDefinition(_))));
     }
 
     #[test]

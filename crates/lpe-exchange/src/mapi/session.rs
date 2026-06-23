@@ -7,7 +7,7 @@ use super::sync::*;
 use super::transport::*;
 use super::*;
 use crate::mapi_store::MapiAssociatedConfigMessage;
-use lpe_storage::{JmapEmail, SearchFolderDefinition};
+use lpe_storage::{AttachmentUploadInput, JmapEmail, SearchFolderDefinition};
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;
@@ -33,6 +33,10 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
     pub(in crate::mapi) message_save_generations: HashMap<(u64, u64), u64>,
     pub(in crate::mapi) message_handle_generations: HashMap<u32, u64>,
+    pub(in crate::mapi) pending_message_recipient_replacements: HashMap<u32, Vec<PendingRecipient>>,
+    pub(in crate::mapi) pending_message_attachments:
+        HashMap<u32, Vec<(u32, AttachmentUploadInput)>>,
+    pub(in crate::mapi) pending_attachment_parent_messages: HashMap<u32, u32>,
     pub(in crate::mapi) pending_attachment_deletions: HashSet<(u64, u64, u32)>,
     pub(in crate::mapi) pending_embedded_message_ids: HashMap<u32, u64>,
     pub(in crate::mapi) pending_embedded_message_attachments: HashMap<u32, (u64, u64, u32)>,
@@ -535,6 +539,9 @@ pub(in crate::mapi) fn create_session(
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
+        pending_message_recipient_replacements: HashMap::new(),
+        pending_message_attachments: HashMap::new(),
+        pending_attachment_parent_messages: HashMap::new(),
         pending_attachment_deletions: HashSet::new(),
         pending_embedded_message_ids: HashMap::new(),
         pending_embedded_message_attachments: HashMap::new(),

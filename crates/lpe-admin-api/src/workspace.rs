@@ -668,6 +668,7 @@ pub(crate) async fn update_public_folder(
                 UpdatePublicFolderInput {
                     account_id: account.account_id,
                     folder_id,
+                    parent_folder_id: None,
                     display_name: request.display_name,
                     folder_class: request.folder_class,
                     sort_order: request.sort_order,

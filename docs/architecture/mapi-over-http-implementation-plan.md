@@ -106,7 +106,7 @@ state. The supported projection surface is:
 | Contents tables | Folder membership rows with stable message identifiers, source/change keys, predecessor lists, subject, dates, sender, recipients where supported, flags, message class, read state, size, and attachment indicators. |
 | Attachment tables | Canonical attachment rows with stable attachment numbering and properties required by Outlook cached-mode reads. |
 | Permission tables | Canonical permission projection plus bounded mutation through `mailbox_delegation_grants`; no MAPI-local ACL table is allowed. |
-| Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions plus hierarchy/content projections; no Common Views search-definition FAI rows are published until documented search-folder BLOB parity exists. |
+| Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions plus hierarchy/content projections; Common Views search-definition FAI rows are published only when a stored `[MS-OXOSRCH]` BLOB has the advertised required blocks. |
 
 Categorized contents tables are bounded to the canonical rows already available
 through the table projection. `RopSortTable` category counts create
@@ -188,8 +188,10 @@ non-canonical LPE state.
 - Search folders are canonical persisted definitions and computed folder
   projections. Built-in definitions cover Outlook bootstrap surfaces such as
   To-Do, Tracked Mail Processing, Contacts Search, and Reminders, but LPE does
-  not export them as Common Views FAI definition messages until it has a
-  complete `[MS-OXOSRCH]` criteria serializer for canonical search JSON.
+  not export them as Common Views FAI definition messages unless the definition
+  carries a stored `[MS-OXOSRCH]` BLOB whose advertised `FolderList2` and
+  `SearchRestriction` blocks are present. LPE must not synthesize partial
+  `IPM.Microsoft.WunderBar.SFInfo` rows from incomplete canonical search JSON.
   Search-folder hierarchy and contents remain canonical projections; Common
   Views search-definition FAI rows must not be invented from LPE-private JSON.
   User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with

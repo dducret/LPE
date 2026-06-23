@@ -39,7 +39,7 @@ pub struct SubmittedRecipientInput {
     pub display_name: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentUploadInput {
     pub file_name: String,
     pub media_type: String,
@@ -89,6 +89,34 @@ enum CanonicalSubmissionPhase {
     PersistSentMessage,
     PersistOutboundQueue,
     DeleteSourceDraft,
+}
+
+async fn insert_visible_recipient(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    message_id: Uuid,
+    role: &str,
+    ordinal: usize,
+    recipient: &SubmittedRecipientInput,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO message_recipients (
+            id, tenant_id, message_id, role, address, display_name, ordinal
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(message_id)
+    .bind(role)
+    .bind(&recipient.address)
+    .bind(recipient.display_name.as_deref())
+    .bind(ordinal as i32)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 fn canonical_submission_phases(has_source_draft: bool) -> Vec<CanonicalSubmissionPhase> {
@@ -244,6 +272,85 @@ struct ResolvedSubmissionAuthorization {
 }
 
 impl Storage {
+    pub async fn replace_message_recipients(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        to: &[SubmittedRecipientInput],
+        cc: &[SubmittedRecipientInput],
+        bcc: &[SubmittedRecipientInput],
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
+            .await?;
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND message_id = $3
+                  AND visibility = 'visible'
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            bail!("message not found");
+        }
+
+        sqlx::query("DELETE FROM message_recipients WHERE tenant_id = $1 AND message_id = $2")
+            .bind(&tenant_id)
+            .bind(message_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM protected_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        for (ordinal, recipient) in to.iter().enumerate() {
+            insert_visible_recipient(&mut tx, &tenant_id, message_id, "to", ordinal, recipient)
+                .await?;
+        }
+        for (ordinal, recipient) in cc.iter().enumerate() {
+            insert_visible_recipient(&mut tx, &tenant_id, message_id, "cc", ordinal, recipient)
+                .await?;
+        }
+        for (ordinal, recipient) in bcc.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO protected_bcc_recipients (
+                    id, tenant_id, message_id, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(message_id)
+            .bind(&recipient.address)
+            .bind(recipient.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn save_draft_message(
         &self,
         input: SubmitMessageInput,

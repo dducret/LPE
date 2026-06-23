@@ -4899,6 +4899,7 @@ where
                         UpdatePublicFolderInput {
                             account_id: principal.account_id,
                             folder_id,
+                            parent_folder_id: None,
                             display_name: Some(display_name),
                             folder_class: None,
                             sort_order: None,

@@ -22,7 +22,8 @@ use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, CreatePublicFolderInput, JmapEmail, JmapMailbox,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, PublicFolderPerUserState,
     PublicFolderPerUserStatePatch, PublicFolderPermissionInput, SearchFolderDefinition,
-    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -59,6 +60,8 @@ const SET_SEARCH_VALID_FLAGS: u32 = SET_SEARCH_STOP_FLAG
 const EC_RULE_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_RULE_NOT_FOUND: u32 = 0x8004_010F;
 const EC_RULE_INVALID_PARAMETER: u32 = 0x8007_0057;
+const SYNC_SEND_OPTION_RECOVER_MODE: u8 = 0x04;
+const SYNC_SEND_OPTION_PARTIAL_ITEM: u8 = 0x10;
 const EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS: usize = 50;
 const EXECUTE_ACTIVE_SESSION_RETRY_DELAY_MS: u64 = 10;
 const DEFAULT_CALENDAR_COLLECTION_ID: &str = "default";
@@ -1007,21 +1010,27 @@ fn bounded_search_criteria_to_rop(
         .get("all")
         .and_then(Value::as_array)
         .ok_or(EC_SEARCH_UNSUPPORTED)?;
-    let mut restrictions = Vec::new();
+    let mut message_class_restrictions = Vec::new();
+    let mut other_restrictions = Vec::new();
     for clause in clauses {
-        restrictions.push(rop_restriction_from_json_clause(clause, use_unicode)?);
-    }
-    let restriction = if restrictions.is_empty() {
-        Vec::new()
-    } else if restrictions.len() == 1 {
-        restrictions.remove(0)
-    } else {
-        let mut bytes = vec![0x00];
-        bytes.extend_from_slice(&(restrictions.len() as u16).to_le_bytes());
-        for child in restrictions {
-            bytes.extend_from_slice(&child);
+        let restriction = rop_restriction_from_json_clause(clause, use_unicode)?;
+        if is_message_class_exclusion_clause(clause) {
+            message_class_restrictions.push(restriction);
+        } else {
+            other_restrictions.push(restriction);
         }
-        bytes
+    }
+    let restriction = if !message_class_restrictions.is_empty() && !other_restrictions.is_empty() {
+        and_restriction(
+            vec![
+                and_restriction(message_class_restrictions, true),
+                and_restriction(other_restrictions, true),
+            ],
+            true,
+        )
+    } else {
+        message_class_restrictions.extend(other_restrictions);
+        and_restriction(message_class_restrictions, false)
     };
     let mut folder_ids = Vec::new();
     if let Some(ids) = definition
@@ -1064,6 +1073,26 @@ fn bounded_search_criteria_to_rop(
         flags |= SEARCH_RECURSIVE_FLAG;
     }
     Ok((restriction, folder_ids, flags))
+}
+
+fn is_message_class_exclusion_clause(clause: &Value) -> bool {
+    clause.get("field").and_then(Value::as_str) == Some("messageClass")
+        && (clause.get("notEquals").is_some() || clause.get("notPrefix").is_some())
+}
+
+fn and_restriction(mut restrictions: Vec<Vec<u8>>, force_wrapper: bool) -> Vec<u8> {
+    if restrictions.is_empty() {
+        Vec::new()
+    } else if restrictions.len() == 1 && !force_wrapper {
+        restrictions.remove(0)
+    } else {
+        let mut bytes = vec![0x00];
+        bytes.extend_from_slice(&(restrictions.len() as u16).to_le_bytes());
+        for child in restrictions {
+            bytes.extend_from_slice(&child);
+        }
+        bytes
+    }
 }
 
 fn builtin_search_criteria_to_rop(
@@ -1413,6 +1442,78 @@ async fn hard_delete_public_folder_contents<S: ExchangeStore>(
     } else {
         (vec![folder_id], partial_completion)
     })
+}
+
+async fn copy_public_folder_tree_for_mapi<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source_id: Uuid,
+    target_parent_id: Uuid,
+    root_display_name: &str,
+) -> Result<lpe_storage::PublicFolder> {
+    let mut stack = vec![(
+        source_id,
+        target_parent_id,
+        Some(root_display_name.to_string()),
+    )];
+    let mut root = None;
+    while let Some((current_id, parent_id, display_name_override)) = stack.pop() {
+        let current = store
+            .fetch_public_folder(principal.account_id, current_id)
+            .await?;
+        let copied = store
+            .create_public_folder_child(
+                CreatePublicFolderInput {
+                    account_id: principal.account_id,
+                    parent_folder_id: parent_id,
+                    display_name: display_name_override
+                        .unwrap_or_else(|| current.display_name.clone()),
+                    folder_class: current.folder_class.clone(),
+                    sort_order: current.sort_order,
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-copy-public-folder".to_string(),
+                    subject: current_id.to_string(),
+                },
+            )
+            .await?;
+        if current_id == source_id {
+            root = Some(copied.clone());
+        }
+        for item in store
+            .fetch_public_folder_items(principal.account_id, current_id)
+            .await?
+        {
+            store
+                .upsert_public_folder_item(
+                    UpsertPublicFolderItemInput {
+                        id: None,
+                        account_id: principal.account_id,
+                        public_folder_id: copied.id,
+                        item_kind: item.item_kind,
+                        message_class: item.message_class,
+                        subject: item.subject,
+                        body_text: item.body_text,
+                        body_html_sanitized: item.body_html_sanitized,
+                        source_payload_json: item.source_payload_json,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "mapi-copy-public-folder-item".to_string(),
+                        subject: item.id.to_string(),
+                    },
+                )
+                .await?;
+        }
+        for child in store
+            .fetch_public_folder_children(principal.account_id, current_id)
+            .await?
+        {
+            stack.push((child.id, copied.id, None));
+        }
+    }
+    root.ok_or_else(|| anyhow::anyhow!("public folder not found"))
 }
 
 async fn hard_delete_mailbox_tree_contents<S: ExchangeStore>(
@@ -5921,7 +6022,21 @@ fn stage_message_property_values(
         return Err(anyhow!("MAPI object is not a message"));
     };
     let (canonical_values, _custom_values) = split_custom_property_values(values.clone());
-    message_followup_update_from_mapi_values(canonical_values)?;
+    let followup_values = canonical_values
+        .into_iter()
+        .filter(|(tag, _)| {
+            !matches!(
+                *tag,
+                PID_TAG_SUBJECT_W
+                    | PID_TAG_NORMALIZED_SUBJECT_W
+                    | PID_TAG_BODY_W
+                    | PID_TAG_SOURCE_KEY
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+            )
+        })
+        .collect::<Vec<_>>();
+    message_followup_update_from_mapi_values(followup_values)?;
     apply_mapi_property_values_to_map(pending_properties, values);
     Ok(())
 }
@@ -5950,6 +6065,123 @@ where
         store, principal, &object, values, mailboxes, emails, snapshot,
     )
     .await
+}
+
+async fn apply_staged_message_recipient_replacement<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    message_id: u64,
+    recipients: &[PendingRecipient],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) else {
+        return Err(anyhow::anyhow!("canonical message not found"));
+    };
+    let (to, cc, bcc) = submitted_recipients_from_pending(recipients);
+    store
+        .replace_message_recipients(
+            principal.account_id,
+            email.id,
+            &to,
+            &cc,
+            &bcc,
+            AuditEntryInput {
+                actor: principal.email.clone(),
+                action: "mapi-replace-message-recipients".to_string(),
+                subject: format!("message:{}", email.id),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+async fn delete_canonical_message_text_properties<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<bool>
+where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+        ..
+    }) = object
+    else {
+        return Ok(false);
+    };
+    let mut values = Vec::new();
+    for tag in property_tags {
+        match *tag {
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                values.push((PID_TAG_SUBJECT_W, MapiValue::String(String::new())));
+            }
+            PID_TAG_BODY_W => values.push((PID_TAG_BODY_W, MapiValue::String(String::new()))),
+            _ => {}
+        }
+    }
+    if values.is_empty() {
+        return Ok(false);
+    }
+    values.sort_by_key(|(tag, _)| *tag);
+    values.dedup_by_key(|(tag, _)| *tag);
+    let target = MapiObject::Message {
+        folder_id: *folder_id,
+        message_id: *message_id,
+        saved_email: None,
+        pending_properties: HashMap::new(),
+    };
+    apply_supported_object_property_values(
+        store, principal, &target, values, mailboxes, emails, snapshot,
+    )
+    .await?;
+    Ok(true)
+}
+
+fn submitted_recipients_from_pending(
+    recipients: &[PendingRecipient],
+) -> (
+    Vec<SubmittedRecipientInput>,
+    Vec<SubmittedRecipientInput>,
+    Vec<SubmittedRecipientInput>,
+) {
+    let mut to = Vec::new();
+    let mut cc = Vec::new();
+    let mut bcc = Vec::new();
+    for recipient in recipients {
+        let value = SubmittedRecipientInput {
+            address: recipient.address.clone(),
+            display_name: recipient.display_name.clone(),
+        };
+        match recipient.recipient_type & 0x0F {
+            0x02 => cc.push(value),
+            0x03 => bcc.push(value),
+            _ => to.push(value),
+        }
+    }
+    (to, cc, bcc)
+}
+
+fn pending_recipients_from_email(email: &JmapEmail) -> Vec<PendingRecipient> {
+    message_recipients(email)
+        .into_iter()
+        .map(|recipient| PendingRecipient {
+            row_id: recipient.order,
+            recipient_type: recipient.recipient_type,
+            address: recipient.address.address.clone(),
+            display_name: recipient.address.display_name.clone(),
+        })
+        .collect()
 }
 
 async fn apply_canonical_public_folder_item_property_values<S>(
@@ -12835,6 +13067,7 @@ where
                 echo_input_handle_table = true;
                 let released_handle = input_handle(&handle_slots, &request);
                 let released_object = input_object(session, &handle_slots, &request);
+                let released_object_for_stream_persist = released_object.cloned();
                 let released_object_kind = mapi_object_debug_kind(released_object);
                 let released_folder_id = mapi_object_debug_folder_id(released_object);
                 let inbox_related_release_context = format_inbox_related_release_context(
@@ -12972,6 +13205,27 @@ where
                     Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
                 ) {
                     session.record_logoff_after_hierarchy_completion();
+                }
+                if let Err(error) = persist_released_associated_config_stream(
+                    store,
+                    principal,
+                    session,
+                    released_object_for_stream_persist.as_ref(),
+                )
+                .await
+                {
+                    tracing::warn!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x01",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(released_handle),
+                        error = %error,
+                        "mapi associated config stream release persist failed"
+                    );
                 }
                 release_handle_slot(session, &mut handle_slots, &request);
                 if let Some(handle) = released_handle {
@@ -14808,7 +15062,7 @@ where
                     }
                     result.map(|_| ())
                 } else {
-                    delete_custom_property_values(
+                    let custom_delete_result = delete_custom_property_values(
                         store,
                         principal,
                         object.as_ref(),
@@ -14817,36 +15071,54 @@ where
                         snapshot,
                         &property_tags,
                     )
-                    .await
-                    .and_then(|_| {
-                        delete_mapi_properties(
-                            input_object_mut(session, &handle_slots, &request),
-                            &property_tags,
-                        )
-                        .or_else(|error| {
-                            if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
-                                Ok(())
-                            } else if persisted_message_delete_is_best_effort(object.as_ref()) {
-                                tracing::info!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    mailbox = %principal.email,
-                                    request_type = "Execute",
-                                    request_rop_id = %format!("{:#04x}", request.rop_id),
-                                    object_kind = mapi_object_debug_kind(object.as_ref()),
-                                    folder_id = %mapi_object_debug_folder_id(object.as_ref()),
-                                    property_tags = %format_debug_property_tags(&property_tags),
-                                    delete_error = %error,
-                                    fallback_reason = "persisted_message_best_effort_delete",
-                                    "rca debug mapi delete properties fallback"
-                                );
-                                Ok(())
-                            } else {
-                                Err(error)
-                            }
-                        })
-                    })
+                    .await;
+                    match custom_delete_result {
+                        Ok(()) => {
+                            let canonical_delete_result = delete_canonical_message_text_properties(
+                                store,
+                                principal,
+                                object.as_ref(),
+                                &property_tags,
+                                mailboxes,
+                                emails,
+                                snapshot,
+                            )
+                            .await;
+                            canonical_delete_result.and_then(|_| {
+                                delete_mapi_properties(
+                                    input_object_mut(session, &handle_slots, &request),
+                                    &property_tags,
+                                )
+                                .or_else(|error| {
+                                    if property_tags.iter().all(|tag| is_custom_property_tag(*tag))
+                                    {
+                                        Ok(())
+                                    } else if persisted_message_delete_is_best_effort(
+                                        object.as_ref(),
+                                    ) {
+                                        tracing::info!(
+                                            rca_debug = true,
+                                            adapter = "mapi",
+                                            endpoint = "emsmdb",
+                                            mailbox = %principal.email,
+                                            request_type = "Execute",
+                                            request_rop_id = %format!("{:#04x}", request.rop_id),
+                                            object_kind = mapi_object_debug_kind(object.as_ref()),
+                                            folder_id = %mapi_object_debug_folder_id(object.as_ref()),
+                                            property_tags = %format_debug_property_tags(&property_tags),
+                                            delete_error = %error,
+                                            fallback_reason = "persisted_message_best_effort_delete",
+                                            "rca debug mapi delete properties fallback"
+                                        );
+                                        Ok(())
+                                    } else {
+                                        Err(error)
+                                    }
+                                })
+                            })
+                        }
+                        Err(error) => Err(error),
+                    }
                 };
                 match delete_result {
                     Ok(()) => {
@@ -14899,6 +15171,16 @@ where
                     "rca debug mapi save changes before inbox probe"
                 );
                 match session.handles.get(&handle).cloned() {
+                    Some(MapiObject::CommonViewNamedView { view_id, .. }) => {
+                        append_save_changes_message_response(
+                            &mut responses,
+                            &mut handle_slots,
+                            &request,
+                            handle,
+                            view_id,
+                        );
+                        continue;
+                    }
                     Some(MapiObject::PendingContact {
                         folder_id,
                         properties,
@@ -15588,6 +15870,10 @@ where
                         pending_properties,
                     }) => {
                         let staged_property_write = !pending_properties.is_empty();
+                        let staged_recipient_replacement = session
+                            .pending_message_recipient_replacements
+                            .get(&handle)
+                            .cloned();
                         let pending = session
                             .pending_attachment_deletions
                             .iter()
@@ -15597,7 +15883,9 @@ where
                                     .then_some(*attach_num)
                             })
                             .collect::<Vec<_>>();
-                        let has_pending_changes = staged_property_write || !pending.is_empty();
+                        let has_pending_changes = staged_property_write
+                            || staged_recipient_replacement.is_some()
+                            || !pending.is_empty();
                         let force_save = request.payload.first().copied().unwrap_or(0) & 0x04 != 0;
                         let current_generation =
                             session.message_save_generation(folder_id, message_id);
@@ -15653,6 +15941,31 @@ where
                                 },
                             );
                             continue;
+                        }
+                        if let Some(recipients) = staged_recipient_replacement.as_deref() {
+                            if apply_staged_message_recipient_replacement(
+                                store, principal, folder_id, message_id, recipients, mailboxes,
+                                emails,
+                            )
+                            .await
+                            .is_err()
+                            {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0C,
+                                    request.response_handle_index(),
+                                    0x8004_0102,
+                                ));
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::Message {
+                                        folder_id,
+                                        message_id,
+                                        saved_email,
+                                        pending_properties,
+                                    },
+                                );
+                                continue;
+                            }
                         }
                         let mut delete_failed = false;
                         for attach_num in pending.iter().copied() {
@@ -15710,6 +16023,15 @@ where
                             );
                         }
                         if staged_property_write {
+                            session.record_notification(MapiNotificationEvent::content(
+                                folder_id,
+                                Some(message_id),
+                            ));
+                        }
+                        if staged_recipient_replacement.is_some() {
+                            session
+                                .pending_message_recipient_replacements
+                                .remove(&handle);
                             session.record_notification(MapiNotificationEvent::content(
                                 folder_id,
                                 Some(message_id),
@@ -16146,8 +16468,21 @@ where
                     ));
                     continue;
                 }
-                let input =
-                    jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
+                let pending_attachments = session
+                    .pending_message_attachments
+                    .get(&handle)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(_, attachment)| attachment)
+                    .collect::<Vec<_>>();
+                let input = jmap_import_from_pending_message(
+                    principal,
+                    mailbox,
+                    &properties,
+                    &recipients,
+                    pending_attachments,
+                );
                 let imported_source_key = imported_message_source_key(&properties);
                 let imported_source_key_global_counter = imported_source_key
                     .as_deref()
@@ -16164,6 +16499,10 @@ where
                     .await
                 {
                     Ok(email) => {
+                        session.pending_message_attachments.remove(&handle);
+                        session
+                            .pending_attachment_parent_messages
+                            .retain(|_, parent_handle| *parent_handle != handle);
                         if apply_conversation_actions_to_new_message(
                             store, principal, mailboxes, &email, snapshot,
                         )
@@ -16321,27 +16660,57 @@ where
                 }
             }
             Some(RopId::RemoveAllRecipients) => {
+                let input_handle_value = input_handle(&handle_slots, &request);
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::PendingMessage { recipients, .. }) => {
                         recipients.clear();
                         responses.extend_from_slice(&rop_simple_success_response(&request));
                     }
+                    Some(MapiObject::Message { .. }) => {
+                        if let Some(handle) = input_handle_value {
+                            session
+                                .pending_message_recipient_replacements
+                                .insert(handle, Vec::new());
+                            responses.extend_from_slice(&rop_simple_success_response(&request));
+                        } else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0D,
+                                request.response_handle_index(),
+                                0x0000_04B9,
+                            ));
+                        }
+                    }
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x0D,
                         request.response_handle_index(),
-                        0x8004_0102,
+                        0x0000_04B9,
                     )),
                 }
             }
             Some(RopId::ModifyRecipients) => {
-                match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::PendingMessage { recipients, .. }) => {
+                let input_handle_value = input_handle(&handle_slots, &request);
+                match input_object(session, &handle_slots, &request).cloned() {
+                    Some(MapiObject::PendingMessage {
+                        recipients: existing_recipients,
+                        ..
+                    }) => {
+                        let existing_recipient_count = existing_recipients.len();
                         let address_book_entries = store
                             .fetch_address_book_entries(principal)
                             .await
                             .unwrap_or_default();
                         match request.modify_recipients(principal, &address_book_entries) {
                             Ok(changes) => {
+                                let Some(MapiObject::PendingMessage { recipients, .. }) =
+                                    input_object_mut(session, &handle_slots, &request)
+                                else {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0E,
+                                        request.response_handle_index(),
+                                        0x0000_04B9,
+                                    ));
+                                    continue;
+                                };
                                 tracing::info!(
                                     rca_debug = true,
                                     adapter = "mapi",
@@ -16373,6 +16742,89 @@ where
                                     request_rop_id = "0x0e",
                                     input_handle_index = request.input_handle_index.unwrap_or(0),
                                     response_handle_index = request.response_handle_index(),
+                                    existing_recipient_count,
+                                    recipient_payload_bytes = request.payload.len(),
+                                    recipient_payload_preview = %hex_preview(&request.payload, 48),
+                                    parse_error = %error,
+                                    "rca debug mapi modify recipients"
+                                );
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0E,
+                                    request.response_handle_index(),
+                                    0x8004_0102,
+                                ));
+                            }
+                        }
+                    }
+                    Some(MapiObject::Message {
+                        folder_id,
+                        message_id,
+                        saved_email,
+                        ..
+                    }) => {
+                        let Some(handle) = input_handle_value else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0E,
+                                request.response_handle_index(),
+                                0x0000_04B9,
+                            ));
+                            continue;
+                        };
+                        let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
+                            .or(saved_email.as_ref().map(|saved| &saved.email))
+                        else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0E,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        };
+                        let mut recipients = session
+                            .pending_message_recipient_replacements
+                            .get(&handle)
+                            .cloned()
+                            .unwrap_or_else(|| pending_recipients_from_email(email));
+                        let address_book_entries = store
+                            .fetch_address_book_entries(principal)
+                            .await
+                            .unwrap_or_default();
+                        match request.modify_recipients(principal, &address_book_entries) {
+                            Ok(changes) => {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0e",
+                                    input_handle_index = request.input_handle_index.unwrap_or(0),
+                                    response_handle_index = request.response_handle_index(),
+                                    existing_recipient_count = recipients.len(),
+                                    recipient_change_count = changes.len(),
+                                    recipient_upsert_count = pending_recipient_upsert_count(&changes),
+                                    recipient_delete_count = pending_recipient_delete_count(&changes),
+                                    recipient_types = %pending_recipient_types_summary(&changes),
+                                    recipient_row_ids = %pending_recipient_row_ids_summary(&changes),
+                                    parse_error = "",
+                                    "rca debug mapi modify recipients"
+                                );
+                                apply_pending_recipient_changes(&mut recipients, changes);
+                                session
+                                    .pending_message_recipient_replacements
+                                    .insert(handle, recipients);
+                                responses.extend_from_slice(&rop_simple_success_response(&request));
+                            }
+                            Err(error) => {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0e",
+                                    input_handle_index = request.input_handle_index.unwrap_or(0),
+                                    response_handle_index = request.response_handle_index(),
                                     existing_recipient_count = recipients.len(),
                                     recipient_payload_bytes = request.payload.len(),
                                     recipient_payload_preview = %hex_preview(&request.payload, 48),
@@ -16390,7 +16842,7 @@ where
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x0E,
                         request.response_handle_index(),
-                        0x8004_0102,
+                        0x0000_04B9,
                     )),
                 }
             }
@@ -16403,12 +16855,25 @@ where
                     ));
                     continue;
                 }
+                let input_handle_value = input_handle(&handle_slots, &request);
+                let pending_recipient_object;
+                let object = if let Some(recipients) = input_handle_value
+                    .and_then(|handle| session.pending_message_recipient_replacements.get(&handle))
+                {
+                    let folder_id = input_object(session, &handle_slots, &request)
+                        .and_then(MapiObject::folder_id)
+                        .unwrap_or(INBOX_FOLDER_ID);
+                    pending_recipient_object = MapiObject::PendingMessage {
+                        folder_id,
+                        properties: HashMap::new(),
+                        recipients: recipients.clone(),
+                    };
+                    Some(&pending_recipient_object)
+                } else {
+                    input_object(session, &handle_slots, &request)
+                };
                 responses.extend_from_slice(&rop_read_recipients_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
+                    &request, object, mailboxes, emails, snapshot,
                 ))
             }
             Some(RopId::ReloadCachedInformation) => {
@@ -18106,27 +18571,157 @@ where
                     ));
                     continue;
                 }
-                if input_object(session, &handle_slots, &request)
-                    .and_then(MapiObject::folder_id)
-                    .is_none()
-                {
+                let Some(source_parent_folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
                     responses.extend_from_slice(&rop_error_response(
                         rop_id,
                         response_handle_index,
                         0x0000_04B9,
                     ));
                     continue;
-                }
-                let target_parent_id = match request
+                };
+                let Some(target_folder_id) = request
                     .move_copy_target_handle(&handle_slots)
                     .and_then(|handle| {
                         session
                             .handles
                             .get(&handle)
                             .and_then(|object| object.folder_id())
-                    }) {
-                    Some(IPM_SUBTREE_FOLDER_ID) => None,
-                    Some(folder_id) => match folder_row_for_id(folder_id, mailboxes) {
+                    })
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some(folder_id) = request.folder_move_copy_folder_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                let display_name = request.folder_move_copy_display_name();
+                let display_name = display_name.trim();
+                if display_name.is_empty() {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+
+                if rop_id == RopId::CopyFolder.as_u8() {
+                    if let (Some(source_public_folder), Some(target_public_folder)) = (
+                        snapshot.public_folder_for_id(folder_id),
+                        snapshot.public_folder_for_id(target_folder_id),
+                    ) {
+                        let partial_completion = match copy_public_folder_tree_for_mapi(
+                            store,
+                            principal,
+                            source_public_folder.folder.id,
+                            target_public_folder.folder.id,
+                            display_name,
+                        )
+                        .await
+                        {
+                            Ok(copied_folder) => {
+                                if let Ok(copied_folder_id) = remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::PublicFolder,
+                                    copied_folder.id,
+                                    None,
+                                    None,
+                                )
+                                .await
+                                {
+                                    session.record_notification(MapiNotificationEvent::hierarchy(
+                                        target_folder_id,
+                                        Some(copied_folder_id),
+                                    ));
+                                }
+                                false
+                            }
+                            Err(_) => true,
+                        };
+                        responses.extend_from_slice(&rop_partial_completion_response(
+                            rop_id,
+                            response_handle_index,
+                            partial_completion,
+                        ));
+                        continue;
+                    }
+                }
+                if rop_id == RopId::MoveFolder.as_u8() {
+                    if let (Some(source_public_folder), Some(target_public_folder)) = (
+                        snapshot.public_folder_for_id(folder_id),
+                        snapshot.public_folder_for_id(target_folder_id),
+                    ) {
+                        let source_parent_matches = snapshot
+                            .public_folder_for_id(source_parent_folder_id)
+                            .map(|parent| {
+                                source_public_folder.folder.parent_folder_id
+                                    == Some(parent.folder.id)
+                            })
+                            .unwrap_or(false);
+                        if !source_parent_matches {
+                            responses.extend_from_slice(&rop_error_response(
+                                rop_id,
+                                response_handle_index,
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
+                        let partial_completion = store
+                            .update_public_folder(
+                                UpdatePublicFolderInput {
+                                    account_id: principal.account_id,
+                                    folder_id: source_public_folder.folder.id,
+                                    parent_folder_id: Some(target_public_folder.folder.id),
+                                    display_name: Some(display_name.to_string()),
+                                    folder_class: None,
+                                    sort_order: None,
+                                },
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-move-public-folder".to_string(),
+                                    subject: format!(
+                                        "public-folder:{}->{}",
+                                        source_public_folder.folder.id,
+                                        target_public_folder.folder.id
+                                    ),
+                                },
+                            )
+                            .await
+                            .is_err();
+                        if !partial_completion {
+                            session.record_notification(MapiNotificationEvent::hierarchy(
+                                source_parent_folder_id,
+                                Some(folder_id),
+                            ));
+                            session.record_notification(MapiNotificationEvent::hierarchy(
+                                target_folder_id,
+                                Some(folder_id),
+                            ));
+                        }
+                        responses.extend_from_slice(&rop_partial_completion_response(
+                            rop_id,
+                            response_handle_index,
+                            partial_completion,
+                        ));
+                        continue;
+                    }
+                }
+
+                let target_parent_id = match target_folder_id {
+                    IPM_SUBTREE_FOLDER_ID => None,
+                    folder_id => match folder_row_for_id(folder_id, mailboxes) {
                         Some(mailbox) if mailbox.role == "custom" => Some(mailbox.id),
                         _ => {
                             responses.extend_from_slice(&rop_error_response(
@@ -18137,22 +18732,6 @@ where
                             continue;
                         }
                     },
-                    None => {
-                        responses.extend_from_slice(&rop_error_response(
-                            rop_id,
-                            response_handle_index,
-                            0x8004_010F,
-                        ));
-                        continue;
-                    }
-                };
-                let Some(folder_id) = request.folder_move_copy_folder_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_0102,
-                    ));
-                    continue;
                 };
                 let Some(source_mailbox) = folder_row_for_id(folder_id, mailboxes) else {
                     responses.extend_from_slice(&rop_error_response(
@@ -18167,16 +18746,6 @@ where
                         rop_id,
                         response_handle_index,
                         0x8007_0005,
-                    ));
-                    continue;
-                }
-                let display_name = request.folder_move_copy_display_name();
-                let display_name = display_name.trim();
-                if display_name.is_empty() {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_0102,
                     ));
                     continue;
                 }
@@ -18666,6 +19235,9 @@ where
                 }
                 let (folder_id, message_id, is_calendar_event) =
                     match input_object(session, &handle_slots, &request) {
+                        Some(MapiObject::PendingMessage { folder_id, .. }) => {
+                            (*folder_id, 0, false)
+                        }
                         Some(MapiObject::Message {
                             folder_id,
                             message_id,
@@ -18783,7 +19355,14 @@ where
                 }
             }
             Some(RopId::CreateAttachment) => {
-                let (folder_id, message_id, is_calendar_event) =
+                let parent_message_handle =
+                    input_handle(&handle_slots, &request).filter(|handle| {
+                        matches!(
+                            session.handles.get(handle),
+                            Some(MapiObject::PendingMessage { .. })
+                        )
+                    });
+                let (folder_id, message_id, is_calendar_event, is_pending_message) =
                     match input_object(session, &handle_slots, &request) {
                         Some(MapiObject::Event { folder_id, .. })
                             if mapi_calendar_content_items_suppressed(*folder_id, snapshot) =>
@@ -18799,11 +19378,14 @@ where
                             folder_id,
                             message_id,
                             ..
-                        }) => (*folder_id, *message_id, false),
+                        }) => (*folder_id, *message_id, false, false),
+                        Some(MapiObject::PendingMessage { folder_id, .. }) => {
+                            (*folder_id, 0, false, true)
+                        }
                         Some(MapiObject::Event {
                             folder_id,
                             event_id,
-                        }) => (*folder_id, *event_id, true),
+                        }) => (*folder_id, *event_id, true, false),
                         _ => {
                             responses.extend_from_slice(&rop_error_response(
                                 0x23,
@@ -18814,6 +19396,7 @@ where
                         }
                     };
                 if !is_calendar_event
+                    && !is_pending_message
                     && message_for_id(folder_id, message_id, mailboxes, emails).is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -18844,8 +19427,18 @@ where
                     continue;
                 }
 
-                let attach_num =
-                    next_pending_attachment_num(session, folder_id, message_id, snapshot);
+                let attach_num = if let Some(parent_handle) = parent_message_handle {
+                    session
+                        .pending_message_attachments
+                        .get(&parent_handle)
+                        .and_then(|attachments| {
+                            attachments.iter().map(|(attach_num, _)| *attach_num).max()
+                        })
+                        .unwrap_or(u32::MAX)
+                        .saturating_add(1)
+                } else {
+                    next_pending_attachment_num(session, folder_id, message_id, snapshot)
+                };
                 let created_at = current_mapi_filetime();
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
@@ -18862,6 +19455,11 @@ where
                         data: Vec::new(),
                     },
                 );
+                if let Some(parent_handle) = parent_message_handle {
+                    session
+                        .pending_attachment_parent_messages
+                        .insert(handle, parent_handle);
+                }
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_create_attachment_response(&request, attach_num));
                 output_handles.push(handle);
@@ -18936,21 +19534,6 @@ where
                     ));
                     continue;
                 };
-                let Some(MapiObject::PendingAttachment {
-                    folder_id,
-                    message_id,
-                    attach_num,
-                    properties,
-                    ..
-                }) = session.handles.get(&handle).cloned()
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x46,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
                 let open_mode = request.payload.get(2).copied().unwrap_or(0);
                 if open_mode > 0x02 {
                     responses.extend_from_slice(&rop_error_response(
@@ -18960,28 +19543,31 @@ where
                     ));
                     continue;
                 }
-                let attach_method = properties
-                    .get(&PID_TAG_ATTACH_METHOD)
-                    .and_then(MapiValue::as_i64)
-                    .unwrap_or(5);
-                if attach_method != 5 {
+                let Some((folder_id, message_id, attach_num, embedded_properties)) =
+                    open_embedded_message_source(
+                        store, principal, session, snapshot, handle, open_mode,
+                    )
+                    .await
+                else {
                     responses.extend_from_slice(&rop_error_response(
                         0x46,
                         request.response_handle_index(),
-                        0x8004_010F,
+                        if open_mode == 0 {
+                            0x8004_010F
+                        } else {
+                            0x8007_0005
+                        },
                     ));
                     continue;
-                }
+                };
                 let embedded_message_id =
                     transient_embedded_message_id(folder_id, message_id, attach_num);
+                let embedded_subject = embedded_message_open_subject(&embedded_properties);
                 let embedded_handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::PendingMessage {
                         folder_id,
-                        properties: HashMap::from([(
-                            PID_TAG_MESSAGE_CLASS_W,
-                            MapiValue::String("IPM.Note".to_string()),
-                        )]),
+                        properties: embedded_properties,
                         recipients: Vec::new(),
                     },
                 );
@@ -18999,7 +19585,7 @@ where
                 responses.extend_from_slice(&rop_open_embedded_message_response(
                     &request,
                     embedded_message_id,
-                    "",
+                    &embedded_subject,
                     0,
                 ));
                 output_handles.push(embedded_handle);
@@ -19123,6 +19709,38 @@ where
                     {
                         attachment.media_type = outcome.detected_mime;
                     }
+                }
+                if let Some(parent_handle) = session
+                    .pending_attachment_parent_messages
+                    .get(&handle)
+                    .copied()
+                {
+                    session
+                        .pending_message_attachments
+                        .entry(parent_handle)
+                        .or_default()
+                        .retain(|(existing_attach_num, _)| *existing_attach_num != attach_num);
+                    session
+                        .pending_message_attachments
+                        .entry(parent_handle)
+                        .or_default()
+                        .push((attach_num, attachment.clone()));
+                    session.handles.insert(
+                        handle,
+                        MapiObject::SavedAttachment {
+                            folder_id,
+                            message_id,
+                            attach_num,
+                            file_reference: format!("pending-message:{parent_handle}:{attach_num}"),
+                            file_name: attachment.file_name,
+                            media_type: attachment.media_type,
+                            disposition: attachment.disposition,
+                            content_id: attachment.content_id,
+                            size_octets: attachment.blob_bytes.len() as u64,
+                        },
+                    );
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                    continue;
                 }
                 if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
                     match store
@@ -21195,6 +21813,7 @@ where
                     ));
                     break;
                 }
+                let sync_send_options = request.sync_send_options();
                 let sync_flags = request.sync_flags();
                 let sync_extra_flags = request.sync_extra_flags();
                 let sync_property_tags = request.sync_property_tags();
@@ -21211,6 +21830,15 @@ where
                     .map(|tag| format!("0x{tag:08x}"))
                     .collect::<Vec<_>>()
                     .join(",");
+                let partial_item_requested = sync_send_options & SYNC_SEND_OPTION_PARTIAL_ITEM != 0;
+                let recover_mode_requested = sync_send_options & SYNC_SEND_OPTION_RECOVER_MODE != 0;
+                let partial_item_behavior = if partial_item_requested && sync_type == 0x01 {
+                    "full-item-fallback"
+                } else if partial_item_requested {
+                    "ignored-non-content-sync"
+                } else {
+                    "not-requested"
+                };
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
@@ -21363,10 +21991,22 @@ where
                             all_special_sync_objects.clone(),
                         )
                     };
-                let sync_attachment_facts =
-                    sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
-                let delta_attachment_facts =
-                    sync_attachment_facts_for(folder_id, &delta_sync_emails, snapshot);
+                let sync_attachment_facts = sync_attachment_facts_for_with_embedded_content(
+                    store,
+                    principal.account_id,
+                    folder_id,
+                    &all_sync_emails,
+                    snapshot,
+                )
+                .await;
+                let delta_attachment_facts = sync_attachment_facts_for_with_embedded_content(
+                    store,
+                    principal.account_id,
+                    folder_id,
+                    &delta_sync_emails,
+                    snapshot,
+                )
+                .await;
                 let aggregate_sync_emails = if sync_type == 0x02 {
                     emails.to_vec()
                 } else {
@@ -21611,6 +22251,10 @@ where
                     folder_role,
                     folder_container_class,
                     sync_type = format_args!("0x{sync_type:02x}"),
+                    sync_send_options = format_args!("0x{sync_send_options:02x}"),
+                    sync_send_options_partial_item = partial_item_requested,
+                    sync_send_options_recover_mode = recover_mode_requested,
+                    sync_partial_item_behavior = partial_item_behavior,
                     sync_flags = format_args!("0x{sync_flags:04x}"),
                     sync_extra_flags = format_args!("0x{sync_extra_flags:08x}"),
                     sync_property_tag_count = sync_property_tags.len(),
@@ -21742,9 +22386,7 @@ where
                 let sync_attachment_facts =
                     sync_attachment_facts_for(folder_id, &selected, snapshot);
                 let transfer_buffer =
-                    mapi_mailstore::fast_transfer_manifest_buffer_with_attachments(
-                        folder_id,
-                        &[],
+                    mapi_mailstore::fast_transfer_message_list_buffer_with_attachments(
                         &selected,
                         &sync_attachment_facts,
                     );
@@ -21882,6 +22524,7 @@ where
                     continue;
                 };
                 let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
+                    request.rop_id,
                     &object,
                     principal.account_id,
                     mailboxes,
@@ -22969,6 +23612,22 @@ where
                 if message_id != 0
                     && message_for_id(folder_id, message_id, mailboxes, emails).is_some()
                 {
+                    let change_number = message_for_id(folder_id, message_id, mailboxes, emails)
+                        .map(mapi_mailstore::canonical_message_change_number)
+                        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message_id));
+                    if import_flag & 0x40 != 0
+                        && import_message_change_conflicts_with_current_pcl(
+                            &property_values,
+                            change_number,
+                        )
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0109,
+                        ));
+                        continue;
+                    }
                     if apply_canonical_message_property_values(
                         store,
                         principal,
@@ -22998,9 +23657,6 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    let change_number = message_for_id(folder_id, message_id, mailboxes, emails)
-                        .map(mapi_mailstore::canonical_message_change_number)
-                        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message_id));
                     record_sync_upload_content_change(
                         session,
                         folder_id,
@@ -23293,6 +23949,55 @@ where
                 }
             }
             Some(RopId::SynchronizationImportDeletes) => {
+                let hierarchy_collector_folder_id =
+                    match input_object(session, &handle_slots, &request) {
+                        Some(MapiObject::SynchronizationCollector {
+                            folder_id,
+                            sync_type: 0x02,
+                            ..
+                        }) => Some(*folder_id),
+                        _ => None,
+                    };
+                if let Some(collector_folder_id) = hierarchy_collector_folder_id {
+                    let mut partial_completion = false;
+                    for folder_id in request.import_delete_message_ids() {
+                        let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
+                            partial_completion = true;
+                            continue;
+                        };
+                        if mailbox.role != "custom" {
+                            partial_completion = true;
+                            continue;
+                        }
+                        if store
+                            .destroy_jmap_mailbox(
+                                principal.account_id,
+                                mailbox.id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-sync-import-delete-folder".to_string(),
+                                    subject: format!("folder:{}", mailbox.id),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                            continue;
+                        }
+                        record_sync_upload_hierarchy_change(
+                            session,
+                            collector_folder_id,
+                            folder_id,
+                        );
+                    }
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x74,
+                        request.response_handle_index(),
+                        partial_completion,
+                    ));
+                    continue;
+                }
                 let Some(folder_id) =
                     input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
                 else {
@@ -23385,6 +24090,15 @@ where
                     };
                     if result.is_err() {
                         partial_completion = true;
+                    } else {
+                        record_sync_upload_content_change(
+                            session,
+                            folder_id,
+                            message_id,
+                            mapi_mailstore::canonical_message_change_number(&email),
+                            false,
+                            false,
+                        );
                     }
                 }
                 responses.extend_from_slice(&rop_partial_completion_response(
@@ -25486,6 +26200,16 @@ mod property_tag_validation_tests {
             0,
             &[(0x8001_3003, 0x00)],
         )));
+        assert!(sort_table_request_is_valid(&request_with_orders(
+            0x00,
+            0,
+            0,
+            &[
+                (PID_TAG_MESSAGE_CLASS_W, 0x00),
+                (0x683A_0003, 0x00),
+                (0x7006_001F, 0x00)
+            ],
+        )));
         assert!(!sort_table_request_is_valid(&request_with_orders(
             0x00,
             2,
@@ -25817,6 +26541,30 @@ where
         });
     }
     Ok(uploads)
+}
+
+async fn sync_attachment_facts_for_with_embedded_content<S: ExchangeStore>(
+    store: &S,
+    account_id: Uuid,
+    folder_id: u64,
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<mapi_mailstore::MessageAttachmentSyncFacts> {
+    let mut facts = sync_attachment_facts_for(folder_id, emails, snapshot);
+    for message_facts in &mut facts {
+        for attachment in &mut message_facts.attachments {
+            if !mapi_mailstore::attachment_sync_fact_is_embedded_message(attachment) {
+                continue;
+            }
+            if let Ok(Some(content)) = store
+                .fetch_attachment_content(account_id, &attachment.file_reference)
+                .await
+            {
+                attachment.embedded_message_blob = Some(content.blob_bytes);
+            }
+        }
+    }
+    facts
 }
 
 async fn mapi_message_ids_for_deleted_changes<S>(
@@ -26255,6 +27003,40 @@ where
     Ok(())
 }
 
+async fn persist_released_associated_config_stream<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    released_object: Option<&MapiObject>,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::AttachmentStream {
+        writable_target: Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
+        ..
+    }) = released_object
+    else {
+        return Ok(());
+    };
+    let message = match session.handles.get(handle) {
+        Some(MapiObject::AssociatedConfig {
+            folder_id,
+            saved_message: Some(message),
+            ..
+        }) => Some((*folder_id, message.clone())),
+        _ => None,
+    };
+    match message {
+        Some((folder_id, message)) => {
+            persist_associated_config_stream_message(store, principal, folder_id, &message).await
+        }
+        None => Err(anyhow!(
+            "MAPI associated config stream release target was not found"
+        )),
+    }
+}
+
 fn message_list_settings_placeholder_persisted_properties(
     default: &crate::mapi_store::MapiAssociatedConfigMessage,
 ) -> HashMap<u32, MapiValue> {
@@ -26366,6 +27148,155 @@ fn transient_embedded_message_id(folder_id: u64, message_id: u64, attach_num: u3
     )
 }
 
+fn embedded_message_open_subject(properties: &HashMap<u32, MapiValue>) -> String {
+    optional_pending_text_property(
+        properties,
+        &[PID_TAG_NORMALIZED_SUBJECT_W, PID_TAG_SUBJECT_W],
+    )
+    .unwrap_or_default()
+}
+
+async fn open_embedded_message_source<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    snapshot: &MapiMailStoreSnapshot,
+    handle: u32,
+    open_mode: u8,
+) -> Option<(u64, u64, u32, HashMap<u32, MapiValue>)> {
+    match session.handles.get(&handle)?.clone() {
+        MapiObject::PendingAttachment {
+            folder_id,
+            message_id,
+            attach_num,
+            properties,
+            ..
+        } => {
+            let attach_method = properties
+                .get(&PID_TAG_ATTACH_METHOD)
+                .and_then(MapiValue::as_i64)
+                .unwrap_or(i64::from(ATTACH_EMBEDDED_MESSAGE));
+            if attach_method != i64::from(ATTACH_EMBEDDED_MESSAGE) {
+                return None;
+            }
+            Some((
+                folder_id,
+                message_id,
+                attach_num,
+                default_embedded_message_properties(),
+            ))
+        }
+        MapiObject::Attachment {
+            folder_id,
+            message_id,
+            attach_num,
+        } => {
+            if open_mode != 0 {
+                return None;
+            }
+            let attachment = snapshot.attachment_for_message(folder_id, message_id, attach_num)?;
+            if !attachment_is_embedded_message(&attachment) {
+                return None;
+            }
+            let properties =
+                embedded_message_properties_from_attachment(store, principal, &attachment).await;
+            Some((folder_id, message_id, attach_num, properties))
+        }
+        MapiObject::SavedAttachment {
+            folder_id,
+            message_id,
+            attach_num,
+            file_reference,
+            file_name,
+            media_type,
+            ..
+        } => {
+            if open_mode != 0 || !attachment_metadata_is_embedded_message(&media_type, &file_name) {
+                return None;
+            }
+            let properties = embedded_message_properties_from_attachment_metadata(
+                store,
+                principal,
+                &file_reference,
+                &file_name,
+            )
+            .await;
+            Some((folder_id, message_id, attach_num, properties))
+        }
+        _ => None,
+    }
+}
+
+async fn embedded_message_properties_from_attachment<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    attachment: &crate::mapi_store::MapiAttachment,
+) -> HashMap<u32, MapiValue> {
+    embedded_message_properties_from_attachment_metadata(
+        store,
+        principal,
+        &attachment.file_reference,
+        &attachment.file_name,
+    )
+    .await
+}
+
+async fn embedded_message_properties_from_attachment_metadata<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    file_reference: &str,
+    file_name: &str,
+) -> HashMap<u32, MapiValue> {
+    let content = store
+        .fetch_attachment_content(principal.account_id, file_reference)
+        .await
+        .ok()
+        .flatten()
+        .map(|content| content.blob_bytes)
+        .unwrap_or_default();
+    embedded_message_properties_from_blob(file_name, &content)
+}
+
+fn default_embedded_message_properties() -> HashMap<u32, MapiValue> {
+    HashMap::from([(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Note".to_string()),
+    )])
+}
+
+fn embedded_message_properties_from_blob(file_name: &str, blob: &[u8]) -> HashMap<u32, MapiValue> {
+    let mut properties = default_embedded_message_properties();
+    let text = String::from_utf8_lossy(blob);
+    if let Some(subject) = text
+        .split_once("Subject:")
+        .and_then(|(_, rest)| rest.split_once("\r\n").map(|(value, _)| value))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        properties.insert(PID_TAG_SUBJECT_W, MapiValue::String(subject.to_string()));
+    } else if let Some(subject) = file_name
+        .trim()
+        .strip_suffix(".msg")
+        .filter(|value| !value.is_empty())
+    {
+        properties.insert(PID_TAG_SUBJECT_W, MapiValue::String(subject.to_string()));
+    }
+    if let Some(body_text) = text
+        .split_once("Body-Length:")
+        .and_then(|(_, rest)| rest.split_once("\r\n").map(|(_, body)| body))
+        .map(|body| {
+            body.split_once("\r\nHtml-Length:")
+                .map(|(value, _)| value)
+                .unwrap_or(body)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        properties.insert(PID_TAG_BODY_W, MapiValue::String(body_text.to_string()));
+    }
+    properties
+}
+
 fn pending_embedded_message_attachment_upload(
     attach_num: u32,
     attachment_properties: &HashMap<u32, MapiValue>,
@@ -26451,6 +27382,57 @@ fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) 
             }
             _ => None,
         })
+}
+
+fn import_message_change_conflicts_with_current_pcl(
+    properties: &[(u32, MapiValue)],
+    current_change_number: u64,
+) -> bool {
+    let Some(client_pcl) = properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag, value) {
+            (PID_TAG_PREDECESSOR_CHANGE_LIST, MapiValue::Binary(bytes)) => Some(bytes.as_slice()),
+            _ => None,
+        })
+    else {
+        return false;
+    };
+    let Ok(client_entries) = parse_predecessor_change_list_entries(client_pcl) else {
+        return true;
+    };
+    let current_change_key = mapi_mailstore::change_key_for_change_number(current_change_number);
+    client_entries.iter().all(|entry| {
+        entry.guid != current_change_key[..16]
+            || entry.counter
+                < crate::mapi::identity::global_counter_from_globcnt(&current_change_key[16..22])
+                    .unwrap_or(1)
+    })
+}
+
+struct PredecessorChangeListEntry {
+    guid: [u8; 16],
+    counter: u64,
+}
+
+fn parse_predecessor_change_list_entries(
+    bytes: &[u8],
+) -> Result<Vec<PredecessorChangeListEntry>, ()> {
+    let mut entries = Vec::new();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let size = usize::from(*bytes.get(offset).ok_or(())?);
+        offset += 1;
+        if size != 22 {
+            return Err(());
+        }
+        let change_key = bytes.get(offset..offset + size).ok_or(())?;
+        offset += size;
+        let guid = change_key[0..16].try_into().map_err(|_| ())?;
+        let counter =
+            crate::mapi::identity::global_counter_from_globcnt(&change_key[16..22]).ok_or(())?;
+        entries.push(PredecessorChangeListEntry { guid, counter });
+    }
+    Ok(entries)
 }
 
 fn persistable_import_source_key_global_counter(source_key: &[u8]) -> Option<u64> {
@@ -29127,7 +30109,7 @@ mod tests {
 
     #[test]
     fn normal_message_column_support_covers_outlook_mail_view_columns() {
-        for view_name in ["Compact", "Sent To"] {
+        for view_name in ["Messages", "Compact", "Sent To"] {
             let columns = outlook_mail_view_definition(view_name)
                 .columns
                 .iter()
@@ -29139,11 +30121,14 @@ mod tests {
                 summary.contains(";defaulted=;"),
                 "{view_name} view has defaulted message-table columns: {summary}"
             );
-            if view_name == "Compact" {
-                assert!(summary.ends_with("named_or_dynamic=0x8514000b,0x9000101e"));
-            } else {
-                assert!(summary.ends_with("named_or_dynamic=0x8503000b,0x9000101e"));
-            }
+            assert!(
+                summary.ends_with(match view_name {
+                    "Compact" => "named_or_dynamic=0x8514000b,0x9000101e",
+                    "Messages" | "Sent To" => "named_or_dynamic=0x8503000b,0x9000101e",
+                    _ => unreachable!(),
+                }),
+                "{view_name} view has unexpected named/dynamic columns: {summary}"
+            );
         }
     }
 
@@ -31030,6 +32015,9 @@ mod tests {
             message_statuses: HashMap::new(),
             message_save_generations: HashMap::new(),
             message_handle_generations: HashMap::new(),
+            pending_message_recipient_replacements: HashMap::new(),
+            pending_message_attachments: HashMap::new(),
+            pending_attachment_parent_messages: HashMap::new(),
             pending_attachment_deletions: HashSet::new(),
             pending_embedded_message_ids: HashMap::new(),
             pending_embedded_message_attachments: HashMap::new(),

@@ -3391,6 +3391,9 @@ impl ExchangeStore for FakeStore {
                 .iter_mut()
                 .find(|folder| folder.id == input.folder_id && folder.lifecycle_state == "active")
                 .map(|folder| {
+                    if let Some(parent_folder_id) = input.parent_folder_id {
+                        folder.parent_folder_id = Some(parent_folder_id);
+                    }
                     if let Some(display_name) = input.display_name.clone() {
                         folder.display_name = display_name;
                     }
@@ -6503,6 +6506,30 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(updated) })
     }
 
+    fn update_jmap_email_content<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        subject: Option<String>,
+        body_text: Option<String>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .unwrap();
+        if let Some(subject) = subject {
+            email.subject = subject;
+        }
+        if let Some(body_text) = body_text {
+            email.preview = body_text.clone();
+            email.body_text = body_text;
+        }
+        let updated = email.clone();
+        Box::pin(async move { Ok(updated) })
+    }
+
     fn delete_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -6533,6 +6560,43 @@ impl ExchangeStore for FakeStore {
             return Box::pin(async move { Err(anyhow::anyhow!("forced delete failure")) });
         }
         self.delete_jmap_email(account_id, message_id, audit)
+    }
+
+    fn replace_message_recipients<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        to: &'a [SubmittedRecipientInput],
+        cc: &'a [SubmittedRecipientInput],
+        bcc: &'a [SubmittedRecipientInput],
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let mut emails = self.emails.lock().unwrap();
+        let Some(email) = emails.iter_mut().find(|email| email.id == message_id) else {
+            return Box::pin(async move { Err(anyhow::anyhow!("message not found")) });
+        };
+        email.to = to
+            .iter()
+            .map(|recipient| JmapEmailAddress {
+                address: recipient.address.clone(),
+                display_name: recipient.display_name.clone(),
+            })
+            .collect();
+        email.cc = cc
+            .iter()
+            .map(|recipient| JmapEmailAddress {
+                address: recipient.address.clone(),
+                display_name: recipient.display_name.clone(),
+            })
+            .collect();
+        email.bcc = bcc
+            .iter()
+            .map(|recipient| JmapEmailAddress {
+                address: recipient.address.clone(),
+                display_name: recipient.display_name.clone(),
+            })
+            .collect();
+        Box::pin(async move { Ok(()) })
     }
 
     fn save_draft_message<'a>(
@@ -7440,9 +7504,19 @@ const FX_INCR_SYNC_MESSAGE: u32 = 0x4015_0003;
 const FX_INCR_SYNC_READ: u32 = 0x402F_0003;
 const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
+const FX_INCR_SYNC_PROGRESS_MODE: u32 = 0x4074_000B;
+const FX_INCR_SYNC_PROGRESS_PER_MSG: u32 = 0x4075_000B;
+const FX_NEW_ATTACH: u32 = 0x4000_0003;
+const FX_START_EMBED: u32 = 0x4001_0003;
+const FX_END_EMBED: u32 = 0x4002_0003;
+const FX_START_RECIP: u32 = 0x4003_0003;
+const FX_END_TO_RECIP: u32 = 0x4004_0003;
+const FX_END_ATTACH: u32 = 0x400E_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
+const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -7455,6 +7529,9 @@ const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
+const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
+const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -7468,6 +7545,19 @@ const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
 const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
 const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
+const PID_TAG_VIEW_DESCRIPTOR_BINARY: u32 = 0x7001_0102;
+const PID_TAG_VIEW_DESCRIPTOR_STRINGS_W: u32 = 0x7002_001F;
+const PID_TAG_VIEW_DESCRIPTOR_NAME_W: u32 = 0x7006_001F;
+const PID_TAG_VIEW_DESCRIPTOR_VERSION: u32 = 0x683A_0003;
+const PID_TAG_ATTACH_ENCODING: u32 = 0x3702_0102;
+const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
+const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
+const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
+const PID_TAG_ATTACH_RENDERING: u32 = 0x3709_0102;
+const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
+const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
+const PID_TAG_ATTACH_FLAGS: u32 = 0x3714_0003;
+const PID_TAG_ATTACHMENT_HIDDEN: u32 = 0x7FFE_000B;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
@@ -8333,8 +8423,12 @@ struct StrictContentMessageBuilder {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum StrictContentSection {
     None,
+    Progress,
     MessageHeader,
     MessageBody,
+    Recipient,
+    Attachment,
+    EmbeddedMessage,
     Deletions,
     ReadState,
     State,
@@ -8387,11 +8481,56 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                     current_message = Some(StrictContentMessageBuilder::default());
                     section = StrictContentSection::MessageHeader;
                 }
+                FX_INCR_SYNC_PROGRESS_MODE | FX_INCR_SYNC_PROGRESS_PER_MSG => {
+                    if state_closed {
+                        return Err("progress marker appears after final ICS state".into());
+                    }
+                    if let Some(message) = current_message.take() {
+                        strict_finish_content_message(message, &mut message_changes)?;
+                    }
+                    section = StrictContentSection::Progress;
+                }
                 FX_INCR_SYNC_MESSAGE => {
                     if section != StrictContentSection::MessageHeader {
                         return Err("IncrSyncMessage without an open messageChange header".into());
                     }
                     section = StrictContentSection::MessageBody;
+                }
+                FX_START_RECIP => {
+                    if section != StrictContentSection::MessageBody {
+                        return Err("StartRecip outside message content".into());
+                    }
+                    section = StrictContentSection::Recipient;
+                }
+                FX_END_TO_RECIP => {
+                    if section != StrictContentSection::Recipient {
+                        return Err("EndToRecip without StartRecip".into());
+                    }
+                    section = StrictContentSection::MessageBody;
+                }
+                FX_NEW_ATTACH => {
+                    if section != StrictContentSection::MessageBody {
+                        return Err("NewAttach outside message content".into());
+                    }
+                    section = StrictContentSection::Attachment;
+                }
+                FX_END_ATTACH => {
+                    if section != StrictContentSection::Attachment {
+                        return Err("EndAttach without NewAttach".into());
+                    }
+                    section = StrictContentSection::MessageBody;
+                }
+                FX_START_EMBED => {
+                    if section != StrictContentSection::Attachment {
+                        return Err("StartEmbed outside attachment content".into());
+                    }
+                    section = StrictContentSection::EmbeddedMessage;
+                }
+                FX_END_EMBED => {
+                    if section != StrictContentSection::EmbeddedMessage {
+                        return Err("EndEmbed without StartEmbed".into());
+                    }
+                    section = StrictContentSection::Attachment;
                 }
                 FX_INCR_SYNC_DEL => {
                     if let Some(message) = current_message.take() {
@@ -8463,6 +8602,57 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                     .ok_or("message body property without current message")?;
                 strict_record_content_body_property(message, property)?;
             }
+            StrictContentSection::Progress => match property.tag {
+                0x0000_0102 => {
+                    if property.value.len() != 32 {
+                        return Err("invalid ProgressInformation length".into());
+                    }
+                }
+                0x0000_0003 | 0x0000_000B => {}
+                tag => return Err(format!("unexpected progress property 0x{tag:08x}")),
+            },
+            StrictContentSection::Recipient => match property.tag {
+                PID_TAG_RECIPIENT_TYPE => {
+                    let recipient_type = strict_decode_i32_property(&property)?;
+                    if recipient_type != 1 && recipient_type != 2 {
+                        return Err(format!("unexpected recipient type {recipient_type}"));
+                    }
+                }
+                PID_TAG_DISPLAY_NAME_W | PID_TAG_EMAIL_ADDRESS_W => {
+                    let _ = strict_decode_utf16z(&property.value)?;
+                }
+                tag => return Err(format!("unexpected recipient property 0x{tag:08x}")),
+            },
+            StrictContentSection::Attachment => match property.tag {
+                PID_TAG_ATTACH_NUM
+                | PID_TAG_RENDERING_POSITION
+                | PID_TAG_ATTACH_SIZE
+                | PID_TAG_ATTACH_METHOD
+                | PID_TAG_ATTACH_FLAGS => {
+                    let _ = strict_decode_i32_property(&property)?;
+                }
+                PID_TAG_ATTACH_ENCODING | PID_TAG_ATTACH_RENDERING => {}
+                PID_TAG_ATTACHMENT_HIDDEN => {
+                    if property.value.len() != 2 {
+                        return Err(
+                            "PidTagAttachmentHidden was not encoded as a two-byte PtypBoolean"
+                                .into(),
+                        );
+                    }
+                }
+                PID_TAG_ATTACH_FILENAME_W
+                | PID_TAG_ATTACH_LONG_FILENAME_W
+                | PID_TAG_ATTACH_MIME_TAG_W => {
+                    let _ = strict_decode_utf16z(&property.value)?;
+                }
+                tag => return Err(format!("unexpected attachment property 0x{tag:08x}")),
+            },
+            StrictContentSection::EmbeddedMessage => match property.tag {
+                PID_TAG_MESSAGE_CLASS_W | PID_TAG_SUBJECT_W | PID_TAG_BODY_W => {
+                    let _ = strict_decode_utf16z(&property.value)?;
+                }
+                tag => return Err(format!("unexpected embedded message property 0x{tag:08x}")),
+            },
             StrictContentSection::Deletions => match property.tag {
                 META_TAG_IDSET_DELETED => {
                     if deleted_idset.replace(property.value).is_some() {
@@ -8578,6 +8768,14 @@ fn strict_content_marker(tag: u32) -> bool {
         tag,
         FX_INCR_SYNC_CHG
             | FX_INCR_SYNC_MESSAGE
+            | FX_INCR_SYNC_PROGRESS_MODE
+            | FX_INCR_SYNC_PROGRESS_PER_MSG
+            | FX_NEW_ATTACH
+            | FX_START_EMBED
+            | FX_END_EMBED
+            | FX_START_RECIP
+            | FX_END_TO_RECIP
+            | FX_END_ATTACH
             | FX_INCR_SYNC_DEL
             | FX_INCR_SYNC_READ
             | FX_INCR_SYNC_STATE_BEGIN
@@ -8758,10 +8956,17 @@ fn strict_replid_globset_contains_counter(value: &[u8], counter: &[u8]) -> Resul
 }
 
 fn strict_replid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String> {
-    if value.len() < 3 || value[0..2] != 1u16.to_le_bytes() {
+    let replid = value
+        .get(0..2)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(0);
+    if value.len() < 3 || replid == 0 {
         return Err("REPLID-based IDSET is missing the store REPLID".into());
     }
     let mut ranges = Vec::new();
+    let mut stack = Vec::new();
+    let mut push_lengths = Vec::new();
     let mut offset = 2;
     loop {
         let command = *value
@@ -8773,13 +8978,73 @@ fn strict_replid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String>
                 if offset != value.len() {
                     return Err("trailing bytes after REPLID GLOBSET end command".into());
                 }
+                if !stack.is_empty() {
+                    return Err("non-empty REPLID GLOBSET stack at end command".into());
+                }
                 return Ok(ranges);
             }
+            1..=6 => {
+                let push_len = usize::from(command);
+                let bytes = read_strict_slice(value, offset, push_len)?;
+                offset += push_len;
+                if stack.len() + push_len > 6 {
+                    return Err("REPLID GLOBSET push overflows GLOBCNT".into());
+                }
+                stack.extend_from_slice(bytes);
+                if stack.len() == 6 {
+                    let counter = strict_globcnt_to_u64(&stack)?;
+                    ranges.push((counter, counter));
+                    stack.truncate(stack.len() - push_len);
+                } else {
+                    push_lengths.push(push_len);
+                }
+            }
+            0x42 => {
+                if stack.len() != 5 {
+                    return Err("REPLID GLOBSET bitmask requires five-byte stack".into());
+                }
+                let start = *read_strict_slice(value, offset, 1)?.first().unwrap();
+                offset += 1;
+                let mask = *read_strict_slice(value, offset, 1)?.first().unwrap();
+                offset += 1;
+                let mut values = vec![start];
+                for bit in 0..8 {
+                    if mask & (1 << bit) != 0 {
+                        values.push(start.saturating_add(1 + bit));
+                    }
+                }
+                for (low, high) in coalesced_u8_ranges(values) {
+                    let mut low_bytes = stack.clone();
+                    low_bytes.push(low);
+                    let mut high_bytes = stack.clone();
+                    high_bytes.push(high);
+                    ranges.push((
+                        strict_globcnt_to_u64(&low_bytes)?,
+                        strict_globcnt_to_u64(&high_bytes)?,
+                    ));
+                }
+            }
+            0x50 => {
+                let Some(pop_len) = push_lengths.pop() else {
+                    return Err("REPLID GLOBSET pop without push".into());
+                };
+                if pop_len > stack.len() {
+                    return Err("REPLID GLOBSET pop underflows stack".into());
+                }
+                stack.truncate(stack.len() - pop_len);
+            }
             0x52 => {
-                let low = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
-                offset += 6;
-                let high = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
-                offset += 6;
+                let suffix_len = 6usize.saturating_sub(stack.len());
+                let low_suffix = read_strict_slice(value, offset, suffix_len)?;
+                offset += suffix_len;
+                let high_suffix = read_strict_slice(value, offset, suffix_len)?;
+                offset += suffix_len;
+                let mut low_bytes = stack.clone();
+                low_bytes.extend_from_slice(low_suffix);
+                let mut high_bytes = stack.clone();
+                high_bytes.extend_from_slice(high_suffix);
+                let low = strict_globcnt_to_u64(&low_bytes)?;
+                let high = strict_globcnt_to_u64(&high_bytes)?;
                 if low == 0 || high < low {
                     return Err("invalid REPLID GLOBSET range".into());
                 }
@@ -8792,6 +9057,45 @@ fn strict_replid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String>
             }
         }
     }
+}
+
+fn coalesced_u8_ranges(mut values: Vec<u8>) -> Vec<(u8, u8)> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    values.sort_unstable();
+    values.dedup();
+    let mut ranges = Vec::new();
+    let mut low = values[0];
+    let mut high = values[0];
+    for value in values.into_iter().skip(1) {
+        if value == high.saturating_add(1) {
+            high = value;
+        } else {
+            ranges.push((low, high));
+            low = value;
+            high = value;
+        }
+    }
+    ranges.push((low, high));
+    ranges
+}
+
+#[test]
+fn microsoft_oxcfxics_idset_serialization_example_decodes_replid_globsets() {
+    let example = [
+        0x01, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x52, 0x05, 0x06, 0x01, 0x10, 0x50, 0x00,
+        0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00,
+    ];
+
+    assert_eq!(
+        strict_replid_globset_ranges(&example[..15]).unwrap(),
+        vec![(5, 6), (16, 16)]
+    );
+    assert_eq!(
+        strict_replid_globset_ranges(&example[15..]).unwrap(),
+        vec![(9, 9)]
+    );
 }
 
 fn strict_push_binary_property(bytes: &mut Vec<u8>, tag: u32, value: &[u8]) {
@@ -9060,6 +9364,18 @@ fn mapi_fast_transfer_chunks(bytes: &[u8]) -> Vec<(u16, Vec<u8>)> {
         offset = transfer_buffer_end;
     }
     chunks
+}
+
+fn assert_mapi_fast_transfer_marker_sequence(buffer: &[u8], markers: &[u32]) {
+    let mut offset = 0;
+    for marker in markers {
+        let marker_bytes = marker.to_le_bytes();
+        let relative_offset = buffer[offset..]
+            .windows(marker_bytes.len())
+            .position(|window| window == marker_bytes)
+            .unwrap_or_else(|| panic!("missing FastTransfer marker 0x{marker:08x}"));
+        offset += relative_offset + marker_bytes.len();
+    }
 }
 
 fn utf16z(value: &str) -> Vec<u8> {
@@ -9355,7 +9671,16 @@ fn append_rop_modify_recipients_with_columns(
 }
 
 fn append_rop_save_changes_message(rops: &mut Vec<u8>, input: u8, response: u8) {
-    rops.extend_from_slice(&[0x0C, 0x00, input, response, 0x00]);
+    append_rop_save_changes_message_with_flags(rops, input, response, 0x00);
+}
+
+fn append_rop_save_changes_message_with_flags(
+    rops: &mut Vec<u8>,
+    input: u8,
+    response: u8,
+    save_flags: u8,
+) {
+    rops.extend_from_slice(&[0x0C, 0x00, input, response, save_flags]);
 }
 
 fn test_conversation_index(conversation_id: Uuid) -> Vec<u8> {
