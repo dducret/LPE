@@ -2433,6 +2433,16 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             .map(|message_class| MapiValue::String(message_class.to_string()))
         }
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            if folder.kind == MapiCollaborationFolderKind::Calendar
+                && folder.id == CALENDAR_FOLDER_ID =>
+        {
+            default_folder_view_entry_id(
+                folder.collection.owner_account_id,
+                folder.id,
+                collaboration_folder_message_class(folder.kind),
+            )
+        }
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_container_class(collaboration_folder_message_class(
                 folder.kind,
             )) =>
@@ -9778,7 +9788,7 @@ mod tests {
     }
 
     #[test]
-    fn collaboration_calendar_does_not_advertise_mail_default_view() {
+    fn collaboration_calendar_advertises_default_view_entry_id() {
         let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
         let collection = MapiCollaborationFolder {
             id: CALENDAR_FOLDER_ID,
@@ -9805,9 +9815,15 @@ mod tests {
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             Some(MapiValue::String("IPM.Appointment".to_string()))
         );
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            CALENDAR_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            Some(MapiValue::Binary(expected_entry_id))
         );
     }
 

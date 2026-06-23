@@ -2919,7 +2919,7 @@ pub(crate) fn collaboration_folder_identity_requests(
     calendar_collections: &[CollaborationCollection],
     task_collections: &[CollaborationCollection],
 ) -> Vec<MapiIdentityRequest> {
-    contact_collections
+    let mut requests = contact_collections
         .iter()
         .filter_map(|collection| {
             collaboration_folder_identity_canonical_id(
@@ -2945,7 +2945,25 @@ pub(crate) fn collaboration_folder_identity_requests(
             reserved_global_counter: None,
             source_key: None,
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    if calendar_collections
+        .iter()
+        .any(|collection| matches!(collection.id.as_str(), "default" | "calendar"))
+    {
+        let mailbox = crate::mapi_mailstore::virtual_special_mailbox(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .expect("default Calendar virtual mailbox");
+        requests.push(MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id: mailbox.id,
+            reserved_global_counter: Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
+            source_key: None,
+        });
+    }
+
+    requests
 }
 
 pub(crate) fn is_virtual_special_mailbox(mailbox: &JmapMailbox) -> bool {
