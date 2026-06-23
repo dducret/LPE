@@ -682,6 +682,12 @@ pub(in crate::mapi) const PID_LID_EMAIL3_DISPLAY_NAME: u32 = 0x0000_80A0;
 pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS: u32 = 0x0000_80A3;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_80A4;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_ENTRY_ID: u32 = 0x0000_80A5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E0: u32 = 0x0000_80E0;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E2: u32 = 0x0000_80E2;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E3: u32 = 0x0000_80E3;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E5: u32 = 0x0000_80E5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E6: u32 = 0x0000_80E6;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E8: u32 = 0x0000_80E8;
 pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1: u32 = 0x0000_80E1;
 pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA: u32 = 0x0000_80EA;
 pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC: u32 = 0x0000_80EC;
@@ -794,6 +800,12 @@ pub(in crate::mapi) const PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG: u32 = 0x80A2_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_DISPLAY_NAME_W_TAG: u32 = 0x80A0_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG: u32 = 0x80A3_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG: u32 = 0x80A4_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E0_TAG: u32 = 0x80E0_000B;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E2_TAG: u32 = 0x80E2_0102;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E3_TAG: u32 = 0x80E3_101F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E5_TAG: u32 = 0x80E5_1102;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E6_TAG: u32 = 0x80E6_0003;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_SOURCE_80E8_TAG: u32 = 0x80E8_0048;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG: u32 =
     0x80B5_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME_W_TAG: u32 =
@@ -933,6 +945,12 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_EMAIL3_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_ORIGINAL_ENTRY_ID, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E0, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E2, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E3, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E5, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E6, PSETID_ADDRESS_GUID),
+            (PID_LID_OUTLOOK_CONTACT_SOURCE_80E8, PSETID_ADDRESS_GUID),
             (
                 PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1,
                 PS_PUBLIC_STRINGS_GUID,
@@ -3900,6 +3918,19 @@ pub(in crate::mapi) fn contact_property_value(
         PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 2).map(|_| MapiValue::String("SMTP".to_string()))
         }
+        PID_LID_OUTLOOK_CONTACT_SOURCE_80E0_TAG
+        | PID_LID_OUTLOOK_CONTACT_SOURCE_80E2_TAG
+        | PID_LID_OUTLOOK_CONTACT_SOURCE_80E3_TAG
+        | PID_LID_OUTLOOK_CONTACT_SOURCE_80E5_TAG
+        | PID_LID_OUTLOOK_CONTACT_SOURCE_80E6_TAG
+        | PID_LID_OUTLOOK_CONTACT_SOURCE_80E8_TAG => {
+            outlook_contact_source_empty_value(property_tag)
+        }
+        tag if MapiPropertyTag::new(tag).property_id()
+            == MapiPropertyTag::new(PID_NAME_OSC_CONTACT_SOURCES_TAG).property_id() =>
+        {
+            outlook_contact_source_empty_value(tag)
+        }
         PID_TAG_MOBILE_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact_phone_by_label(
             contact,
             &["mobile", "cell"],
@@ -3952,6 +3983,20 @@ pub(in crate::mapi) fn contact_property_value(
             mapi_mailstore::predecessor_change_list(change_number),
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+fn outlook_contact_source_empty_value(property_tag: u32) -> Option<MapiValue> {
+    match MapiPropertyTag::new(property_tag).property_type_code() {
+        0x0003 => Some(MapiValue::U32(0)),
+        0x000B => Some(MapiValue::Bool(false)),
+        0x001E | 0x001F => Some(MapiValue::String(String::new())),
+        0x0048 => Some(MapiValue::Guid(Uuid::nil().into_bytes())),
+        0x0102 => Some(MapiValue::Binary(Vec::new())),
+        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
+        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
         _ => None,
     }
 }
@@ -10407,6 +10452,80 @@ mod tests {
     }
 
     #[test]
+    fn outlook_contact_search_source_columns_project_empty_values() {
+        let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777778);
+        let contact = default_contact_for_mapping(account_id, "default");
+
+        assert_eq!(
+            contact_property_value(&contact, 1, CONTACTS_SEARCH_FOLDER_ID, 0x8450_0102),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_NAME_OSC_CONTACT_SOURCES_TAG
+            ),
+            Some(MapiValue::MultiString(Vec::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E0_TAG
+            ),
+            Some(MapiValue::Bool(false))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E2_TAG
+            ),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E3_TAG
+            ),
+            Some(MapiValue::MultiString(Vec::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E5_TAG
+            ),
+            Some(MapiValue::MultiBinary(Vec::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E6_TAG
+            ),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_SEARCH_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_SOURCE_80E8_TAG
+            ),
+            Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+        );
+    }
+
+    #[test]
     fn public_folder_projects_default_post_message_class_from_folder_class() {
         let folder = MapiPublicFolder {
             id: PUBLIC_FOLDERS_ROOT_FOLDER_ID + 0x10000,
@@ -14405,6 +14524,27 @@ mod tests {
                 }),
                 Some(lid as u16),
                 "PS_PUBLIC_STRINGS lid 0x{lid:04x} should not allocate a transient id"
+            );
+        }
+    }
+
+    #[test]
+    fn outlook_contact_source_probe_named_properties_map_to_stable_ids() {
+        for lid in [
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E0,
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E2,
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E3,
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E5,
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E6,
+            PID_LID_OUTLOOK_CONTACT_SOURCE_80E8,
+        ] {
+            assert_eq!(
+                well_known_named_property_id(&MapiNamedProperty {
+                    guid: PSETID_ADDRESS_GUID,
+                    kind: MapiNamedPropertyKind::Lid(lid),
+                }),
+                Some(lid as u16),
+                "PSETID_Address lid 0x{lid:04x} should not allocate a transient id"
             );
         }
     }

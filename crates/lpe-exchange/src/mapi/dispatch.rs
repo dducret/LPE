@@ -28149,6 +28149,28 @@ mod tests {
     }
 
     #[test]
+    fn get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_mapping() {
+        let mut session = test_mapi_session();
+        let property = MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_CONTACT_SOURCE_80E0),
+        };
+
+        let property_id = cache_named_property_mapping_and_return_property_id(
+            &mut session,
+            0x80b8,
+            property.clone(),
+        );
+
+        assert_eq!(property_id, PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16);
+        assert_eq!(session.property_name_for_id(0x80b8), property);
+        assert_eq!(
+            session.property_id_for_name(property, false),
+            Some(PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16)
+        );
+    }
+
+    #[test]
     fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
         let session = test_mapi_session();
         let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
