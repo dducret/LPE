@@ -7643,6 +7643,27 @@ fn format_debug_named_properties(properties: &[MapiNamedProperty]) -> String {
         .join("|")
 }
 
+fn is_contact_link_timestamp_config(folder_id: u64, message_class: &str) -> bool {
+    mapi_folder_is_outlook_contacts_surface(folder_id)
+        && message_class == "IPM.Microsoft.ContactLink.TimeStamp"
+}
+
+fn contains_outlook_osc_contact_source_probe(properties: &[MapiNamedProperty]) -> bool {
+    properties.iter().any(|property| {
+        property.guid == PS_PUBLIC_STRINGS_GUID
+            && match &property.kind {
+                MapiNamedPropertyKind::Name(name) => name.eq_ignore_ascii_case("OscContactSources"),
+                MapiNamedPropertyKind::Lid(lid) => matches!(
+                    *lid,
+                    PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1
+                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA
+                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC
+                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED
+                ),
+            }
+    })
+}
+
 fn format_debug_named_property_context(session: &MapiSession, tags: &[u32]) -> String {
     tags.iter()
         .copied()
@@ -14265,6 +14286,13 @@ where
                             request.output_handle_index.unwrap_or(0),
                             message.id,
                             message.message_class
+                        ));
+                    }
+                    if is_contact_link_timestamp_config(folder_id, &message.message_class) {
+                        session.record_outlook_view_failure_trace_event(format!(
+                            "open_contact_link_timestamp_config:request_id={request_id};folder=0x{folder_id:016x};config=0x{:016x};handle={handle};subject={}",
+                            message.id,
+                            message.subject
                         ));
                     }
                     tracing::info!(
@@ -25204,6 +25232,15 @@ where
                     returned_property_ids = %format_debug_property_ids(&property_ids),
                     message = "rca debug mapi get property ids from names",
                 );
+                if contains_outlook_osc_contact_source_probe(&properties) {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "resolve_osc_contact_sources:request_id={request_id};object={};create_missing={};requested={};returned={}",
+                        mapi_object_debug_kind(input_object(session, &handle_slots, &request)),
+                        request.named_property_create(),
+                        requested_named_properties,
+                        format_debug_property_ids(&property_ids)
+                    ));
+                }
                 responses.extend_from_slice(&rop_get_property_ids_from_names_response(
                     &request,
                     &property_ids,
