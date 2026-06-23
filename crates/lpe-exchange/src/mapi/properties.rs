@@ -650,6 +650,7 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE: u32 = 0x0000_820E;
 pub(in crate::mapi) const PID_LID_BUSY_STATUS: u32 = 0x0000_8205;
 pub(in crate::mapi) const PID_LID_LOCATION: u32 = 0x0000_8208;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION: u32 = 0x0000_8213;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_COLOR: u32 = 0x0000_8214;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE: u32 = 0x0000_8215;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_RECUR: u32 = 0x0000_8216;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS: u32 = 0x0000_8217;
@@ -745,6 +746,7 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
 pub(in crate::mapi) const PID_LID_BUSY_STATUS_TAG: u32 = 0x8205_0003;
 pub(in crate::mapi) const PID_LID_LOCATION_W_TAG: u32 = 0x8208_001F;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION_TAG: u32 = 0x8213_0003;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_COLOR_TAG: u32 = 0x8214_0003;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_RECUR_TAG: u32 = 0x8216_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
@@ -893,6 +895,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_DURATION, PSETID_APPOINTMENT_GUID),
+            (PID_LID_APPOINTMENT_COLOR, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_RECUR, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
@@ -4089,6 +4092,7 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         }
         PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
         PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
+        PID_LID_APPOINTMENT_COLOR_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
@@ -12037,6 +12041,10 @@ mod tests {
             Some(MapiValue::I32(0))
         );
         assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_COLOR_TAG),
+            Some(MapiValue::I32(0))
+        );
+        assert_eq!(
             event_property_value(
                 &event,
                 1,
@@ -14345,6 +14353,17 @@ mod tests {
                 "PSETID_Sharing lid 0x{lid:04x} should not allocate a transient id"
             );
         }
+    }
+
+    #[test]
+    fn appointment_color_named_property_maps_to_stable_id() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+            }),
+            Some(PID_LID_APPOINTMENT_COLOR as u16)
+        );
     }
 
     #[test]
