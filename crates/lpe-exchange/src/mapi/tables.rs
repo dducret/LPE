@@ -4590,8 +4590,26 @@ pub(in crate::mapi) fn rop_find_row_response(
                     return rop_find_row_no_match_response(request);
                 }
             } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
-                let mut rows =
-                    associated_table_rows(*folder_id, snapshot, Some(&restriction), mailbox_guid);
+                let mut rows = associated_table_rows(
+                    *folder_id,
+                    snapshot,
+                    table_restriction.as_ref(),
+                    mailbox_guid,
+                );
+                if *folder_id == INBOX_FOLDER_ID {
+                    for row in associated_table_rows(
+                        *folder_id,
+                        snapshot,
+                        Some(&restriction),
+                        mailbox_guid,
+                    ) {
+                        if !rows.iter().any(|existing| {
+                            associated_table_row_id(existing) == associated_table_row_id(&row)
+                        }) {
+                            rows.push(row);
+                        }
+                    }
+                }
                 sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
                 let broad_outlook_configuration_probe = *folder_id == INBOX_FOLDER_ID
                     && is_broad_outlook_configuration_find_row(&restriction);
@@ -10701,6 +10719,91 @@ mod tests {
             CONTACTS_FOLDER_ID,
             "IPM.Microsoft.ContactLink.TimeStamp",
             &MapiMailStoreSnapshot::empty(),
+        );
+    }
+
+    #[test]
+    fn contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let contact_prefs_id = Uuid::from_u128(0x6d617069_6370_7266_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            contact_prefs_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 83,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: contact_prefs_id,
+                account_id,
+                folder_id: CONTACTS_FOLDER_ID,
+                message_class: "IPM.Configuration.ContactPrefs".to_string(),
+                subject: "IPM.Configuration.ContactPrefs".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Microsoft.ContactLink.TimeStamp");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        assert_response_contains_utf16(&response, "IPM.Microsoft.ContactLink.TimeStamp");
+        assert_eq!(table_position(&table), Some(1));
+
+        let position_response = rop_query_position_response(
+            &RopRequest {
+                rop_id: RopId::QueryPosition.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: Vec::new(),
+            },
+            Some(&table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+        assert_eq!(position_response[0], RopId::QueryPosition.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(position_response[6..10].try_into().unwrap()),
+            1
+        );
+        assert_eq!(
+            u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
+            3
         );
     }
 
