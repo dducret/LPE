@@ -383,6 +383,7 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE_EXTENDED: u32 = 0x0E08_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_ENTRY_ID: u32 = 0x0E09_0102;
 pub(in crate::mapi) const OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B: u32 = 0x0E0B_0102;
 pub(in crate::mapi) const PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS: u32 = 0x0E99_0102;
+pub(in crate::mapi) const PID_TAG_EXTENDED_RULE_MESSAGE_CONDITION: u32 = 0x0E9A_0102;
 pub(in crate::mapi) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;

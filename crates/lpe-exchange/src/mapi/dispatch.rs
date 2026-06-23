@@ -3181,6 +3181,40 @@ fn associated_config_debug_fields(
         })
 }
 
+fn associated_config_open_shape(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> String {
+    let actions_len =
+        associated_config_binary_property_len(message, PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS);
+    let condition_len =
+        associated_config_binary_property_len(message, PID_TAG_EXTENDED_RULE_MESSAGE_CONDITION);
+    let has_undocumented_0e0b =
+        associated_config_property_value(message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B).is_some();
+    format!(
+        "class={};subject={};properties={};extended_rule_actions_len={};extended_rule_condition_len={};has_0e0b={}",
+        message.message_class,
+        message.subject,
+        mapi_properties_from_json(&message.properties_json).len(),
+        actions_len
+            .map(|len| len.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        condition_len
+            .map(|len| len.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        has_undocumented_0e0b
+    )
+}
+
+fn associated_config_binary_property_len(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+    property_tag: u32,
+) -> Option<usize> {
+    match associated_config_property_value(message, property_tag) {
+        Some(MapiValue::Binary(bytes)) => Some(bytes.len()),
+        _ => None,
+    }
+}
+
 fn log_open_message_debug(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -14272,7 +14306,8 @@ where
                         },
                     );
                     if folder_id == INBOX_FOLDER_ID
-                        && message.message_class.starts_with("IPM.Configuration.")
+                        && (message.message_class.starts_with("IPM.Configuration.")
+                            || message.message_class == "IPM.ExtendedRule.Message")
                     {
                         session.record_inbox_associated_config_open();
                         session.record_outlook_view_failure_trace_event(format!(
@@ -14288,6 +14323,7 @@ where
                             message.message_class
                         ));
                     }
+                    let response = rop_open_message_response(&request, &message.subject, 0);
                     if is_contact_link_timestamp_config(folder_id, &message.message_class) {
                         session.record_outlook_view_failure_trace_event(format!(
                             "open_contact_link_timestamp_config:request_id={request_id};folder=0x{folder_id:016x};config=0x{:016x};handle={handle};subject={}",
@@ -14310,15 +14346,15 @@ where
                         associated_config_canonical_id = %message.canonical_id,
                         associated_config_class = %message.message_class,
                         associated_config_subject = %message.subject,
+                        open_message_payload_preview = %hex_preview(&request.payload, 48),
+                        open_message_response_bytes = response.len(),
+                        open_message_response_preview = %hex_preview(&response, 96),
+                        associated_config_shape = %associated_config_open_shape(&message),
                         contacts_surface = mapi_folder_is_outlook_contacts_surface(folder_id),
                         "rca debug mapi open associated config"
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(
-                        &request,
-                        &message.subject,
-                        0,
-                    ));
+                    responses.extend_from_slice(&response);
                     output_handles.push(handle);
                 } else if snapshot.associated_config_identity_matches_folder(folder_id, message_id)
                 {
