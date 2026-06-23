@@ -719,6 +719,21 @@ pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_REMOTE_UID: u32 = 0x0000_8A08;
 pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_LOCAL_TYPE: u32 = 0x0000_8A1C;
 pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_CAPABILITIES: u32 = 0x0000_8A67;
 pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8AA6: u32 = 0x0000_8AA6;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A70: u32 = 0x0000_8A70;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A71: u32 = 0x0000_8A71;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A72: u32 = 0x0000_8A72;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A73: u32 = 0x0000_8A73;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A74: u32 = 0x0000_8A74;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A75: u32 = 0x0000_8A75;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A76: u32 = 0x0000_8A76;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A77: u32 = 0x0000_8A77;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A78: u32 = 0x0000_8A78;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A7E: u32 = 0x0000_8A7E;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A80: u32 = 0x0000_8A80;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A88: u32 = 0x0000_8A88;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A8B: u32 = 0x0000_8A8B;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A8D: u32 = 0x0000_8A8D;
+pub(in crate::mapi) const PID_LID_OUTLOOK_SHARING_8A8E: u32 = 0x0000_8A8E;
 pub(in crate::mapi) const PID_NAME_SHARING_SEND_AS_STATE_TAG: u32 = 0x81ED_0003;
 
 pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
@@ -989,6 +1004,21 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_OUTLOOK_SHARING_LOCAL_TYPE, PSETID_SHARING_GUID),
             (PID_LID_OUTLOOK_SHARING_CAPABILITIES, PSETID_SHARING_GUID),
             (PID_LID_OUTLOOK_SHARING_8AA6, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A70, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A71, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A72, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A73, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A74, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A75, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A76, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A77, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A78, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A7E, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A80, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A88, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A8B, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A8D, PSETID_SHARING_GUID),
+            (PID_LID_OUTLOOK_SHARING_8A8E, PSETID_SHARING_GUID),
         ]
         .into_iter()
         .map(|(lid, guid)| (lid as u16, lid, guid)),
@@ -14285,6 +14315,36 @@ mod tests {
             }),
             Some(PID_LID_OUTLOOK_SHARING_8AA6 as u16)
         );
+    }
+
+    #[test]
+    fn outlook_calendar_sharing_probe_named_properties_map_to_stable_ids() {
+        for lid in [
+            PID_LID_OUTLOOK_SHARING_8A70,
+            PID_LID_OUTLOOK_SHARING_8A71,
+            PID_LID_OUTLOOK_SHARING_8A72,
+            PID_LID_OUTLOOK_SHARING_8A74,
+            PID_LID_OUTLOOK_SHARING_8A75,
+            PID_LID_OUTLOOK_SHARING_8A73,
+            PID_LID_OUTLOOK_SHARING_8A76,
+            PID_LID_OUTLOOK_SHARING_8A77,
+            PID_LID_OUTLOOK_SHARING_8A78,
+            PID_LID_OUTLOOK_SHARING_8A7E,
+            PID_LID_OUTLOOK_SHARING_8A80,
+            PID_LID_OUTLOOK_SHARING_8A8B,
+            PID_LID_OUTLOOK_SHARING_8A88,
+            PID_LID_OUTLOOK_SHARING_8A8E,
+            PID_LID_OUTLOOK_SHARING_8A8D,
+        ] {
+            assert_eq!(
+                well_known_named_property_id(&MapiNamedProperty {
+                    guid: PSETID_SHARING_GUID,
+                    kind: MapiNamedPropertyKind::Lid(lid),
+                }),
+                Some(lid as u16),
+                "PSETID_Sharing lid 0x{lid:04x} should not allocate a transient id"
+            );
+        }
     }
 
     #[test]
