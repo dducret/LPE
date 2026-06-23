@@ -7034,6 +7034,61 @@ mod tests {
     }
 
     #[test]
+    fn contact_table_projects_missing_secondary_email_slots_as_empty_strings() {
+        let account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111112").unwrap();
+        let contact = AccessibleContact {
+            id: Uuid::parse_str("81818181-8181-4181-8181-818181818182").unwrap(),
+            collection_id: "default".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            name: "Denis Ducret".to_string(),
+            email: "denis@example.test".to_string(),
+            ..Default::default()
+        };
+        let columns = [
+            PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG,
+            PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG,
+            PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG,
+        ];
+
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+            ),
+            None
+        );
+        assert_eq!(
+            contact_table_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            contact_table_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+
+        let row = serialize_contact_row(&contact, 1, CONTACTS_FOLDER_ID, &columns);
+        assert_response_contains_utf16(&row, "denis@example.test");
+        assert_response_contains_utf16(&row, "SMTP");
+    }
+
+    #[test]
     fn get_status_rejects_folder_handles_matching_microsoft_table_scope() {
         let request = RopRequest {
             rop_id: RopId::GetStatus.as_u8(),
@@ -15045,12 +15100,37 @@ pub(in crate::mapi) fn serialize_contact_row(
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match contact_property_value(contact, item_id, folder_id, *column) {
+        match contact_table_property_value(contact, item_id, folder_id, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
     }
     row
+}
+
+fn contact_table_property_value(
+    contact: &AccessibleContact,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    contact_property_value(contact, item_id, folder_id, property_tag).or_else(|| {
+        outlook_contact_empty_email_table_value(canonical_property_storage_tag(property_tag))
+    })
+}
+
+fn outlook_contact_empty_email_table_value(property_tag: u32) -> Option<MapiValue> {
+    match property_tag {
+        PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG
+        | PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+        | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG
+        | PID_LID_EMAIL3_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
+        | PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG => Some(MapiValue::String(String::new())),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn serialize_event_row(
