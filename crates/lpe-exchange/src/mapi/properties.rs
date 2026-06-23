@@ -3869,7 +3869,10 @@ pub(in crate::mapi) fn contact_property_value(
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INST_ID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
         PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(contact.name.clone()))
         }
@@ -10452,6 +10455,32 @@ mod tests {
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG
             ),
             Some(MapiValue::String("SMTP".to_string()))
+        );
+    }
+
+    #[test]
+    fn contact_property_projects_outlook_table_identity_columns() {
+        let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777779);
+        let mut contact = default_contact_for_mapping(account_id, "default");
+        contact.id = Uuid::from_u128(0x99999999_9999_4999_8999_999999999999);
+        let item_id = crate::mapi::identity::mapi_store_id(0x043);
+        crate::mapi::identity::remember_mapi_identity(contact.id, item_id);
+
+        assert_eq!(
+            contact_property_value(&contact, item_id, CONTACTS_FOLDER_ID, PID_TAG_FOLDER_ID),
+            Some(MapiValue::U64(CONTACTS_FOLDER_ID))
+        );
+        assert_eq!(
+            contact_property_value(&contact, item_id, CONTACTS_FOLDER_ID, PID_TAG_MID),
+            Some(MapiValue::U64(item_id))
+        );
+        assert_eq!(
+            contact_property_value(&contact, item_id, CONTACTS_FOLDER_ID, PID_TAG_INST_ID),
+            Some(MapiValue::U64(item_id))
+        );
+        assert_eq!(
+            contact_property_value(&contact, item_id, CONTACTS_FOLDER_ID, PID_TAG_INSTANCE_NUM),
+            Some(MapiValue::U32(0))
         );
     }
 
