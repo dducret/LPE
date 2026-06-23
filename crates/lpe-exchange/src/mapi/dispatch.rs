@@ -10988,6 +10988,7 @@ fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
             | CONTACTS_SEARCH_FOLDER_ID
             | QUICK_CONTACTS_FOLDER_ID
             | IM_CONTACT_LIST_FOLDER_ID
+            | JUNK_FOLDER_ID
             | COMMON_VIEWS_FOLDER_ID
             | QUICK_STEP_SETTINGS_FOLDER_ID
     )
@@ -27925,6 +27926,21 @@ mod tests {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             INBOX_FOLDER_ID,
+            true,
+            &default_associated_config_columns(),
+            &snapshot,
+        );
+
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    }
+
+    #[test]
+    fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let contract = format_outlook_view_handoff_table_contract(
+            JUNK_FOLDER_ID,
             true,
             &default_associated_config_columns(),
             &snapshot,
