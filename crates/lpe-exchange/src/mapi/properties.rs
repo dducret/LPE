@@ -632,7 +632,10 @@ pub(in crate::mapi) const PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL
 pub(in crate::mapi) const OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG: u32 = 0x8FFF_0102;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
+// PidLidSideEffects: [MS-OXPROPS] 2.299, behavior flags in [MS-OXCMSG] 2.2.1.16.
+pub(in crate::mapi) const PID_LID_SIDE_EFFECTS: u32 = 0x0000_8510;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514: u32 = 0x0000_8514;
+pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8578: u32 = 0x0000_8578;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_85B1: u32 = 0x0000_85B1;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
 pub(in crate::mapi) const PID_LID_REMINDER_SET: u32 = 0x0000_8503;
@@ -774,7 +777,9 @@ pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_T
     0x825F_0102;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
+pub(in crate::mapi) const PID_LID_SIDE_EFFECTS_TAG: u32 = 0x8510_0003;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514_TAG: u32 = 0x8514_000B;
+pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8578_TAG: u32 = 0x8578_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_OVERRIDE_TAG: u32 = 0x851C_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND_TAG: u32 = 0x851E_000B;
@@ -896,7 +901,9 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         [
             (PID_LID_COMMON_START, PSETID_COMMON_GUID),
             (PID_LID_COMMON_END, PSETID_COMMON_GUID),
+            (PID_LID_SIDE_EFFECTS, PSETID_COMMON_GUID),
             (PID_LID_OUTLOOK_COMMON_8514, PSETID_COMMON_GUID),
+            (PID_LID_OUTLOOK_COMMON_8578, PSETID_COMMON_GUID),
             (PID_LID_OUTLOOK_COMMON_85B1, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
             (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
@@ -4190,6 +4197,7 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
         PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
         PID_LID_APPOINTMENT_COLOR_TAG => Some(MapiValue::I32(0)),
+        PID_LID_SIDE_EFFECTS_TAG | PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
@@ -11331,9 +11339,23 @@ mod tests {
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {
                 guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
+            }),
+            Some(PID_LID_SIDE_EFFECTS as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
                 kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_8514),
             }),
             Some(PID_LID_OUTLOOK_COMMON_8514 as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_8578),
+            }),
+            Some(PID_LID_OUTLOOK_COMMON_8578 as u16)
         );
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {
@@ -12251,6 +12273,19 @@ mod tests {
         );
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_COLOR_TAG),
+            Some(MapiValue::I32(0))
+        );
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_SIDE_EFFECTS_TAG),
+            Some(MapiValue::I32(0))
+        );
+        assert_eq!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_OUTLOOK_COMMON_8578_TAG
+            ),
             Some(MapiValue::I32(0))
         );
         assert_eq!(

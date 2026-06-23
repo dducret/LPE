@@ -28204,6 +28204,39 @@ mod tests {
     }
 
     #[test]
+    fn table_columns_normalize_outlook_calendar_common_aliases() {
+        let mut session = test_mapi_session();
+        session.cache_named_property(
+            0x8005,
+            MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
+            },
+        );
+        session.cache_named_property(
+            0x8013,
+            MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_8578),
+            },
+        );
+
+        let columns = normalize_table_property_tags_for_session(
+            &session,
+            vec![0x8013_0003, 0x8005_0003, PID_TAG_SUBJECT_W],
+        );
+
+        assert_eq!(
+            columns,
+            vec![
+                PID_LID_OUTLOOK_COMMON_8578_TAG,
+                PID_LID_SIDE_EFFECTS_TAG,
+                PID_TAG_SUBJECT_W
+            ]
+        );
+    }
+
+    #[test]
     fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
         let mut session = test_mapi_session();
         let property = MapiNamedProperty {
