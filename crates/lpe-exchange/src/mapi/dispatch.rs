@@ -10980,6 +10980,11 @@ fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
         INBOX_FOLDER_ID
             | DRAFTS_FOLDER_ID
             | SENT_FOLDER_ID
+            | CONTACTS_FOLDER_ID
+            | SUGGESTED_CONTACTS_FOLDER_ID
+            | CONTACTS_SEARCH_FOLDER_ID
+            | QUICK_CONTACTS_FOLDER_ID
+            | IM_CONTACT_LIST_FOLDER_ID
             | COMMON_VIEWS_FOLDER_ID
             | QUICK_STEP_SETTINGS_FOLDER_ID
     )
