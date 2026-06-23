@@ -1890,6 +1890,7 @@ pub(in crate::mapi) fn request_type(headers: &HeaderMap) -> Result<MapiRequestTy
         "getmatches" => MapiRequestType::GetMatches,
         "getproplist" => MapiRequestType::GetPropList,
         "getprops" => MapiRequestType::GetProps,
+        "gethierarchyinfo" => MapiRequestType::GetHierarchyInfo,
         "getspecialtable" => MapiRequestType::GetSpecialTable,
         "gettemplateinfo" => MapiRequestType::GetTemplateInfo,
         "modlinkatt" => MapiRequestType::ModLinkAtt,
@@ -2663,6 +2664,21 @@ mod tests {
             quota_mb: None,
             quota_used_octets: None,
         }
+    }
+
+    #[test]
+    fn request_type_recognizes_get_hierarchy_info_as_nspi_request() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-requesttype",
+            HeaderValue::from_static("GetHierarchyInfo"),
+        );
+
+        let request_type = request_type(&headers).unwrap();
+
+        assert_eq!(request_type, MapiRequestType::GetHierarchyInfo);
+        assert!(request_type.requires_nspi_session());
+        assert_eq!(request_type.header_value(), "GetHierarchyInfo");
     }
 
     #[test]

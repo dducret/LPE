@@ -12,6 +12,7 @@ pub(in crate::mapi) enum MapiHttpRequestType {
     GetMatches,
     GetPropList,
     GetProps,
+    GetHierarchyInfo,
     GetSpecialTable,
     GetTemplateInfo,
     ModLinkAtt,
@@ -43,6 +44,7 @@ impl MapiHttpRequestType {
         ("GetMatches", Self::GetMatches),
         ("GetPropList", Self::GetPropList),
         ("GetProps", Self::GetProps),
+        ("GetHierarchyInfo", Self::GetHierarchyInfo),
         ("GetSpecialTable", Self::GetSpecialTable),
         ("GetTemplateInfo", Self::GetTemplateInfo),
         ("ModLinkAtt", Self::ModLinkAtt),
@@ -72,6 +74,7 @@ impl MapiHttpRequestType {
             Self::GetMatches => "GetMatches",
             Self::GetPropList => "GetPropList",
             Self::GetProps => "GetProps",
+            Self::GetHierarchyInfo => "GetHierarchyInfo",
             Self::GetSpecialTable => "GetSpecialTable",
             Self::GetTemplateInfo => "GetTemplateInfo",
             Self::ModLinkAtt => "ModLinkAtt",
@@ -97,6 +100,7 @@ impl MapiHttpRequestType {
                 | Self::GetMatches
                 | Self::GetPropList
                 | Self::GetProps
+                | Self::GetHierarchyInfo
                 | Self::GetSpecialTable
                 | Self::GetTemplateInfo
                 | Self::ModLinkAtt

@@ -44,6 +44,9 @@ where
         MapiRequestType::GetProps => {
             nspi_props_response(store, principal, request, "GetProps", request_id).await
         }
+        MapiRequestType::GetHierarchyInfo => {
+            nspi_hierarchy_info_response(principal, request, request_id)
+        }
         MapiRequestType::GetSpecialTable => {
             nspi_special_table_response(principal, request, request_id)
         }
@@ -316,6 +319,7 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
     MapiRequestType::GetMatches,
     MapiRequestType::GetPropList,
     MapiRequestType::GetProps,
+    MapiRequestType::GetHierarchyInfo,
     MapiRequestType::GetSpecialTable,
     MapiRequestType::GetTemplateInfo,
     MapiRequestType::ModLinkAtt,
@@ -1423,9 +1427,39 @@ pub(in crate::mapi) fn nspi_special_table_response(
     request: &[u8],
     request_id: &str,
 ) -> Response {
+    nspi_hierarchy_table_response(
+        principal,
+        request,
+        request_id,
+        "GetSpecialTable",
+        "special_table",
+    )
+}
+
+pub(in crate::mapi) fn nspi_hierarchy_info_response(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response {
+    nspi_hierarchy_table_response(
+        principal,
+        request,
+        request_id,
+        "GetHierarchyInfo",
+        "hierarchy_info",
+    )
+}
+
+fn nspi_hierarchy_table_response(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+    request_type: &'static str,
+    context_name: &'static str,
+) -> Response {
     let flags = nspi_request_flags(request);
     let context = format!(
-        "special_table;request_flags={};unicode_strings={};address_creation_templates={}",
+        "{context_name};request_flags={};unicode_strings={};address_creation_templates={}",
         flags
             .map(|value| format!("{value:#010x}"))
             .unwrap_or_else(|| "missing".to_string()),
@@ -1464,7 +1498,7 @@ pub(in crate::mapi) fn nspi_special_table_response(
     );
     log_nspi_response_contract(
         principal,
-        "GetSpecialTable",
+        request_type,
         request_id,
         0,
         &body,
@@ -1473,7 +1507,7 @@ pub(in crate::mapi) fn nspi_special_table_response(
         &property_tags,
         &context,
     );
-    mapi_response("GetSpecialTable", request_id, 0, body, None)
+    mapi_response(request_type, request_id, 0, body, None)
 }
 
 fn nspi_request_flags(request: &[u8]) -> Option<u32> {
@@ -2588,6 +2622,40 @@ mod tests {
         assert_eq!(nspi_known_unsupported_property_tag_name(0x0FF8_0102), None);
         assert_eq!(nspi_known_unsupported_property_tag_name(0x3A20_001F), None);
         assert_eq!(nspi_known_unsupported_property_tag_name(0x3A1B_101F), None);
+    }
+
+    #[tokio::test]
+    async fn get_hierarchy_info_returns_successful_address_book_hierarchy() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let response = nspi_hierarchy_info_response(
+            &principal,
+            &NSPI_UNICODE_STRINGS_FLAG.to_le_bytes(),
+            "test-request",
+        );
+
+        assert_eq!(
+            response_header(&response, "x-requesttype").unwrap(),
+            "GetHierarchyInfo"
+        );
+        assert_eq!(response_header(&response, "x-responsecode").unwrap(), "0");
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let global_address_list = "Global Address List"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(body
+            .windows(global_address_list.len())
+            .any(|window| window == global_address_list));
     }
 
     #[test]
