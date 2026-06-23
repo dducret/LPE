@@ -667,11 +667,26 @@ pub(in crate::mapi) const PID_LID_CONTACT_LINK_SEARCH_KEY: u32 = 0x0000_8584;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_ENTRY: u32 = 0x0000_8585;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
 pub(in crate::mapi) const PID_LID_EMAIL1_ADDRESS_TYPE: u32 = 0x0000_8082;
+pub(in crate::mapi) const PID_LID_EMAIL1_DISPLAY_NAME: u32 = 0x0000_8080;
 pub(in crate::mapi) const PID_LID_EMAIL1_EMAIL_ADDRESS: u32 = 0x0000_8083;
+pub(in crate::mapi) const PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_8084;
+pub(in crate::mapi) const PID_LID_EMAIL1_ORIGINAL_ENTRY_ID: u32 = 0x0000_8085;
 pub(in crate::mapi) const PID_LID_EMAIL2_ADDRESS_TYPE: u32 = 0x0000_8092;
+pub(in crate::mapi) const PID_LID_EMAIL2_DISPLAY_NAME: u32 = 0x0000_8090;
 pub(in crate::mapi) const PID_LID_EMAIL2_EMAIL_ADDRESS: u32 = 0x0000_8093;
+pub(in crate::mapi) const PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_8094;
+pub(in crate::mapi) const PID_LID_EMAIL2_ORIGINAL_ENTRY_ID: u32 = 0x0000_8095;
 pub(in crate::mapi) const PID_LID_EMAIL3_ADDRESS_TYPE: u32 = 0x0000_80A2;
+pub(in crate::mapi) const PID_LID_EMAIL3_DISPLAY_NAME: u32 = 0x0000_80A0;
 pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS: u32 = 0x0000_80A3;
+pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_80A4;
+pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_ENTRY_ID: u32 = 0x0000_80A5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE: u32 = 0x0000_80B5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS: u32 = 0x0000_80B7;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE: u32 = 0x0000_80D5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS: u32 = 0x0000_80D7;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE: u32 = 0x0000_805F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS: u32 = 0x0000_8060;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID: u32 = 0x0000_85C6;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID: u32 = 0x0000_85C7;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME: u32 = 0x0000_85C8;
@@ -745,11 +760,29 @@ pub(in crate::mapi) const PID_LID_CONTACT_LINK_ENTRY_TAG: u32 = 0x8585_0102;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_W_TAG: u32 = 0x8586_001F;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_STRING8_TAG: u32 = 0x8586_001E;
 pub(in crate::mapi) const PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG: u32 = 0x8082_001F;
+pub(in crate::mapi) const PID_LID_EMAIL1_DISPLAY_NAME_W_TAG: u32 = 0x8080_001F;
 pub(in crate::mapi) const PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG: u32 = 0x8083_001F;
+pub(in crate::mapi) const PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME_W_TAG: u32 = 0x8084_001F;
 pub(in crate::mapi) const PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG: u32 = 0x8092_001F;
+pub(in crate::mapi) const PID_LID_EMAIL2_DISPLAY_NAME_W_TAG: u32 = 0x8090_001F;
 pub(in crate::mapi) const PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG: u32 = 0x8093_001F;
+pub(in crate::mapi) const PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG: u32 = 0x8094_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG: u32 = 0x80A2_001F;
+pub(in crate::mapi) const PID_LID_EMAIL3_DISPLAY_NAME_W_TAG: u32 = 0x80A0_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG: u32 = 0x80A3_001F;
+pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG: u32 = 0x80A4_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG: u32 =
+    0x80B5_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG: u32 =
+    0x80B7_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE_W_TAG: u32 =
+    0x80D5_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG: u32 =
+    0x80D7_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG: u32 =
+    0x805F_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS_W_TAG: u32 =
+    0x8060_001F;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG: u32 = 0x85C6_0102;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG: u32 = 0x85C7_0102;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG: u32 = 0x85C8_0040;
@@ -856,12 +889,45 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
                 PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY,
                 PSETID_APPOINTMENT_GUID,
             ),
+            (PID_LID_EMAIL1_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL1_ADDRESS_TYPE, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL1_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL1_ORIGINAL_ENTRY_ID, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL2_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL2_ADDRESS_TYPE, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL2_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL2_ORIGINAL_ENTRY_ID, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL3_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_ADDRESS_TYPE, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME, PSETID_ADDRESS_GUID),
+            (PID_LID_EMAIL3_ORIGINAL_ENTRY_ID, PSETID_ADDRESS_GUID),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS,
+                PSETID_ADDRESS_GUID,
+            ),
             (PID_LID_COMPANIES, PSETID_COMMON_GUID),
             (PID_LID_CONTACTS, PSETID_COMMON_GUID),
             (PID_LID_CONTACT_LINK_SEARCH_KEY, PSETID_COMMON_GUID),
@@ -3707,20 +3773,38 @@ pub(in crate::mapi) fn contact_property_value(
         PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 0).map(|_| MapiValue::String("SMTP".to_string()))
         }
-        PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG => {
+        PID_LID_EMAIL1_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG
+        | PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 0).map(MapiValue::String)
         }
         PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 1).map(|_| MapiValue::String("SMTP".to_string()))
         }
-        PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG => {
+        PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+        | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 1).map(MapiValue::String)
         }
         PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 2).map(|_| MapiValue::String("SMTP".to_string()))
         }
-        PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG => {
+        PID_LID_EMAIL3_DISPLAY_NAME_W_TAG
+        | PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
+        | PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 2).map(MapiValue::String)
+        }
+        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG => {
+            contact_email_value(contact, 0).map(|_| MapiValue::String("SMTP".to_string()))
+        }
+        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE_W_TAG => {
+            contact_email_value(contact, 1).map(|_| MapiValue::String("SMTP".to_string()))
+        }
+        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG => {
+            contact_email_value(contact, 2).map(|_| MapiValue::String("SMTP".to_string()))
         }
         PID_TAG_MOBILE_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact_phone_by_label(
             contact,
@@ -10160,6 +10244,53 @@ mod tests {
     }
 
     #[test]
+    fn outlook_contact_view_email_alias_restriction_matches_primary_email() {
+        let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777777);
+        let mut contact = default_contact_for_mapping(account_id, "default");
+        contact.id = Uuid::from_u128(0x88888888_8888_4888_8888_888888888888);
+        contact.email = "denis@example.test".to_string();
+        crate::mapi::identity::remember_mapi_identity(
+            contact.id,
+            crate::mapi::identity::mapi_store_id(91),
+        );
+        let restriction = MapiRestriction::Or(vec![
+            MapiRestriction::Exist {
+                property_tag: PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG,
+            },
+            MapiRestriction::Exist {
+                property_tag: PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG,
+            },
+            MapiRestriction::Exist {
+                property_tag: PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS_W_TAG,
+            },
+        ]);
+
+        assert!(restriction_matches_contact_in_folder(
+            Some(&restriction),
+            &contact,
+            CONTACTS_FOLDER_ID
+        ));
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG
+            ),
+            Some(MapiValue::String("denis@example.test".to_string()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG
+            ),
+            Some(MapiValue::String("SMTP".to_string()))
+        );
+    }
+
+    #[test]
     fn public_folder_projects_default_post_message_class_from_folder_class() {
         let folder = MapiPublicFolder {
             id: PUBLIC_FOLDERS_ROOT_FOLDER_ID + 0x10000,
@@ -14153,6 +14284,47 @@ mod tests {
                 kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL3_EMAIL_ADDRESS),
             }),
             Some(0x80A3)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_DISPLAY_NAME),
+            }),
+            Some(0x8080)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME),
+            }),
+            Some(0x8084)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(
+                    PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS
+                ),
+            }),
+            Some(0x80B7)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(
+                    PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS
+                ),
+            }),
+            Some(0x80D7)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(
+                    PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS
+                ),
+            }),
+            Some(0x8060)
         );
     }
 

@@ -1403,7 +1403,7 @@ impl MapiSession {
             .insert(property.clone(), canonical_property_id);
         self.named_property_ids
             .insert(canonical_property_id, property.clone());
-        if property_id != canonical_property_id {
+        if property_id != canonical_property_id && !is_reserved_named_property_id(property_id) {
             self.named_property_ids.insert(property_id, property);
         }
         if property_id >= self.next_named_property_id {
@@ -2152,6 +2152,31 @@ mod tests {
         assert_eq!(session.property_name_for_id(0x8010), property);
         assert_eq!(session.property_name_for_id(0x8fff), property);
         assert_eq!(session.next_named_property_id, 0x9000);
+    }
+
+    #[test]
+    fn cached_well_known_named_property_does_not_alias_reserved_id_collision() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let property = MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS),
+        };
+
+        session.cache_named_property(PID_LID_EMAIL1_EMAIL_ADDRESS as u16, property.clone());
+
+        assert_eq!(
+            session.property_id_for_name(property, false),
+            Some(PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS as u16)
+        );
+        assert_eq!(
+            session.property_name_for_id(PID_LID_EMAIL1_EMAIL_ADDRESS as u16),
+            MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_EMAIL_ADDRESS),
+            }
+        );
     }
 
     #[test]
