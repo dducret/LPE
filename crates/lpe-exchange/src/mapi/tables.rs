@@ -1393,6 +1393,9 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if folder_id == CONTACTS_SEARCH_FOLDER_ID => {
+            default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
+        }
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(folder_id, message_class) =>
         {
@@ -12609,6 +12612,7 @@ mod tests {
             JUNK_FOLDER_ID,
             ARCHIVE_FOLDER_ID,
             CONVERSATION_HISTORY_FOLDER_ID,
+            CONTACTS_SEARCH_FOLDER_ID,
         ] {
             assert!(matches!(
                 special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),

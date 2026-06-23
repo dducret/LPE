@@ -2432,6 +2432,13 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             ))
             .map(|message_class| MapiValue::String(message_class.to_string()))
         }
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if folder.kind == MapiCollaborationFolderKind::Contacts => {
+            default_folder_view_entry_id(
+                folder.collection.owner_account_id,
+                folder.id,
+                collaboration_folder_message_class(folder.kind),
+            )
+        }
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if folder.kind == MapiCollaborationFolderKind::Calendar
                 && folder.id == CALENDAR_FOLDER_ID =>
@@ -9781,9 +9788,15 @@ mod tests {
             ),
             Some(MapiValue::String("IPM.Contact".to_string()))
         );
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            CONTACTS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+        .unwrap();
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            Some(MapiValue::Binary(expected_entry_id))
         );
     }
 
