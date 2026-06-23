@@ -11877,6 +11877,51 @@ mod tests {
     }
 
     #[test]
+    fn contact_link_timestamp_config_projects_outlook_osc_defaults() {
+        let message = MapiAssociatedConfigMessage {
+            id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC),
+            folder_id: CONTACTS_FOLDER_ID,
+            canonical_id: Uuid::nil(),
+            message_class: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            subject: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            properties_json: serde_json::json!({}),
+        };
+
+        assert_eq!(
+            associated_config_property_value(&message, PID_NAME_OSC_CONTACT_SOURCES_TAG),
+            Some(MapiValue::MultiString(Vec::new()))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &message,
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1 << 16) | 0x0102
+            ),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &message,
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x001F
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &message,
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA << 16) | 0x0003
+            ),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &message,
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED << 16) | 0x000B
+            ),
+            Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
     fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         let message = MapiAssociatedConfigMessage {
             id: crate::mapi::identity::mapi_store_id(
@@ -14385,6 +14430,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             {
                 Some(MapiValue::String("text/xml".to_string()))
             }
+            tag if message.message_class == "IPM.Microsoft.ContactLink.TimeStamp" => {
+                outlook_contact_link_empty_property_value(tag)
+            }
             PID_TAG_VIEW_DESCRIPTOR_FLAGS
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
@@ -14532,6 +14580,24 @@ fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage
         message.message_class.as_str(),
         "IPM.Aggregation" | "IPM.Sharing.Configuration" | "IPM.Sharing.Index"
     )
+}
+
+fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiValue> {
+    let tag = MapiPropertyTag::new(property_tag);
+    let property_id = u32::from(tag.property_id());
+    if !matches!(property_id, 0x8450 | 0x80E1 | 0x80EA | 0x80EC | 0x80ED) {
+        return None;
+    }
+    match tag.property_type_code() {
+        0x0003 => Some(MapiValue::U32(0)),
+        0x000B => Some(MapiValue::Bool(false)),
+        0x001E | 0x001F => Some(MapiValue::String(String::new())),
+        0x0102 => Some(MapiValue::Binary(Vec::new())),
+        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
+        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
+        _ => None,
+    }
 }
 
 fn configuration_roaming_datatypes(

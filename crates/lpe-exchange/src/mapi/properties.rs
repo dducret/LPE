@@ -682,6 +682,10 @@ pub(in crate::mapi) const PID_LID_EMAIL3_DISPLAY_NAME: u32 = 0x0000_80A0;
 pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS: u32 = 0x0000_80A3;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_80A4;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_ENTRY_ID: u32 = 0x0000_80A5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1: u32 = 0x0000_80E1;
+pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA: u32 = 0x0000_80EA;
+pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC: u32 = 0x0000_80EC;
+pub(in crate::mapi) const PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED: u32 = 0x0000_80ED;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE: u32 = 0x0000_80B5;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME: u32 = 0x0000_80B6;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS: u32 = 0x0000_80B7;
@@ -813,6 +817,7 @@ pub(in crate::mapi) const PID_LID_CONVERSATION_PROCESSED_TAG: u32 = 0x85C9_0003;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG: u32 = 0x85CA_0040;
 pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_VERSION_TAG: u32 = 0x85CB_0003;
 pub(in crate::mapi) const PID_NAME_KEYWORDS_TAG: u32 = 0x9000_101F;
+pub(in crate::mapi) const PID_NAME_OSC_CONTACT_SOURCES_TAG: u32 = 0x8450_101F;
 pub(in crate::mapi) const OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG: u32 = 0x1213_0003;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_W_TAG: u32 = 0x8700_001F;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_STRING8_TAG: u32 = 0x8700_001E;
@@ -928,6 +933,22 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_EMAIL3_EMAIL_ADDRESS, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME, PSETID_ADDRESS_GUID),
             (PID_LID_EMAIL3_ORIGINAL_ENTRY_ID, PSETID_ADDRESS_GUID),
+            (
+                PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1,
+                PS_PUBLIC_STRINGS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA,
+                PS_PUBLIC_STRINGS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC,
+                PS_PUBLIC_STRINGS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED,
+                PS_PUBLIC_STRINGS_GUID,
+            ),
             (
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE,
                 PSETID_ADDRESS_GUID,
@@ -1059,6 +1080,13 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         MapiNamedProperty {
             guid: PS_PUBLIC_STRINGS_GUID,
             kind: MapiNamedPropertyKind::Name("Keywords".to_string()),
+        },
+    )))
+    .chain(std::iter::once((
+        MapiPropertyTag::new(PID_NAME_OSC_CONTACT_SOURCES_TAG).property_id(),
+        MapiNamedProperty {
+            guid: PS_PUBLIC_STRINGS_GUID,
+            kind: MapiNamedPropertyKind::Name("OscContactSources".to_string()),
         },
     )))
     .chain([
@@ -14352,6 +14380,33 @@ mod tests {
             }),
             Some(PID_LID_OUTLOOK_SHARING_8AA6 as u16)
         );
+    }
+
+    #[test]
+    fn outlook_contact_link_probe_named_properties_map_to_stable_ids() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Name("OscContactSources".to_string()),
+            }),
+            Some(MapiPropertyTag::new(PID_NAME_OSC_CONTACT_SOURCES_TAG).property_id())
+        );
+
+        for lid in [
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1,
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC,
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA,
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED,
+        ] {
+            assert_eq!(
+                well_known_named_property_id(&MapiNamedProperty {
+                    guid: PS_PUBLIC_STRINGS_GUID,
+                    kind: MapiNamedPropertyKind::Lid(lid),
+                }),
+                Some(lid as u16),
+                "PS_PUBLIC_STRINGS lid 0x{lid:04x} should not allocate a transient id"
+            );
+        }
     }
 
     #[test]
