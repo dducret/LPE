@@ -1393,7 +1393,7 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if folder_id == CONTACTS_SEARCH_FOLDER_ID => {
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID if special_folder_needs_default_view(folder_id) => {
             default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
@@ -1443,6 +1443,22 @@ pub(in crate::mapi) fn special_folder_property_value(
         }
         _ => None,
     }
+}
+
+fn special_folder_needs_default_view(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        IPM_SUBTREE_FOLDER_ID
+            | CONTACTS_SEARCH_FOLDER_ID
+            | JOURNAL_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | TASKS_FOLDER_ID
+            | SYNC_ISSUES_FOLDER_ID
+            | CONFLICTS_FOLDER_ID
+            | LOCAL_FAILURES_FOLDER_ID
+            | SERVER_FAILURES_FOLDER_ID
+            | RSS_FEEDS_FOLDER_ID
+    )
 }
 
 fn serialize_hierarchy_row(
@@ -12612,7 +12628,16 @@ mod tests {
             JUNK_FOLDER_ID,
             ARCHIVE_FOLDER_ID,
             CONVERSATION_HISTORY_FOLDER_ID,
+            IPM_SUBTREE_FOLDER_ID,
             CONTACTS_SEARCH_FOLDER_ID,
+            JOURNAL_FOLDER_ID,
+            NOTES_FOLDER_ID,
+            TASKS_FOLDER_ID,
+            SYNC_ISSUES_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+            RSS_FEEDS_FOLDER_ID,
         ] {
             assert!(matches!(
                 special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
@@ -12620,20 +12645,11 @@ mod tests {
             ));
         }
         for folder_id in [
-            IPM_SUBTREE_FOLDER_ID,
             DEFERRED_ACTION_FOLDER_ID,
             FREEBUSY_DATA_FOLDER_ID,
-            SYNC_ISSUES_FOLDER_ID,
-            CONFLICTS_FOLDER_ID,
-            LOCAL_FAILURES_FOLDER_ID,
-            SERVER_FAILURES_FOLDER_ID,
-            RSS_FEEDS_FOLDER_ID,
             TRACKED_MAIL_PROCESSING_FOLDER_ID,
             CALENDAR_FOLDER_ID,
             CONTACTS_FOLDER_ID,
-            JOURNAL_FOLDER_ID,
-            NOTES_FOLDER_ID,
-            TASKS_FOLDER_ID,
             QUICK_CONTACTS_FOLDER_ID,
             IM_CONTACT_LIST_FOLDER_ID,
             QUICK_STEP_SETTINGS_FOLDER_ID,
