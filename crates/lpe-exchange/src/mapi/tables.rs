@@ -12115,6 +12115,67 @@ mod tests {
     }
 
     #[test]
+    fn contacts_helper_associated_configs_project_table_config_columns() {
+        for message_class in [
+            "IPM.Microsoft.ContactLink.TimeStamp",
+            "IPM.Microsoft.OSC.ContactSync",
+        ] {
+            let message = MapiAssociatedConfigMessage {
+                id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC),
+                folder_id: CONTACTS_FOLDER_ID,
+                canonical_id: Uuid::nil(),
+                message_class: message_class.to_string(),
+                subject: message_class.to_string(),
+                properties_json: serde_json::json!({}),
+            };
+
+            assert_eq!(
+                associated_config_property_value(&message, PID_TAG_ROAMING_DATATYPES),
+                Some(MapiValue::U32(0))
+            );
+            assert!(matches!(
+                associated_config_property_value(&message, 0x685D_0003),
+                Some(MapiValue::U32(value)) if value != 0
+            ));
+
+            let row = serialize_associated_config_row_with_mailbox_guid(
+                &message,
+                Uuid::nil(),
+                &[
+                    PID_TAG_FOLDER_ID,
+                    PID_TAG_MID,
+                    PID_TAG_INST_ID,
+                    PID_TAG_INSTANCE_NUM,
+                    PID_TAG_ROAMING_DATATYPES,
+                    PID_TAG_MESSAGE_CLASS_W,
+                    0x685D_0003,
+                    PID_TAG_LAST_MODIFICATION_TIME,
+                ],
+            );
+            let mut row_cursor = Cursor::new(&row);
+            for column in [
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+            ] {
+                parse_mapi_property_value(&mut row_cursor, column).unwrap();
+            }
+            assert_eq!(
+                parse_mapi_property_value(&mut row_cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
+                MapiValue::I32(0)
+            );
+            parse_mapi_property_value(&mut row_cursor, PID_TAG_MESSAGE_CLASS_W).unwrap();
+            assert!(matches!(
+                parse_mapi_property_value(&mut row_cursor, 0x685D_0003).unwrap(),
+                MapiValue::I32(value) if value != 0
+            ));
+            parse_mapi_property_value(&mut row_cursor, PID_TAG_LAST_MODIFICATION_TIME).unwrap();
+            assert_eq!(row_cursor.position() as usize, row.len());
+        }
+    }
+
+    #[test]
     fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         let message = MapiAssociatedConfigMessage {
             id: crate::mapi::identity::mapi_store_id(
@@ -14638,6 +14699,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             {
                 Some(MapiValue::String("text/xml".to_string()))
             }
+            PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::U32(0))
+            }
+            0x685D_0003 if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::U32(outlook_configuration_stamp(message)))
+            }
             tag if message.message_class == "IPM.Microsoft.ContactLink.TimeStamp" => {
                 outlook_contact_link_empty_property_value(tag)
             }
@@ -14787,6 +14854,13 @@ fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage
     matches!(
         message.message_class.as_str(),
         "IPM.Aggregation" | "IPM.Sharing.Configuration" | "IPM.Sharing.Index"
+    )
+}
+
+fn is_outlook_contacts_helper_config(message: &MapiAssociatedConfigMessage) -> bool {
+    matches!(
+        message.message_class.as_str(),
+        "IPM.Microsoft.ContactLink.TimeStamp" | "IPM.Microsoft.OSC.ContactSync"
     )
 }
 
