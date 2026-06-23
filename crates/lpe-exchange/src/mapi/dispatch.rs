@@ -7519,10 +7519,10 @@ fn table_column_support_summary(columns: &[u32], is_backed: impl Fn(u32) -> bool
 
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
-        if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
-            named_or_dynamic.push(*column);
-        } else if is_backed(storage_tag) {
+        if is_backed(storage_tag) {
             backed.push(*column);
+        } else if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
+            named_or_dynamic.push(*column);
         } else {
             defaulted.push(*column);
         }
@@ -7612,6 +7612,9 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_MESSAGE_FLAGS
             | PID_TAG_READ
             | PID_TAG_FLAG_STATUS
+            | PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG
+            | PID_LID_OUTLOOK_COMMON_8514_TAG
+            | 0x8017_000B
             | PID_TAG_FLAG_COMPLETE_TIME
             | PID_TAG_FOLLOWUP_ICON
             | PID_TAG_TODO_ITEM_FLAGS
@@ -7651,8 +7654,10 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_CHANGE_NUMBER
             | PID_TAG_INTERNET_MESSAGE_ID_W
             | PID_TAG_TRANSPORT_MESSAGE_HEADERS_W
+            | PID_LID_REMINDER_SET_TAG
+            | PID_NAME_KEYWORDS_TAG
             | PID_NAME_CONTENT_CLASS_W_TAG
-    )
+    ) || property_ids_match(storage_tag, PID_NAME_KEYWORDS_TAG)
 }
 
 fn format_debug_property_ids(property_ids: &[u16]) -> String {
@@ -30492,8 +30497,7 @@ mod tests {
             );
             assert!(
                 summary.ends_with(match view_name {
-                    "Compact" => "named_or_dynamic=0x8514000b,0x9000101e",
-                    "Messages" | "Sent To" => "named_or_dynamic=0x8503000b,0x9000101e",
+                    "Compact" | "Messages" | "Sent To" => "named_or_dynamic=",
                     _ => unreachable!(),
                 }),
                 "{view_name} view has unexpected named/dynamic columns: {summary}"
@@ -30528,7 +30532,10 @@ mod tests {
         assert!(summary.contains("0x00410102"));
         assert!(!summary.contains("defaulted=0x00410102"));
         assert!(!summary.contains("defaulted=0x12130003"));
-        assert!(summary.contains("named_or_dynamic=0x8514000b,0x8017000b,0x801f001f"));
+        assert!(summary.contains("0x8514000b"));
+        assert!(summary.contains("0x8017000b"));
+        assert!(summary.contains("0x801f001f"));
+        assert!(summary.ends_with("named_or_dynamic="));
     }
 
     #[test]
