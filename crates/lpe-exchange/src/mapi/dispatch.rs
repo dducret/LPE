@@ -10452,7 +10452,7 @@ fn log_mapi_query_position_debug(
             String::new(),
         ),
     };
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
@@ -10984,6 +10984,7 @@ fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
             | DRAFTS_FOLDER_ID
             | SENT_FOLDER_ID
             | CONTACTS_FOLDER_ID
+            | CALENDAR_FOLDER_ID
             | SUGGESTED_CONTACTS_FOLDER_ID
             | CONTACTS_SEARCH_FOLDER_ID
             | QUICK_CONTACTS_FOLDER_ID
