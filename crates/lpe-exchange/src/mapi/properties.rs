@@ -682,8 +682,10 @@ pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS: u32 = 0x0000_80A3;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME: u32 = 0x0000_80A4;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_ENTRY_ID: u32 = 0x0000_80A5;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE: u32 = 0x0000_80B5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME: u32 = 0x0000_80B6;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS: u32 = 0x0000_80B7;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE: u32 = 0x0000_80D5;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME: u32 = 0x0000_80D6;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS: u32 = 0x0000_80D7;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE: u32 = 0x0000_805F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS: u32 = 0x0000_8060;
@@ -773,10 +775,14 @@ pub(in crate::mapi) const PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG: u32 = 0x80A3_001F;
 pub(in crate::mapi) const PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG: u32 = 0x80A4_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG: u32 =
     0x80B5_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME_W_TAG: u32 =
+    0x80B6_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG: u32 =
     0x80B7_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE_W_TAG: u32 =
     0x80D5_001F;
+pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME_W_TAG: u32 =
+    0x80D6_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG: u32 =
     0x80D7_001F;
 pub(in crate::mapi) const PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG: u32 =
@@ -909,11 +915,19 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
                 PSETID_ADDRESS_GUID,
             ),
             (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS,
                 PSETID_ADDRESS_GUID,
             ),
             (
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE,
+                PSETID_ADDRESS_GUID,
+            ),
+            (
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME,
                 PSETID_ADDRESS_GUID,
             ),
             (
@@ -3776,6 +3790,7 @@ pub(in crate::mapi) fn contact_property_value(
         PID_LID_EMAIL1_DISPLAY_NAME_W_TAG
         | PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG
         | PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME_W_TAG
         | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 0).map(MapiValue::String)
         }
@@ -3785,6 +3800,7 @@ pub(in crate::mapi) fn contact_property_value(
         PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
         | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
         | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME_W_TAG
         | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 1).map(MapiValue::String)
         }
@@ -10284,6 +10300,15 @@ mod tests {
                 &contact,
                 1,
                 CONTACTS_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME_W_TAG
+            ),
+            Some(MapiValue::String("denis@example.test".to_string()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG
             ),
             Some(MapiValue::String("SMTP".to_string()))
@@ -14302,11 +14327,25 @@ mod tests {
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {
                 guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_DISPLAY_NAME),
+            }),
+            Some(0x80B6)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
                 kind: MapiNamedPropertyKind::Lid(
                     PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS
                 ),
             }),
             Some(0x80B7)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME),
+            }),
+            Some(0x80D6)
         );
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {

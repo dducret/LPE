@@ -10083,6 +10083,7 @@ fn log_outlook_contents_table_query_rows(
         &selected_columns,
         mailboxes,
         emails,
+        snapshot,
     );
     let inbox_associated_wire_row_summary = format_inbox_associated_wire_row_summary(
         principal.account_id,
@@ -10423,6 +10424,7 @@ fn log_mapi_query_position_debug(
                     &effective_columns,
                     mailboxes,
                     emails,
+                    snapshot,
                 ),
                 format_inbox_view_descriptor_behavior_contract(
                     *folder_id,
@@ -10670,6 +10672,7 @@ fn log_outlook_contents_table_find_row(
             &selected_columns,
             mailboxes,
             emails,
+            snapshot,
         )
     } else {
         String::new()
@@ -11344,9 +11347,27 @@ fn format_normal_message_query_row_summary(
     columns: &[u32],
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> String {
     if associated || row_count == 0 || columns.is_empty() {
         return String::new();
+    }
+    if folder_id == CONTACTS_FOLDER_ID
+        || folder_id == CONTACTS_SEARCH_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
+    {
+        return format_contact_query_row_summary(
+            folder_id,
+            position,
+            forward_read,
+            row_count,
+            sort_orders,
+            restriction,
+            columns,
+            snapshot,
+        );
     }
 
     let mut rows = emails_for_folder(folder_id, mailboxes, emails);
@@ -11389,6 +11410,75 @@ fn format_normal_message_query_row_summary(
 
     format!(
         "total={};position={};forward={};requested={};returned={};summarized={};{}",
+        rows.len(),
+        position,
+        forward_read,
+        row_count,
+        selected.len(),
+        selected.len().min(5),
+        row_summaries
+    )
+}
+
+fn format_contact_query_row_summary(
+    folder_id: u64,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let mut rows = if folder_id == CONTACTS_SEARCH_FOLDER_ID {
+        snapshot.contacts_search_results()
+    } else {
+        snapshot.contacts_for_folder(folder_id)
+    };
+    rows.retain(|contact| {
+        restriction_matches_contact_in_folder(restriction, &contact.contact, folder_id)
+    });
+    sort_contacts(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let row_summaries = selected
+        .iter()
+        .take(5)
+        .map(|index| {
+            let contact = rows[*index];
+            let serialized =
+                serialize_contact_row(&contact.contact, contact.id, contact.folder_id, columns);
+            let standard_row = standard_property_row_bytes(&serialized);
+            let values = columns
+                .iter()
+                .map(|tag| {
+                    let value = contact_property_value(
+                        &contact.contact,
+                        contact.id,
+                        contact.folder_id,
+                        *tag,
+                    )
+                    .map(|value| format_debug_mapi_value(&value))
+                    .unwrap_or_else(|| "default".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "index={};mid=0x{:016x};name={};email={};value_len={};status_row_len={};values={}",
+                index,
+                contact.id,
+                contact.contact.name,
+                contact.contact.email,
+                serialized.len(),
+                standard_row.len(),
+                values
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    format!(
+        "contact_total={};position={};forward={};requested={};returned={};summarized={};{}",
         rows.len(),
         position,
         forward_read,
@@ -28872,6 +28962,7 @@ mod tests {
             ],
             std::slice::from_ref(&mailbox),
             std::slice::from_ref(&email),
+            &empty_snapshot(),
         );
 
         assert!(summary.contains("total=1"));
@@ -28902,6 +28993,7 @@ mod tests {
             &[PID_TAG_SUBJECT_W],
             std::slice::from_ref(&mailbox),
             std::slice::from_ref(&email),
+            &empty_snapshot(),
         );
 
         assert!(restricted.contains("total=0"));
