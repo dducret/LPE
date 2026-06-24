@@ -28170,6 +28170,21 @@ mod tests {
     }
 
     #[test]
+    fn calendar_view_handoff_table_contract_reports_folder_local_default_view() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let contract = format_outlook_view_handoff_table_contract(
+            CALENDAR_FOLDER_ID,
+            true,
+            &default_associated_config_columns(),
+            &snapshot,
+        );
+
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    }
+
+    #[test]
     fn inbox_view_descriptor_set_columns_contract_reports_missing_descriptor_columns() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_inbox_view_descriptor_set_columns_behavior_contract(

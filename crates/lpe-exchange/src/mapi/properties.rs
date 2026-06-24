@@ -2333,6 +2333,8 @@ pub(in crate::mapi) fn default_view_supported_container_class(container_class: &
         || container_class.starts_with("IPF.Note.")
         || container_class == "IPF.Contact"
         || container_class.starts_with("IPF.Contact.")
+        || container_class == "IPF.Appointment"
+        || container_class.starts_with("IPF.Appointment.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
