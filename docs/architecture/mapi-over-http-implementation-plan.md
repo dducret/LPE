@@ -935,7 +935,10 @@ properties, including common start/end aliases, the bounded
 `PidLidAllAttendeesString`, `PidLidToAttendeesString`, and
 `PidLidCcAttendeesString` plus `PidTagDisplayCc` projections from canonical attendee metadata and
 timezone description/definition projections from canonical event timezone
-state. Calendar content sync also projects canonical attachment presence from
+state. Calendar item rows project `PidLidSideEffects` with the documented
+open-on-delete, copy, move, and context-menu bits from `[MS-OXCMSG]` section
+2.2.1.16 so Outlook can attach normal item actions to Calendar contents rows.
+Calendar content sync also projects canonical attachment presence from
 `calendar_event_attachments` through `PidTagHasAttachments`; attachment table,
 open, stream, create, and save paths use canonical calendar attachment rows.
 Binary timezone payload writes remain rejected until parser-backed

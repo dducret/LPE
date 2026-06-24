@@ -635,6 +635,8 @@ pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 // PidLidSideEffects: [MS-OXPROPS] 2.299, behavior flags in [MS-OXCMSG] 2.2.1.16.
 pub(in crate::mapi) const PID_LID_SIDE_EFFECTS: u32 = 0x0000_8510;
+// PidLidSideEffects: MS-OXCMSG 2.2.1.16 open-on-delete/copy/move/context-menu bits.
+pub(in crate::mapi) const CALENDAR_EVENT_SIDE_EFFECTS: i32 = 0x0000_0161;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514: u32 = 0x0000_8514;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8578: u32 = 0x0000_8578;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_85B1: u32 = 0x0000_85B1;
@@ -4332,7 +4334,8 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
         PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
         PID_LID_APPOINTMENT_COLOR_TAG => Some(MapiValue::I32(0)),
-        PID_LID_SIDE_EFFECTS_TAG | PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
+        PID_LID_SIDE_EFFECTS_TAG => Some(MapiValue::I32(CALENDAR_EVENT_SIDE_EFFECTS)),
+        PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
@@ -12412,7 +12415,7 @@ mod tests {
         );
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_SIDE_EFFECTS_TAG),
-            Some(MapiValue::I32(0))
+            Some(MapiValue::I32(CALENDAR_EVENT_SIDE_EFFECTS))
         );
         assert_eq!(
             event_property_value(
