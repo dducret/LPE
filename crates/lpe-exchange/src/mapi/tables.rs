@@ -10968,7 +10968,7 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 3);
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 2);
     }
 
     #[test]
@@ -11500,7 +11500,7 @@ mod tests {
     }
 
     #[test]
-    fn contacts_associated_query_rows_exposes_default_named_view() {
+    fn contacts_associated_query_rows_do_not_expose_mail_default_named_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: CONTACTS_FOLDER_ID,
@@ -11530,11 +11530,11 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     }
 
     #[test]
-    fn calendar_associated_query_rows_exposes_default_named_view() {
+    fn calendar_associated_query_rows_do_not_expose_mail_default_named_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: CALENDAR_FOLDER_ID,
@@ -11564,7 +11564,7 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     }
 
     #[test]

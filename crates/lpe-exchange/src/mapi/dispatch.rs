@@ -7429,7 +7429,9 @@ fn common_view_named_view_message_for_open(
             .common_view_named_view_message_for_id(message_id)
             .filter(|message| message.folder_id == folder_id);
     }
-    snapshot.default_folder_named_view_message(folder_id, message_id)
+    folder_local_default_named_view_is_supported(snapshot, folder_id, message_id)
+        .then(|| snapshot.default_folder_named_view_message(folder_id, message_id))
+        .flatten()
 }
 
 fn search_folder_definition_message_for_open(
@@ -28181,7 +28183,7 @@ mod tests {
     }
 
     #[test]
-    fn contacts_view_handoff_table_contract_reports_folder_local_default_view() {
+    fn contacts_view_handoff_table_contract_does_not_report_mail_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             CONTACTS_FOLDER_ID,
@@ -28190,13 +28192,13 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_supported=false"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
     #[test]
-    fn calendar_view_handoff_table_contract_reports_folder_local_default_view() {
+    fn calendar_view_handoff_table_contract_does_not_report_mail_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             CALENDAR_FOLDER_ID,
@@ -28205,8 +28207,8 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_supported=false"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
@@ -29598,14 +29600,25 @@ mod tests {
     fn folder_default_named_view_open_materializes_for_target_folder() {
         let selected = common_view_named_view_message_for_open(
             &MapiMailStoreSnapshot::empty(),
-            CONTACTS_FOLDER_ID,
+            INBOX_FOLDER_ID,
             crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         );
 
         assert_eq!(
             selected.map(|message| (message.folder_id, message.name)),
-            Some((CONTACTS_FOLDER_ID, "Compact".to_string()))
+            Some((INBOX_FOLDER_ID, "Compact".to_string()))
         );
+    }
+
+    #[test]
+    fn folder_default_named_view_open_rejects_non_mail_folder() {
+        let selected = common_view_named_view_message_for_open(
+            &MapiMailStoreSnapshot::empty(),
+            CONTACTS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        );
+
+        assert!(selected.is_none());
     }
 
     #[test]
