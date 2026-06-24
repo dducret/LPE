@@ -3111,8 +3111,11 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
 pub(in crate::mapi) enum ViewDefinitionKind {
     CalendarCompact,
     ContactList,
+    JournalList,
     MailCompact,
     MailSentTo,
+    NoteList,
+    TaskList,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3301,6 +3304,9 @@ pub(in crate::mapi) fn outlook_folder_view_definition(
         | QUICK_CONTACTS_FOLDER_ID
         | IM_CONTACT_LIST_FOLDER_ID
         | CONTACTS_SEARCH_FOLDER_ID => outlook_contact_view_definition(view_name),
+        JOURNAL_FOLDER_ID => outlook_journal_view_definition(view_name),
+        NOTES_FOLDER_ID => outlook_note_view_definition(view_name),
+        TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => outlook_task_view_definition(view_name),
         _ => outlook_mail_view_definition(view_name),
     }
 }
@@ -3404,6 +3410,135 @@ fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
         ],
         sort_column: 1,
         sort_descending: false,
+    }
+}
+
+fn outlook_task_view_definition(_view_name: &str) -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::TaskList,
+        columns: vec![
+            view_column(
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                0x12,
+                0x0000_270A,
+                "Icon",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                0x18,
+                0x0000_2F00,
+                "Subject",
+            ),
+            view_column(PID_TAG_FLAG_STATUS, 0x0C, 0x0000_2F4A, "Status"),
+            view_named_id_column(
+                PID_LID_TASK_DUE_DATE_TAG,
+                0x10,
+                0x0000_3F40,
+                PSETID_TASK_GUID,
+                PID_LID_TASK_DUE_DATE,
+                "Due Date",
+            ),
+            view_named_id_column(
+                PID_LID_TASK_START_DATE_TAG,
+                0x10,
+                0x0000_3F40,
+                PSETID_TASK_GUID,
+                PID_LID_TASK_START_DATE,
+                "Start Date",
+            ),
+            view_named_id_column(
+                PID_LID_PERCENT_COMPLETE_TAG,
+                0x0C,
+                0x0000_3F40,
+                PSETID_TASK_GUID,
+                PID_LID_PERCENT_COMPLETE,
+                "% Complete",
+            ),
+        ],
+        sort_column: 3,
+        sort_descending: false,
+    }
+}
+
+fn outlook_note_view_definition(_view_name: &str) -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::NoteList,
+        columns: vec![
+            view_column(
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                0x12,
+                0x0000_270A,
+                "Icon",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                0x18,
+                0x0000_2F00,
+                "Subject",
+            ),
+            view_column(
+                PID_TAG_LAST_MODIFICATION_TIME,
+                0x10,
+                0x0000_2F40,
+                "Modified",
+            ),
+            view_named_id_column(
+                PID_LID_NOTE_COLOR_TAG,
+                0x0C,
+                0x0000_3F40,
+                PSETID_NOTE_GUID,
+                PID_LID_NOTE_COLOR,
+                "Color",
+            ),
+        ],
+        sort_column: 2,
+        sort_descending: true,
+    }
+}
+
+fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::JournalList,
+        columns: vec![
+            view_column(
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                0x12,
+                0x0000_270A,
+                "Icon",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                0x18,
+                0x0000_2F00,
+                "Subject",
+            ),
+            view_named_id_column(
+                PID_LID_LOG_START_TAG,
+                0x10,
+                0x0000_3F40,
+                PSETID_LOG_GUID,
+                PID_LID_LOG_START,
+                "Start",
+            ),
+            view_named_id_column(
+                PID_LID_LOG_DURATION_TAG,
+                0x0C,
+                0x0000_3F40,
+                PSETID_LOG_GUID,
+                PID_LID_LOG_DURATION,
+                "Duration",
+            ),
+            view_named_id_column(
+                string8_property_tag(PID_LID_LOG_TYPE_W_TAG),
+                0x12,
+                0x0000_3F00,
+                PSETID_LOG_GUID,
+                PID_LID_LOG_TYPE,
+                "Type",
+            ),
+        ],
+        sort_column: 2,
+        sort_descending: true,
     }
 }
 
@@ -14256,6 +14391,9 @@ mod tests {
     fn folder_default_view_definitions_use_type_specific_columns() {
         let contact = outlook_folder_view_definition(CONTACTS_FOLDER_ID, "Compact");
         let calendar = outlook_folder_view_definition(CALENDAR_FOLDER_ID, "Compact");
+        let task = outlook_folder_view_definition(TASKS_FOLDER_ID, "Compact");
+        let note = outlook_folder_view_definition(NOTES_FOLDER_ID, "Compact");
+        let journal = outlook_folder_view_definition(JOURNAL_FOLDER_ID, "Compact");
         let mail = outlook_folder_view_definition(INBOX_FOLDER_ID, "Compact");
 
         assert_eq!(contact.kind, ViewDefinitionKind::ContactList);
@@ -14290,6 +14428,54 @@ mod tests {
         assert_eq!(
             view_descriptor_strings(&calendar),
             "\nIcon\nSubject\nStart\nEnd\nLocation\nBusy\n"
+        );
+
+        assert_eq!(task.kind, ViewDefinitionKind::TaskList);
+        assert_eq!(
+            descriptor_column_property_tags(&view_descriptor_binary(&task)),
+            vec![
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                PID_TAG_FLAG_STATUS,
+                PID_LID_TASK_DUE_DATE_TAG,
+                PID_LID_TASK_START_DATE_TAG,
+                PID_LID_PERCENT_COMPLETE_TAG,
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&task),
+            "\nIcon\nSubject\nStatus\nDue Date\nStart Date\n% Complete\n"
+        );
+
+        assert_eq!(note.kind, ViewDefinitionKind::NoteList);
+        assert_eq!(
+            descriptor_column_property_tags(&view_descriptor_binary(&note)),
+            vec![
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                PID_TAG_LAST_MODIFICATION_TIME,
+                PID_LID_NOTE_COLOR_TAG,
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&note),
+            "\nIcon\nSubject\nModified\nColor\n"
+        );
+
+        assert_eq!(journal.kind, ViewDefinitionKind::JournalList);
+        assert_eq!(
+            descriptor_column_property_tags(&view_descriptor_binary(&journal)),
+            vec![
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                PID_LID_LOG_START_TAG,
+                PID_LID_LOG_DURATION_TAG,
+                string8_property_tag(PID_LID_LOG_TYPE_W_TAG),
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&journal),
+            "\nIcon\nSubject\nStart\nDuration\nType\n"
         );
 
         assert_eq!(mail.kind, ViewDefinitionKind::MailCompact);
