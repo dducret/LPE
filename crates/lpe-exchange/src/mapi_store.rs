@@ -486,7 +486,6 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
         "IPM.Configuration.ELC"
             | OUTLOOK_INBOX_MRM_CONFIG_CLASS
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
-            | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
             | OUTLOOK_INBOX_SHARING_INDEX_CLASS
             | OUTLOOK_INBOX_AGGREGATION_CLASS
@@ -3897,7 +3896,6 @@ mod tests {
         for exact_virtual_id in [
             OUTLOOK_INBOX_ELC_CONFIG_ID,
             OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
-            OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
             OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
             OUTLOOK_INBOX_SHARING_INDEX_ID,
             OUTLOOK_INBOX_AGGREGATION_ID,
@@ -3911,6 +3909,13 @@ mod tests {
                 exact_virtual_id
             ));
         }
+        assert!(snapshot
+            .associated_config_message_for_id(OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID)
+            .is_none());
+        assert!(!snapshot.associated_config_identity_matches_folder(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
+        ));
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_6561_7343_8000_000000000002);

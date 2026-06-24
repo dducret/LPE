@@ -4307,7 +4307,6 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
             "IPM.Configuration.ELC"
                 | "IPM.Configuration.MRM"
                 | "IPM.Configuration.UMOLK.UserOptions"
-                | "IPM.RuleOrganizer"
                 | "IPM.Sharing.Configuration"
                 | "IPM.Sharing.Index"
                 | "IPM.Aggregation"
@@ -10569,8 +10568,8 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_rule_organizer() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.RuleOrganizer");
+    fn inbox_associated_find_row_does_not_return_empty_virtual_rule_organizer() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.RuleOrganizer");
     }
 
     #[test]
@@ -11667,7 +11666,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_query_rows_returns_exact_rule_organizer_default() {
+    fn inbox_associated_query_rows_does_not_return_empty_virtual_rule_organizer() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -11708,8 +11707,7 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-        assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
     }
 
     #[test]
