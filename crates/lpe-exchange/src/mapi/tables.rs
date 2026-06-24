@@ -10878,6 +10878,26 @@ mod tests {
     }
 
     #[test]
+    fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view() {
+        let rows = associated_table_rows(
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            &MapiMailStoreSnapshot::empty(),
+            None,
+            Uuid::nil(),
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(rows[0], AssociatedTableRow::Config(_)));
+        assert_eq!(
+            associated_folder_message_count(
+                SUGGESTED_CONTACTS_FOLDER_ID,
+                &MapiMailStoreSnapshot::empty()
+            ),
+            1
+        );
+    }
+
+    #[test]
     fn quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
         assert_contact_folder_associated_find_row_returns_osc_contact_sync(
             QUICK_CONTACTS_FOLDER_ID,

@@ -2339,6 +2339,12 @@ pub(in crate::mapi) fn default_view_supported_container_class(container_class: &
         || container_class.starts_with("IPF.Contact.")
         || container_class == "IPF.Appointment"
         || container_class.starts_with("IPF.Appointment.")
+        || container_class == "IPF.Task"
+        || container_class.starts_with("IPF.Task.")
+        || container_class == "IPF.StickyNote"
+        || container_class.starts_with("IPF.StickyNote.")
+        || container_class == "IPF.Journal"
+        || container_class.starts_with("IPF.Journal.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
@@ -2349,17 +2355,19 @@ pub(in crate::mapi) fn default_view_supported_folder(
         return false;
     }
     if container_class == "IPF.Contact" || container_class.starts_with("IPF.Contact.") {
-        return matches!(
-            folder_id,
-            CONTACTS_FOLDER_ID
-                | SUGGESTED_CONTACTS_FOLDER_ID
-                | QUICK_CONTACTS_FOLDER_ID
-                | IM_CONTACT_LIST_FOLDER_ID
-                | CONTACTS_SEARCH_FOLDER_ID
-        );
+        return matches!(folder_id, CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID);
     }
     if container_class == "IPF.Appointment" || container_class.starts_with("IPF.Appointment.") {
         return folder_id == CALENDAR_FOLDER_ID;
+    }
+    if container_class == "IPF.Task" || container_class.starts_with("IPF.Task.") {
+        return matches!(folder_id, TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID);
+    }
+    if container_class == "IPF.StickyNote" || container_class.starts_with("IPF.StickyNote.") {
+        return folder_id == NOTES_FOLDER_ID;
+    }
+    if container_class == "IPF.Journal" || container_class.starts_with("IPF.Journal.") {
+        return folder_id == JOURNAL_FOLDER_ID;
     }
     if matches!(
         folder_id,
@@ -10081,14 +10089,25 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_collaboration_classes_do_not_advertise_default_views() {
+    fn collaboration_classes_advertise_type_specific_default_views() {
         for (folder_id, container_class) in [
             (TASKS_FOLDER_ID, "IPF.Task"),
             (TODO_SEARCH_FOLDER_ID, "IPF.Task"),
             (NOTES_FOLDER_ID, "IPF.StickyNote"),
             (JOURNAL_FOLDER_ID, "IPF.Journal"),
         ] {
-            assert!(!default_view_supported_folder(folder_id, container_class));
+            assert!(default_view_supported_folder(folder_id, container_class));
+        }
+    }
+
+    #[test]
+    fn auxiliary_contact_folders_do_not_advertise_folder_default_views() {
+        for folder_id in [
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+        ] {
+            assert!(!default_view_supported_folder(folder_id, "IPF.Contact"));
         }
     }
 
