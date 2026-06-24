@@ -254,12 +254,15 @@ non-canonical LPE state.
   The bounded Inbox Compact descriptor follows the observed Outlook 2016/2019
   visible-message projection: attachment indicator, sent-representing display
   name, subject, delivery time, and message flags.
-  Non-mail folders, including Calendar, Contacts, Tasks, Notes, and Journal,
-  do not advertise `PidTagDefaultViewEntryId` until LPE has type-specific
-  Outlook view descriptors for those container classes. Delete attempts against
-  synthetic folder-local mail default view rows are acknowledged as no-op
-  success because the rows are compatibility projections, not canonical FAI
-  messages.
+  Calendar and Contacts advertise bounded folder-local default named-view rows
+  with type-specific Outlook view descriptors. Calendar descriptors use
+  appointment columns such as subject, start, end, location, and busy status;
+  Contacts descriptors use contact columns such as display name, primary email,
+  mobile, company, and title. Tasks, Notes, and Journal do not advertise
+  `PidTagDefaultViewEntryId` until LPE has type-specific Outlook view
+  descriptors for those container classes. Delete attempts against synthetic
+  folder-local default view rows are acknowledged as no-op success because the
+  rows are compatibility projections, not canonical FAI messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder

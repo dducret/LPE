@@ -9532,7 +9532,7 @@ fn log_outlook_view_handoff(
     message: &crate::mapi_store::MapiCommonViewNamedViewMessage,
     snapshot: &MapiMailStoreSnapshot,
 ) {
-    let definition = outlook_mail_view_definition(&message.name);
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor_binary = view_descriptor_binary(&definition);
     let descriptor_strings = view_descriptor_strings(&definition);
     let descriptor_summary = format_view_descriptor_binary_summary(&descriptor_binary);
@@ -9662,14 +9662,14 @@ fn format_outlook_view_handoff_table_contract(
     let descriptor_summary = view
         .as_ref()
         .map(|message| {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             let descriptor = view_descriptor_binary(&definition);
             format_view_descriptor_binary_summary(&descriptor)
         })
         .unwrap_or_default();
     let selected_missing_descriptor_columns = if associated {
         view.as_ref().map(|message| {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             let descriptor = view_descriptor_binary(&definition);
             let descriptor_columns = view_descriptor_property_tags(&descriptor);
             missing_debug_property_tags(&descriptor_columns, columns)
@@ -9708,7 +9708,7 @@ fn format_inbox_view_descriptor_behavior_contract(
     let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
         return "default_view=missing".to_string();
     };
-    let definition = outlook_mail_view_definition(&message.name);
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
     let mut rows = emails_for_folder(folder_id, mailboxes, emails);
@@ -9783,7 +9783,7 @@ fn format_inbox_view_descriptor_set_columns_behavior_contract(
     let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
         return "default_view=missing".to_string();
     };
-    let definition = outlook_mail_view_definition(&message.name);
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
     let selected_missing_descriptor_columns = if columns.len() >= descriptor_columns.len() {
@@ -28183,7 +28183,7 @@ mod tests {
     }
 
     #[test]
-    fn contacts_view_handoff_table_contract_does_not_report_mail_default_view() {
+    fn contacts_view_handoff_table_contract_reports_contact_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             CONTACTS_FOLDER_ID,
@@ -28192,13 +28192,16 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=false"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains(
+            "visible_column_tags=0x001a001e,0x3001001e,0x8083001e,0x3a1c001e,0x3a16001e,0x3a17001e"
+        ));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
     #[test]
-    fn calendar_view_handoff_table_contract_does_not_report_mail_default_view() {
+    fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             CALENDAR_FOLDER_ID,
@@ -28207,8 +28210,11 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=false"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains(
+            "visible_column_tags=0x001a001e,0x0037001e,0x85160040,0x85170040,0x8208001e,0x82050003"
+        ));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
@@ -29611,14 +29617,17 @@ mod tests {
     }
 
     #[test]
-    fn folder_default_named_view_open_rejects_non_mail_folder() {
+    fn folder_default_named_view_open_materializes_for_supported_contact_folder() {
         let selected = common_view_named_view_message_for_open(
             &MapiMailStoreSnapshot::empty(),
             CONTACTS_FOLDER_ID,
             crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         );
 
-        assert!(selected.is_none());
+        assert_eq!(
+            selected.map(|message| (message.folder_id, message.name)),
+            Some((CONTACTS_FOLDER_ID, "Compact".to_string()))
+        );
     }
 
     #[test]

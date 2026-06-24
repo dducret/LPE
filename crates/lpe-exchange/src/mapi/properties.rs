@@ -1995,7 +1995,9 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID if default_view_supported_container_class(message_class) => {
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+            if default_view_supported_folder(folder_id, message_class) =>
+        {
             default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
@@ -2329,7 +2331,12 @@ fn search_folder_id(definition: &SearchFolderDefinition) -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
+    container_class == "IPF.Note"
+        || container_class.starts_with("IPF.Note.")
+        || container_class == "IPF.Contact"
+        || container_class.starts_with("IPF.Contact.")
+        || container_class == "IPF.Appointment"
+        || container_class.starts_with("IPF.Appointment.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
@@ -2338,6 +2345,19 @@ pub(in crate::mapi) fn default_view_supported_folder(
 ) -> bool {
     if !default_view_supported_container_class(container_class) {
         return false;
+    }
+    if container_class == "IPF.Contact" || container_class.starts_with("IPF.Contact.") {
+        return matches!(
+            folder_id,
+            CONTACTS_FOLDER_ID
+                | SUGGESTED_CONTACTS_FOLDER_ID
+                | QUICK_CONTACTS_FOLDER_ID
+                | IM_CONTACT_LIST_FOLDER_ID
+                | CONTACTS_SEARCH_FOLDER_ID
+        );
+    }
+    if container_class == "IPF.Appointment" || container_class.starts_with("IPF.Appointment.") {
+        return folder_id == CALENDAR_FOLDER_ID;
     }
     if matches!(
         folder_id,
@@ -2490,9 +2510,10 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             .map(|message_class| MapiValue::String(message_class.to_string()))
         }
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
-            if default_view_supported_container_class(collaboration_folder_message_class(
-                folder.kind,
-            )) =>
+            if default_view_supported_folder(
+                folder.id,
+                collaboration_folder_message_class(folder.kind),
+            ) =>
         {
             default_folder_view_entry_id(
                 folder.collection.owner_account_id,
@@ -3022,7 +3043,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         }
         PID_TAG_VIEW_DESCRIPTOR_FLAGS => Some(MapiValue::U32(message.view_flags)),
         PID_TAG_VIEW_DESCRIPTOR_BINARY | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835 => {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             log_view_definition_diagnostics(
                 message.folder_id,
                 message.id,
@@ -3032,7 +3053,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
             Some(MapiValue::Binary(view_descriptor_binary(&definition)))
         }
         OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C => {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             log_view_definition_diagnostics(
                 message.folder_id,
                 message.id,
@@ -3048,7 +3069,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         }
         PID_TAG_VIEW_DESCRIPTOR_NAME_W => Some(MapiValue::String(message.name.clone())),
         PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             log_view_definition_diagnostics(
                 message.folder_id,
                 message.id,
@@ -3059,7 +3080,7 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
         }
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => {
-            let definition = outlook_mail_view_definition(&message.name);
+            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             log_view_definition_diagnostics(
                 message.folder_id,
                 message.id,
@@ -3086,6 +3107,8 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::mapi) enum ViewDefinitionKind {
+    CalendarCompact,
+    ContactList,
     MailCompact,
     MailSentTo,
 }
@@ -3262,6 +3285,123 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
         ],
         sort_column: 7,
         sort_descending: true,
+    }
+}
+
+pub(in crate::mapi) fn outlook_folder_view_definition(
+    folder_id: u64,
+    view_name: &str,
+) -> ViewDefinition {
+    match folder_id {
+        CALENDAR_FOLDER_ID => outlook_calendar_view_definition(view_name),
+        CONTACTS_FOLDER_ID
+        | SUGGESTED_CONTACTS_FOLDER_ID
+        | QUICK_CONTACTS_FOLDER_ID
+        | IM_CONTACT_LIST_FOLDER_ID
+        | CONTACTS_SEARCH_FOLDER_ID => outlook_contact_view_definition(view_name),
+        _ => outlook_mail_view_definition(view_name),
+    }
+}
+
+fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::CalendarCompact,
+        columns: vec![
+            view_column(
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                0x12,
+                0x0000_270A,
+                "Icon",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                0x18,
+                0x0000_2F00,
+                "Subject",
+            ),
+            view_named_id_column(
+                PID_LID_COMMON_START_TAG,
+                0x10,
+                0x0000_3F40,
+                PSETID_COMMON_GUID,
+                PID_LID_COMMON_START,
+                "Start",
+            ),
+            view_named_id_column(
+                PID_LID_COMMON_END_TAG,
+                0x10,
+                0x0000_3F40,
+                PSETID_COMMON_GUID,
+                PID_LID_COMMON_END,
+                "End",
+            ),
+            view_named_id_column(
+                string8_property_tag(PID_LID_LOCATION_W_TAG),
+                0x14,
+                0x0000_3F00,
+                PSETID_APPOINTMENT_GUID,
+                PID_LID_LOCATION,
+                "Location",
+            ),
+            view_named_id_column(
+                PID_LID_BUSY_STATUS_TAG,
+                0x0C,
+                0x0000_3F40,
+                PSETID_APPOINTMENT_GUID,
+                PID_LID_BUSY_STATUS,
+                "Busy",
+            ),
+        ],
+        sort_column: 2,
+        sort_descending: false,
+    }
+}
+
+fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::ContactList,
+        columns: vec![
+            view_column(
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                0x12,
+                0x0000_270A,
+                "Icon",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_DISPLAY_NAME_W),
+                0x18,
+                0x0000_2F00,
+                "Full Name",
+            ),
+            view_named_id_column(
+                string8_property_tag(PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG),
+                0x18,
+                0x0000_3F00,
+                PSETID_ADDRESS_GUID,
+                PID_LID_EMAIL1_EMAIL_ADDRESS,
+                "Email",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_MOBILE_TELEPHONE_NUMBER_W),
+                0x12,
+                0x0000_2F00,
+                "Mobile",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_COMPANY_NAME_W),
+                0x14,
+                0x0000_2F00,
+                "Company",
+            ),
+            view_column(
+                string8_property_tag(PID_TAG_TITLE_W),
+                0x14,
+                0x0000_2F00,
+                "Job Title",
+            ),
+        ],
+        sort_column: 1,
+        sort_descending: false,
     }
 }
 
@@ -9839,12 +9979,17 @@ mod tests {
         );
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                account_id,
+                CONTACTS_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+            .map(MapiValue::Binary)
         );
     }
 
     #[test]
-    fn collaboration_calendar_does_not_advertise_mail_default_view() {
+    fn collaboration_calendar_advertises_calendar_default_view() {
         let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
         let collection = MapiCollaborationFolder {
             id: CALENDAR_FOLDER_ID,
@@ -9873,7 +10018,12 @@ mod tests {
         );
         assert_eq!(
             collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-            None
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                account_id,
+                CALENDAR_FOLDER_ID,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+            .map(MapiValue::Binary)
         );
     }
 
@@ -14085,6 +14235,49 @@ mod tests {
             view_descriptor_strings(&sent_to_definition),
             "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nTo\nSubject\nSent\nSize\nCategories\n"
         );
+    }
+
+    #[test]
+    fn folder_default_view_definitions_use_type_specific_columns() {
+        let contact = outlook_folder_view_definition(CONTACTS_FOLDER_ID, "Compact");
+        let calendar = outlook_folder_view_definition(CALENDAR_FOLDER_ID, "Compact");
+        let mail = outlook_folder_view_definition(INBOX_FOLDER_ID, "Compact");
+
+        assert_eq!(contact.kind, ViewDefinitionKind::ContactList);
+        assert_eq!(
+            descriptor_column_property_tags(&view_descriptor_binary(&contact)),
+            vec![
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                string8_property_tag(PID_TAG_DISPLAY_NAME_W),
+                string8_property_tag(PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG),
+                string8_property_tag(PID_TAG_MOBILE_TELEPHONE_NUMBER_W),
+                string8_property_tag(PID_TAG_COMPANY_NAME_W),
+                string8_property_tag(PID_TAG_TITLE_W),
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&contact),
+            "\nIcon\nFull Name\nEmail\nMobile\nCompany\nJob Title\n"
+        );
+
+        assert_eq!(calendar.kind, ViewDefinitionKind::CalendarCompact);
+        assert_eq!(
+            descriptor_column_property_tags(&view_descriptor_binary(&calendar)),
+            vec![
+                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+                string8_property_tag(PID_TAG_SUBJECT_W),
+                PID_LID_COMMON_START_TAG,
+                PID_LID_COMMON_END_TAG,
+                string8_property_tag(PID_LID_LOCATION_W_TAG),
+                PID_LID_BUSY_STATUS_TAG,
+            ]
+        );
+        assert_eq!(
+            view_descriptor_strings(&calendar),
+            "\nIcon\nSubject\nStart\nEnd\nLocation\nBusy\n"
+        );
+
+        assert_eq!(mail.kind, ViewDefinitionKind::MailCompact);
     }
 
     #[test]

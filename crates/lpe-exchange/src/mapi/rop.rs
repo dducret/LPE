@@ -1780,7 +1780,7 @@ fn log_common_view_descriptor_getprops_summary(
         return;
     };
 
-    let definition = outlook_mail_view_definition(&message.name);
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_strings = view_descriptor_strings(&definition);
     let descriptor_string_bytes = utf16le_bytes(&descriptor_strings);
@@ -1930,7 +1930,7 @@ fn format_common_view_descriptor_getprops_contract(
             format_property_tags_for_debug(columns)
         );
     };
-    let definition = outlook_mail_view_definition(&message.name);
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
     let descriptor_strings = view_descriptor_strings(&definition);
