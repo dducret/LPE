@@ -10966,15 +10966,7 @@ fn debug_property_tag_present(required: u32, present: &[u32]) -> bool {
     {
         return true;
     }
-    if required != 0x0000_101E {
-        return false;
-    }
-    present.iter().copied().any(|tag| {
-        let property_id = (tag >> 16) as u16;
-        let property_type = (tag & 0xFFFF) as u16;
-        property_id >= FIRST_NAMED_PROPERTY_ID
-            && matches!(property_type, 0x001E | 0x001F | 0x101E | 0x101F)
-    })
+    false
 }
 
 fn format_ipm_configuration_row_contract(
@@ -28154,7 +28146,7 @@ mod tests {
         assert!(contract.contains("0x0e1b000b"));
         assert!(contract.contains("0x0042001f"));
         assert!(
-            contract.ends_with("selected_missing_descriptor_columns="),
+            contract.ends_with("selected_missing_descriptor_columns=0x0000101e"),
             "{contract}"
         );
     }
