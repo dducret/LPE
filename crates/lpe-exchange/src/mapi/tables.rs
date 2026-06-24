@@ -309,7 +309,7 @@ pub(in crate::mapi) fn restriction_matches_common_views_message(
     }
 }
 
-fn calendar_content_rows<'a>(
+pub(in crate::mapi) fn calendar_content_rows<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     folder_id: u64,
     restriction: Option<&MapiRestriction>,

@@ -10453,6 +10453,7 @@ fn log_mapi_query_position_debug(
         restriction_decoded,
         restriction_property_tags,
         normal_message_query_position_summary,
+        calendar_event_query_position_summary,
         inbox_view_descriptor_behavior_contract,
     ) = match object {
         Some(MapiObject::ContentsTable {
@@ -10486,6 +10487,16 @@ fn log_mapi_query_position_debug(
                     emails,
                     snapshot,
                 ),
+                format_calendar_event_query_position_summary(
+                    *folder_id,
+                    *associated,
+                    *table_position,
+                    row_count.min(5) as usize,
+                    sort_orders,
+                    restriction.as_ref(),
+                    &effective_columns,
+                    snapshot,
+                ),
                 format_inbox_view_descriptor_behavior_contract(
                     *folder_id,
                     *associated,
@@ -10506,6 +10517,7 @@ fn log_mapi_query_position_debug(
             String::new(),
             0,
             false,
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -10538,6 +10550,7 @@ fn log_mapi_query_position_debug(
         restriction_decoded = %restriction_decoded,
         restriction_property_tags = %restriction_property_tags,
         normal_message_query_position_summary = %normal_message_query_position_summary,
+        calendar_event_query_position_summary = %calendar_event_query_position_summary,
         inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
         inbox_associated_config_summary = object
             .and_then(MapiObject::folder_id)
@@ -11544,6 +11557,63 @@ fn format_contact_query_row_summary(
         rows.len(),
         position,
         forward_read,
+        row_count,
+        selected.len(),
+        selected.len().min(5),
+        row_summaries
+    )
+}
+
+fn format_calendar_event_query_position_summary(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if associated || folder_id != CALENDAR_FOLDER_ID || row_count == 0 || columns.is_empty() {
+        return String::new();
+    }
+    let mut rows = calendar_content_rows(snapshot, folder_id, restriction);
+    sort_events(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, true, row_count);
+    let row_summaries = selected
+        .iter()
+        .take(5)
+        .map(|index| {
+            let event = rows[*index];
+            let serialized = serialize_event_row(&event.event, event.id, event.folder_id, columns);
+            let standard_row = standard_property_row_bytes(&serialized);
+            let values = columns
+                .iter()
+                .map(|tag| {
+                    let value = event_property_value(&event.event, event.id, event.folder_id, *tag)
+                        .map(|value| format_debug_mapi_value(&value))
+                        .unwrap_or_else(|| "default".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "index={};mid=0x{:016x};title={};value_len={};status_row_len={};values={}",
+                index,
+                event.id,
+                event.event.title,
+                serialized.len(),
+                standard_row.len(),
+                values
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    format!(
+        "event_total={};position={};forward=true;requested={};returned={};summarized={};{}",
+        rows.len(),
+        position,
         row_count,
         selected.len(),
         selected.len().min(5),
@@ -30546,6 +30616,81 @@ mod tests {
         assert!(!detail.contains("tag=0x12130003"));
         assert!(!detail.contains("0x0037001f"));
         assert!(!detail.contains("0x801f001f"));
+    }
+
+    #[test]
+    fn calendar_query_position_summary_projects_observed_outlook_columns() {
+        let event_id = uuid::Uuid::from_u128(0x7174);
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(0x7174),
+        );
+        let event = lpe_storage::AccessibleEvent {
+            id: event_id,
+            uid: "calendar-row".to_string(),
+            collection_id: DEFAULT_CALENDAR_COLLECTION_ID.to_string(),
+            owner_account_id: uuid::Uuid::from_u128(0x8184),
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test User".to_string(),
+            rights: default_mapping_rights(),
+            date: "2026-06-23".to_string(),
+            time: "15:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Calendar row".to_string(),
+            location: "Office".to_string(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![event],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let summary = format_calendar_event_query_position_summary(
+            CALENDAR_FOLDER_ID,
+            false,
+            0,
+            1,
+            &[],
+            None,
+            &[
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_MESSAGE_FLAGS,
+                PID_TAG_MESSAGE_STATUS,
+                PID_LID_OUTLOOK_COMMON_8578_TAG,
+                PID_LID_SIDE_EFFECTS_TAG,
+            ],
+            &snapshot,
+        );
+
+        assert!(summary.contains("event_total=1"));
+        assert!(summary.contains("title=Calendar row"));
+        assert!(summary.contains("0x85780003=0"));
+        assert!(summary.contains("0x85100003=0"));
+        assert!(!summary.contains("0x001a001f=default"));
     }
 
     #[test]
