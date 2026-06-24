@@ -11405,6 +11405,40 @@ mod tests {
     }
 
     #[test]
+    fn contacts_associated_query_rows_exposes_default_named_view() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    }
+
+    #[test]
     fn inbox_associated_query_rows_keeps_configuration_with_stored_stream() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000099);
@@ -12944,6 +12978,9 @@ mod tests {
             CONVERSATION_HISTORY_FOLDER_ID,
             IPM_SUBTREE_FOLDER_ID,
             CONTACTS_SEARCH_FOLDER_ID,
+            CONTACTS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
             JOURNAL_FOLDER_ID,
             NOTES_FOLDER_ID,
             TASKS_FOLDER_ID,
@@ -12963,9 +13000,6 @@ mod tests {
             FREEBUSY_DATA_FOLDER_ID,
             TRACKED_MAIL_PROCESSING_FOLDER_ID,
             CALENDAR_FOLDER_ID,
-            CONTACTS_FOLDER_ID,
-            QUICK_CONTACTS_FOLDER_ID,
-            IM_CONTACT_LIST_FOLDER_ID,
             QUICK_STEP_SETTINGS_FOLDER_ID,
         ] {
             assert_eq!(

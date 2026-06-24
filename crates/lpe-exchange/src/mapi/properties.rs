@@ -2329,7 +2329,10 @@ fn search_folder_id(definition: &SearchFolderDefinition) -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn default_view_supported_container_class(container_class: &str) -> bool {
-    container_class == "IPF.Note" || container_class.starts_with("IPF.Note.")
+    container_class == "IPF.Note"
+        || container_class.starts_with("IPF.Note.")
+        || container_class == "IPF.Contact"
+        || container_class.starts_with("IPF.Contact.")
 }
 
 pub(in crate::mapi) fn default_view_supported_folder(
