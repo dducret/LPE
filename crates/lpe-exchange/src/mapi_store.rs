@@ -809,7 +809,10 @@ fn outlook_contact_link_timestamp_associated_config_default(
 }
 
 fn outlook_contact_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
-    outlook_contact_sync_associated_config_default(folder_id)
+    let contact_sync = (folder_id != crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
+        .then(|| outlook_contact_sync_associated_config_default(folder_id))
+        .flatten();
+    contact_sync
         .into_iter()
         .chain(outlook_contact_link_timestamp_associated_config_default(
             folder_id,
@@ -4246,18 +4249,11 @@ mod tests {
     fn contacts_include_default_osc_contact_sync_without_duplicate() {
         let snapshot = MapiMailStoreSnapshot::empty();
 
-        for (folder_id, sync_message_id, timestamp_message_id) in [
-            (
-                crate::mapi::identity::CONTACTS_FOLDER_ID,
-                OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
-                OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-            ),
-            (
-                crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-                OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID,
-                OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-            ),
-        ] {
+        for (folder_id, sync_message_id, timestamp_message_id) in [(
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
+            OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
+        )] {
             let messages = snapshot.associated_config_messages_for_folder(folder_id);
             assert_eq!(
                 messages
@@ -4305,6 +4301,40 @@ mod tests {
                 timestamp_message_id
             ));
         }
+
+        let messages = snapshot.associated_config_messages_for_folder(
+            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
+                .count(),
+            0
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| {
+                    message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            snapshot
+                .associated_config_message_for_id(OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID)
+                .map(|message| message.message_class),
+            None
+        );
+        assert_eq!(
+            snapshot
+                .associated_config_message_for_id(
+                    OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
+                )
+                .map(|message| message.message_class),
+            Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
+        );
     }
 
     #[test]

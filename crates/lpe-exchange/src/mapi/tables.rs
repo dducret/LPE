@@ -10862,9 +10862,11 @@ mod tests {
     }
 
     #[test]
-    fn suggested_contacts_associated_find_row_returns_osc_contact_sync_config() {
-        assert_contact_folder_associated_find_row_returns_osc_contact_sync(
+    fn suggested_contacts_associated_find_row_does_not_return_empty_osc_contact_sync_config() {
+        assert_contact_folder_associated_find_row_does_not_return_config(
             SUGGESTED_CONTACTS_FOLDER_ID,
+            "IPM.Microsoft.OSC.ContactSync",
+            &MapiMailStoreSnapshot::empty(),
         );
     }
 
@@ -10940,7 +10942,7 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 3);
     }
 
     #[test]
@@ -12489,6 +12491,37 @@ mod tests {
         message_class: &str,
         snapshot: &MapiMailStoreSnapshot,
     ) {
+        let response =
+            contact_folder_associated_find_row_response(folder_id, message_class, snapshot);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
+        assert_eq!(response[7], 1);
+        let mut encoded_message_class = Vec::new();
+        write_utf16z(&mut encoded_message_class, message_class);
+        assert!(response
+            .windows(encoded_message_class.len())
+            .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    fn assert_contact_folder_associated_find_row_does_not_return_config(
+        folder_id: u64,
+        message_class: &str,
+        snapshot: &MapiMailStoreSnapshot,
+    ) {
+        let response =
+            contact_folder_associated_find_row_response(folder_id, message_class, snapshot);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
+        assert_eq!(response[7], 0);
+    }
+
+    fn contact_folder_associated_find_row_response(
+        folder_id: u64,
+        message_class: &str,
+        snapshot: &MapiMailStoreSnapshot,
+    ) -> Vec<u8> {
         let mut table = MapiObject::ContentsTable {
             folder_id,
             associated: true,
@@ -12528,17 +12561,7 @@ mod tests {
             payload,
         };
 
-        let response =
-            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
-
-        assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
-        assert_eq!(response[7], 1);
-        let mut encoded_message_class = Vec::new();
-        write_utf16z(&mut encoded_message_class, message_class);
-        assert!(response
-            .windows(encoded_message_class.len())
-            .any(|window| window == encoded_message_class.as_slice()));
+        rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil())
     }
 
     fn inbox_associated_sort_snapshot() -> MapiMailStoreSnapshot {
