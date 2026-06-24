@@ -70,6 +70,8 @@ const ROW_MODIFY: u8 = 0x02;
 const ROW_REMOVE: u8 = 0x04;
 const PID_TAG_RULE_ID: u32 = 0x6674_0014;
 const PID_TAG_RULE_STATE: u32 = 0x6677_0003;
+const PID_TAG_RULE_CONDITION: u32 = 0x6679_00FD;
+const PID_TAG_RULE_ACTIONS: u32 = 0x6680_00FE;
 const PID_TAG_RULE_NAME_W: u32 = 0x6682_001F;
 const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
 const ST_ENABLED: u32 = 0x0000_0001;
@@ -17607,13 +17609,40 @@ where
                         columns,
                         columns_set,
                         ..
-                    })
-                    | Some(MapiObject::RuleTable {
+                    }) => {
+                        if !set_columns_request_is_valid(&request) {
+                            columns.clear();
+                            *columns_set = false;
+                            responses.extend_from_slice(&rop_error_response(
+                                0x12,
+                                request.response_handle_index(),
+                                0x8007_0057,
+                            ));
+                            break;
+                        }
+                        *columns = normalized_columns.clone();
+                        *columns_set = true;
+                        responses.extend_from_slice(&rop_set_columns_response(&request));
+                    }
+                    Some(MapiObject::RuleTable {
                         columns,
                         columns_set,
                         ..
                     }) => {
-                        if !set_columns_request_is_valid(&request) {
+                        if !set_columns_request_is_valid_for_rule_table(&request) {
+                            tracing::warn!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x12",
+                                requested_columns = %format_debug_property_tags(&request.property_tags()),
+                                unknown_wire_type_columns =
+                                    %format_unknown_wire_type_property_tags(&request.property_tags()),
+                                response_error = "0x80070057",
+                                message = "rca debug mapi rule table set columns rejected",
+                            );
                             columns.clear();
                             *columns_set = false;
                             responses.extend_from_slice(&rop_error_response(
@@ -21060,13 +21089,24 @@ where
                     ));
                 }
             }
-            Some(
-                RopId::SpoolerLockMessage
-                | RopId::TransportNewMail
-                | RopId::UpdateDeferredActionMessages,
-            ) => {
+            Some(RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
                 if input_handle(&handle_slots, &request).is_some() {
                     responses.extend_from_slice(&rop_simple_success_response(&request));
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                }
+            }
+            Some(RopId::UpdateDeferredActionMessages) => {
+                if input_handle(&handle_slots, &request).is_some() {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
@@ -26089,7 +26129,7 @@ where
                 }
             }
             Some(RopId::GetStoreState) => {
-                if logon_request_handle(session, &handle_slots, &request) {
+                if input_handle(&handle_slots, &request).is_some() {
                     responses.extend_from_slice(&rop_get_store_state_response(&request));
                 } else {
                     responses.extend_from_slice(&rop_error_response(
@@ -26511,11 +26551,26 @@ fn set_columns_request_is_valid(request: &RopRequest) -> bool {
         && set_columns_property_tags_are_valid(&request.property_tags())
 }
 
+fn set_columns_request_is_valid_for_rule_table(request: &RopRequest) -> bool {
+    table_async_flags_are_valid(request)
+        && !request.property_tags().is_empty()
+        && set_columns_property_tags_are_valid_for_rule_table(&request.property_tags())
+}
+
 fn set_columns_property_tags_are_valid(property_tags: &[u32]) -> bool {
     property_tags.iter().all(|tag| {
         let property_type = (*tag & 0xFFFF) as u16;
         !matches!(property_type, 0x0000 | 0x000A)
             && MapiPropertyTag::new(*tag).property_type().is_some()
+    })
+}
+
+fn set_columns_property_tags_are_valid_for_rule_table(property_tags: &[u32]) -> bool {
+    property_tags.iter().all(|tag| {
+        // MS-OXPROPS sections 2.946 and 2.948 define these rule-table columns as
+        // PtypRuleAction/PtypRestriction; they are valid column tags only here.
+        matches!(*tag, PID_TAG_RULE_ACTIONS | PID_TAG_RULE_CONDITION)
+            || set_columns_property_tags_are_valid(&[*tag])
     })
 }
 
@@ -26550,6 +26605,23 @@ mod property_tag_validation_tests {
         assert!(!set_columns_property_tags_are_valid(&[0x0037_0000]));
         assert!(!set_columns_property_tags_are_valid(&[0x0037_000A]));
         assert!(!set_columns_property_tags_are_valid(&[0x0037_801D]));
+        assert!(!set_columns_property_tags_are_valid(&[
+            PID_TAG_RULE_CONDITION,
+            PID_TAG_RULE_ACTIONS
+        ]));
+    }
+
+    #[test]
+    fn rule_table_set_columns_accepts_documented_rule_complex_types() {
+        assert!(set_columns_property_tags_are_valid_for_rule_table(&[
+            PID_TAG_RULE_CONDITION,
+            PID_TAG_RULE_ACTIONS,
+            PID_TAG_RULE_NAME_W,
+        ]));
+        assert!(!set_columns_property_tags_are_valid_for_rule_table(&[
+            PID_TAG_RULE_CONDITION,
+            0x0037_801D
+        ]));
     }
 
     #[test]
