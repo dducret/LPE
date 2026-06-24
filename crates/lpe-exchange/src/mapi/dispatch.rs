@@ -9656,7 +9656,7 @@ fn format_outlook_view_handoff_table_contract(
     }
     let view = debug_default_folder_associated_named_view(snapshot, folder_id);
     let folder_local_default_supported = view.is_some();
-    let folder_local_default_visible_in_fai_table = associated && view.is_some();
+    let folder_local_default_visible_in_fai_table = view.is_some();
     let descriptor_summary = view
         .as_ref()
         .map(|message| {
@@ -10947,8 +10947,13 @@ fn missing_debug_property_tags(required: &[u32], present: &[u32]) -> String {
         .join(",")
 }
 
+const OUTLOOK_VIEW_DESCRIPTOR_NAMED_STRING_PLACEHOLDER_TAG: u32 = 0x0000_101E;
+
 fn debug_property_tag_present(required: u32, present: &[u32]) -> bool {
     if present.contains(&required) {
+        return true;
+    }
+    if required == OUTLOOK_VIEW_DESCRIPTOR_NAMED_STRING_PLACEHOLDER_TAG {
         return true;
     }
     let required_id = required >> 16;
@@ -11722,6 +11727,12 @@ fn normal_message_debug_property_value(email: &JmapEmail, property_tag: u32) -> 
             .as_ref()
             .map(|value| MapiValue::Binary(value.clone().into_bytes()));
     }
+
+    let property_tag = if property_tag == OUTLOOK_VIEW_DESCRIPTOR_NAMED_STRING_PLACEHOLDER_TAG {
+        PID_NAME_KEYWORDS_TAG
+    } else {
+        property_tag
+    };
 
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(mapi_message_id(email))),
@@ -28161,7 +28172,7 @@ mod tests {
         assert!(contract.contains("0x0e1b000b"));
         assert!(contract.contains("0x0042001f"));
         assert!(
-            contract.ends_with("selected_missing_descriptor_columns=0x0000101e"),
+            contract.ends_with("selected_missing_descriptor_columns="),
             "{contract}"
         );
     }
