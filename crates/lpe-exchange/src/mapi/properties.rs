@@ -3905,34 +3905,42 @@ pub(in crate::mapi) fn contact_property_value(
         | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS_W_TAG => {
             contact_email_value(contact, 0).map(MapiValue::String)
         }
-        PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG => {
-            contact_email_value(contact, 1).map(|_| MapiValue::String("SMTP".to_string()))
-        }
+        PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 1)
+                .map(|_| "SMTP".to_string())
+                .unwrap_or_default(),
+        )),
         PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
         | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
         | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG
         | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_DISPLAY_NAME_W_TAG
-        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG => {
-            contact_email_value(contact, 1).map(MapiValue::String)
-        }
-        PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG => {
-            contact_email_value(contact, 2).map(|_| MapiValue::String("SMTP".to_string()))
-        }
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 1).unwrap_or_default(),
+        )),
+        PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 2)
+                .map(|_| "SMTP".to_string())
+                .unwrap_or_default(),
+        )),
         PID_LID_EMAIL3_DISPLAY_NAME_W_TAG
         | PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
         | PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG
-        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS_W_TAG => {
-            contact_email_value(contact, 2).map(MapiValue::String)
-        }
+        | PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_EMAIL_ADDRESS_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 2).unwrap_or_default(),
+        )),
         PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 0).map(|_| MapiValue::String("SMTP".to_string()))
         }
-        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE_W_TAG => {
-            contact_email_value(contact, 1).map(|_| MapiValue::String("SMTP".to_string()))
-        }
-        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG => {
-            contact_email_value(contact, 2).map(|_| MapiValue::String("SMTP".to_string()))
-        }
+        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_ADDRESS_TYPE_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 1)
+                .map(|_| "SMTP".to_string())
+                .unwrap_or_default(),
+        )),
+        PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS3_ADDRESS_TYPE_W_TAG => Some(MapiValue::String(
+            contact_email_value(contact, 2)
+                .map(|_| "SMTP".to_string())
+                .unwrap_or_default(),
+        )),
         PID_LID_OUTLOOK_CONTACT_SOURCE_80E0_TAG
         | PID_LID_OUTLOOK_CONTACT_SOURCE_80E2_TAG
         | PID_LID_OUTLOOK_CONTACT_SOURCE_80E3_TAG
@@ -10467,6 +10475,42 @@ mod tests {
                 PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_ADDRESS_TYPE_W_TAG
             ),
             Some(MapiValue::String("SMTP".to_string()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS2_EMAIL_ADDRESS_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
+        );
+        assert_eq!(
+            contact_property_value(
+                &contact,
+                1,
+                CONTACTS_FOLDER_ID,
+                PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG
+            ),
+            Some(MapiValue::String(String::new()))
         );
     }
 
