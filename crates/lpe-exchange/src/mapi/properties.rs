@@ -9946,6 +9946,18 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_collaboration_classes_do_not_advertise_default_views() {
+        for (folder_id, container_class) in [
+            (TASKS_FOLDER_ID, "IPF.Task"),
+            (TODO_SEARCH_FOLDER_ID, "IPF.Task"),
+            (NOTES_FOLDER_ID, "IPF.StickyNote"),
+            (JOURNAL_FOLDER_ID, "IPF.Journal"),
+        ] {
+            assert!(!default_view_supported_folder(folder_id, container_class));
+        }
+    }
+
+    #[test]
     fn collaboration_folder_projects_default_post_message_class_for_contacts() {
         let account_id = Uuid::from_u128(0xcccccccc_cccc_4ccc_8ccc_cccccccccccc);
         let collection = MapiCollaborationFolder {

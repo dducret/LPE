@@ -258,9 +258,10 @@ non-canonical LPE state.
   with type-specific Outlook view descriptors. Calendar descriptors use
   appointment columns such as subject, start, end, location, and busy status;
   Contacts descriptors use contact columns such as display name, primary email,
-  mobile, company, and title. Tasks, Notes, and Journal do not advertise
-  `PidTagDefaultViewEntryId` until LPE has type-specific Outlook view
-  descriptors for those container classes. Delete attempts against synthetic
+  mobile, company, and title. Tasks, To-Do, Notes, and Journal do not advertise
+  `PidTagDefaultViewEntryId` and must not inherit the mail default-view
+  descriptor until LPE has type-specific Outlook view descriptors and contents
+  row projections for those container classes. Delete attempts against synthetic
   folder-local default view rows are acknowledged as no-op success because the
   rows are compatibility projections, not canonical FAI messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
