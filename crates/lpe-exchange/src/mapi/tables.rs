@@ -212,12 +212,15 @@ fn associated_table_rows(
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
+                && !associated_config_duplicated_by_default_named_view(folder_id, snapshot, message)
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(AssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(view) = default_folder_associated_named_view(snapshot, folder_id) {
-        if restriction_matches_common_view_named_view(restriction, &view, mailbox_guid) {
+        if default_folder_named_view_visible_for_restriction(restriction)
+            && restriction_matches_common_view_named_view(restriction, &view, mailbox_guid)
+        {
             rows.push(AssociatedTableRow::NamedView(view));
         }
     }
@@ -283,6 +286,27 @@ fn default_folder_associated_named_view(
             )
         })
         .flatten()
+}
+
+fn associated_config_duplicated_by_default_named_view(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    folder_id == INBOX_FOLDER_ID
+        && message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+        && message.subject == "Compact"
+        && default_folder_associated_named_view(snapshot, folder_id).is_some()
+}
+
+fn default_folder_named_view_visible_for_restriction(
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    restriction.is_none()
+        || exact_message_class_restriction_value(restriction).is_some_and(|message_class| {
+            message_class
+                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        })
 }
 
 pub(in crate::mapi) fn restriction_matches_common_views_message(
@@ -2495,6 +2519,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
         }) if *associated && *folder_id == INBOX_FOLDER_ID => {
             let mut rows =
                 associated_table_rows(*folder_id, snapshot, restriction.as_ref(), mailbox_guid);
+            rows.retain(|row| associated_table_row_config(row).is_some());
             sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -4643,14 +4668,15 @@ pub(in crate::mapi) fn rop_find_row_response(
                 let row_refs = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
                     find_row(row_refs.as_slice(), *position, request, |message| {
-                        if broad_outlook_configuration_probe
-                            && associated_table_row_config(message).is_some_and(|config| {
-                                crate::mapi_store::is_outlook_inbox_default_associated_config_id(
-                                    config.id,
-                                )
-                            })
-                        {
-                            return false;
+                        if broad_outlook_configuration_probe {
+                            let Some(config) = associated_table_row_config(message) else {
+                                return false;
+                            };
+                            if crate::mapi_store::is_outlook_inbox_default_associated_config_id(
+                                config.id,
+                            ) {
+                                return false;
+                            }
                         }
                         associated_table_row_matches(message, Some(&restriction), mailbox_guid)
                     })
@@ -11368,6 +11394,74 @@ mod tests {
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
         assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let account_prefs_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000101);
+        let persisted_view_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000101);
+        let account_prefs_object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 181,
+        );
+        let persisted_view_object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 182,
+        );
+        crate::mapi::identity::remember_mapi_identity(account_prefs_id, account_prefs_object_id);
+        crate::mapi::identity::remember_mapi_identity(persisted_view_id, persisted_view_object_id);
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: account_prefs_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.AccountPrefs".to_string(),
+                subject: "Account prefs".to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_view_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+                subject: "Compact".to_string(),
+                properties_json: serde_json::json!({
+                    "0x0e0b0102": {"type": "binary", "value": "010203"}
+                }),
+            },
+        ]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W, PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     }
 
     #[test]

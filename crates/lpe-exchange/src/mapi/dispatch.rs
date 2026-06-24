@@ -12099,12 +12099,17 @@ fn debug_associated_table_rows(
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
+                && !debug_associated_config_duplicated_by_default_named_view(
+                    folder_id, snapshot, message,
+                )
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(DebugAssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(view) = debug_default_folder_associated_named_view(snapshot, folder_id) {
-        if restriction_matches_common_view_named_view(restriction, &view, mailbox_guid) {
+        if debug_default_folder_named_view_visible_for_restriction(restriction)
+            && restriction_matches_common_view_named_view(restriction, &view, mailbox_guid)
+        {
             rows.push(DebugAssociatedTableRow::NamedView(view));
         }
     }
@@ -12172,6 +12177,27 @@ fn debug_default_folder_associated_named_view(
             )
         })
         .flatten()
+}
+
+fn debug_associated_config_duplicated_by_default_named_view(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> bool {
+    folder_id == INBOX_FOLDER_ID
+        && message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+        && message.subject == "Compact"
+        && debug_default_folder_associated_named_view(snapshot, folder_id).is_some()
+}
+
+fn debug_default_folder_named_view_visible_for_restriction(
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    restriction.is_none()
+        || debug_exact_message_class_restriction_value(restriction).is_some_and(|message_class| {
+            message_class
+                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        })
 }
 
 fn sort_debug_associated_table_rows(
