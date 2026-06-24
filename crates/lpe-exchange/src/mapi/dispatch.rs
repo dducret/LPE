@@ -30690,7 +30690,11 @@ mod tests {
         assert!(summary.contains("title=Calendar row"));
         assert!(summary.contains("0x85780003=0"));
         assert!(summary.contains("0x85100003=0"));
+        assert!(!summary.contains("0x67480014=default"));
+        assert!(!summary.contains("0x674d0014=default"));
+        assert!(!summary.contains("0x674e0003=default"));
         assert!(!summary.contains("0x001a001f=default"));
+        assert!(!summary.contains("0x0e170003=default"));
     }
 
     #[test]

@@ -4156,7 +4156,9 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
-        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(folder_id)),
+        PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
             Some(MapiValue::String(event.title.clone()))
         }
@@ -4177,6 +4179,7 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(event_size(event))),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(event_size(event))),
@@ -12404,6 +12407,42 @@ mod tests {
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
             Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn calendar_projection_backs_outlook_table_identity_and_status_columns() {
+        let event = default_event_for_mapping(Uuid::nil(), "default");
+        let item_id = 0x0000_0000_0044_0001;
+
+        assert_eq!(
+            event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_FOLDER_ID),
+            Some(MapiValue::U64(CALENDAR_FOLDER_ID))
+        );
+        assert_eq!(
+            event_property_value(
+                &event,
+                item_id,
+                CALENDAR_FOLDER_ID,
+                PID_TAG_PARENT_FOLDER_ID
+            ),
+            Some(MapiValue::U64(CALENDAR_FOLDER_ID))
+        );
+        assert_eq!(
+            event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_MID),
+            Some(MapiValue::U64(item_id))
+        );
+        assert_eq!(
+            event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_INST_ID),
+            Some(MapiValue::U64(item_id))
+        );
+        assert_eq!(
+            event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_INSTANCE_NUM),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_MESSAGE_STATUS),
+            Some(MapiValue::U32(0))
         );
     }
 
