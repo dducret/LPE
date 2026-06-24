@@ -1442,6 +1442,7 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) last_getprops_request_contract: String,
     pub(in crate::mapi) last_setprops_request_contract: String,
     pub(in crate::mapi) request_contract_sequence: String,
+    pub(in crate::mapi) outlook_view_trace_events: String,
 }
 
 pub(in crate::mapi) fn post_hierarchy_action_summary(
@@ -1477,6 +1478,7 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
             .map(|(index, contract)| format!("{}:{contract}", index + 1))
             .collect::<Vec<_>>()
             .join("|"),
+        outlook_view_trace_events: actions.outlook_view_failure_trace_events.join(">"),
     }
 }
 

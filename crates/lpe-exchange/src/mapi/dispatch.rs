@@ -2402,6 +2402,7 @@ fn log_execute_rop_debug(
             post_hierarchy.content_sync_configure_observed,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
+        outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
         logon_response_present = logon.present,
         logon_error_code = %logon.error_code,
         logon_parse_error = %logon.parse_error,
@@ -13453,6 +13454,32 @@ where
                     }
                     _ => None,
                 };
+                let calendar_normal_release_context = match released_object {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
+                        "request_id={request_id};request_rops={request_rop_names};handle={};position={};row_count={};columns={};sort={};restriction={};view_handoff={}",
+                        format_optional_debug_handle(released_handle),
+                        position,
+                        folder_message_count(*folder_id, mailboxes, emails, snapshot),
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref()),
+                        format_outlook_view_handoff_table_contract(
+                            *folder_id,
+                            *associated,
+                            columns,
+                            snapshot,
+                        )
+                    )),
+                    _ => None,
+                };
                 let post_inbox_fai_handoff_context = match released_object {
                     Some(MapiObject::ContentsTable {
                         folder_id,
@@ -13585,6 +13612,23 @@ where
                             "rca debug mapi visible inbox released before query rows"
                         );
                     }
+                }
+                if let Some(context) = calendar_normal_release_context {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "calendar_normal_release:{context}"
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x01",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(released_handle),
+                        release_context = %context,
+                        "rca debug mapi calendar normal released"
+                    );
                 }
                 if let Some((released_table_context, handoff_context, live_handle_summary)) =
                     post_inbox_fai_handoff_context
@@ -14745,6 +14789,11 @@ where
                     handle,
                     snapshot,
                 );
+                if contents_folder_id == CALENDAR_FOLDER_ID && !associated {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "calendar_normal_table_open:request_id={request_id};handle={handle};row_count={row_count};flags=0x{table_flags:02x}"
+                    ));
+                }
                 if folder_id == INBOX_FOLDER_ID {
                     session.record_outlook_view_failure_trace_event(format!(
                         "inbox_contents_table_open:request_id={request_id};handle={handle};associated={associated};row_count={row_count};flags=0x{table_flags:02x}"
@@ -17380,6 +17429,7 @@ where
                 let selected_named_property_context =
                     format_debug_named_property_context(session, &normalized_columns);
                 let mut inbox_normal_setcolumns_context = None;
+                let mut calendar_normal_setcolumns_context = None;
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable {
                         folder_id,
@@ -17533,6 +17583,24 @@ where
                                 ),
                             ));
                         }
+                        if *folder_id == CALENDAR_FOLDER_ID && !*associated {
+                            let row_count =
+                                folder_message_count(*folder_id, mailboxes, emails, snapshot);
+                            calendar_normal_setcolumns_context = Some(format!(
+                                "handle={};input_index={};row_count={};columns={};named_properties={};view_handoff={}",
+                                format_optional_debug_handle(input_handle_value),
+                                request.input_handle_index().unwrap_or(0),
+                                row_count,
+                                format_debug_property_tags(columns),
+                                selected_named_property_context,
+                                format_outlook_view_handoff_table_contract(
+                                    *folder_id,
+                                    *associated,
+                                    columns,
+                                    snapshot,
+                                )
+                            ));
+                        }
                         responses.extend_from_slice(&rop_set_columns_response(&request));
                     }
                     Some(MapiObject::PermissionTable {
@@ -17581,6 +17649,22 @@ where
                         input_handle_value = %format_optional_debug_handle(handle),
                         setcolumns_context = %context,
                         "rca debug mapi visible inbox setcolumns tracked"
+                    );
+                }
+                if let Some(context) = calendar_normal_setcolumns_context {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "calendar_normal_setcolumns:{context}"
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x12",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        setcolumns_context = %context,
+                        "rca debug mapi calendar normal setcolumns tracked"
                     );
                 }
             }
@@ -17801,6 +17885,28 @@ where
                     )),
                     _ => None,
                 };
+                let calendar_normal_query_rows_context = match query_object {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
+                        "handle={};input_index={};position={};requested_forward_read={};requested_row_count={};columns={};sort={};restriction={}",
+                        format_optional_debug_handle(input_handle_value),
+                        request.input_handle_index().unwrap_or(0),
+                        position,
+                        request.query_forward_read(),
+                        request.query_row_count().unwrap_or(0),
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref())
+                    )),
+                    _ => None,
+                };
                 let bootstrap_query_phase = outlook_bootstrap_query_rows_phase(query_object);
                 let bootstrap_row_invariants = outlook_bootstrap_row_invariant_summaries(
                     query_object,
@@ -17936,12 +18042,41 @@ where
                         "rca debug mapi visible inbox query rows tracked"
                     );
                 }
+                if let Some(context) = calendar_normal_query_rows_context {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "calendar_normal_query_rows:{context}"
+                    ));
+                }
             }
             Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
                 &request,
                 input_object(session, &handle_slots, &request),
             )),
             Some(RopId::QueryPosition) => {
+                let calendar_normal_query_position_context = match input_object(
+                    session,
+                    &handle_slots,
+                    &request,
+                ) {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
+                        "handle={};input_index={};position_before={};columns={};sort={};restriction={}",
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        request.input_handle_index().unwrap_or(0),
+                        position,
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref())
+                    )),
+                    _ => None,
+                };
                 let response = rop_query_position_response(
                     &request,
                     input_object(session, &handle_slots, &request),
@@ -17959,6 +18094,21 @@ where
                     emails,
                     snapshot,
                 );
+                if let Some(context) = calendar_normal_query_position_context {
+                    let position = response
+                        .get(6..10)
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .map(u32::from_le_bytes)
+                        .unwrap_or(0);
+                    let row_count = response
+                        .get(10..14)
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .map(u32::from_le_bytes)
+                        .unwrap_or(0);
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "calendar_normal_query_position:{context};response_position={position};response_row_count={row_count}"
+                    ));
+                }
                 responses.extend_from_slice(&response);
             }
             Some(RopId::SeekRow) => {
