@@ -10570,8 +10570,8 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_elc_config() {
-        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
+    fn inbox_associated_find_row_suppresses_outlook_elc_config() {
+        assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
     }
 
     #[test]

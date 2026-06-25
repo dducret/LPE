@@ -497,8 +497,7 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
 ) -> Option<MapiAssociatedConfigMessage> {
     if !matches!(
         message_class,
-        "IPM.Configuration.ELC"
-            | OUTLOOK_INBOX_MRM_CONFIG_CLASS
+        OUTLOOK_INBOX_MRM_CONFIG_CLASS
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
             | OUTLOOK_INBOX_SHARING_INDEX_CLASS
