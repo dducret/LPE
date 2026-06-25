@@ -10082,6 +10082,7 @@ fn log_outlook_contents_table_restrict(
 
 fn log_outlook_contents_table_query_rows(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -10193,6 +10194,7 @@ fn log_outlook_contents_table_query_rows(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = %request_id,
         request_rop_id = "0x15",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
         folder_id = %format!("0x{folder_id:016x}"),
@@ -10553,6 +10555,7 @@ fn format_hierarchy_debug_bool(value: Option<&MapiValue>) -> String {
 
 fn log_mapi_query_position_debug(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     response: &[u8],
@@ -10659,6 +10662,7 @@ fn log_mapi_query_position_debug(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = %request_id,
         request_rop_id = "0x17",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
         object_kind = mapi_object_debug_kind(object),
@@ -18089,6 +18093,7 @@ where
                 log_calendar_hierarchy_query_rows_contract(principal, query_object, snapshot);
                 log_outlook_contents_table_query_rows(
                     principal,
+                    request_id,
                     &request,
                     query_object,
                     mailboxes,
@@ -18250,6 +18255,7 @@ where
                 );
                 log_mapi_query_position_debug(
                     principal,
+                    request_id,
                     &request,
                     input_object(session, &handle_slots, &request),
                     &response,
@@ -30005,7 +30011,7 @@ mod tests {
 
         assert_eq!(
             selected.map(|message| (message.folder_id, message.name)),
-            Some((INBOX_FOLDER_ID, "Compact".to_string()))
+            Some((INBOX_FOLDER_ID, "Messages".to_string()))
         );
     }
 
@@ -30019,7 +30025,7 @@ mod tests {
 
         assert_eq!(
             selected.map(|message| (message.folder_id, message.name)),
-            Some((CONTACTS_FOLDER_ID, "Compact".to_string()))
+            Some((CONTACTS_FOLDER_ID, "Contacts".to_string()))
         );
     }
 
