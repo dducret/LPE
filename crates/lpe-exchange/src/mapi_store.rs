@@ -757,16 +757,6 @@ fn outlook_common_views_default_navigation_shortcuts() -> Vec<MapiNavigationShor
     ]
 }
 
-fn is_transient_outlook_migration_associated_config_class(message_class: &str) -> bool {
-    matches!(
-        message_class,
-        "IPM.Microsoft.MigrationStatus"
-            | "IPM.Microsoft.PendingChange.MigrateCategoriesList"
-            | "IPM.Microsoft.PendingChange.MigrateFlags"
-            | "IPM.Microsoft.PendingChange.MigrateLabels"
-    )
-}
-
 fn outlook_contact_sync_associated_config_default(
     folder_id: u64,
 ) -> Option<MapiAssociatedConfigMessage> {
@@ -1386,8 +1376,7 @@ impl MapiMailStoreSnapshot {
             configs
                 .into_iter()
                 .filter(|config| {
-                    !is_transient_outlook_migration_associated_config_class(&config.message_class)
-                        && !is_empty_synthetic_inbox_associated_config(config)
+                    !is_empty_synthetic_inbox_associated_config(config)
                         && !is_empty_outlook_inbox_named_view_placeholder(config)
                 })
                 .map(|config| MapiAssociatedConfigMessage {
@@ -4142,10 +4131,10 @@ mod tests {
     }
 
     #[test]
-    fn associated_configs_drop_transient_outlook_migration_markers() {
+    fn associated_configs_keep_outlook_migration_markers_visible() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let kept_id = Uuid::from_u128(0x6d617069_6b65_6570_8000_000000000001);
-        let dropped_id = Uuid::from_u128(0x6d617069_6472_6f70_8000_000000000001);
+        let migration_id = Uuid::from_u128(0x6d617069_6472_6f70_8000_000000000001);
         crate::mapi::identity::remember_mapi_identity(
             kept_id,
             crate::mapi::identity::mapi_store_id(
@@ -4153,7 +4142,7 @@ mod tests {
             ),
         );
         crate::mapi::identity::remember_mapi_identity(
-            dropped_id,
+            migration_id,
             crate::mapi::identity::mapi_store_id(
                 crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 82,
             ),
@@ -4168,7 +4157,7 @@ mod tests {
                 properties_json: serde_json::json!({}),
             },
             crate::store::MapiAssociatedConfigRecord {
-                id: dropped_id,
+                id: migration_id,
                 account_id,
                 folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
                 message_class: "IPM.Microsoft.PendingChange.MigrateFlags".to_string(),
@@ -4183,7 +4172,7 @@ mod tests {
         assert!(messages.iter().any(|message| {
             message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
         }));
-        assert!(!messages
+        assert!(messages
             .iter()
             .any(|message| message.message_class == "IPM.Microsoft.PendingChange.MigrateFlags"));
     }
