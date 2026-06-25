@@ -3253,11 +3253,11 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
         columns: vec![
             view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
             view_named_id_column(
-                PID_LID_REMINDER_SET_TAG,
+                PID_LID_OUTLOOK_COMMON_8514_TAG,
                 0x12,
                 0x0000_3F40,
                 PSETID_COMMON_GUID,
-                PID_LID_REMINDER_SET,
+                PID_LID_OUTLOOK_COMMON_8514,
                 "Reminder",
             ),
             view_column(
@@ -3281,7 +3281,12 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 "Subject",
             ),
             view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
-            view_column(PID_TAG_MESSAGE_SIZE, 0x0C, 0x0000_2740, "Size"),
+            view_column(
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+                0x0C,
+                0x0000_2740,
+                "Size",
+            ),
             view_named_string_column(
                 multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
                 0x12,
