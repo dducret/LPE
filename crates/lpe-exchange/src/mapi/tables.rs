@@ -10955,7 +10955,7 @@ mod tests {
         );
         assert_eq!(
             u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
-            3
+            4
         );
     }
 
@@ -12352,6 +12352,13 @@ mod tests {
         assert_eq!(
             associated_config_property_value(
                 &message,
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1 << 16) | 0x0040
+            ),
+            Some(MapiValue::I64(0))
+        );
+        assert_eq!(
+            associated_config_property_value(
+                &message,
                 (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x001F
             ),
             Some(MapiValue::String(String::new()))
@@ -12369,6 +12376,10 @@ mod tests {
                 (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED << 16) | 0x000B
             ),
             Some(MapiValue::Bool(false))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+            Some(MapiValue::Binary(Vec::new()))
         );
     }
 
@@ -14985,6 +14996,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             0x685D_0003 if is_outlook_contacts_helper_config(message) => {
                 Some(MapiValue::U32(outlook_configuration_stamp(message)))
             }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::Binary(Vec::new()))
+            }
             tag if message.message_class == "IPM.Microsoft.ContactLink.TimeStamp" => {
                 outlook_contact_link_empty_property_value(tag)
             }
@@ -15153,6 +15167,7 @@ fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiVa
     match tag.property_type_code() {
         0x0003 => Some(MapiValue::U32(0)),
         0x000B => Some(MapiValue::Bool(false)),
+        0x0040 => Some(MapiValue::I64(0)),
         0x001E | 0x001F => Some(MapiValue::String(String::new())),
         0x0102 => Some(MapiValue::Binary(Vec::new())),
         0x1003 => Some(MapiValue::MultiI32(Vec::new())),
