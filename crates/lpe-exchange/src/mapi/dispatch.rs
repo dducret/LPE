@@ -10354,6 +10354,7 @@ fn log_outlook_contents_table_query_rows_response(
 
 fn log_outlook_hierarchy_table_query_rows_response(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     response: &[u8],
@@ -10393,6 +10394,8 @@ fn log_outlook_hierarchy_table_query_rows_response(
         .get(9..)
         .map(|bytes| hex_preview(bytes, 160))
         .unwrap_or_default();
+    let hierarchy_wire_row_summary =
+        format_hierarchy_query_rows_wire_summary(response, &selected_columns, 32);
 
     tracing::info!(
         rca_debug = true,
@@ -10400,6 +10403,7 @@ fn log_outlook_hierarchy_table_query_rows_response(
         endpoint = "emsmdb",
         account_id = %principal.account_id,
         mailbox = %principal.email,
+        mapi_request_id = request_id,
         request_type = "Execute",
         request_rop_id = "0x15",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
@@ -10424,8 +10428,104 @@ fn log_outlook_hierarchy_table_query_rows_response(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         response_payload_bytes = response.len(),
         response_row_payload_preview = %response_row_payload_preview,
+        hierarchy_wire_row_summary = %hierarchy_wire_row_summary,
         "rca debug outlook hierarchy table query rows response"
     );
+}
+
+fn format_hierarchy_query_rows_wire_summary(
+    response: &[u8],
+    selected_columns: &[u32],
+    max_rows: usize,
+) -> String {
+    if selected_columns.is_empty() {
+        return String::new();
+    }
+    let row_count = response
+        .get(7..9)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(0) as usize;
+    if row_count == 0 {
+        return "total=0;decoded=0".to_string();
+    }
+
+    let mut cursor = Cursor::new(response.get(9..).unwrap_or_default());
+    let decode_count = row_count.min(max_rows);
+    let mut rows = Vec::new();
+    for row_index in 0..decode_count {
+        let mut values = HashMap::new();
+        let mut parse_error = String::new();
+        for column in selected_columns {
+            match parse_mapi_property_value(&mut cursor, *column) {
+                Ok(value) => {
+                    values.insert(*column, value);
+                }
+                Err(error) => {
+                    parse_error = format!("parse_error={error}");
+                    break;
+                }
+            }
+        }
+        rows.push(format!(
+            "index={row_index};id={};class={};name={};count={};type={};hidden={};subfolders={};{}",
+            format_hierarchy_debug_folder_id(values.get(&PID_TAG_FOLDER_ID)),
+            format_hierarchy_debug_string(values.get(&PID_TAG_CONTAINER_CLASS_W)),
+            format_hierarchy_debug_string(values.get(&PID_TAG_DISPLAY_NAME_W)),
+            format_hierarchy_debug_count(values.get(&PID_TAG_CONTENT_COUNT)),
+            format_hierarchy_debug_count(values.get(&PID_TAG_FOLDER_TYPE)),
+            format_hierarchy_debug_bool(values.get(&PID_TAG_ATTRIBUTE_HIDDEN)),
+            format_hierarchy_debug_bool(values.get(&PID_TAG_SUBFOLDERS)),
+            parse_error
+        ));
+        if !parse_error.is_empty() {
+            break;
+        }
+    }
+
+    format!(
+        "total={row_count};decoded={};truncated={};remaining_bytes={};{}",
+        rows.len(),
+        row_count > rows.len(),
+        cursor.remaining(),
+        rows.join("|")
+    )
+}
+
+fn format_hierarchy_debug_folder_id(value: Option<&MapiValue>) -> String {
+    match value {
+        Some(MapiValue::I64(value)) if *value >= 0 => format!("0x{:016x}", *value as u64),
+        Some(MapiValue::U64(value)) => format!("0x{value:016x}"),
+        Some(MapiValue::I32(value)) if *value >= 0 => format!("0x{:016x}", *value as u64),
+        Some(MapiValue::U32(value)) => format!("0x{:016x}", u64::from(*value)),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn format_hierarchy_debug_string(value: Option<&MapiValue>) -> String {
+    match value {
+        Some(MapiValue::String(value)) => format_debug_text_value(value),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn format_hierarchy_debug_count(value: Option<&MapiValue>) -> String {
+    match value {
+        Some(MapiValue::I32(value)) => value.to_string(),
+        Some(MapiValue::U32(value)) => value.to_string(),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn format_hierarchy_debug_bool(value: Option<&MapiValue>) -> String {
+    match value {
+        Some(MapiValue::Bool(value)) => value.to_string(),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
 }
 
 fn log_mapi_query_position_debug(
@@ -18026,6 +18126,7 @@ where
                 );
                 log_outlook_hierarchy_table_query_rows_response(
                     principal,
+                    request_id,
                     &request,
                     input_object(session, &handle_slots, &request),
                     &response,
@@ -29580,6 +29681,38 @@ mod tests {
 
         assert!(restricted.contains("total=0"));
         assert!(restricted.contains("returned=0"));
+    }
+
+    #[test]
+    fn hierarchy_query_rows_wire_summary_decodes_compact_folder_projection() {
+        fn append_utf16z(row: &mut Vec<u8>, value: &str) {
+            for unit in value.encode_utf16() {
+                row.extend_from_slice(&unit.to_le_bytes());
+            }
+            row.extend_from_slice(&0u16.to_le_bytes());
+        }
+
+        let columns = vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_CONTENT_COUNT,
+        ];
+        let mut response = vec![0x15, 0, 0, 0, 0, 0, 0, 1, 0];
+        response.extend_from_slice(&INBOX_FOLDER_ID.to_le_bytes());
+        append_utf16z(&mut response, "IPF.Note");
+        append_utf16z(&mut response, "Inbox");
+        response.extend_from_slice(&3u32.to_le_bytes());
+
+        let summary = format_hierarchy_query_rows_wire_summary(&response, &columns, 8);
+
+        assert!(summary.contains("total=1"), "{summary}");
+        assert!(summary.contains("decoded=1"), "{summary}");
+        assert!(
+            summary.contains("index=0;id=0x0000000000050001;class=IPF.Note;name=Inbox;count=3"),
+            "{summary}"
+        );
+        assert!(summary.contains("remaining_bytes=0"), "{summary}");
     }
 
     #[test]

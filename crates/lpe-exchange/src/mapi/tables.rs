@@ -1112,6 +1112,7 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
+    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
 
@@ -1187,6 +1188,7 @@ pub(in crate::mapi) fn mailbox_shadowed_by_active_outlook_special_folder(
             | "local failures"
             | "notes"
             | "quick contacts"
+            | "quick step settings"
             | "rss feeds"
             | "server failures"
             | "suggested contacts"
@@ -6035,7 +6037,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
     match folder_id {
         ROOT_FOLDER_ID => ("Root", 0, "", true),
         IPM_SUBTREE_FOLDER_ID => ("Top of Information Store", ROOT_FOLDER_ID, "IPF.Note", true),
-        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "IPF.Note", false),
+        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "", false),
         SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "", false),
         INBOX_FOLDER_ID => ("Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         OUTBOX_FOLDER_ID => ("Outbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
@@ -6124,7 +6126,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             false,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
-        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "IPF.Note", false),
+        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
         CONVERSATION_HISTORY_FOLDER_ID => (
             "Conversation History",
             IPM_SUBTREE_FOLDER_ID,
