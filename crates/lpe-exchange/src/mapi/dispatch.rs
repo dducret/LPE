@@ -10501,13 +10501,23 @@ fn format_hierarchy_query_rows_wire_summary(
 
 fn format_hierarchy_debug_folder_id(value: Option<&MapiValue>) -> String {
     match value {
-        Some(MapiValue::I64(value)) if *value >= 0 => format!("0x{:016x}", *value as u64),
-        Some(MapiValue::U64(value)) => format!("0x{value:016x}"),
+        Some(MapiValue::I64(value)) if *value >= 0 => {
+            format_hierarchy_debug_wire_folder_id(*value as u64)
+        }
+        Some(MapiValue::U64(value)) => format_hierarchy_debug_wire_folder_id(*value),
         Some(MapiValue::I32(value)) if *value >= 0 => format!("0x{:016x}", *value as u64),
         Some(MapiValue::U32(value)) => format!("0x{:016x}", u64::from(*value)),
         Some(value) => mapi_value_debug_shape(value),
         None => "missing".to_string(),
     }
+}
+
+fn format_hierarchy_debug_wire_folder_id(value: u64) -> String {
+    let bytes = value.to_le_bytes();
+    crate::mapi::identity::object_id_from_wire_id(&bytes)
+        .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(&bytes))
+        .map(|folder_id| format!("0x{folder_id:016x}"))
+        .unwrap_or_else(|| format!("0x{value:016x}"))
 }
 
 fn format_hierarchy_debug_string(value: Option<&MapiValue>) -> String {
@@ -29710,7 +29720,9 @@ mod tests {
         ];
         let mut response = vec![0x15, 0, 0, 0, 0, 0, 0, 1, 0];
         response.push(0);
-        response.extend_from_slice(&INBOX_FOLDER_ID.to_le_bytes());
+        response.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        );
         append_utf16z(&mut response, "IPF.Note");
         append_utf16z(&mut response, "Inbox");
         response.extend_from_slice(&3u32.to_le_bytes());
