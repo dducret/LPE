@@ -4464,6 +4464,20 @@ fn post_hierarchy_getprops_contract(
     )
 }
 
+fn should_log_outlook_surface_getprops_info(object: Option<&MapiObject>) -> bool {
+    matches!(
+        object.and_then(MapiObject::folder_id),
+        Some(
+            INBOX_FOLDER_ID
+                | CONTACTS_FOLDER_ID
+                | CALENDAR_FOLDER_ID
+                | JOURNAL_FOLDER_ID
+                | NOTES_FOLDER_ID
+                | TASKS_FOLDER_ID
+        )
+    )
+}
+
 fn post_hierarchy_setprops_contract(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -15278,6 +15292,23 @@ where
                 );
                 let post_hierarchy_contract =
                     post_hierarchy_getprops_contract(&request, object, &property_response);
+                if should_log_outlook_surface_getprops_info(object) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        mapi_request_id = request_id,
+                        request_rop_id = "0x07",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = mapi_object_debug_kind(object),
+                        folder_id = %mapi_object_debug_folder_id(object),
+                        getprops_contract = %post_hierarchy_contract,
+                        "rca debug mapi outlook surface getprops contract"
+                    );
+                }
                 session.record_post_hierarchy_getprops_contract(post_hierarchy_contract.clone());
                 session.record_post_hierarchy_request_contract(format!(
                     "{post_hierarchy_contract}->ok"
