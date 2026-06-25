@@ -12406,6 +12406,17 @@ mod tests {
                 associated_config_property_value(&message, 0x685D_0003),
                 Some(MapiValue::U32(value)) if value != 0
             ));
+            assert_eq!(
+                associated_config_property_value(&message, PID_NAME_OSC_CONTACT_SOURCES_TAG),
+                Some(MapiValue::MultiString(Vec::new()))
+            );
+            assert_eq!(
+                associated_config_property_value(
+                    &message,
+                    (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x0003
+                ),
+                Some(MapiValue::U32(0))
+            );
 
             let row = serialize_associated_config_row_with_mailbox_guid(
                 &message,
@@ -14999,7 +15010,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B if is_outlook_contacts_helper_config(message) => {
                 Some(MapiValue::Binary(Vec::new()))
             }
-            tag if message.message_class == "IPM.Microsoft.ContactLink.TimeStamp" => {
+            tag if is_outlook_contacts_helper_config(message) => {
                 outlook_contact_link_empty_property_value(tag)
             }
             PID_TAG_VIEW_DESCRIPTOR_FLAGS
