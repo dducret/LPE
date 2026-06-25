@@ -9426,6 +9426,7 @@ fn log_calendar_hierarchy_query_rows_contract(
 
 fn log_outlook_contents_table_open(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     folder_id: u64,
     table_flags: u8,
@@ -9452,6 +9453,7 @@ fn log_outlook_contents_table_open(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = %request_id,
         request_rop_id = "0x05",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
         request_output_handle_index = request.output_handle_index.unwrap_or(0),
@@ -9478,6 +9480,7 @@ fn log_outlook_contents_table_open(
 
 fn log_outlook_contents_table_set_columns(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     folder_id: u64,
     associated: bool,
@@ -9502,6 +9505,7 @@ fn log_outlook_contents_table_set_columns(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = %request_id,
         request_rop_id = "0x12",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
         folder_id = %format!("0x{folder_id:016x}"),
@@ -13715,6 +13719,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = %request_id,
                             request_rop_id = "0x01",
                             input_handle_index = request.input_handle_index().unwrap_or(0),
                             input_handle_value = %format_optional_debug_handle(released_handle),
@@ -13728,6 +13733,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = %request_id,
                             request_rop_id = "0x01",
                             input_handle_index = request.input_handle_index().unwrap_or(0),
                             input_handle_value = %format_optional_debug_handle(released_handle),
@@ -14905,6 +14911,7 @@ where
                 };
                 log_outlook_contents_table_open(
                     principal,
+                    request_id,
                     &request,
                     contents_folder_id,
                     table_flags,
@@ -17667,6 +17674,7 @@ where
                         }
                         log_outlook_contents_table_set_columns(
                             principal,
+                            request_id,
                             &request,
                             *folder_id,
                             *associated,
@@ -17795,6 +17803,7 @@ where
                         endpoint = "emsmdb",
                         mailbox = %principal.email,
                         request_type = "Execute",
+                        mapi_request_id = %request_id,
                         request_rop_id = "0x12",
                         input_handle_index = request.input_handle_index().unwrap_or(0),
                         input_handle_value = %format_optional_debug_handle(handle),
@@ -18188,6 +18197,7 @@ where
                         endpoint = "emsmdb",
                         mailbox = %principal.email,
                         request_type = "Execute",
+                        mapi_request_id = %request_id,
                         request_rop_id = "0x15",
                         input_handle_index = request.input_handle_index().unwrap_or(0),
                         input_handle_value = %format_optional_debug_handle(handle),
