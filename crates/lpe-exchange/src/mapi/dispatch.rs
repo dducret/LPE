@@ -10454,6 +10454,13 @@ fn format_hierarchy_query_rows_wire_summary(
     let decode_count = row_count.min(max_rows);
     let mut rows = Vec::new();
     for row_index in 0..decode_count {
+        let row_status = match cursor.read_u8() {
+            Ok(status) => status,
+            Err(error) => {
+                rows.push(format!("index={row_index};row_status=parse_error={error}"));
+                break;
+            }
+        };
         let mut values = HashMap::new();
         let mut parse_error = String::new();
         for column in selected_columns {
@@ -10468,7 +10475,7 @@ fn format_hierarchy_query_rows_wire_summary(
             }
         }
         rows.push(format!(
-            "index={row_index};id={};class={};name={};count={};type={};hidden={};subfolders={};{}",
+            "index={row_index};row_status=0x{row_status:02x};id={};class={};name={};count={};type={};hidden={};subfolders={};{}",
             format_hierarchy_debug_folder_id(values.get(&PID_TAG_FOLDER_ID)),
             format_hierarchy_debug_string(values.get(&PID_TAG_CONTAINER_CLASS_W)),
             format_hierarchy_debug_string(values.get(&PID_TAG_DISPLAY_NAME_W)),
@@ -12640,6 +12647,7 @@ fn log_calendar_identity_chain(
 
 fn log_special_folder_contract(
     principal: &AccountPrincipal,
+    request_id: &str,
     folder_id: u64,
     mailbox_folder_found: bool,
     collaboration_folder_found: bool,
@@ -12672,6 +12680,7 @@ fn log_special_folder_contract(
         endpoint = "emsmdb",
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = request_id,
         request_rop_id = "0x02",
         folder_id = %format!("0x{folder_id:016x}"),
         folder_role = role_for_folder_id(folder_id).unwrap_or(""),
@@ -13812,7 +13821,7 @@ where
                 } else {
                     "not_found"
                 };
-                tracing::debug!(
+                tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
@@ -13872,6 +13881,7 @@ where
                 );
                 log_special_folder_contract(
                     principal,
+                    request_id,
                     folder_id,
                     mailbox_folder_found,
                     collaboration_folder_found,
@@ -29699,6 +29709,7 @@ mod tests {
             PID_TAG_CONTENT_COUNT,
         ];
         let mut response = vec![0x15, 0, 0, 0, 0, 0, 0, 1, 0];
+        response.push(0);
         response.extend_from_slice(&INBOX_FOLDER_ID.to_le_bytes());
         append_utf16z(&mut response, "IPF.Note");
         append_utf16z(&mut response, "Inbox");
@@ -29709,7 +29720,9 @@ mod tests {
         assert!(summary.contains("total=1"), "{summary}");
         assert!(summary.contains("decoded=1"), "{summary}");
         assert!(
-            summary.contains("index=0;id=0x0000000000050001;class=IPF.Note;name=Inbox;count=3"),
+            summary.contains(
+                "index=0;row_status=0x00;id=0x0000000000050001;class=IPF.Note;name=Inbox;count=3"
+            ),
             "{summary}"
         );
         assert!(summary.contains("remaining_bytes=0"), "{summary}");
