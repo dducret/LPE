@@ -30431,7 +30431,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -30767,7 +30767,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -30804,7 +30804,7 @@ mod tests {
         assert!(summary.contains(&format!("0x67480014={COMMON_VIEWS_FOLDER_ID}")));
         assert!(summary.contains(&format!("0x674d0014={shortcut_store_id}")));
         assert!(summary.contains("0x674e0003=0"));
-        assert!(summary.contains("0x0037001f=Inbox"));
+        assert!(summary.contains("0x0037001f=Pinned Inbox"));
         assert!(summary.contains("0x684c0102=binary:"));
         assert!(summary.contains("0x68910102=binary:"));
         assert!(summary.contains("0x80100102=binary:"));
@@ -30866,7 +30866,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -30880,7 +30880,7 @@ mod tests {
 
         let summary = format_common_views_wlink_target_decoding(account_id, &snapshot);
 
-        assert!(summary.contains("subject=Inbox"));
+        assert!(summary.contains("subject=Pinned Inbox"));
         assert!(summary.contains(&format!("target_folder=0x{INBOX_FOLDER_ID:016x}")));
         assert!(summary.contains(&format!("entry_id_decoded=0x{INBOX_FOLDER_ID:016x}")));
         assert!(summary.contains("entry_id_matches_inbox=true"));
@@ -30926,7 +30926,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,

@@ -9866,7 +9866,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -10422,7 +10422,7 @@ mod tests {
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -10473,7 +10473,7 @@ mod tests {
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
         assert_eq!(response[7], 1);
-        assert_response_contains_utf16(&response, "Inbox");
+        assert_response_contains_utf16(&response, "Pinned Inbox");
     }
 
     #[test]

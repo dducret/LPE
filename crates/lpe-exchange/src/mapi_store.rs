@@ -384,6 +384,22 @@ pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u6
     )
 }
 
+fn is_outlook_common_views_default_mail_favorite(shortcut: &MapiNavigationShortcutMessage) -> bool {
+    if shortcut.shortcut_type != 0
+        || shortcut.section != 1
+        || shortcut.group_name != OUTLOOK_MAIL_FAVORITES_GROUP_NAME
+    {
+        return false;
+    }
+
+    matches!(
+        (shortcut.subject.as_str(), shortcut.target_folder_id),
+        ("Inbox", Some(crate::mapi::identity::INBOX_FOLDER_ID))
+            | ("Sent", Some(crate::mapi::identity::SENT_FOLDER_ID))
+            | ("Trash", Some(crate::mapi::identity::TRASH_FOLDER_ID))
+    )
+}
+
 pub(crate) fn is_outlook_default_conversation_action_id(item_id: u64) -> bool {
     item_id == OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID
 }
@@ -3217,6 +3233,9 @@ fn common_views_table_projects_navigation_shortcut(
     if shortcut.shortcut_type == 4 {
         return true;
     }
+    if is_outlook_common_views_default_mail_favorite(shortcut) {
+        return false;
+    }
     matches!(
         shortcut.target_folder_id,
         Some(crate::mapi::identity::INBOX_FOLDER_ID)
@@ -4816,7 +4835,7 @@ mod tests {
             MapiNavigationShortcutRecord {
                 id: inbox_first_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -4829,7 +4848,7 @@ mod tests {
             MapiNavigationShortcutRecord {
                 id: inbox_duplicate_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
@@ -4869,7 +4888,7 @@ mod tests {
                 .filter(|message| matches!(
                     message,
                     MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                        if shortcut.subject == "Inbox"
+                        if shortcut.subject == "Pinned Inbox"
                             && shortcut.target_folder_id
                                 == Some(crate::mapi::identity::INBOX_FOLDER_ID)
                 ))
@@ -4879,7 +4898,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_materializes_mail_group_header_for_persisted_favorite_links() {
+    fn common_views_materializes_mail_group_header_for_custom_persisted_favorite_links() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let inbox_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000020);
         crate::mapi::identity::remember_mapi_identity(
@@ -4893,7 +4912,7 @@ mod tests {
             MapiNavigationShortcutRecord {
                 id: inbox_id,
                 account_id,
-                subject: "Inbox".to_string(),
+                subject: "Pinned Inbox".to_string(),
                 target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0x0010_8000,
@@ -4938,6 +4957,70 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn common_views_suppresses_persisted_default_mail_favorites_from_startup_table() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let inbox_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000030);
+        let sent_id = Uuid::from_u128(0x6d617069_776c_5365_8000_000000000030);
+        let trash_id = Uuid::from_u128(0x6d617069_776c_5472_8000_000000000030);
+        for (offset, id) in [inbox_id, sent_id, trash_id].into_iter().enumerate() {
+            crate::mapi::identity::remember_mapi_identity(
+                id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 92 + offset as u64,
+                ),
+            );
+        }
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            MapiNavigationShortcutRecord {
+                id: inbox_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0x0010_8000,
+                save_stamp: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: None,
+                group_name: "Mail".to_string(),
+            },
+            MapiNavigationShortcutRecord {
+                id: sent_id,
+                account_id,
+                subject: "Sent".to_string(),
+                target_folder_id: Some(crate::mapi::identity::SENT_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0x0010_8000,
+                save_stamp: 0,
+                section: 1,
+                ordinal: 191,
+                group_header_id: None,
+                group_name: "Mail".to_string(),
+            },
+            MapiNavigationShortcutRecord {
+                id: trash_id,
+                account_id,
+                subject: "Trash".to_string(),
+                target_folder_id: Some(crate::mapi::identity::TRASH_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0x0010_8000,
+                save_stamp: 0,
+                section: 1,
+                ordinal: 223,
+                group_header_id: None,
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        assert_eq!(snapshot.navigation_shortcut_messages().len(), 3);
+        let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+        assert_eq!(table_messages.len(), 2);
+        assert!(table_messages
+            .iter()
+            .all(|message| matches!(message, MapiCommonViewsMessage::NamedView(_))));
     }
 
     #[test]
