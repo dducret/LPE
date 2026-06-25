@@ -13917,7 +13917,7 @@ where
                     store, principal, session, folder_id, mailboxes, snapshot,
                 )
                 .await;
-                tracing::debug!(
+                tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
                     endpoint = "emsmdb",
