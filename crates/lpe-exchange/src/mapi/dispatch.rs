@@ -10247,6 +10247,7 @@ fn log_outlook_contents_table_query_rows(
 
 fn log_outlook_contents_table_query_rows_response(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     response: &[u8],
@@ -10308,12 +10309,13 @@ fn log_outlook_contents_table_query_rows_response(
         &selected_columns,
         snapshot,
     );
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = "emsmdb",
         account_id = %principal.account_id,
         mailbox = %principal.email,
+        mapi_request_id = %request_id,
         request_type = "Execute",
         request_rop_id = "0x15",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
@@ -18137,6 +18139,7 @@ where
                 );
                 log_outlook_contents_table_query_rows_response(
                     principal,
+                    request_id,
                     &request,
                     input_object(session, &handle_slots, &request),
                     &response,
