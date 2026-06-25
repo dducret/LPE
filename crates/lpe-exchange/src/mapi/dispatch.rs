@@ -28369,7 +28369,7 @@ mod tests {
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x12130003,0x0000101e"
+            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x0e170003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
     }
@@ -28453,7 +28453,7 @@ mod tests {
         assert!(contract.contains("phase=setcolumns"));
         assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
         assert!(contract
-            .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
+            .contains("descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x0e170003,0x0e1b000b"));
         assert!(!contract.contains("descriptor_columns=0x00040001"));
         assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
         assert!(contract.ends_with("selected_missing_descriptor_columns="));
@@ -28480,11 +28480,11 @@ mod tests {
                 PID_TAG_IMPORTANCE,
                 PID_TAG_HAS_ATTACHMENTS,
                 PID_TAG_MESSAGE_STATUS,
-                0x8514_000B,
+                PID_LID_REMINDER_SET_TAG,
                 0x8017_000B,
                 0x801F_001F,
                 0x0041_0102,
-                0x1213_0003,
+                PID_TAG_MESSAGE_SIZE,
                 PID_TAG_MESSAGE_DELIVERY_TIME,
             ],
             &snapshot,
