@@ -1550,12 +1550,12 @@ fn flagged_property_error_code(
 ) -> u32 {
     if property_is_unsupported_for_object(object, principal, tag) {
         0x8004_0102
-    } else if property_tag_debug_name(tag) == "unknown" {
-        0x8004_0102
     } else if fallback_default_specific_property(
         object, principal, mailboxes, emails, snapshot, tag,
     ) {
         ROP_ERROR_NOT_FOUND
+    } else if property_tag_debug_name(tag) == "unknown" {
+        0x8004_0102
     } else {
         0x8004_0102
     }
@@ -2810,9 +2810,16 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_SERVER_ACCOUNT_ICON
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
-        Some(MapiObject::AssociatedConfig { .. }) => {
-            MapiPropertyTag::new(storage_tag).property_type().is_some()
-        }
+        Some(MapiObject::AssociatedConfig { .. }) => matches!(
+            storage_tag,
+            PID_TAG_INSTANCE_NUM
+                | PID_TAG_MESSAGE_FLAGS
+                | PID_TAG_MESSAGE_STATUS
+                | PID_TAG_ACCESS_LEVEL
+                | PID_TAG_SENT_MAIL_SVR_EID
+                | PID_TAG_ASSOCIATED
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
@@ -10056,11 +10063,14 @@ mod tests {
             Some(&object),
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ));
-        assert!(modeled_zero_or_default_property(
+        assert!(!modeled_zero_or_default_property(
             Some(&object),
             PID_TAG_ORIGINAL_MESSAGE_CLASS_W
         ));
-        assert!(modeled_zero_or_default_property(Some(&object), 0x801D_0003));
+        assert!(!modeled_zero_or_default_property(
+            Some(&object),
+            0x801D_0003
+        ));
         assert!(!modeled_zero_or_default_property(
             Some(&object),
             0x801D_0000
@@ -11261,7 +11271,7 @@ mod tests {
             config_id: crate::mapi::identity::mapi_store_id(0x4322),
             saved_message: None,
         };
-        assert!(!fallback_default_specific_property(
+        assert!(fallback_default_specific_property(
             Some(&config),
             &principal,
             &[],
@@ -11269,6 +11279,15 @@ mod tests {
             &MapiMailStoreSnapshot::empty(),
             0x801D_0003,
         ));
+        let missing_errors = format_property_errors_for_debug(
+            Some(&config),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            &[0x801D_0003],
+        );
+        assert!(missing_errors.contains("0x801d0003:unknown:0x8004010f"));
 
         let unsupported_errors = format_property_errors_for_debug(
             Some(&config),
