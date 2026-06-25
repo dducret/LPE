@@ -934,7 +934,7 @@ fn hierarchy_rows<'a>(
     sort_orders: &[MapiSortOrder],
     mailbox_guid: Uuid,
 ) -> Vec<HierarchyRow<'a>> {
-    hierarchy_rows_excluding_deleted(
+    hierarchy_table_rows_excluding_deleted(
         folder_id,
         mailboxes,
         snapshot,
@@ -1049,6 +1049,30 @@ fn hierarchy_rows_excluding_deleted<'a>(
                 .collect::<Vec<_>>();
     }
     sort_hierarchy_rows(&mut rows, sort_orders);
+    rows
+}
+
+fn hierarchy_table_rows_excluding_deleted<'a>(
+    folder_id: u64,
+    mailboxes: &'a [JmapMailbox],
+    snapshot: &'a MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
+    deleted_advertised_special_folders: &HashSet<u64>,
+) -> Vec<HierarchyRow<'a>> {
+    let mut rows = hierarchy_rows_excluding_deleted(
+        folder_id,
+        mailboxes,
+        snapshot,
+        restriction,
+        sort_orders,
+        mailbox_guid,
+        deleted_advertised_special_folders,
+    );
+    if folder_id != IPM_SUBTREE_FOLDER_ID {
+        rows.retain(|row| !matches!(row, HierarchyRow::Collaboration(_)));
+    }
     rows
 }
 
@@ -1751,7 +1775,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            let rows = hierarchy_rows_excluding_deleted(
+            let rows = hierarchy_table_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
@@ -2421,7 +2445,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
         ) =>
         {
-            let rows = hierarchy_rows_excluding_deleted(
+            let rows = hierarchy_table_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
@@ -4421,7 +4445,7 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else {
                 columns.clone()
             };
-            let rows = hierarchy_rows_excluding_deleted(
+            let rows = hierarchy_table_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
@@ -5231,7 +5255,7 @@ pub(in crate::mapi) fn table_position_and_count(
             deleted_advertised_special_folders,
             ..
         }) if is_queryable_hierarchy_folder(*folder_id) => {
-            let total = hierarchy_rows_excluding_deleted(
+            let total = hierarchy_table_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
@@ -5553,7 +5577,7 @@ pub(in crate::mapi) fn table_row_keys(
             restriction,
             deleted_advertised_special_folders,
             ..
-        } if is_queryable_hierarchy_folder(*folder_id) => hierarchy_rows_excluding_deleted(
+        } if is_queryable_hierarchy_folder(*folder_id) => hierarchy_table_rows_excluding_deleted(
             *folder_id,
             mailboxes,
             snapshot,
@@ -9089,6 +9113,71 @@ mod tests {
         assert!(serialized
             .windows(class.len())
             .any(|window| window == class));
+    }
+
+    #[test]
+    fn custom_collaboration_folders_are_only_ipm_subtree_children() {
+        let folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_1130);
+        let collection = CollaborationCollection {
+            id: "project-calendar".to_string(),
+            kind: "calendar".to_string(),
+            owner_account_id: Uuid::nil(),
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            display_name: "Project Calendar".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        };
+        crate::mapi::identity::remember_mapi_identity(
+            crate::mapi_store::collaboration_folder_identity_canonical_id(
+                crate::mapi_store::MapiCollaborationFolderKind::Calendar,
+                &collection,
+            )
+            .unwrap(),
+            folder_id,
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mailboxes = snapshot.mailboxes();
+
+        let ipm_rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        assert!(ipm_rows
+            .iter()
+            .any(|row| hierarchy_row_id(row) == folder_id));
+
+        let root_rows = hierarchy_rows(
+            ROOT_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        assert!(!root_rows
+            .iter()
+            .any(|row| hierarchy_row_id(row) == folder_id));
     }
 
     #[test]
