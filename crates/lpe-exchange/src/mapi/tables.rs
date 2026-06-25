@@ -11541,7 +11541,7 @@ mod tests {
         let mut table = MapiObject::ContentsTable {
             folder_id: CALENDAR_FOLDER_ID,
             associated: true,
-            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns: vec![PID_TAG_MESSAGE_CLASS_W, PID_TAG_SUBJECT_W],
             columns_set: true,
             sort_orders: vec![MapiSortOrder {
                 property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -11568,6 +11568,8 @@ mod tests {
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
         assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert_response_contains_utf16(&response, "Calendar");
+        assert!(utf16_position(&response, "Compact").is_none());
     }
 
     #[test]
