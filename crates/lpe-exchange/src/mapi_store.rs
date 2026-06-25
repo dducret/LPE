@@ -370,7 +370,7 @@ pub(crate) fn outlook_default_folder_named_view_name(folder_id: u64) -> &'static
         }
         crate::mapi::identity::NOTES_FOLDER_ID => "Notes",
         crate::mapi::identity::JOURNAL_FOLDER_ID => "Journal",
-        _ => "Compact",
+        _ => "Messages",
     }
 }
 
@@ -4724,7 +4724,7 @@ mod tests {
         let snapshot = MapiMailStoreSnapshot::empty();
 
         for (folder_id, expected_name) in [
-            (crate::mapi::identity::INBOX_FOLDER_ID, "Compact"),
+            (crate::mapi::identity::INBOX_FOLDER_ID, "Messages"),
             (crate::mapi::identity::CALENDAR_FOLDER_ID, "Calendar"),
             (crate::mapi::identity::TASKS_FOLDER_ID, "Tasks"),
             (crate::mapi::identity::NOTES_FOLDER_ID, "Notes"),
