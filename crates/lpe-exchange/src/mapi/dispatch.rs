@@ -8579,7 +8579,7 @@ fn response_rop_fixed_frame_end(
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(8).saturating_add(byte_count))
         }),
-        (0x29, Some(0)) => Some(start.saturating_add(6)),
+        (0x29, Some(0)) => Some(start.saturating_add(7)),
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(10).saturating_add(byte_count))
@@ -31861,6 +31861,7 @@ mod tests {
         responses.push(0);
         responses.extend_from_slice(&[0x29, 0x03]);
         responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
         responses.extend_from_slice(&[0x0a, 0x04]);
         responses.extend_from_slice(&0u32.to_le_bytes());
         responses.extend_from_slice(&0u16.to_le_bytes());
@@ -31896,19 +31897,19 @@ mod tests {
             .contains("0x06@0..7:len=7:out=2:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x29@7..13:len=6:out=3:rv=0x00000000"));
+            .contains("0x29@7..14:len=7:out=3:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x0a@13..21:len=8:out=4:rv=0x00000000"));
+            .contains("0x0a@14..22:len=8:out=4:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x07@21..32:len=11:out=4:rv=0x00000000"));
+            .contains("0x07@22..33:len=11:out=4:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x0a@32..50:len=18:out=4:rv=0x00000000"));
+            .contains("0x0a@33..51:len=18:out=4:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x0c@50..65:len=15:out=5:rv=0x00000000"));
+            .contains("0x0c@51..66:len=15:out=5:rv=0x00000000"));
         assert!(response_summary.parse_error.is_empty());
     }
 
