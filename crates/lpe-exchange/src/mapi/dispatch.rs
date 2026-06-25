@@ -30962,7 +30962,7 @@ mod tests {
 
         let summary = format_common_views_wlink_contract_summary(&columns, &snapshot);
 
-        assert!(summary.contains("link_rows=3"));
+        assert!(summary.contains("link_rows=1"));
         assert!(summary.contains("header_rows=1"));
         assert!(summary.contains("not_selected_required_link_columns="));
         assert!(summary.contains("expected_link_default_columns=0x68530003"));

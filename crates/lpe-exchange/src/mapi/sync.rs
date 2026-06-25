@@ -2699,9 +2699,24 @@ mod tests {
         .expect("default common views named view manifest");
 
         assert_eq!(manifest.0, COMMON_VIEWS_FOLDER_ID);
-        let manifest = String::from_utf8_lossy(&manifest.1);
-        assert!(manifest.contains("IPM.Microsoft.FolderDesign.NamedView"));
-        assert!(manifest.contains("Compact"));
+        let utf16z = |value: &str| {
+            let mut bytes = value
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            bytes.extend_from_slice(&[0, 0]);
+            bytes
+        };
+        let named_view_class = utf16z("IPM.Microsoft.FolderDesign.NamedView");
+        let compact_name = utf16z("Compact");
+        assert!(manifest
+            .1
+            .windows(named_view_class.len())
+            .any(|window| window == named_view_class.as_slice()));
+        assert!(manifest
+            .1
+            .windows(compact_name.len())
+            .any(|window| window == compact_name.as_slice()));
     }
 
     #[test]

@@ -2036,16 +2036,6 @@ impl MapiMailStoreSnapshot {
             .filter(common_views_table_projects_navigation_shortcut)
             .collect::<Vec<_>>();
         materialize_default_mail_group_header(&mut table_shortcuts);
-        for default_shortcut in outlook_common_views_default_navigation_shortcuts() {
-            if !table_shortcuts.iter().any(|shortcut| {
-                shortcut.target_folder_id == default_shortcut.target_folder_id
-                    && shortcut.shortcut_type == default_shortcut.shortcut_type
-                    && shortcut.section == default_shortcut.section
-                    && shortcut.group_name == default_shortcut.group_name
-            }) {
-                table_shortcuts.push(default_shortcut);
-            }
-        }
         let messages = table_shortcuts
             .into_iter()
             .map(MapiCommonViewsMessage::NavigationShortcut)
@@ -4615,69 +4605,16 @@ mod tests {
     }
 
     #[test]
-    fn common_views_projects_default_named_views_for_table_only() {
+    fn common_views_projects_default_named_views_without_synthetic_shortcuts_for_table_only() {
         let snapshot = MapiMailStoreSnapshot::empty();
         assert!(snapshot.navigation_shortcut_messages().is_empty());
         assert_eq!(snapshot.common_views_messages().count(), 0);
         let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-        assert_eq!(messages.len(), 6);
-        let default_header = messages
+        assert_eq!(messages.len(), 2);
+        assert!(messages
             .iter()
-            .find_map(|message| match message {
-                MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
-                        && shortcut.shortcut_type == 4 =>
-                {
-                    Some(shortcut)
-                }
-                _ => None,
-            })
-            .expect("default mail navigation group header");
-        assert_eq!(default_header.target_folder_id, None);
-        assert_eq!(default_header.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-        assert_eq!(
-            default_header.group_header_id,
-            Some(default_wlink_group_uuid())
-        );
-        let default_shortcut = messages
-            .iter()
-            .find_map(|message| match message {
-                MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID =>
-                {
-                    Some(shortcut)
-                }
-                _ => None,
-            })
-            .expect("default inbox navigation shortcut");
-        assert_eq!(default_shortcut.subject, "Inbox");
-        assert_eq!(
-            default_shortcut.target_folder_id,
-            Some(crate::mapi::identity::INBOX_FOLDER_ID)
-        );
-        assert_eq!(
-            default_shortcut.group_name,
-            OUTLOOK_MAIL_FAVORITES_GROUP_NAME
-        );
-        for (subject, target_folder_id) in [
-            ("Sent", crate::mapi::identity::SENT_FOLDER_ID),
-            ("Trash", crate::mapi::identity::TRASH_FOLDER_ID),
-        ] {
-            let shortcut = messages
-                .iter()
-                .find_map(|message| match message {
-                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                        if shortcut.subject == subject =>
-                    {
-                        Some(shortcut)
-                    }
-                    _ => None,
-                })
-                .expect("default mail navigation shortcut");
-            assert_eq!(shortcut.target_folder_id, Some(target_folder_id));
-            assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-        }
+            .all(|message| !matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))));
         let named_views = messages
             .iter()
             .filter_map(|message| match message {
@@ -4838,7 +4775,7 @@ mod tests {
         assert_eq!(shortcut.subject, "Alpha");
         assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
         assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-        assert_eq!(messages.len(), 6);
+        assert_eq!(messages.len(), 4);
         assert_eq!(
             messages
                 .iter()
