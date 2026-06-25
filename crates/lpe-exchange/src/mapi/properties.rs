@@ -3205,11 +3205,11 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
             columns: vec![
                 view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
                 view_named_id_column(
-                    PID_LID_REMINDER_SET_TAG,
+                    PID_LID_OUTLOOK_COMMON_8514_TAG,
                     0x12,
                     0x0000_3F40,
                     PSETID_COMMON_GUID,
-                    PID_LID_REMINDER_SET,
+                    PID_LID_OUTLOOK_COMMON_8514,
                     "Reminder",
                 ),
                 view_column(
@@ -3218,7 +3218,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                     0x0000_270A,
                     "Icon",
                 ),
-                view_column(PID_TAG_FLAG_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
+                view_column(PID_TAG_MESSAGE_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
                 view_column(PID_TAG_HAS_ATTACHMENTS, 0x12, 0x0000_2F4A, "Attachment"),
                 view_column(
                     string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
@@ -3233,7 +3233,12 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                     "Subject",
                 ),
                 view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
-                view_column(PID_TAG_MESSAGE_SIZE, 0x0C, 0x0000_2740, "Size"),
+                view_column(
+                    OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+                    0x0C,
+                    0x0000_2740,
+                    "Size",
+                ),
                 view_named_string_column(
                     multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
                     0x12,
@@ -14188,7 +14193,7 @@ mod tests {
     }
 
     #[test]
-    fn microsoft_oxocfg_view_definition_example_uses_documented_mail_columns() {
+    fn messages_view_definition_matches_outlook_visible_inbox_projection() {
         let definition = outlook_mail_view_definition("Messages");
         let descriptor = view_descriptor_binary(&definition);
 
@@ -14205,14 +14210,14 @@ mod tests {
             descriptor_column_property_tags(&descriptor),
             vec![
                 PID_TAG_IMPORTANCE,
-                PID_LID_REMINDER_SET_TAG,
+                PID_LID_OUTLOOK_COMMON_8514_TAG,
                 string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                PID_TAG_FLAG_STATUS,
+                PID_TAG_MESSAGE_STATUS,
                 PID_TAG_HAS_ATTACHMENTS,
                 string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
                 string8_property_tag(PID_TAG_SUBJECT_W),
                 PID_TAG_MESSAGE_DELIVERY_TIME,
-                PID_TAG_MESSAGE_SIZE,
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
                 0x0000_101E,
             ]
         );
@@ -14241,11 +14246,11 @@ mod tests {
                 },
                 TestViewColumnPacket {
                     property_type: 0x000B,
-                    property_id: 0x8503,
+                    property_id: 0x8514,
                     width: 0x12,
                     flags: 0x0000_3F40,
                     kind: 0,
-                    id: 0x8503,
+                    id: 0x8514,
                     guid: Some(PSETID_COMMON_GUID),
                     name: None,
                 },
@@ -14261,11 +14266,11 @@ mod tests {
                 },
                 TestViewColumnPacket {
                     property_type: 0x0003,
-                    property_id: 0x1090,
+                    property_id: 0x0E17,
                     width: 0x12,
                     flags: 0x0000_2F4A,
                     kind: 0,
-                    id: 0x1090,
+                    id: 0x0E17,
                     guid: None,
                     name: None,
                 },
@@ -14311,11 +14316,11 @@ mod tests {
                 },
                 TestViewColumnPacket {
                     property_type: 0x0003,
-                    property_id: 0x0E08,
+                    property_id: 0x1213,
                     width: 0x0C,
                     flags: 0x0000_2740,
                     kind: 0,
-                    id: 0x0E08,
+                    id: 0x1213,
                     guid: None,
                     name: None,
                 },
