@@ -12319,6 +12319,7 @@ fn debug_associated_config_duplicated_by_default_named_view(
     folder_id == INBOX_FOLDER_ID
         && message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
         && message.subject == "Compact"
+        && associated_config_visible_in_table(folder_id, None, message)
         && debug_default_folder_associated_named_view(snapshot, folder_id).is_some()
 }
 
