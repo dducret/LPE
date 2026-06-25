@@ -9538,7 +9538,7 @@ async fn mapi_over_http_find_row_returns_matching_contents_row() {
         .next()
         .unwrap()
         .to_string();
-    let restriction = mapi_content_restriction(0x0037_001F, "needle");
+    let restriction = mapi_content_restriction(0x0037_001F, "Needle target");
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder

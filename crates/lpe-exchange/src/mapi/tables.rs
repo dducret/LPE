@@ -4307,11 +4307,7 @@ pub(in crate::mapi) fn rop_free_bookmark_response(
 }
 
 fn rop_find_row_no_match_response(request: &RopRequest) -> Vec<u8> {
-    let mut response = vec![0x4F, request.response_handle_index()];
-    write_u32(&mut response, 0);
-    response.push(0);
-    response.push(0);
-    response
+    rop_error_response(0x4F, request.response_handle_index(), 0x8004_010F)
 }
 
 fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> bool {
@@ -9915,9 +9911,11 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
         assert_eq!(table_position(&table), Some(0));
     }
 
@@ -10803,9 +10801,11 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
         assert_eq!(table_position(&table), Some(0));
     }
 
@@ -11179,9 +11179,11 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
     }
 
     #[test]
@@ -12630,9 +12632,11 @@ mod tests {
         let response = inbox_associated_find_row_response_for_message_class(message_class);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_eq!(response[6], 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
     }
 
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
@@ -12725,8 +12729,11 @@ mod tests {
             contact_folder_associated_find_row_response(folder_id, message_class, snapshot);
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
-        assert_eq!(response[7], 0);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
     }
 
     fn contact_folder_associated_find_row_response(
