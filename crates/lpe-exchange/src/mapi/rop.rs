@@ -1537,7 +1537,33 @@ fn fallback_default_specific_property(
     let encoded = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
     let mut default_value = Vec::new();
     write_property_default(&mut default_value, tag);
-    encoded == default_value && !modeled_zero_or_default_property(object, tag)
+    encoded == default_value
+        && !modeled_zero_or_default_property(object, tag)
+        && !associated_config_modeled_property(object, principal, snapshot, tag)
+}
+
+fn associated_config_modeled_property(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    snapshot: &MapiMailStoreSnapshot,
+    tag: u32,
+) -> bool {
+    let Some(MapiObject::AssociatedConfig {
+        folder_id,
+        config_id,
+        saved_message,
+    }) = object
+    else {
+        return false;
+    };
+    snapshot
+        .associated_config_message_for_id(*config_id)
+        .or_else(|| saved_message.clone())
+        .filter(|message| message.folder_id == *folder_id)
+        .and_then(|message| {
+            associated_config_property_value_with_mailbox_guid(&message, principal.account_id, tag)
+        })
+        .is_some()
 }
 
 fn flagged_property_error_code(
@@ -11045,6 +11071,108 @@ mod tests {
         assert!(response
             .windows(expected_change_key.len())
             .any(|window| window == expected_change_key.as_slice()));
+    }
+
+    #[test]
+    fn contacts_helper_associated_getprops_projects_empty_modeled_values() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let config_id = crate::mapi::identity::mapi_store_id(0x4323);
+        let object = MapiObject::AssociatedConfig {
+            folder_id: CONTACTS_FOLDER_ID,
+            config_id,
+            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+                id: config_id,
+                folder_id: CONTACTS_FOLDER_ID,
+                canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+                message_class: "IPM.Microsoft.OSC.ContactSync".to_string(),
+                subject: "IPM.Microsoft.OSC.ContactSync".to_string(),
+                properties_json: serde_json::json!({}),
+            }),
+        };
+        let tags = [
+            PID_NAME_OSC_CONTACT_SOURCES_TAG,
+            PID_TAG_ENTRY_ID,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            PID_TAG_MESSAGE_CLASS_W,
+        ];
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+        for tag in tags {
+            payload.extend_from_slice(&tag.to_le_bytes());
+        }
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload,
+        };
+
+        assert!(!fallback_default_specific_property(
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_NAME_OSC_CONTACT_SOURCES_TAG,
+        ));
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
+        let mut cursor = Cursor::new(&response[7..]);
+        assert_eq!(
+            parse_property_value_for_tag(&mut cursor, PID_NAME_OSC_CONTACT_SOURCES_TAG).unwrap(),
+            MapiValue::MultiString(Vec::new())
+        );
+        assert!(matches!(
+            parse_property_value_for_tag(&mut cursor, PID_TAG_ENTRY_ID).unwrap(),
+            MapiValue::Binary(bytes) if !bytes.is_empty()
+        ));
+        assert_eq!(
+            parse_property_value_for_tag(&mut cursor, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+                .unwrap(),
+            MapiValue::Binary(Vec::new())
+        );
+        assert_eq!(
+            parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
+            MapiValue::String("IPM.Microsoft.OSC.ContactSync".to_string())
+        );
+
+        let contact_link = MapiObject::AssociatedConfig {
+            folder_id: CONTACTS_FOLDER_ID,
+            config_id,
+            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+                id: config_id,
+                folder_id: CONTACTS_FOLDER_ID,
+                canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+                message_class: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+                subject: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+                properties_json: serde_json::json!({}),
+            }),
+        };
+        assert!(!fallback_default_specific_property(
+            Some(&contact_link),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x0003,
+        ));
     }
 
     #[test]
