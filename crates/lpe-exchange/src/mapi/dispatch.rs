@@ -18689,7 +18689,9 @@ where
                     continue;
                 }
 
-                if parent_folder_id == SEARCH_FOLDER_ID {
+                if parent_folder_id == SEARCH_FOLDER_ID
+                    || request.create_folder_type() == FOLDER_SEARCH as u8
+                {
                     if let Some(definition) = snapshot
                         .user_saved_search_folder_definition_by_display_name(
                             display_name,

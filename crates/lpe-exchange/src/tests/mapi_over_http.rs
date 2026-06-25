@@ -6904,6 +6904,73 @@ async fn mapi_over_http_create_search_folder_persists_only_after_criteria() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_create_root_search_folder_accepts_criteria() {
+    let account = FakeStore::account();
+    let search_folders = Arc::new(Mutex::new(Vec::new()));
+    let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555504",
+            "inbox",
+            "Inbox",
+        )])),
+        created_mailboxes: created_mailboxes.clone(),
+        search_folders: search_folders.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut restriction = Vec::new();
+    append_search_property_multi_string(&mut restriction, 0x9000_101F, 0x04, &["Finance"]);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x1C, 0x00, 0x01, 0x02, // RopCreateFolder
+        0x02, // search folder
+        0x01, // Unicode names
+        0x00, // do not open existing
+        0x00, // reserved
+    ]);
+    rops.extend_from_slice(&utf16z("Contact Search"));
+    rops.extend_from_slice(&utf16z(""));
+    append_rop_set_search_criteria(
+        &mut rops,
+        2,
+        &restriction,
+        &[crate::mapi::identity::INBOX_FOLDER_ID],
+        0x0002_0026,
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x1C, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x30, 0x02, 0, 0, 0, 0]));
+    assert!(created_mailboxes.lock().unwrap().is_empty());
+    let stored = search_folders.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].account_id, account.account_id);
+    assert_eq!(stored[0].display_name, "Contact Search");
+}
+
+#[tokio::test]
 async fn mapi_over_http_create_search_folder_without_criteria_is_not_persisted() {
     let search_folders = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
