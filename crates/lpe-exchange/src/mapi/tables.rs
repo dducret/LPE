@@ -4304,6 +4304,9 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if folder_id != INBOX_FOLDER_ID {
         return true;
     }
+    if message.message_class == "IPM.ExtendedRule.Message" {
+        return false;
+    }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
         return matches!(
             message.message_class.as_str(),
@@ -11477,6 +11480,53 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_broad_configuration_find_row_ignores_extended_rule_message() {
+        let snapshot = inbox_associated_extended_rule_snapshot();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
+    }
+
+    #[test]
     fn inbox_associated_query_rows_uses_sort_order() {
         let snapshot = inbox_associated_sort_snapshot();
         let mut table = MapiObject::ContentsTable {
@@ -11515,6 +11565,41 @@ mod tests {
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
         assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_suppresses_extended_rule_message() {
+        let snapshot = inbox_associated_extended_rule_snapshot();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
     }
 
     #[test]
@@ -12907,6 +12992,30 @@ mod tests {
                 subject: "Account prefs".to_string(),
                 properties_json: serde_json::json!({
                     "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                }),
+            },
+        ])
+    }
+
+    fn inbox_associated_extended_rule_snapshot() -> MapiMailStoreSnapshot {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let persisted_id = Uuid::from_u128(0x6d617069_6578_5275_8000_000000000101);
+        crate::mapi::identity::remember_mapi_identity(
+            persisted_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 83,
+            ),
+        );
+        MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.ExtendedRule.Message".to_string(),
+                subject: "Junk E-mail Rule".to_string(),
+                properties_json: serde_json::json!({
+                    "0x7c060003": {"type": "u32", "value": 4},
+                    "0x7c070102": {"type": "binary", "value": "392d30"}
                 }),
             },
         ])
