@@ -1428,7 +1428,7 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
             Some(MapiValue::U32(0))
         }
-        PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags_for_folder(
             folder_id,
         ))),
@@ -13237,6 +13237,10 @@ mod tests {
         assert_eq!(
             u32::from_le_bytes(root_row.try_into().unwrap()),
             MAPI_FOLDER_ACCESS
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ACCESS, Uuid::nil()),
+            Some(MapiValue::U32(MAPI_FOLDER_ACCESS))
         );
     }
 

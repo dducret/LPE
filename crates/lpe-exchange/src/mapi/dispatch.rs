@@ -4610,7 +4610,7 @@ fn getprops_contract_response_summary(
                 }
                 value_shapes.push(format!(
                     "{storage_tag:#010x}:{}",
-                    mapi_value_debug_shape(&value)
+                    mapi_getprops_contract_value_debug(storage_tag, &value)
                 ));
             }
             Err(error) => {
@@ -4625,10 +4625,15 @@ fn getprops_contract_response_summary(
     summary.returned_tags = returned_tags.join(",");
     summary.problem_tags = problem_tags.join(",");
     summary.zero_default_tags = zero_default_tags.join(",");
-    if row_shape == Some(1) {
-        summary.value_shapes = value_shapes.join(",");
-    }
+    summary.value_shapes = value_shapes.join(",");
     summary
+}
+
+fn mapi_getprops_contract_value_debug(storage_tag: u32, value: &MapiValue) -> String {
+    match storage_tag {
+        PID_TAG_ACCESS | PID_TAG_ACCESS_LEVEL => mapi_value_debug_u32_from_value(value),
+        _ => mapi_value_debug_shape(value),
+    }
 }
 
 fn set_properties_problem_count(response: &[u8]) -> usize {
@@ -31373,6 +31378,20 @@ mod tests {
         assert!(context.contains("return_value=0x00000000"));
         assert!(context.contains("row_bytes=5"));
         assert!(context.contains("row_preview=0001000000"));
+    }
+
+    #[test]
+    fn getprops_contract_response_summary_includes_access_value() {
+        let summary = getprops_contract_response_summary(
+            &[PID_TAG_ACCESS],
+            &[
+                0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00,
+            ],
+        );
+
+        assert_eq!(summary.result, "0x00000000");
+        assert_eq!(summary.returned_tags, "0x0ff40003");
+        assert_eq!(summary.value_shapes, "0x0ff40003:0x0000003f");
     }
 
     #[test]
