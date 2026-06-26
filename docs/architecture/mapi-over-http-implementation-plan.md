@@ -268,11 +268,15 @@ non-canonical LPE state.
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
   EntryID, type, flags, save stamp, section, ordinal, group header GUID, and
-  group display name. LPE does not synthesize default `WunderBar` rows for
-  fresh profiles:
+  group display name. For fresh Outlook profiles, LPE projects bounded default
+  mail Favorites rows in the Common Views table/open path: the `Favorites`
+  group header plus Inbox, Sent, and Trash shortcuts. These rows are an Outlook
+  interoperability table projection, not a Microsoft-mandated Inbox
+  view/configuration object, and they are not exported as persisted Common
+  Views FAI sync changes until Outlook creates or imports durable shortcut
+  rows.
   `[MS-OXOCFG]` defines navigation shortcuts as Common Views FAI messages that
-  clients create, store, and later read, so fresh-profile Common Views content
-  ICS can legitimately be empty. Outlook-created `WunderBar` group headers are
+  clients create, store, and later read. Outlook-created `WunderBar` group headers are
   persisted as Common Views FAI rows with `PidTagWlinkType = 4` and linked
   shortcuts retain the matching `PidTagWlinkGroupClsid`. This scope covers
   cached-mode profile creation and reopen; full Exchange navigation-pane

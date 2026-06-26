@@ -21252,7 +21252,7 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_synthetic_items() {
+async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_sync_items() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),

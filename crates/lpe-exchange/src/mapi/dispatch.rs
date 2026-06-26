@@ -30000,7 +30000,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_open_does_not_fabricate_navigation_shortcut() {
+    fn common_views_open_projects_default_navigation_shortcut() {
         let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
         let selected = navigation_shortcut_message_for_open(
             &MapiMailStoreSnapshot::empty(),
@@ -30008,7 +30008,10 @@ mod tests {
             shortcut_id,
         );
 
-        assert!(selected.is_none());
+        assert_eq!(
+            selected.map(|message| message.subject),
+            Some("Inbox".to_string())
+        );
     }
 
     #[test]
@@ -30996,7 +30999,7 @@ mod tests {
 
         let summary = format_common_views_wlink_contract_summary(&columns, &snapshot);
 
-        assert!(summary.contains("link_rows=1"));
+        assert!(summary.contains("link_rows=3"));
         assert!(summary.contains("header_rows=1"));
         assert!(summary.contains("not_selected_required_link_columns="));
         assert!(summary.contains("expected_link_default_columns=0x68530003"));
