@@ -3684,6 +3684,54 @@ fn format_inbox_associated_query_context(
     ))
 }
 
+fn format_post_fai_hierarchy_release_without_inbox_contents_context(
+    object: Option<&MapiObject>,
+    released_handle: Option<u32>,
+    state: &PostHierarchyActionState,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<String> {
+    let Some(MapiObject::HierarchyTable {
+        folder_id,
+        columns,
+        position,
+        sort_orders,
+        restriction,
+        deleted_advertised_special_folders,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    if !state.inbox_associated_contents_table_observed
+        || state.inbox_normal_contents_table_observed
+        || !state.post_inbox_fai_handoff_logged
+    {
+        return None;
+    }
+    let row_count = hierarchy_row_count_excluding_deleted(
+        *folder_id,
+        mailboxes,
+        snapshot,
+        deleted_advertised_special_folders,
+    );
+    Some(format!(
+        "handle={};folder=0x{folder_id:016x};role={};position={position};row_count={row_count};columns={};sort={};restriction={};last_associated_query={};last_hierarchy_table={};last_hierarchy_query={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        format_optional_debug_handle(released_handle),
+        debug_role_for_folder_id(*folder_id),
+        format_debug_property_tags(columns),
+        format_debug_sort_orders(sort_orders),
+        restriction
+            .as_ref()
+            .map(format_debug_parsed_restriction)
+            .unwrap_or_default(),
+        debug_context_or_none(&state.last_inbox_associated_query_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_table_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_query_context),
+        state.recent_probe_actions.join(">")
+    ))
+}
+
 fn format_inbox_associated_find_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
@@ -13752,6 +13800,14 @@ where
                     }
                     _ => None,
                 };
+                let post_fai_hierarchy_release_without_inbox_contents =
+                    format_post_fai_hierarchy_release_without_inbox_contents_context(
+                        released_object,
+                        released_handle,
+                        &session.post_hierarchy_actions,
+                        mailboxes,
+                        snapshot,
+                    );
                 if session.hierarchy_sync_completed() {
                     let remaining_before = session.handles.len();
                     post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
@@ -13875,6 +13931,25 @@ where
                         "rca debug mapi inbox associated handoff without contents"
                     );
                     session.mark_post_inbox_fai_handoff_logged();
+                }
+                if let Some(context) = post_fai_hierarchy_release_without_inbox_contents {
+                    session.record_outlook_view_failure_trace_event(format!(
+                        "post_fai_hierarchy_release_without_inbox_contents:{context}"
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        mapi_request_id = %request_id,
+                        request_rop_id = "0x01",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(released_handle),
+                        release_context = %context,
+                        live_handle_summaries_after_release = %format_live_handle_debug_summary(session),
+                        "rca debug mapi post fai hierarchy released without inbox contents"
+                    );
                 }
                 if let Some(event) = post_hierarchy_release_events.last_mut() {
                     event.remaining_after = session.handles.len();
@@ -31161,6 +31236,53 @@ mod tests {
         assert!(context.contains("normal_contents_table_observed=false"));
         assert!(context.contains("last_associated_query=values=row0"));
         assert!(context.contains("last_common_views_inbox_shortcut=entry_id_matches_inbox=true"));
+        assert!(context.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        ));
+    }
+
+    #[test]
+    fn post_fai_hierarchy_release_context_reports_stop_before_inbox_contents() {
+        let mut state = PostHierarchyActionState::default();
+        state.inbox_associated_contents_table_observed = true;
+        state.post_inbox_fai_handoff_logged = true;
+        state.last_inbox_associated_query_context = "window=returned=6".to_string();
+        state
+            .recent_probe_actions
+            .push("GetHierarchyTable(in=0,out=13,row_count=22)".to_string());
+        let table = MapiObject::HierarchyTable {
+            folder_id: IPM_SUBTREE_FOLDER_ID,
+            columns: vec![
+                PID_TAG_FOLDER_ID,
+                PID_TAG_SUBFOLDERS,
+                PID_TAG_CONTAINER_CLASS_W,
+            ],
+            columns_set: true,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 22,
+        };
+
+        let context = format_post_fai_hierarchy_release_without_inbox_contents_context(
+            Some(&table),
+            Some(13),
+            &state,
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        )
+        .unwrap();
+
+        assert!(context.contains("handle=13"));
+        assert!(context.contains(&format!("folder=0x{IPM_SUBTREE_FOLDER_ID:016x}")));
+        assert!(context.contains("role=ipm_subtree"));
+        assert!(context.contains("row_count=22"));
+        assert!(context.contains("last_associated_query=window=returned=6"));
         assert!(context.contains(
             "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
         ));
