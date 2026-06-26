@@ -342,6 +342,16 @@ fn common_views_navigation_shortcut_sort_tag(property_tag: u32) -> bool {
     )
 }
 
+pub(in crate::mapi) fn common_views_navigation_shortcut_count(
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    snapshot
+        .common_views_table_messages()
+        .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
+        .count()
+        .min(u32::MAX as usize) as u32
+}
+
 pub(in crate::mapi) fn calendar_content_rows<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     folder_id: u64,
@@ -5329,6 +5339,7 @@ pub(in crate::mapi) fn table_position_and_count(
         Some(MapiObject::ContentsTable {
             folder_id,
             associated,
+            columns,
             position,
             restriction,
             sort_orders,
@@ -5344,6 +5355,15 @@ pub(in crate::mapi) fn table_position_and_count(
                     restriction.as_ref(),
                     mailbox_guid,
                 )
+            } else if *associated
+                && *folder_id == COMMON_VIEWS_FOLDER_ID
+                && common_views_navigation_shortcut_projection(
+                    restriction.as_ref(),
+                    columns,
+                    sort_orders,
+                )
+            {
+                common_views_navigation_shortcut_count(snapshot) as usize
             } else if *associated {
                 restricted_associated_folder_message_count(
                     *folder_id,
@@ -10727,6 +10747,13 @@ mod tests {
             output_handle_index: None,
             payload: vec![0, 1, 10, 0],
         };
+
+        let (_, projected_total) =
+            table_position_and_count(Some(&table), &[], &[], &snapshot, account_id);
+        assert_eq!(
+            projected_total as u32,
+            common_views_navigation_shortcut_count(&snapshot)
+        );
 
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
