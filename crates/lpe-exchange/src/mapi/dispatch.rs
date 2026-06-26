@@ -3552,23 +3552,21 @@ fn format_inbox_fai_handoff_visibility_context(
         Some(&prefix_restriction),
         account_id,
     );
-    let named_view_restriction = MapiRestriction::Property {
-        relop: 0x04,
-        property_tag: PID_TAG_MESSAGE_CLASS_W,
-        value: MapiValue::String(
-            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
-        ),
-    };
-    let named_view_rows = debug_associated_table_rows(
-        INBOX_FOLDER_ID,
-        snapshot,
-        Some(&named_view_restriction),
-        account_id,
+    let advertised_default_view = snapshot.common_view_named_view_message_for_id(
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
     );
-    let default_view = debug_default_folder_associated_named_view(snapshot, INBOX_FOLDER_ID);
+    let advertised_default_view_rows = advertised_default_view
+        .as_ref()
+        .map(|view| {
+            format!(
+                "id=0x{:016x};folder=0x{:016x};class=IPM.Microsoft.FolderDesign.NamedView;subject={}",
+                view.id, view.folder_id, view.name
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
-        default_view
+        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x};default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
+        advertised_default_view
             .as_ref()
             .map(|view| format!("0x{:016x}", view.id))
             .unwrap_or_else(|| "none".to_string()),
@@ -3581,8 +3579,8 @@ fn format_inbox_fai_handoff_visibility_context(
         format_debug_associated_row_list(&unfiltered_rows),
         prefix_rows.len(),
         format_debug_associated_row_list(&prefix_rows),
-        named_view_rows.len(),
-        format_debug_associated_row_list(&named_view_rows)
+        usize::from(advertised_default_view.is_some()),
+        advertised_default_view_rows
     )
 }
 
@@ -28747,12 +28745,16 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert!(context.contains("default_view_id=0x7fffffffffe90001"));
+        assert!(context.contains(&format!(
+            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        )));
+        assert!(context.contains("default_view_id=0x7ffffffffff70001"));
         assert!(context.contains("current_count=0"));
         assert!(context.contains("unfiltered_count=0"));
         assert!(context.contains("prefix_ipm_configuration_count=0"));
-        assert!(context.contains("exact_named_view_count=0"));
-        assert!(!context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
+        assert!(context.contains("exact_named_view_count=1"));
+        assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
+        assert!(context.contains("subject=Compact"));
     }
 
     #[test]

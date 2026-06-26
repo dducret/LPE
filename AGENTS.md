@@ -196,11 +196,3 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
   `0.4` databases may receive documented, idempotent SQL compatibility updates
   through update scripts when the release policy and affected architecture or
   installation documentation are updated in the same work
-
-## Consistency Rule
-
-When code, documentation, and `AGENTS.md` diverge:
-
-1. identify the divergence
-2. choose the option most consistent with explicit user constraints
-3. update code and documentation together
