@@ -1108,9 +1108,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
-    CONFLICTS_FOLDER_ID,
-    LOCAL_FAILURES_FOLDER_ID,
-    SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
     QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -7269,6 +7266,25 @@ mod tests {
         for row in rows {
             assert_eq!(hierarchy_row_parent_id(&row, &[]), SYNC_ISSUES_FOLDER_ID);
         }
+    }
+
+    #[test]
+    fn ipm_subtree_hierarchy_does_not_duplicate_sync_issues_children() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &[],
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        let row_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
+
+        assert!(row_ids.contains(&SYNC_ISSUES_FOLDER_ID));
+        assert!(!row_ids.contains(&CONFLICTS_FOLDER_ID));
+        assert!(!row_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
+        assert!(!row_ids.contains(&SERVER_FAILURES_FOLDER_ID));
     }
 
     #[test]
