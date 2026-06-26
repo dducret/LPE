@@ -797,6 +797,17 @@ fn log_mapi_session_disconnect(
         && request_type == "Disconnect"
         && post_hierarchy_summary.content_sync_configure_observed
         && all_sync_sources_completed;
+    let final_phase_abandoned_after_inbox_fai_query_rows =
+        session.abandoned_after_inbox_fai_query_rows();
+    let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
+        "client_abandoned_after_inbox_fai_query_rows"
+    } else if post_fai_inbox_probe_loop_terminal {
+        "post_fai_inbox_folder_type_probe_loop"
+    } else if clean_client_close_after_sync {
+        "outlook_reconnect_or_client_side_reason"
+    } else {
+        "post_hierarchy_sequence"
+    };
     let nspi_address_book_probe_only = endpoint == MapiEndpoint::Nspi
         && request_type == "Unbind"
         && session.execute_request_count == 0
@@ -824,6 +835,85 @@ fn log_mapi_session_disconnect(
     } else {
         "client_next_request"
     };
+
+    if endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect" {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            session_age_ms,
+            handle_count = session.handles.len(),
+            live_handle_summaries = %live_handle_summaries,
+            last_successful_execute_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_successful_execute_context
+                ),
+            last_successful_non_release_execute_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_successful_non_release_execute_context
+                ),
+            last_table_context =
+                %debug_context_or_none(&session.post_hierarchy_actions.last_table_context),
+            last_table_query_rows_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_table_query_rows_context
+                ),
+            last_table_release_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_table_release_context
+                ),
+            last_inbox_associated_query_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_associated_query_context
+                ),
+            last_inbox_related_release_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_related_release_context
+                ),
+            inbox_associated_contents_table_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_contents_table_observed,
+            inbox_normal_contents_table_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed,
+            inbox_normal_query_rows_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_query_rows_observed,
+            abandoned_after_inbox_fai_query_rows =
+                final_phase_abandoned_after_inbox_fai_query_rows,
+            post_fai_inbox_probe_loop_terminal,
+            post_hierarchy_content_sync_configure_observed =
+                post_hierarchy_summary.content_sync_configure_observed,
+            post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
+            recent_probe_actions =
+                %session.post_hierarchy_actions.recent_probe_actions.join(">"),
+            recent_execute_summaries = %recent_execute_summaries,
+            next_debug_focus = final_phase_next_debug_focus,
+            "rca debug mapi final phase disconnect summary"
+        );
+    }
 
     if endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"

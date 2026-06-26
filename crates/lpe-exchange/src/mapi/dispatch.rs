@@ -1787,6 +1787,16 @@ where
                 &session,
                 post_hierarchy_observation,
             );
+            session.record_last_successful_execute_context(
+                format!(
+                    "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=true",
+                    cached.request_rop_ids,
+                    cached.response_rop_ids,
+                    cached.response_rop_results,
+                    cached.response_rop_buffer_bytes
+                ),
+                request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+            );
             store_session(session_id.clone(), session);
             return mapi_response_with_cookies(
                 "Execute",
@@ -1870,6 +1880,16 @@ where
         let response_debug = summarize_response_rop_buffer(
             execute_success_rop_buffer(&response_body).unwrap_or_default(),
             &request_debug.ids,
+        );
+        session.record_last_successful_execute_context(
+            format!(
+                "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=false",
+                request_debug.names_csv,
+                response_debug.names_csv,
+                response_debug.results_csv,
+                response_debug.response_payload_bytes
+            ),
+            request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
         );
         cache_execute_response(
             &mut session,
@@ -2005,6 +2025,16 @@ where
     let response_debug = summarize_response_rop_buffer(
         execute_success_rop_buffer(&response_body).unwrap_or_default(),
         &request_debug.ids,
+    );
+    session.record_last_successful_execute_context(
+        format!(
+            "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=false",
+            request_debug.names_csv,
+            response_debug.names_csv,
+            response_debug.results_csv,
+            response_debug.response_payload_bytes
+        ),
+        request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
     );
     cache_execute_response(
         &mut session,
@@ -13667,6 +13697,17 @@ where
                 let released_object_for_stream_persist = released_object.cloned();
                 let released_object_kind = mapi_object_debug_kind(released_object);
                 let released_folder_id = mapi_object_debug_folder_id(released_object);
+                let released_folder_role = released_object
+                    .and_then(MapiObject::folder_id)
+                    .map(debug_role_for_folder_id)
+                    .unwrap_or_default();
+                let released_associated_contents_table = matches!(
+                    released_object,
+                    Some(MapiObject::ContentsTable {
+                        associated: true,
+                        ..
+                    })
+                );
                 let inbox_related_release_context = format_inbox_related_release_context(
                     released_object,
                     released_handle,
@@ -13870,6 +13911,15 @@ where
                 if let Some(context) = inbox_related_release_context {
                     session.record_last_inbox_related_release_context(context);
                 }
+                session.record_last_table_release_context(format!(
+                    "phase=release;request_id={request_id};request_rops={request_rop_names};input_index={};handle={};kind={};folder={};role={};associated={}",
+                    request.input_handle_index().unwrap_or(0),
+                    format_optional_debug_handle(released_handle),
+                    released_object_kind,
+                    released_folder_id,
+                    released_folder_role,
+                    released_associated_contents_table
+                ));
                 if let Some(context) = visible_inbox_release_without_query_rows {
                     let has_defaulted_columns =
                         context.contains(";defaulted=0x") || context.contains("backed=false");
@@ -15105,6 +15155,13 @@ where
                     handle,
                     snapshot,
                 );
+                session.record_last_table_context(format!(
+                    "phase=open;request_id={request_id};request_rops={request_rop_names};input_index={};output_index={};handle={};folder=0x{contents_folder_id:016x};role={};associated={associated};table_flags=0x{table_flags:02x};row_count={row_count}",
+                    request.input_handle_index().unwrap_or(0),
+                    request.output_handle_index.unwrap_or(0),
+                    handle,
+                    debug_role_for_folder_id(contents_folder_id)
+                ));
                 if contents_folder_id == CALENDAR_FOLDER_ID && !associated {
                     session.record_outlook_view_failure_trace_event(format!(
                         "calendar_normal_table_open:request_id={request_id};handle={handle};row_count={row_count};flags=0x{table_flags:02x}"
@@ -18393,6 +18450,33 @@ where
                     snapshot,
                     queried_position,
                 );
+                if let Some(MapiObject::ContentsTable {
+                    folder_id,
+                    associated,
+                    columns,
+                    position,
+                    restriction,
+                    sort_orders,
+                    ..
+                }) = input_object(session, &handle_slots, &request)
+                {
+                    let row_count = response
+                        .get(7..9)
+                        .and_then(|bytes| bytes.try_into().ok())
+                        .map(u16::from_le_bytes)
+                        .unwrap_or(0);
+                    session.record_last_table_query_rows_context(format!(
+                        "phase=query_rows;request_id={request_id};request_rops={request_rop_names};input_index={};handle={};folder=0x{folder_id:016x};role={};associated={associated};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_row_count={row_count};columns={};sort={};restriction={}",
+                        request.input_handle_index().unwrap_or(0),
+                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        debug_role_for_folder_id(*folder_id),
+                        request.query_forward_read(),
+                        request.query_row_count().unwrap_or(0),
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref())
+                    ));
+                }
                 responses.extend_from_slice(&response);
                 if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
                     log_outlook_bootstrap_phase(

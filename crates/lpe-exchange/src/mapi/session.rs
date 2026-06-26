@@ -121,6 +121,11 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_hierarchy_query_context: String,
     pub(in crate::mapi) last_inbox_related_release_context: String,
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
+    pub(in crate::mapi) last_successful_execute_context: String,
+    pub(in crate::mapi) last_successful_non_release_execute_context: String,
+    pub(in crate::mapi) last_table_context: String,
+    pub(in crate::mapi) last_table_query_rows_context: String,
+    pub(in crate::mapi) last_table_release_context: String,
     pub(in crate::mapi) first_inbox_loop_transition_context: String,
     pub(in crate::mapi) inbox_loop_transition_logged: bool,
     pub(in crate::mapi) post_inbox_fai_handoff_logged: bool,
@@ -1046,6 +1051,43 @@ impl MapiSession {
             .last_inbox_folder_type_getprops_context = context;
     }
 
+    pub(in crate::mapi) fn record_last_successful_execute_context(
+        &mut self,
+        context: String,
+        has_non_release_rop: bool,
+    ) {
+        self.post_hierarchy_actions.last_successful_execute_context = context.clone();
+        if has_non_release_rop {
+            self.post_hierarchy_actions
+                .last_successful_non_release_execute_context = context;
+        }
+    }
+
+    pub(in crate::mapi) fn record_last_table_context(&mut self, context: String) {
+        self.post_hierarchy_actions.last_table_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_table_query_rows_context(&mut self, context: String) {
+        self.post_hierarchy_actions.last_table_query_rows_context = context.clone();
+        self.post_hierarchy_actions.last_table_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_table_release_context(&mut self, context: String) {
+        self.post_hierarchy_actions.last_table_release_context = context.clone();
+        self.post_hierarchy_actions.last_table_context = context;
+    }
+
+    pub(in crate::mapi) fn abandoned_after_inbox_fai_query_rows(&self) -> bool {
+        let actions = &self.post_hierarchy_actions;
+        actions.inbox_associated_contents_table_observed
+            && !actions.inbox_normal_contents_table_observed
+            && !actions.inbox_normal_contents_table_query_rows_observed
+            && !actions.last_inbox_associated_query_context.is_empty()
+            && actions
+                .last_table_release_context
+                .contains("folder=0x0000000000050001;role=inbox;associated=true")
+    }
+
     pub(in crate::mapi) fn record_first_inbox_loop_transition_context(&mut self, context: String) {
         if self
             .post_hierarchy_actions
@@ -1841,6 +1883,27 @@ mod tests {
         assert_eq!(session.last_request_id, "test:3");
         assert_eq!(session.request_count, 3);
         assert_eq!(session.execute_request_count, 1);
+    }
+
+    #[test]
+    fn session_detects_abandon_after_inbox_fai_query_rows_release() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+
+        session.record_inbox_associated_contents_table();
+        session.record_last_inbox_associated_query_context(
+            "handle=19;folder=0x0000000000050001;associated=true;response_row_count=5".to_string(),
+        );
+        session.record_last_table_release_context(
+            "phase=release;folder=0x0000000000050001;role=inbox;associated=true".to_string(),
+        );
+
+        assert!(session.abandoned_after_inbox_fai_query_rows());
+
+        session.record_inbox_normal_contents_table();
+
+        assert!(!session.abandoned_after_inbox_fai_query_rows());
     }
 
     #[test]
