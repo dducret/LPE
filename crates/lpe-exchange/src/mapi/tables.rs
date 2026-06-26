@@ -1120,6 +1120,7 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SYNC_ISSUES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
+    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
 
@@ -9539,7 +9540,7 @@ mod tests {
         assert!(row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(row_ids.contains(&TASKS_FOLDER_ID));
-        assert!(!row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
+        assert!(row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
@@ -9563,7 +9564,7 @@ mod tests {
         assert!(sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(sync_ids.contains(&TASKS_FOLDER_ID));
-        assert!(!sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
+        assert!(sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));
@@ -11509,8 +11510,12 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-        assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
     }
 
