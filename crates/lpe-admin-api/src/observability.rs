@@ -368,6 +368,60 @@ fn render_metrics() -> String {
             "lpe_mapi_folder_purge_partial_total {}\n",
             purge.partial_total
         ));
+
+        let outlook_view = lpe_exchange::mapi_outlook_view_metrics();
+        output.push_str("# HELP lpe_mapi_outlook_view_startup_events_total Outlook MAPI startup view events observed by LPE.\n");
+        output.push_str("# TYPE lpe_mapi_outlook_view_startup_events_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_events_total{{event=\"inbox_fai_handoff_without_contents\"}} {}\n",
+            outlook_view.inbox_fai_handoff_without_contents_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_events_total{{event=\"post_fai_hierarchy_without_contents\"}} {}\n",
+            outlook_view.post_fai_hierarchy_without_contents_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_events_total{{event=\"inbox_normal_contents_opened\"}} {}\n",
+            outlook_view.inbox_normal_contents_opened_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_events_total{{event=\"ipm_subtree_hierarchy_query\"}} {}\n",
+            outlook_view.ipm_subtree_hierarchy_query_total
+        ));
+        output.push_str("# HELP lpe_mapi_outlook_view_startup_issues_total Outlook MAPI startup view issue counters.\n");
+        output.push_str("# TYPE lpe_mapi_outlook_view_startup_issues_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_issues_total{{issue=\"ipm_subtree_missing_conversation_action\"}} {}\n",
+            outlook_view.ipm_subtree_hierarchy_missing_conversation_action_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_issues_total{{issue=\"ipm_subtree_quick_step_present\"}} {}\n",
+            outlook_view.ipm_subtree_hierarchy_quick_step_present_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_startup_issues_total{{issue=\"ipm_subtree_row_count_mismatch\"}} {}\n",
+            outlook_view.ipm_subtree_hierarchy_row_count_mismatch_total
+        ));
+        output.push_str("# HELP lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_rows Last IPM subtree hierarchy QueryRows row counts observed for Outlook startup.\n");
+        output.push_str("# TYPE lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_rows gauge\n");
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_rows{{kind=\"response\"}} {}\n",
+            outlook_view.last_ipm_subtree_hierarchy_response_row_count
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_rows{{kind=\"table_total\"}} {}\n",
+            outlook_view.last_ipm_subtree_hierarchy_table_total_row_count
+        ));
+        output.push_str("# HELP lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_flag Last IPM subtree hierarchy shape flags observed for Outlook startup.\n");
+        output.push_str("# TYPE lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_flag gauge\n");
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_flag{{flag=\"has_conversation_action\"}} {}\n",
+            outlook_view.last_ipm_subtree_hierarchy_has_conversation_action
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_outlook_view_last_ipm_subtree_hierarchy_flag{{flag=\"has_quick_step\"}} {}\n",
+            outlook_view.last_ipm_subtree_hierarchy_has_quick_step
+        ));
     }
 
     output

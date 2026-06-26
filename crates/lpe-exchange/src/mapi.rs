@@ -69,6 +69,23 @@ static MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_PARTIAL_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_POST_FAI_HIERARCHY_WITHOUT_CONTENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_INBOX_NORMAL_CONTENTS_OPENED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUERY_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_MISSING_CONVERSATION_ACTION_TOTAL: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUICK_STEP_PRESENT_TOTAL: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_ROW_COUNT_MISMATCH_TOTAL: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_RESPONSE_ROW_COUNT: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_TABLE_TOTAL_ROW_COUNT: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_CONVERSATION_ACTION: AtomicU64 =
+    AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_QUICK_STEP: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MapiFolderPurgeMetrics {
@@ -76,6 +93,21 @@ pub struct MapiFolderPurgeMetrics {
     pub succeeded_total: u64,
     pub failed_total: u64,
     pub partial_total: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MapiOutlookViewMetrics {
+    pub inbox_fai_handoff_without_contents_total: u64,
+    pub post_fai_hierarchy_without_contents_total: u64,
+    pub inbox_normal_contents_opened_total: u64,
+    pub ipm_subtree_hierarchy_query_total: u64,
+    pub ipm_subtree_hierarchy_missing_conversation_action_total: u64,
+    pub ipm_subtree_hierarchy_quick_step_present_total: u64,
+    pub ipm_subtree_hierarchy_row_count_mismatch_total: u64,
+    pub last_ipm_subtree_hierarchy_response_row_count: u64,
+    pub last_ipm_subtree_hierarchy_table_total_row_count: u64,
+    pub last_ipm_subtree_hierarchy_has_conversation_action: u64,
+    pub last_ipm_subtree_hierarchy_has_quick_step: u64,
 }
 
 pub(crate) fn record_mapi_folder_purge_metrics(
@@ -98,5 +130,83 @@ pub fn mapi_folder_purge_metrics() -> MapiFolderPurgeMetrics {
         succeeded_total: MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL.load(AtomicOrdering::Relaxed),
         failed_total: MAPI_FOLDER_PURGE_FAILED_TOTAL.load(AtomicOrdering::Relaxed),
         partial_total: MAPI_FOLDER_PURGE_PARTIAL_TOTAL.load(AtomicOrdering::Relaxed),
+    }
+}
+
+pub(crate) fn record_mapi_outlook_view_inbox_fai_handoff_without_contents() {
+    MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL
+        .fetch_add(1, AtomicOrdering::Relaxed);
+}
+
+pub(crate) fn record_mapi_outlook_view_post_fai_hierarchy_without_contents() {
+    MAPI_OUTLOOK_VIEW_POST_FAI_HIERARCHY_WITHOUT_CONTENTS_TOTAL
+        .fetch_add(1, AtomicOrdering::Relaxed);
+}
+
+pub(crate) fn record_mapi_outlook_view_inbox_normal_contents_opened() {
+    MAPI_OUTLOOK_VIEW_INBOX_NORMAL_CONTENTS_OPENED_TOTAL.fetch_add(1, AtomicOrdering::Relaxed);
+}
+
+pub(crate) fn record_mapi_outlook_view_ipm_subtree_hierarchy_query(
+    response_row_count: u64,
+    table_total_row_count: u64,
+    has_conversation_action: bool,
+    has_quick_step: bool,
+) {
+    MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUERY_TOTAL.fetch_add(1, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_RESPONSE_ROW_COUNT
+        .store(response_row_count, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_TABLE_TOTAL_ROW_COUNT
+        .store(table_total_row_count, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_CONVERSATION_ACTION
+        .store(has_conversation_action as u64, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_QUICK_STEP
+        .store(has_quick_step as u64, AtomicOrdering::Relaxed);
+    if !has_conversation_action {
+        MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_MISSING_CONVERSATION_ACTION_TOTAL
+            .fetch_add(1, AtomicOrdering::Relaxed);
+    }
+    if has_quick_step {
+        MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUICK_STEP_PRESENT_TOTAL
+            .fetch_add(1, AtomicOrdering::Relaxed);
+    }
+    if response_row_count != table_total_row_count {
+        MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_ROW_COUNT_MISMATCH_TOTAL
+            .fetch_add(1, AtomicOrdering::Relaxed);
+    }
+}
+
+pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
+    MapiOutlookViewMetrics {
+        inbox_fai_handoff_without_contents_total:
+            MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL.load(AtomicOrdering::Relaxed),
+        post_fai_hierarchy_without_contents_total:
+            MAPI_OUTLOOK_VIEW_POST_FAI_HIERARCHY_WITHOUT_CONTENTS_TOTAL
+                .load(AtomicOrdering::Relaxed),
+        inbox_normal_contents_opened_total: MAPI_OUTLOOK_VIEW_INBOX_NORMAL_CONTENTS_OPENED_TOTAL
+            .load(AtomicOrdering::Relaxed),
+        ipm_subtree_hierarchy_query_total: MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUERY_TOTAL
+            .load(AtomicOrdering::Relaxed),
+        ipm_subtree_hierarchy_missing_conversation_action_total:
+            MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_MISSING_CONVERSATION_ACTION_TOTAL
+                .load(AtomicOrdering::Relaxed),
+        ipm_subtree_hierarchy_quick_step_present_total:
+            MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUICK_STEP_PRESENT_TOTAL
+                .load(AtomicOrdering::Relaxed),
+        ipm_subtree_hierarchy_row_count_mismatch_total:
+            MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_ROW_COUNT_MISMATCH_TOTAL
+                .load(AtomicOrdering::Relaxed),
+        last_ipm_subtree_hierarchy_response_row_count:
+            MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_RESPONSE_ROW_COUNT
+                .load(AtomicOrdering::Relaxed),
+        last_ipm_subtree_hierarchy_table_total_row_count:
+            MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_TABLE_TOTAL_ROW_COUNT
+                .load(AtomicOrdering::Relaxed),
+        last_ipm_subtree_hierarchy_has_conversation_action:
+            MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_CONVERSATION_ACTION
+                .load(AtomicOrdering::Relaxed),
+        last_ipm_subtree_hierarchy_has_quick_step:
+            MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_QUICK_STEP
+                .load(AtomicOrdering::Relaxed),
     }
 }

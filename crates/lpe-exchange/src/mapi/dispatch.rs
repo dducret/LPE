@@ -10597,6 +10597,15 @@ fn log_outlook_hierarchy_table_query_rows_response(
         .unwrap_or_default();
     let hierarchy_wire_row_summary =
         format_hierarchy_query_rows_wire_summary(response, &selected_columns, 32);
+    if *folder_id == IPM_SUBTREE_FOLDER_ID {
+        let metric_summary = hierarchy_response_metric_summary(response, &selected_columns);
+        record_mapi_outlook_view_ipm_subtree_hierarchy_query(
+            u64::from(row_count),
+            table_total_row_count as u64,
+            metric_summary.has_conversation_action,
+            metric_summary.has_quick_step,
+        );
+    }
 
     tracing::info!(
         rca_debug = true,
@@ -10632,6 +10641,64 @@ fn log_outlook_hierarchy_table_query_rows_response(
         hierarchy_wire_row_summary = %hierarchy_wire_row_summary,
         "rca debug outlook hierarchy table query rows response"
     );
+}
+
+#[derive(Debug, Default)]
+struct HierarchyResponseMetricSummary {
+    has_conversation_action: bool,
+    has_quick_step: bool,
+}
+
+fn hierarchy_response_metric_summary(
+    response: &[u8],
+    selected_columns: &[u32],
+) -> HierarchyResponseMetricSummary {
+    let row_count = response
+        .get(7..9)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(0) as usize;
+    let mut cursor = Cursor::new(response.get(9..).unwrap_or_default());
+    let mut summary = HierarchyResponseMetricSummary::default();
+
+    for _ in 0..row_count {
+        if cursor.read_u8().is_err() {
+            break;
+        }
+        for column in selected_columns {
+            let value = match parse_mapi_property_value(&mut cursor, *column) {
+                Ok(value) => value,
+                Err(_) => return summary,
+            };
+            if *column == PID_TAG_FOLDER_ID {
+                match hierarchy_metric_folder_id(&value) {
+                    Some(CONVERSATION_ACTION_SETTINGS_FOLDER_ID) => {
+                        summary.has_conversation_action = true;
+                    }
+                    Some(QUICK_STEP_SETTINGS_FOLDER_ID) => {
+                        summary.has_quick_step = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    summary
+}
+
+fn hierarchy_metric_folder_id(value: &MapiValue) -> Option<u64> {
+    let raw = match value {
+        MapiValue::I64(value) if *value >= 0 => *value as u64,
+        MapiValue::U64(value) => *value,
+        MapiValue::I32(value) if *value >= 0 => *value as u64,
+        MapiValue::U32(value) => u64::from(*value),
+        _ => return None,
+    };
+    let bytes = raw.to_le_bytes();
+    crate::mapi::identity::object_id_from_wire_id(&bytes)
+        .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(&bytes))
+        .or(Some(raw))
 }
 
 fn format_hierarchy_query_rows_wire_summary(
@@ -13976,6 +14043,7 @@ where
                 if let Some((released_table_context, handoff_context, live_handle_summary)) =
                     post_inbox_fai_handoff_context
                 {
+                    record_mapi_outlook_view_inbox_fai_handoff_without_contents();
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -13994,6 +14062,7 @@ where
                     session.mark_post_inbox_fai_handoff_logged();
                 }
                 if let Some(context) = post_fai_hierarchy_release_without_inbox_contents {
+                    record_mapi_outlook_view_post_fai_hierarchy_without_contents();
                     session.record_outlook_view_failure_trace_event(format!(
                         "post_fai_hierarchy_release_without_inbox_contents:{context}"
                     ));
@@ -15175,6 +15244,7 @@ where
                         session.record_inbox_associated_contents_table();
                     } else {
                         session.record_inbox_normal_contents_table();
+                        record_mapi_outlook_view_inbox_normal_contents_opened();
                     }
                     session.record_last_inbox_contents_table_context(format!(
                         "input_index={};output_index={};output_handle={};table_flags=0x{table_flags:02x};associated={associated};row_count={row_count}",

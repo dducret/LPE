@@ -9,7 +9,10 @@ mod ntlm;
 mod service;
 mod store;
 
-pub use crate::mapi::{mapi_folder_purge_metrics, MapiFolderPurgeMetrics};
+pub use crate::mapi::{
+    mapi_folder_purge_metrics, mapi_outlook_view_metrics, MapiFolderPurgeMetrics,
+    MapiOutlookViewMetrics,
+};
 pub use crate::service::router;
 
 #[cfg(test)]
