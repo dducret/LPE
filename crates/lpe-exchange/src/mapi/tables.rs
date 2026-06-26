@@ -324,6 +324,24 @@ pub(in crate::mapi) fn restriction_matches_common_views_message(
     }
 }
 
+fn common_views_navigation_shortcut_projection(
+    restriction: Option<&MapiRestriction>,
+    _columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+) -> bool {
+    restriction.is_none()
+        && sort_orders
+            .iter()
+            .any(|order| common_views_navigation_shortcut_sort_tag(order.property_tag))
+}
+
+fn common_views_navigation_shortcut_sort_tag(property_tag: u32) -> bool {
+    matches!(
+        property_tag & 0xFFFF_0000,
+        0x6849_0000 | 0x684B_0000 | 0x684F_0000 | 0x6850_0000 | 0x6852_0000
+    )
+}
+
 pub(in crate::mapi) fn calendar_content_rows<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     folder_id: u64,
@@ -1834,6 +1852,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                     let total_common_views_rows = rows.len();
+                    let navigation_projection = common_views_navigation_shortcut_projection(
+                        restriction.as_ref(),
+                        &columns,
+                        sort_orders,
+                    );
                     let navigation_shortcut_count = rows
                         .iter()
                         .filter(|message| {
@@ -1867,6 +1890,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             virtual_navigation_shortcut_count,
                         common_views_named_view_count =
                             total_common_views_rows.saturating_sub(navigation_shortcut_count),
+                        common_views_navigation_projection = navigation_projection,
                         table_has_restriction = restriction.is_some(),
                         current_position = *table_position,
                         selected_property_tag_count = columns.len(),
@@ -1880,6 +1904,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             mailbox_guid,
                         )
                     });
+                    if navigation_projection {
+                        rows.retain(|message| {
+                            matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
+                        });
+                    }
                     sort_common_views_messages(&mut rows, sort_orders);
                     rows.iter()
                         .map(|message| {
@@ -2461,6 +2490,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
         Some(MapiObject::ContentsTable {
             folder_id,
             associated,
+            columns,
             sort_orders,
             restriction,
             position,
@@ -2474,6 +2504,15 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                     mailbox_guid,
                 )
             });
+            if common_views_navigation_shortcut_projection(
+                restriction.as_ref(),
+                columns,
+                sort_orders,
+            ) {
+                rows.retain(|message| {
+                    matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
+                });
+            }
             sort_common_views_messages(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -10649,6 +10688,88 @@ mod tests {
         assert!(!response
             .windows(zero_guid_entry_id.len())
             .any(|window| window == zero_guid_entry_id.as_slice()));
+    }
+
+    #[test]
+    fn common_views_wlink_query_rows_suppress_named_views() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = common_views_sort_snapshot(account_id);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: default_navigation_shortcut_property_tags(),
+            columns_set: true,
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: 0x684F_0102,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: 0x6850_0102,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: 0x684B_0102,
+                    order: 0,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        assert_response_contains_utf16(&response, "Alpha");
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+        assert!(utf16_position(&response, "Compact").is_none());
+    }
+
+    #[test]
+    fn common_views_restricted_named_view_query_rows_remain_available() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = common_views_sort_snapshot(account_id);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: default_navigation_shortcut_property_tags(),
+            columns_set: true,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.Microsoft.FolderDesign.NamedView".to_string()),
+            }),
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
+        assert_response_contains_utf16(&response, "Compact");
     }
 
     #[test]
