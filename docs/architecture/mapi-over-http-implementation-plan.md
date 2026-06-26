@@ -241,9 +241,13 @@ non-canonical LPE state.
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
   `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
   message with `WLink` properties.
-- Outlook mail-folder default views point at bounded synthetic named-view rows.
-  Inbox uses a folder-local synthetic `IPM.Microsoft.FolderDesign.NamedView`;
-  other mail folders use the bounded synthetic Common Views named-view rows.
+- Outlook default-view EntryID properties can point at bounded synthetic view
+  objects for startup compatibility, but LPE does not advertise synthetic
+  folder-local `IPM.Microsoft.FolderDesign.NamedView` rows in folder-associated
+  tables. Outlook-created or imported associated configuration rows remain
+  visible and durable, and bounded Common Views named-view rows remain visible
+  only through Common Views. This avoids presenting an incomplete folder-local
+  view definition as mailbox state.
   Mail named-view descriptor binaries list only real message-table property
   tags used by the visible columns; they must not include synthetic placeholder
   tags or named-property IDs that are not resolvable in the active session.
@@ -251,19 +255,12 @@ non-canonical LPE state.
   `PtypString8` / `PtypMultipleString8` for text view columns, while the
   message table projection accepts and serializes both those ANSI tags and the
   Unicode tags Outlook also asks for in live traces.
-  The bounded Inbox Compact descriptor follows the observed Outlook 2016/2019
-  visible-message projection: attachment indicator, sent-representing display
-  name, subject, delivery time, and message flags.
-  Calendar and Contacts advertise bounded folder-local default named-view rows
-  with type-specific Outlook view descriptors. Calendar descriptors use
-  appointment columns such as subject, start, end, location, and busy status;
-  Contacts descriptors use contact columns such as display name, primary email,
-  mobile, company, and title. Tasks, To-Do, Notes, and Journal do not advertise
-  `PidTagDefaultViewEntryId` and must not inherit the mail default-view
-  descriptor until LPE has type-specific Outlook view descriptors and contents
-  row projections for those container classes. Delete attempts against synthetic
-  folder-local default view rows are acknowledged as no-op success because the
-  rows are compatibility projections, not canonical FAI messages.
+  Tasks, To-Do, Notes, and Journal do not advertise `PidTagDefaultViewEntryId`
+  and must not inherit the mail default-view descriptor until LPE has
+  type-specific Outlook view descriptors and contents row projections for those
+  container classes. Delete attempts against synthetic folder-local default view
+  objects are acknowledged as no-op success because the objects are
+  compatibility projections, not canonical FAI messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder

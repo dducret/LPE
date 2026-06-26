@@ -9826,7 +9826,7 @@ fn format_outlook_view_handoff_table_contract(
     }
     let view = debug_default_folder_associated_named_view(snapshot, folder_id);
     let folder_local_default_supported = view.is_some();
-    let folder_local_default_visible_in_fai_table = view.is_some();
+    let folder_local_default_visible_in_fai_table = false;
     let descriptor_summary = view
         .as_ref()
         .map(|message| {
@@ -9983,24 +9983,7 @@ fn warn_outlook_view_handoff_table_invariants(
     if !associated || folder_id == COMMON_VIEWS_FOLDER_ID {
         return;
     }
-    if view_handoff_table_contract.contains("folder_local_default_supported=true")
-        && view_handoff_table_contract.contains("folder_local_default_visible_in_fai_table=false")
-    {
-        tracing::warn!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            account_id = %principal.account_id,
-            mailbox = %principal.email,
-            request_type = "Execute",
-            request_rop_id,
-            folder_id = %format!("0x{folder_id:016x}"),
-            folder_role = debug_role_for_folder_id(folder_id),
-            associated,
-            view_handoff_table_contract,
-            message = "rca debug outlook contents table invariant warning: default folder view is not visible in associated table",
-        );
-    }
+    let _ = (principal, request_rop_id, view_handoff_table_contract);
 }
 
 fn format_view_descriptor_binary_summary(descriptor: &[u8]) -> String {
@@ -12373,14 +12356,13 @@ fn common_views_link_row_expected_default(property_tag: u32) -> bool {
 #[derive(Clone)]
 enum DebugAssociatedTableRow {
     Config(crate::mapi_store::MapiAssociatedConfigMessage),
-    NamedView(crate::mapi_store::MapiCommonViewNamedViewMessage),
 }
 
 fn debug_associated_table_rows(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
-    mailbox_guid: Uuid,
+    _mailbox_guid: Uuid,
 ) -> Vec<DebugAssociatedTableRow> {
     let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
     append_exact_virtual_inbox_debug_associated_config(
@@ -12388,25 +12370,14 @@ fn debug_associated_table_rows(
         restriction,
         &mut config_messages,
     );
-    let mut rows = config_messages
+    config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
-                && !debug_associated_config_duplicated_by_default_named_view(
-                    folder_id, snapshot, message,
-                )
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(DebugAssociatedTableRow::Config)
-        .collect::<Vec<_>>();
-    if let Some(view) = debug_default_folder_associated_named_view(snapshot, folder_id) {
-        if debug_default_folder_named_view_visible_for_restriction(restriction)
-            && restriction_matches_common_view_named_view(restriction, &view, mailbox_guid)
-        {
-            rows.push(DebugAssociatedTableRow::NamedView(view));
-        }
-    }
-    rows
+        .collect::<Vec<_>>()
 }
 
 fn append_exact_virtual_inbox_debug_associated_config(
@@ -12472,28 +12443,6 @@ fn debug_default_folder_associated_named_view(
         .flatten()
 }
 
-fn debug_associated_config_duplicated_by_default_named_view(
-    folder_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-) -> bool {
-    folder_id == INBOX_FOLDER_ID
-        && message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-        && message.subject == "Compact"
-        && associated_config_visible_in_table(folder_id, None, message)
-        && debug_default_folder_associated_named_view(snapshot, folder_id).is_some()
-}
-
-fn debug_default_folder_named_view_visible_for_restriction(
-    restriction: Option<&MapiRestriction>,
-) -> bool {
-    restriction.is_none()
-        || debug_exact_message_class_restriction_value(restriction).is_some_and(|message_class| {
-            message_class
-                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-        })
-}
-
 fn sort_debug_associated_table_rows(
     rows: &mut [DebugAssociatedTableRow],
     sort_orders: &[MapiSortOrder],
@@ -12539,30 +12488,24 @@ fn debug_associated_row_property_value(
         DebugAssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
         }
-        DebugAssociatedTableRow::NamedView(message) => {
-            common_view_named_view_property_value(message, mailbox_guid, property_tag)
-        }
     }
 }
 
 fn debug_associated_row_id(message: &DebugAssociatedTableRow) -> u64 {
     match message {
         DebugAssociatedTableRow::Config(message) => message.id,
-        DebugAssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
 fn debug_associated_row_class(message: &DebugAssociatedTableRow) -> &str {
     match message {
         DebugAssociatedTableRow::Config(message) => &message.message_class,
-        DebugAssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
     }
 }
 
 fn debug_associated_row_subject(message: &DebugAssociatedTableRow) -> &str {
     match message {
         DebugAssociatedTableRow::Config(message) => &message.subject,
-        DebugAssociatedTableRow::NamedView(message) => &message.name,
     }
 }
 
@@ -12574,9 +12517,6 @@ fn serialize_debug_associated_row(
     match message {
         DebugAssociatedTableRow::Config(message) => {
             serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-        DebugAssociatedTableRow::NamedView(message) => {
-            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
     }
 }
@@ -28761,7 +28701,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
@@ -28783,10 +28723,10 @@ mod tests {
 
         assert!(context.contains("default_view_id=0x7fffffffffe90001"));
         assert!(context.contains("current_count=0"));
-        assert!(context.contains("unfiltered_count=1"));
+        assert!(context.contains("unfiltered_count=0"));
         assert!(context.contains("prefix_ipm_configuration_count=0"));
-        assert!(context.contains("exact_named_view_count=1"));
-        assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
+        assert!(context.contains("exact_named_view_count=0"));
+        assert!(!context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
     }
 
     #[test]
@@ -28800,7 +28740,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
     }
 
@@ -28815,7 +28755,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains(
             "visible_column_tags=0x001a001e,0x3001001e,0x8083001e,0x3a1c001e,0x3a16001e,0x3a17001e"
         ));
@@ -28833,7 +28773,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
         assert!(contract.contains(
             "visible_column_tags=0x001a001e,0x0037001e,0x85160040,0x85170040,0x8208001e,0x82050003"
         ));

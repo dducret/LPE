@@ -190,41 +190,30 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
 #[derive(Clone)]
 enum AssociatedTableRow {
     Config(MapiAssociatedConfigMessage),
-    NamedView(MapiCommonViewNamedViewMessage),
 }
 
 fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
     !snapshot
         .associated_config_messages_for_folder(folder_id)
         .is_empty()
-        || default_folder_associated_named_view(snapshot, folder_id).is_some()
 }
 
 fn associated_table_rows(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
-    mailbox_guid: Uuid,
+    _mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
     let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
     append_exact_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
-    let mut rows = config_messages
+    config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
-                && !associated_config_duplicated_by_default_named_view(folder_id, snapshot, message)
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(AssociatedTableRow::Config)
-        .collect::<Vec<_>>();
-    if let Some(view) = default_folder_associated_named_view(snapshot, folder_id) {
-        if default_folder_named_view_visible_for_restriction(restriction)
-            && restriction_matches_common_view_named_view(restriction, &view, mailbox_guid)
-        {
-            rows.push(AssociatedTableRow::NamedView(view));
-        }
-    }
-    rows
+        .collect::<Vec<_>>()
 }
 
 fn append_exact_virtual_inbox_associated_config(
@@ -268,46 +257,6 @@ fn exact_message_class_restriction_value(restriction: Option<&MapiRestriction>) 
         } => Some(value.as_str()),
         _ => None,
     }
-}
-
-fn default_folder_associated_named_view(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-) -> Option<MapiCommonViewNamedViewMessage> {
-    let container_class = snapshot
-        .collaboration_folder_for_id(folder_id)
-        .map(|folder| collaboration_folder_message_class(folder.kind))
-        .or_else(|| role_for_folder_id(folder_id).map(|_| special_folder_metadata(folder_id).2))?;
-    default_view_supported_folder(folder_id, container_class)
-        .then(|| {
-            snapshot.default_folder_named_view_message(
-                folder_id,
-                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-            )
-        })
-        .flatten()
-}
-
-fn associated_config_duplicated_by_default_named_view(
-    folder_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-    message: &MapiAssociatedConfigMessage,
-) -> bool {
-    folder_id == INBOX_FOLDER_ID
-        && message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-        && message.subject == "Compact"
-        && !is_empty_inbox_configuration_placeholder(message)
-        && default_folder_associated_named_view(snapshot, folder_id).is_some()
-}
-
-fn default_folder_named_view_visible_for_restriction(
-    restriction: Option<&MapiRestriction>,
-) -> bool {
-    restriction.is_none()
-        || exact_message_class_restriction_value(restriction).is_some_and(|message_class| {
-            message_class
-                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-        })
 }
 
 pub(in crate::mapi) fn restriction_matches_common_views_message(
@@ -11006,6 +10955,34 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_table_does_not_expose_synthetic_folder_default_named_view() {
+        let restriction = MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(
+                crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
+            ),
+        };
+        let rows = associated_table_rows(
+            INBOX_FOLDER_ID,
+            &MapiMailStoreSnapshot::empty(),
+            Some(&restriction),
+            Uuid::nil(),
+        );
+
+        assert!(rows.is_empty());
+        assert_eq!(
+            restricted_associated_folder_message_count(
+                INBOX_FOLDER_ID,
+                &MapiMailStoreSnapshot::empty(),
+                Some(&restriction),
+                Uuid::nil()
+            ),
+            0
+        );
+    }
+
+    #[test]
     fn quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
         assert_contact_folder_associated_find_row_returns_osc_contact_sync(
             QUICK_CONTACTS_FOLDER_ID,
@@ -14886,9 +14863,6 @@ fn serialize_associated_table_row(
         AssociatedTableRow::Config(message) => {
             serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
-        AssociatedTableRow::NamedView(message) => {
-            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
     }
 }
 
@@ -14901,23 +14875,17 @@ fn associated_table_row_property_value(
         AssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
         }
-        AssociatedTableRow::NamedView(message) => {
-            common_view_named_view_property_value(message, mailbox_guid, property_tag)
-        }
     }
 }
 
 fn associated_table_row_matches(
     message: &AssociatedTableRow,
     restriction: Option<&MapiRestriction>,
-    mailbox_guid: Uuid,
+    _mailbox_guid: Uuid,
 ) -> bool {
     match message {
         AssociatedTableRow::Config(message) => {
             restriction_matches_associated_config(restriction, message)
-        }
-        AssociatedTableRow::NamedView(message) => {
-            restriction_matches_common_view_named_view(restriction, message, mailbox_guid)
         }
     }
 }
@@ -14927,21 +14895,18 @@ fn associated_table_row_config(
 ) -> Option<&MapiAssociatedConfigMessage> {
     match message {
         AssociatedTableRow::Config(message) => Some(message),
-        AssociatedTableRow::NamedView(_) => None,
     }
 }
 
 fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
     match message {
         AssociatedTableRow::Config(message) => message.id,
-        AssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
 fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
     match message {
         AssociatedTableRow::Config(message) => &message.message_class,
-        AssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
     }
 }
 
