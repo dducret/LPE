@@ -30751,7 +30751,7 @@ mod tests {
                 id: first_id,
                 account_id,
                 folder_id: INBOX_FOLDER_ID,
-                message_class: "IPM.Configuration.A".to_string(),
+                message_class: "IPM.Custom.A".to_string(),
                 subject: "A".to_string(),
                 properties_json: serde_json::json!({
                     "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
@@ -30761,7 +30761,7 @@ mod tests {
                 id: second_id,
                 account_id,
                 folder_id: INBOX_FOLDER_ID,
-                message_class: "IPM.Configuration.B".to_string(),
+                message_class: "IPM.Custom.B".to_string(),
                 subject: "B".to_string(),
                 properties_json: serde_json::json!({
                     "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
@@ -30783,8 +30783,8 @@ mod tests {
         );
 
         assert!(summary.contains("position=1"), "{summary}");
-        assert!(summary.contains("class=IPM.Configuration.B"), "{summary}");
-        assert!(!summary.contains("class=IPM.Configuration.A"), "{summary}");
+        assert!(summary.contains("class=IPM.Custom.B"), "{summary}");
+        assert!(!summary.contains("class=IPM.Custom.A"), "{summary}");
     }
 
     #[test]
@@ -30877,7 +30877,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_named_view_debug_summaries_include_synthetic_row() {
+    fn inbox_associated_named_view_debug_summaries_suppress_synthetic_row() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
         let restriction = MapiRestriction::Property {
@@ -30927,35 +30927,34 @@ mod tests {
             &snapshot,
         );
 
-        assert!(window.contains("total=1"), "{window}");
+        assert!(window.contains("total=0"), "{window}");
         assert!(
-            window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            !window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{window}"
         );
         assert!(
-            values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            !values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{values}"
         );
         assert!(
-            values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
+            !values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
             "{values}"
         );
         assert!(
-            values.contains(&format!(
+            !values.contains(&format!(
                 "0x674a0014={}",
                 crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
             )),
             "{values}"
         );
-        assert!(values.contains("0x683a0003=8"), "{values}");
-        assert!(wire.contains("total=1"), "{wire}");
-        assert!(wire.contains("returned=1"), "{wire}");
+        assert!(!values.contains("0x683a0003=8"), "{values}");
+        assert!(wire.is_empty(), "{wire}");
         assert!(
-            wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            !wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{wire}"
         );
-        assert!(wire.contains("value_len=32"), "{wire}");
-        assert!(wire.contains("query_rows_len=33"), "{wire}");
+        assert!(!wire.contains("value_len=32"), "{wire}");
+        assert!(!wire.contains("query_rows_len=33"), "{wire}");
     }
 
     #[test]

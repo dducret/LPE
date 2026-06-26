@@ -3906,7 +3906,6 @@ mod tests {
         for suppressed_id in [
             OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
             OUTLOOK_INBOX_EAS_CONFIG_ID,
-            OUTLOOK_INBOX_ELC_CONFIG_ID,
             OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID,
             OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
         ] {
@@ -3919,6 +3918,7 @@ mod tests {
             ));
         }
         for exact_virtual_id in [
+            OUTLOOK_INBOX_ELC_CONFIG_ID,
             OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID,
             OUTLOOK_INBOX_SHARING_CONFIGURATION_ID,
             OUTLOOK_INBOX_SHARING_INDEX_ID,

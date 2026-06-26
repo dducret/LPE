@@ -245,9 +245,11 @@ non-canonical LPE state.
   objects for startup compatibility, but LPE does not advertise synthetic
   folder-local `IPM.Microsoft.FolderDesign.NamedView` rows in folder-associated
   tables. Outlook-created or imported associated configuration rows remain
-  visible and durable, and bounded Common Views named-view rows remain visible
-  only through Common Views. This avoids presenting an incomplete folder-local
-  view definition as mailbox state.
+  durable, but Inbox startup enumeration does not replay broad
+  `IPM.Configuration.*` rows; only exact, bounded lookups expose those rows.
+  Bounded Common Views named-view rows remain visible only through Common Views.
+  This avoids presenting incomplete folder-local view definitions or stale
+  Outlook client preferences as mailbox state.
   Mail named-view descriptor binaries list only real message-table property
   tags used by the visible columns; they must not include synthetic placeholder
   tags or named-property IDs that are not resolvable in the active session.
@@ -295,7 +297,8 @@ non-canonical LPE state.
   fabricating unsupported Exchange preference data. Inbox associated-content
   sync does not emit broad synthetic or virtual-only rows such as aggregation,
   sharing, EAS, ELC, rule organizer, account preferences, or message-list
-  settings unless Outlook has persisted a backed row with a valid payload.
+  settings during broad Inbox associated-table scans. Exact, bounded lookups
+  may expose persisted backed rows with valid payloads.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`

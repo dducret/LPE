@@ -198,6 +198,22 @@ fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -
         .is_empty()
 }
 
+fn should_use_associated_config_table(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    if has_associated_table_rows(folder_id, snapshot) {
+        return true;
+    }
+    folder_id == INBOX_FOLDER_ID
+        && exact_message_class_restriction_value(restriction)
+            .and_then(
+                crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class,
+            )
+            .is_some()
+}
+
 fn associated_table_rows(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
@@ -1788,7 +1804,13 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             }))
                 {
                     default_calendar_configuration_property_tags()
-                } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+                } else if *associated
+                    && should_use_associated_config_table(
+                        *folder_id,
+                        snapshot,
+                        restriction.as_ref(),
+                    )
+                {
                     default_associated_config_columns()
                 } else {
                     default_contents_columns()
@@ -1878,7 +1900,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         })
                         .map(|message| serialize_conversation_action_row(message, &columns))
                         .collect::<Vec<_>>()
-                } else if has_associated_table_rows(*folder_id, snapshot) {
+                } else if should_use_associated_config_table(
+                    *folder_id,
+                    snapshot,
+                    restriction.as_ref(),
+                ) {
                     let mut rows = associated_table_rows(
                         *folder_id,
                         snapshot,
@@ -2341,7 +2367,8 @@ fn query_rows_response_columns(
                         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar))
             {
                 default_calendar_configuration_property_tags()
-            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+            } else if *associated && should_use_associated_config_table(*folder_id, snapshot, None)
+            {
                 default_associated_config_columns()
             } else {
                 default_contents_columns()
@@ -2801,7 +2828,8 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
             {
                 default_calendar_configuration_property_tags()
-            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+            } else if *associated && should_use_associated_config_table(*folder_id, snapshot, None)
+            {
                 default_associated_config_columns()
             } else {
                 match snapshot
@@ -4289,6 +4317,11 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
             message_class_restriction_matches_exact(restriction, &message.message_class)
         });
     }
+    if message.message_class.starts_with("IPM.Configuration.") {
+        return restriction.is_some_and(|restriction| {
+            message_class_restriction_matches_exact(restriction, &message.message_class)
+        }) && !is_empty_inbox_configuration_placeholder(message);
+    }
     !is_empty_inbox_configuration_placeholder(message)
 }
 
@@ -4431,7 +4464,13 @@ pub(in crate::mapi) fn rop_find_row_response(
                     default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
-                } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+                } else if *associated
+                    && should_use_associated_config_table(
+                        *folder_id,
+                        snapshot,
+                        table_restriction.as_ref(),
+                    )
+                {
                     default_associated_config_columns()
                 } else {
                     default_contents_columns()
@@ -4563,7 +4602,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                 } else {
                     return rop_find_row_no_match_response(request);
                 }
-            } else if *associated && has_associated_table_rows(*folder_id, snapshot) {
+            } else if *associated
+                && should_use_associated_config_table(*folder_id, snapshot, Some(&restriction))
+            {
                 let mut rows = associated_table_rows(
                     *folder_id,
                     snapshot,
@@ -10541,14 +10582,17 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_returns_outlook_named_view_config() {
+    fn inbox_associated_find_row_does_not_return_outlook_named_view_config() {
         let response = inbox_associated_find_row_response_for_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
         );
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(response[7], 1);
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
     }
 
     #[test]
@@ -11345,9 +11389,11 @@ mod tests {
             rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(response[7], 1);
-        assert_eq!(response[8], 0);
-        assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x8004_010F
+        );
+        assert_eq!(response.len(), 6);
     }
 
     #[test]
@@ -11395,24 +11441,11 @@ mod tests {
             Uuid::nil(),
         );
         assert_eq!(find_response[0], RopId::FindRow.as_u8());
-        assert_eq!(find_response[7], 1);
-
-        let seek_request = RopRequest {
-            rop_id: RopId::SeekRow.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload: vec![1, 1, 0, 0, 0, 0],
-        };
-        let seek_response = rop_seek_row_response(
-            &seek_request,
-            Some(&mut table),
-            &[],
-            &[],
-            &snapshot,
-            Uuid::nil(),
+        assert_eq!(
+            u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
+            0x8004_010F
         );
-        assert_eq!(seek_response[0], RopId::SeekRow.as_u8());
-        assert_eq!(table_position(&table), Some(1));
+        assert_eq!(find_response.len(), 6);
 
         let query_request = RopRequest {
             rop_id: RopId::QueryRows.as_u8(),
@@ -11474,10 +11507,10 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
@@ -11547,8 +11580,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     }
 
@@ -11617,9 +11650,9 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     }
 
     #[test]
@@ -11730,7 +11763,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_query_rows_keeps_configuration_with_stored_stream() {
+    fn inbox_associated_query_rows_suppresses_prefix_configuration_with_stored_stream() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000099);
         crate::mapi::identity::remember_mapi_identity(
@@ -11776,7 +11809,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+        assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
     }
 
     #[test]
@@ -11810,7 +11844,11 @@ mod tests {
             category_count: 0,
             expanded_count: 0,
             collapsed_categories: HashSet::new(),
-            restriction: None,
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.Configuration.AccountPrefs".to_string()),
+            }),
             bookmarks: HashMap::new(),
             next_bookmark: 1,
             position: 0,
@@ -12058,7 +12096,11 @@ mod tests {
             category_count: 0,
             expanded_count: 0,
             collapsed_categories: HashSet::new(),
-            restriction: None,
+            restriction: Some(MapiRestriction::Property {
+                relop: 0x04,
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: MapiValue::String("IPM.Configuration.AccountPrefs".to_string()),
+            }),
             bookmarks: HashMap::new(),
             next_bookmark: 1,
             position: 0,
