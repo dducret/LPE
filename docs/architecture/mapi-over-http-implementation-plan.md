@@ -249,8 +249,10 @@ non-canonical LPE state.
   objects for startup compatibility, but LPE does not advertise synthetic
   folder-local `IPM.Microsoft.FolderDesign.NamedView` rows in folder-associated
   tables. Outlook-created or imported associated configuration rows remain
-  durable, but Inbox startup enumeration does not replay broad
-  `IPM.Configuration.*` rows or `IPM.ExtendedRule.Message` rows; only exact,
+  durable, but Inbox startup enumeration does not replay broad persisted
+  `IPM.Configuration.*` rows or `IPM.ExtendedRule.Message` rows; only the
+  modeled `IPM.Configuration.MessageListSettings` row is exposed in the Inbox
+  associated table and for Outlook's broad startup prefix probe, and exact,
   bounded lookups expose supported configuration rows.
   Inbox mail folders advertise the Common Views `Compact` named view as their
   default view so `PidTagDefaultViewEntryId` targets a visible Common Views FAI
