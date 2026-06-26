@@ -788,6 +788,11 @@ fn log_mapi_session_disconnect(
         partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions);
     let partial_scope_checkpoint_not_stored_expected =
         partial_scope_checkpoint_not_stored_count > 0 && all_sync_sources_completed;
+    let post_fai_inbox_probe_loop_terminal_summary =
+        post_fai_inbox_probe_loop_terminal_summary(&session.post_hierarchy_actions);
+    let post_fai_inbox_probe_loop_terminal = post_fai_inbox_probe_loop_terminal_summary.is_some();
+    let post_fai_inbox_probe_loop_terminal_summary =
+        post_fai_inbox_probe_loop_terminal_summary.unwrap_or_default();
     let clean_client_close_after_sync = endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
         && post_hierarchy_summary.content_sync_configure_observed
@@ -984,6 +989,8 @@ fn log_mapi_session_disconnect(
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
+        post_fai_inbox_probe_loop_terminal,
+        post_fai_inbox_probe_loop_terminal_summary = %post_fai_inbox_probe_loop_terminal_summary,
         nspi_address_book_probe_only,
         outlook_profile_stage = %outlook_profile_stage,
         next_expected_client_step = %next_expected_client_step,
@@ -1102,7 +1109,9 @@ fn log_mapi_session_disconnect(
         clean_client_close_after_sync,
         post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
         next_debug_focus =
-            if clean_client_close_after_sync {
+            if post_fai_inbox_probe_loop_terminal {
+                "post_fai_inbox_folder_type_probe_loop"
+            } else if clean_client_close_after_sync {
                 "outlook_reconnect_or_client_side_reason"
             } else if incomplete_sync_source_count > 0 {
                 "unfinished_sync_source"
@@ -1117,11 +1126,35 @@ fn log_mapi_session_disconnect(
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
+        post_fai_inbox_probe_loop_terminal,
+        post_fai_inbox_probe_loop_terminal_summary = %post_fai_inbox_probe_loop_terminal_summary,
         nspi_address_book_probe_only,
         outlook_profile_stage = %outlook_profile_stage,
         next_expected_client_step = %next_expected_client_step,
         "rca debug mapi disconnect verdict"
     );
+
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && post_fai_inbox_probe_loop_terminal
+    {
+        tracing::warn!(
+            rca_debug = true,
+            rca_warning = "post_fai_inbox_folder_type_probe_loop_terminal",
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            post_fai_inbox_probe_loop_terminal_summary =
+                %post_fai_inbox_probe_loop_terminal_summary,
+            recent_execute_summaries = %recent_execute_summaries,
+            outlook_view_failure_trace_summary = %outlook_view_failure_trace_summary,
+            "rca debug mapi terminal post fai inbox folder type probe loop"
+        );
+    }
 
     if incomplete_sync_source_count > 0 {
         tracing::warn!(
@@ -1507,6 +1540,43 @@ fn partial_scope_checkpoint_not_stored_count(actions: &PostHierarchyActionState)
         .iter()
         .filter(|summary| summary.contains("status=ok_partial_scope_no_checkpoint"))
         .count()
+}
+
+fn post_fai_inbox_probe_loop_terminal_summary(
+    actions: &PostHierarchyActionState,
+) -> Option<String> {
+    if !actions.post_inbox_fai_folder_type_probe_loop_logged
+        || !actions.inbox_associated_contents_table_observed
+        || actions.inbox_normal_contents_table_observed
+        || actions.inbox_open_folder_probe_count < 2
+        || actions.inbox_folder_type_getprops_probe_count < 2
+    {
+        return None;
+    }
+
+    Some(format!(
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};associated_contents_table_observed={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};last_open={};last_folder_type_getprops={};last_associated_query={};last_associated_find={};last_inbox_related_release={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        actions.inbox_open_folder_probe_count,
+        actions.inbox_folder_type_getprops_probe_count,
+        actions.inbox_associated_contents_table_observed,
+        actions.inbox_normal_contents_table_observed,
+        actions.inbox_normal_contents_table_setcolumns_observed,
+        actions.inbox_normal_contents_table_query_rows_observed,
+        debug_context_or_none(&actions.last_inbox_open_folder_context),
+        debug_context_or_none(&actions.last_inbox_folder_type_getprops_context),
+        debug_context_or_none(&actions.last_inbox_associated_query_context),
+        debug_context_or_none(&actions.last_inbox_associated_find_context),
+        debug_context_or_none(&actions.last_inbox_related_release_context),
+        actions.recent_probe_actions.join(">")
+    ))
+}
+
+fn debug_context_or_none(context: &str) -> &str {
+    if context.is_empty() {
+        "none"
+    } else {
+        context
+    }
 }
 
 fn format_rop_ids_for_debug(rop_ids: &[u8]) -> String {
@@ -3000,6 +3070,39 @@ mod tests {
             partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions),
             1
         );
+    }
+
+    #[test]
+    fn post_fai_inbox_probe_loop_terminal_summary_requires_no_normal_contents() {
+        let mut state = PostHierarchyActionState {
+            post_inbox_fai_folder_type_probe_loop_logged: true,
+            inbox_associated_contents_table_observed: true,
+            inbox_open_folder_probe_count: 4,
+            inbox_folder_type_getprops_probe_count: 4,
+            last_inbox_open_folder_context: "output_handle=19".to_string(),
+            last_inbox_folder_type_getprops_context: "folder_type=1".to_string(),
+            last_inbox_associated_query_context: "returned=6".to_string(),
+            last_inbox_related_release_context: "handle=13;role=ipm_subtree".to_string(),
+            recent_probe_actions: vec![
+                "OpenFolder(in=1,handle=8,out=19,folder=0x0000000000050001)".to_string(),
+                "GetPropertiesSpecific(in=2,handle=19,tags=0x36010003)".to_string(),
+            ],
+            ..PostHierarchyActionState::default()
+        };
+
+        let summary = post_fai_inbox_probe_loop_terminal_summary(&state).unwrap();
+
+        assert!(summary.contains("open_folder_count=4"));
+        assert!(summary.contains("folder_type_getprops_count=4"));
+        assert!(summary.contains("normal_contents_table_observed=false"));
+        assert!(summary.contains("last_folder_type_getprops=folder_type=1"));
+        assert!(summary.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        ));
+
+        state.inbox_normal_contents_table_observed = true;
+
+        assert!(post_fai_inbox_probe_loop_terminal_summary(&state).is_none());
     }
 
     #[test]
