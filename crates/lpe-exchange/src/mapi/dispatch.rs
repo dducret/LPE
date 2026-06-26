@@ -12407,6 +12407,32 @@ fn append_exact_virtual_inbox_debug_associated_config(
     if folder_id != INBOX_FOLDER_ID {
         return;
     }
+    if restriction.is_none()
+        || restriction.is_some_and(|restriction| {
+            matches!(
+                restriction,
+                MapiRestriction::Property {
+                    relop: 0x02,
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    value: MapiValue::String(value),
+                } | MapiRestriction::Content {
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    value,
+                    ..
+                } if value.eq_ignore_ascii_case("IPM.Configuration.")
+            )
+        })
+    {
+        for message in crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults() {
+            if !messages.iter().any(|existing| {
+                existing
+                    .message_class
+                    .eq_ignore_ascii_case(&message.message_class)
+            }) {
+                messages.push(message);
+            }
+        }
+    }
     let Some(message_class) = debug_exact_message_class_restriction_value(restriction) else {
         return;
     };
