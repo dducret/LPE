@@ -7288,15 +7288,13 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let sync_flags = cursor.read_u16()?;
             let mut payload = vec![sync_type, send_options];
             payload.extend_from_slice(&sync_flags.to_le_bytes());
-            if cursor.remaining() > 0 {
-                let restriction_size = cursor.read_u16()? as usize;
-                payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
-                payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
-                payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
-                let property_tag_count = cursor.read_u16()? as usize;
-                payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
-                payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
-            }
+            let restriction_size = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            let property_tag_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -9011,6 +9009,33 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0x6E, u32::MAX, u32::MAX]
         );
+
+        let sync_then_upload = [
+            0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+            0x02, 0x09, 0x01, 0x01, // type, send options, flags
+            0x00, 0x00, // RestrictionDataSize
+            0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+            0x00, 0x00, // PropertyTagCount
+            0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+            0x17, 0x40, 0x00, 0x03, // MetaTagIdsetGiven
+            0x00, 0x00, 0x00, 0x00, // stream size
+        ];
+        let mut cursor = Cursor::new(&sync_then_upload);
+        let sync_configure = read_rop_request(&mut cursor).unwrap();
+        let upload_begin = read_rop_request(&mut cursor).unwrap();
+        assert_eq!(
+            sync_configure.rop_id,
+            RopId::SynchronizationConfigure.as_u8()
+        );
+        assert_eq!(
+            sync_configure.payload,
+            vec![0x02, 0x09, 0x01, 0x01, 0, 0, 1, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            upload_begin.rop_id,
+            RopId::SynchronizationUploadStateStreamBegin.as_u8()
+        );
+        assert_eq!(cursor.remaining(), 0);
 
         let release_pair = [
             0x08, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x6F, 0x00, 0x00, 0x00, 0x6E, 0x00,

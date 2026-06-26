@@ -2449,6 +2449,9 @@ pub(in crate::mapi) fn default_view_uses_common_views(
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    if mapi_folder_id(mailbox) == SYNC_ISSUES_FOLDER_ID {
+        return false;
+    }
     !mailboxes.is_empty()
         && mailboxes
             .iter()
@@ -9925,6 +9928,28 @@ mod tests {
         );
         assert_eq!(
             mailbox_property_value_with_context(&child, &mailboxes, PID_TAG_SUBFOLDERS),
+            Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn sync_issues_folder_properties_stay_leaf_with_persisted_children() {
+        let parent = mailbox(
+            "11111111-1111-1111-1111-11111111111a",
+            None,
+            "sync_issues",
+            "Sync Issues",
+        );
+        let child = mailbox(
+            "11111111-1111-1111-1111-11111111111b",
+            Some(parent.id),
+            "conflicts",
+            "Conflicts",
+        );
+        let mailboxes = vec![parent.clone(), child];
+
+        assert_eq!(
+            mailbox_property_value_with_context(&parent, &mailboxes, PID_TAG_SUBFOLDERS),
             Some(MapiValue::Bool(false))
         );
     }

@@ -982,15 +982,6 @@ fn hierarchy_rows_excluding_deleted<'a>(
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
         }
-    } else if folder_id == SYNC_ISSUES_FOLDER_ID {
-        for special_folder_id in SYNC_ISSUES_HIERARCHY_FOLDER_IDS {
-            if !deleted_advertised_special_folders.contains(special_folder_id)
-                && folder_ids.insert(*special_folder_id)
-                && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
-            {
-                rows.push(HierarchyRow::Special(*special_folder_id));
-            }
-        }
     } else if folder_id == SEARCH_FOLDER_ID {
         for special_folder_id in SEARCH_HIERARCHY_FOLDER_IDS {
             if !deleted_advertised_special_folders.contains(special_folder_id)
@@ -1075,14 +1066,7 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SYNC_ISSUES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
-];
-
-const SYNC_ISSUES_HIERARCHY_FOLDER_IDS: &[u64] = &[
-    CONFLICTS_FOLDER_ID,
-    LOCAL_FAILURES_FOLDER_ID,
-    SERVER_FAILURES_FOLDER_ID,
 ];
 
 const SEARCH_HIERARCHY_FOLDER_IDS: &[u64] = &[CONTACTS_SEARCH_FOLDER_ID];
@@ -1299,7 +1283,7 @@ fn log_sync_issues_hierarchy_query_rows(
     sort_orders: &[MapiSortOrder],
     position: usize,
     rows: &[HierarchyRow<'_>],
-    mailbox_guid: Uuid,
+    _mailbox_guid: Uuid,
 ) {
     if folder_id != SYNC_ISSUES_FOLDER_ID {
         return;
@@ -1324,17 +1308,7 @@ fn log_sync_issues_hierarchy_query_rows(
         })
         .collect::<Vec<_>>()
         .join("|");
-    let child_candidate_summary = SYNC_ISSUES_HIERARCHY_FOLDER_IDS
-        .iter()
-        .map(|child_id| {
-            format!(
-                "folder_id=0x{child_id:016x}:display_name={}:restriction_match={}",
-                special_folder_metadata(*child_id).0,
-                special_hierarchy_row_matches(*child_id, restriction, mailbox_guid)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("|");
+    let child_candidate_summary = "suppressed_until_backed";
 
     tracing::info!(
         rca_debug = true,
@@ -1413,7 +1387,9 @@ pub(in crate::mapi) fn special_folder_property_value(
         }
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
-        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(
+            has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID,
+        )),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(matches!(
             folder_id,
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
@@ -5956,7 +5932,9 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
                 write_u32(&mut row, 0)
             }
-            PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
+            PID_TAG_SUBFOLDERS => {
+                row.push((has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID) as u8)
+            }
             PID_TAG_ATTRIBUTE_HIDDEN => row.push(matches!(
                 folder_id,
                 CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
@@ -7223,7 +7201,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_issues_hierarchy_table_projects_special_child_folders() {
+    fn sync_issues_hierarchy_table_is_leaf_until_backed() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let inbox = JmapMailbox {
             id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
@@ -7248,17 +7226,7 @@ mod tests {
         );
         let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
 
-        assert_eq!(
-            row_ids,
-            vec![
-                CONFLICTS_FOLDER_ID,
-                LOCAL_FAILURES_FOLDER_ID,
-                SERVER_FAILURES_FOLDER_ID
-            ]
-        );
-        for row in rows {
-            assert_eq!(hierarchy_row_parent_id(&row, &[]), SYNC_ISSUES_FOLDER_ID);
-        }
+        assert!(row_ids.is_empty());
     }
 
     #[test]
@@ -7304,7 +7272,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_issues_query_rows_projects_special_child_folders() {
+    fn sync_issues_query_rows_returns_no_children_until_backed() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let inbox = JmapMailbox {
             id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
@@ -7350,12 +7318,106 @@ mod tests {
         );
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 3);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
         assert!(utf16_position(&response, "INBOX").is_none());
-        assert_response_contains_utf16(&response, "Conflicts");
-        assert_response_contains_utf16(&response, "Local Failures");
-        assert_response_contains_utf16(&response, "Server Failures");
-        assert_eq!(table_position(&table), Some(3));
+        assert!(utf16_position(&response, "Conflicts").is_none());
+        assert!(utf16_position(&response, "Local Failures").is_none());
+        assert!(utf16_position(&response, "Server Failures").is_none());
+        assert_eq!(table_position(&table), Some(0));
+    }
+
+    #[test]
+    fn persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy() {
+        let sync_id = Uuid::parse_str("11111111-1111-1111-1111-11111111111a").unwrap();
+        let mailboxes = vec![
+            JmapMailbox {
+                id: sync_id,
+                parent_id: None,
+                role: "sync_issues".to_string(),
+                name: "Sync Issues".to_string(),
+                sort_order: 90,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: Uuid::parse_str("11111111-1111-1111-1111-11111111111b").unwrap(),
+                parent_id: Some(sync_id),
+                role: "conflicts".to_string(),
+                name: "Conflicts".to_string(),
+                sort_order: 91,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: Uuid::parse_str("11111111-1111-1111-1111-11111111111c").unwrap(),
+                parent_id: Some(sync_id),
+                role: "local_failures".to_string(),
+                name: "Local Failures".to_string(),
+                sort_order: 92,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: Uuid::parse_str("11111111-1111-1111-1111-11111111111d").unwrap(),
+                parent_id: Some(sync_id),
+                role: "server_failures".to_string(),
+                name: "Server Failures".to_string(),
+                sort_order: 93,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            },
+        ];
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        let row_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
+
+        assert!(row_ids.contains(&SYNC_ISSUES_FOLDER_ID));
+        assert!(!row_ids.contains(&CONFLICTS_FOLDER_ID));
+        assert!(!row_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
+        assert!(!row_ids.contains(&SERVER_FAILURES_FOLDER_ID));
+        let sync_row = rows
+            .iter()
+            .find(|row| hierarchy_row_id(row) == SYNC_ISSUES_FOLDER_ID)
+            .expect("sync issues startup row");
+        assert_eq!(
+            serialize_hierarchy_row(
+                *sync_row,
+                &mailboxes,
+                &snapshot,
+                &[PID_TAG_SUBFOLDERS],
+                Uuid::nil(),
+            ),
+            vec![0]
+        );
+        assert!(!mailbox_has_subfolders(&mailboxes[0], &mailboxes));
+        assert!(hierarchy_rows(
+            SYNC_ISSUES_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        )
+        .is_empty());
     }
 
     #[test]
@@ -9345,7 +9407,7 @@ mod tests {
         assert!(!row_ids.contains(&quick_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&tasks_shadow_folder_id));
-        assert!(row_ids.contains(&quick_step_shadow_folder_id));
+        assert!(!row_ids.contains(&quick_step_shadow_folder_id));
         assert_eq!(
             rows.iter()
                 .filter(|row| hierarchy_row_display_name(row) == "Tasks")
@@ -9369,7 +9431,7 @@ mod tests {
         assert!(!sync_ids.contains(&quick_contacts_shadow_folder_id));
         assert!(!sync_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!sync_ids.contains(&tasks_shadow_folder_id));
-        assert!(sync_ids.contains(&quick_step_shadow_folder_id));
+        assert!(!sync_ids.contains(&quick_step_shadow_folder_id));
 
         let calendar_row = rows
             .iter()
@@ -16633,6 +16695,9 @@ fn mapi_parent_folder_id(mailbox: &JmapMailbox) -> u64 {
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    if mapi_folder_id(mailbox) == SYNC_ISSUES_FOLDER_ID {
+        return false;
+    }
     !mailboxes.is_empty()
         && mailboxes
             .iter()

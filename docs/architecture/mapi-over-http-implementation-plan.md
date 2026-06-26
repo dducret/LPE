@@ -94,6 +94,10 @@ before it is advertised.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
+- Per `[MS-OXCROPS]` section 2.2.13.1.1,
+  `RopSynchronizationConfigure` always carries `RestrictionDataSize`,
+  `SynchronizationExtraFlags`, `PropertyTagCount`, and `PropertyTags`; the
+  parser must consume those fields before reading the next ROP in a batch.
 
 ### Table Projection Contract
 
@@ -258,6 +262,13 @@ non-canonical LPE state.
   `PtypString8` / `PtypMultipleString8` for text view columns, while the
   message table projection accepts and serializes both those ANSI tags and the
   Unicode tags Outlook also asks for in live traces.
+  Sync Issues remains an exact-ID Outlook special folder, but startup hierarchy
+  tables advertise it as a leaf until LPE backs its Conflicts, Local Failures,
+  and Server Failures child folders with real canonical or compatibility
+  semantics. Quick Step Settings also remains exact-ID/openable compatibility
+  state, not an IPM subtree startup hierarchy row. This keeps Outlook from
+  walking unsupported virtual hierarchy branches before opening normal Inbox
+  contents.
   Tasks, To-Do, Notes, and Journal do not advertise `PidTagDefaultViewEntryId`
   and must not inherit the mail default-view descriptor until LPE has
   type-specific Outlook view descriptors and contents row projections for those

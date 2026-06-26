@@ -25806,21 +25806,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
         ),
         (
-            "Conflicts",
-            "IPF.Note",
-            crate::mapi::identity::CONFLICTS_FOLDER_ID,
-        ),
-        (
-            "Local Failures",
-            "IPF.Note",
-            crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
-        ),
-        (
-            "Server Failures",
-            "IPF.Note",
-            crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
-        ),
-        (
             "Junk E-mail",
             "IPF.Note",
             crate::mapi::identity::JUNK_FOLDER_ID,
@@ -25835,11 +25820,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "IPF.Note",
             crate::mapi::identity::ARCHIVE_FOLDER_ID,
         ),
-        (
-            "Quick Step Settings",
-            "IPF.Configuration",
-            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-        ),
     ] {
         assert!(contains_bytes(&response_rops, &utf16z(name)));
         assert!(contains_bytes(&response_rops, &utf16z(class)));
@@ -25852,6 +25832,14 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
         &response_rops,
         &utf16z("Conversation History")
     ));
+    for name in [
+        "Conflicts",
+        "Local Failures",
+        "Server Failures",
+        "Quick Step Settings",
+    ] {
+        assert!(!contains_bytes(&response_rops, &utf16z(name)));
+    }
     assert!(!contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(

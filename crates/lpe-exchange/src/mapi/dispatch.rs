@@ -32913,7 +32913,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_query_rows_total_count_includes_sync_issues_children() {
+    fn bootstrap_query_rows_total_count_keeps_sync_issues_leaf_until_backed() {
         let object = MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
             columns: default_hierarchy_columns(),
@@ -32937,7 +32937,7 @@ mod tests {
                 &MapiMailStoreSnapshot::empty(),
                 Uuid::nil(),
             ),
-            Some(3)
+            Some(0)
         );
     }
 
