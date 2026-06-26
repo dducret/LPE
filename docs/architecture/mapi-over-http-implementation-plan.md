@@ -252,7 +252,10 @@ non-canonical LPE state.
   durable, but Inbox startup enumeration does not replay broad
   `IPM.Configuration.*` rows or `IPM.ExtendedRule.Message` rows; only exact,
   bounded lookups expose supported configuration rows.
-  Bounded Common Views named-view rows remain visible only through Common Views.
+  Inbox mail folders advertise the Common Views `Compact` named view as their
+  default view so `PidTagDefaultViewEntryId` targets a visible Common Views FAI
+  row instead of a hidden folder-local named-view projection. Bounded Common
+  Views named-view rows remain visible only through Common Views.
   This avoids presenting incomplete folder-local view definitions or stale
   Outlook client preferences as mailbox state.
   Mail named-view descriptor binaries list only real message-table property

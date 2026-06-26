@@ -9824,8 +9824,28 @@ fn format_outlook_view_handoff_table_contract(
     if !is_outlook_folder_table_debug_target(folder_id) {
         return String::new();
     }
-    let view = debug_default_folder_associated_named_view(snapshot, folder_id);
-    let folder_local_default_supported = view.is_some();
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| advertised_special_folder_container_class(folder_id));
+    let uses_common_views = container_class
+        .is_some_and(|container_class| default_view_uses_common_views(container_class, folder_id));
+    let (view_folder_id, expected_view_message_id, view) = if uses_common_views {
+        (
+            COMMON_VIEWS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            snapshot.common_view_named_view_message_for_id(
+                crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            ),
+        )
+    } else {
+        (
+            folder_id,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            debug_default_folder_associated_named_view(snapshot, folder_id),
+        )
+    };
+    let folder_local_default_supported = !uses_common_views && view.is_some();
     let folder_local_default_visible_in_fai_table = false;
     let descriptor_summary = view
         .as_ref()
@@ -9849,10 +9869,11 @@ fn format_outlook_view_handoff_table_contract(
     format!(
         "folder_local_default_supported={folder_local_default_supported};\
          folder_local_default_visible_in_fai_table={folder_local_default_visible_in_fai_table};\
+         advertised_default_view_folder_id=0x{view_folder_id:016x};\
          expected_view_message_id=0x{:016x};selected_property_tag_count={};\
          selected_missing_descriptor_columns={selected_missing_descriptor_columns};\
          descriptor_summary={descriptor_summary}",
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        expected_view_message_id,
         columns.len()
     )
 }
@@ -28691,7 +28712,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
+    fn inbox_view_handoff_table_contract_reports_common_views_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             INBOX_FOLDER_ID,
@@ -28700,9 +28721,12 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_supported=false"));
         assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
-        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+        assert!(contract.contains(&format!(
+            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        )));
+        assert!(contract.contains("expected_view_message_id=0x7ffffffffff70001"));
     }
 
     #[test]
@@ -28730,7 +28754,7 @@ mod tests {
     }
 
     #[test]
-    fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
+    fn junk_view_handoff_table_contract_reports_common_views_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             JUNK_FOLDER_ID,
@@ -28739,9 +28763,12 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_supported=false"));
         assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
-        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+        assert!(contract.contains(&format!(
+            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        )));
+        assert!(contract.contains("expected_view_message_id=0x7ffffffffff70001"));
     }
 
     #[test]
@@ -32787,11 +32814,13 @@ mod tests {
             default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
 
         assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-        assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
-        assert!(debug.contains("decoded_folder_name=inbox"));
+        assert!(debug.contains(&format!(
+            "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        )));
+        assert!(debug.contains("decoded_folder_name=common_views"));
         assert!(debug.contains(&format!(
             "decoded_message_id=0x{:016x}",
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
         )));
     }
 
