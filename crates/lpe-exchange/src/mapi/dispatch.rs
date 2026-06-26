@@ -3506,6 +3506,74 @@ fn inbox_post_fai_reopen_stall_observed(state: &PostHierarchyActionState) -> boo
         && !state.last_inbox_related_release_context.is_empty()
 }
 
+fn format_inbox_fai_handoff_visibility_context(
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    account_id: Uuid,
+) -> String {
+    let unfiltered_rows = debug_associated_table_rows(INBOX_FOLDER_ID, snapshot, None, account_id);
+    let current_rows =
+        debug_associated_table_rows(INBOX_FOLDER_ID, snapshot, restriction, account_id);
+    let prefix_restriction = MapiRestriction::Content {
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: "IPM.Configuration.".to_string(),
+        fuzzy_level_low: 0x0002,
+        fuzzy_level_high: 0x0001,
+    };
+    let prefix_rows = debug_associated_table_rows(
+        INBOX_FOLDER_ID,
+        snapshot,
+        Some(&prefix_restriction),
+        account_id,
+    );
+    let named_view_restriction = MapiRestriction::Property {
+        relop: 0x04,
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: MapiValue::String(
+            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
+        ),
+    };
+    let named_view_rows = debug_associated_table_rows(
+        INBOX_FOLDER_ID,
+        snapshot,
+        Some(&named_view_restriction),
+        account_id,
+    );
+    let default_view = debug_default_folder_associated_named_view(snapshot, INBOX_FOLDER_ID);
+    format!(
+        "default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
+        default_view
+            .as_ref()
+            .map(|view| format!("0x{:016x}", view.id))
+            .unwrap_or_else(|| "none".to_string()),
+        restriction
+            .map(format_debug_parsed_restriction)
+            .unwrap_or_default(),
+        current_rows.len(),
+        format_debug_associated_row_list(&current_rows),
+        unfiltered_rows.len(),
+        format_debug_associated_row_list(&unfiltered_rows),
+        prefix_rows.len(),
+        format_debug_associated_row_list(&prefix_rows),
+        named_view_rows.len(),
+        format_debug_associated_row_list(&named_view_rows)
+    )
+}
+
+fn format_debug_associated_row_list(rows: &[DebugAssociatedTableRow]) -> String {
+    rows.iter()
+        .map(|row| {
+            format!(
+                "id=0x{:016x};class={};subject={}",
+                debug_associated_row_id(row),
+                debug_associated_row_class(row),
+                debug_associated_row_subject(row)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn format_inbox_hierarchy_query_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
@@ -13660,7 +13728,7 @@ where
                             associated_folder_message_count(*folder_id, snapshot);
                         Some((
                             format!(
-                                "handle={};folder=0x{folder_id:016x};position={position};columns={};sort={};restriction={};filtered_row_count={};unfiltered_row_count={}",
+                                "handle={};folder=0x{folder_id:016x};position={position};columns={};sort={};restriction={};filtered_row_count={};unfiltered_row_count={};handoff_visibility={}",
                                 format_optional_debug_handle(released_handle),
                                 format_debug_property_tags(columns),
                                 format_debug_sort_orders(sort_orders),
@@ -13669,7 +13737,12 @@ where
                                     .map(format_debug_parsed_restriction)
                                     .unwrap_or_default(),
                                 filtered_row_count,
-                                unfiltered_row_count
+                                unfiltered_row_count,
+                                format_inbox_fai_handoff_visibility_context(
+                                    snapshot,
+                                    restriction.as_ref(),
+                                    principal.account_id,
+                                )
                             ),
                             format_inbox_post_fai_handoff_context(
                                 &session.post_hierarchy_actions,
@@ -28566,6 +28639,30 @@ mod tests {
         assert!(contract.contains("folder_local_default_supported=true"));
         assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    }
+
+    #[test]
+    fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let prefix_restriction = MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: "IPM.Configuration.".to_string(),
+            fuzzy_level_low: 0x0002,
+            fuzzy_level_high: 0x0001,
+        };
+
+        let context = format_inbox_fai_handoff_visibility_context(
+            &snapshot,
+            Some(&prefix_restriction),
+            Uuid::nil(),
+        );
+
+        assert!(context.contains("default_view_id=0x7fffffffffe90001"));
+        assert!(context.contains("current_count=0"));
+        assert!(context.contains("unfiltered_count=1"));
+        assert!(context.contains("prefix_ipm_configuration_count=0"));
+        assert!(context.contains("exact_named_view_count=1"));
+        assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
     }
 
     #[test]
