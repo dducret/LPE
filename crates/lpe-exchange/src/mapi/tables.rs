@@ -4736,6 +4736,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     }
                     if broad_outlook_configuration_probe {
                         *table_restriction = Some(outlook_configuration_prefix_restriction());
+                        *position = 0;
                         tracing::info!(
                             rca_debug = true,
                             adapter = "mapi",
@@ -11599,6 +11600,121 @@ mod tests {
         assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
         assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
         assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    }
+
+    #[test]
+    fn inbox_associated_broad_find_row_resets_cursor_for_restricted_followup() {
+        let account_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1608);
+        let earlier_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1609);
+        let persisted_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1610);
+        crate::mapi::identity::remember_mapi_identity(
+            earlier_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 800,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            persisted_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 801,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: earlier_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.ClientOptions".to_string(),
+                subject: "ClientOptions".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.MessageListSettings".to_string(),
+                subject: "IPM.Configuration.MessageListSettings".to_string(),
+                properties_json: serde_json::json!({
+                    "0x001a001f": {
+                        "type": "string",
+                        "value": "IPM.Configuration.MessageListSettings"
+                    },
+                    "0x7c070102": {
+                        "type": "binary",
+                        "value": "3c786d6c2f3e"
+                    }
+                }),
+            },
+        ]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            columns_set: true,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.");
+        let mut find_payload = vec![0];
+        find_payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        find_payload.extend_from_slice(&restriction);
+        find_payload.push(1);
+        find_payload.extend_from_slice(&0u16.to_le_bytes());
+        let find_response = rop_find_row_response(
+            &RopRequest {
+                rop_id: RopId::FindRow.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: find_payload,
+            },
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(find_response[0], RopId::FindRow.as_u8());
+        assert_eq!(
+            u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
+            0
+        );
+        assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
+        assert_eq!(table_position(&table), Some(0));
+
+        let query_response = rop_query_rows_response(
+            &RopRequest {
+                rop_id: RopId::QueryRows.as_u8(),
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: vec![0, 1, 50, 0],
+            },
+            Some(&mut table),
+            &[],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
+
+        assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+        assert_eq!(
+            u16::from_le_bytes([query_response[7], query_response[8]]),
+            1
+        );
+        assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
+        assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
     }
 
     #[test]
