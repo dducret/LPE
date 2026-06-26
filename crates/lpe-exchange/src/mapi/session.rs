@@ -125,6 +125,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) inbox_loop_transition_logged: bool,
     pub(in crate::mapi) post_inbox_fai_handoff_logged: bool,
     pub(in crate::mapi) post_inbox_fai_reopen_logged: bool,
+    pub(in crate::mapi) post_inbox_fai_folder_type_probe_loop_logged: bool,
     pub(in crate::mapi) post_rule_organizer_stream_reopen_logged: bool,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
     pub(in crate::mapi) outlook_view_failure_trace_events: Vec<String>,
@@ -1066,6 +1067,11 @@ impl MapiSession {
 
     pub(in crate::mapi) fn mark_post_inbox_fai_reopen_logged(&mut self) {
         self.post_hierarchy_actions.post_inbox_fai_reopen_logged = true;
+    }
+
+    pub(in crate::mapi) fn mark_post_inbox_fai_folder_type_probe_loop_logged(&mut self) {
+        self.post_hierarchy_actions
+            .post_inbox_fai_folder_type_probe_loop_logged = true;
     }
 
     pub(in crate::mapi) fn mark_post_rule_organizer_stream_reopen_logged(&mut self) {

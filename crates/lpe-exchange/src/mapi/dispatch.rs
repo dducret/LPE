@@ -3506,6 +3506,32 @@ fn inbox_post_fai_reopen_stall_observed(state: &PostHierarchyActionState) -> boo
         && !state.last_inbox_related_release_context.is_empty()
 }
 
+fn format_post_fai_folder_type_probe_loop_context(
+    state: &PostHierarchyActionState,
+) -> Option<String> {
+    if !state.post_inbox_fai_handoff_logged
+        || !state.post_inbox_fai_reopen_logged
+        || state.post_inbox_fai_folder_type_probe_loop_logged
+        || state.inbox_normal_contents_table_observed
+        || state.inbox_open_folder_probe_count < 2
+        || state.inbox_folder_type_getprops_probe_count < 2
+    {
+        return None;
+    }
+    Some(format!(
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};associated_contents_table_observed={};last_open={};last_folder_type_getprops={};last_associated_query={};last_associated_find={};last_inbox_related_release={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        state.inbox_open_folder_probe_count,
+        state.inbox_folder_type_getprops_probe_count,
+        state.inbox_associated_contents_table_observed,
+        debug_context_or_none(&state.last_inbox_open_folder_context),
+        debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
+        debug_context_or_none(&state.last_inbox_associated_query_context),
+        debug_context_or_none(&state.last_inbox_associated_find_context),
+        debug_context_or_none(&state.last_inbox_related_release_context),
+        state.recent_probe_actions.join(">")
+    ))
+}
+
 fn format_inbox_fai_handoff_visibility_context(
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
@@ -15474,6 +15500,29 @@ where
                             context,
                             format_inbox_folder_type_getprops_response_context(&property_response)
                         ));
+                    }
+                    if let Some(context) = format_post_fai_folder_type_probe_loop_context(
+                        &session.post_hierarchy_actions,
+                    ) {
+                        session.record_outlook_view_failure_trace_event(format!(
+                            "post_fai_folder_type_probe_loop:{context}"
+                        ));
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x07",
+                            mapi_request_id = request_id,
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            input_handle_value =
+                                %format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                            probe_loop_context = %context,
+                            "rca debug mapi post fai inbox folder type probe loop"
+                        );
+                        session.mark_post_inbox_fai_folder_type_probe_loop_logged();
                     }
                     if let Some(summary) =
                         format_inbox_open_loop_summary(&session.post_hierarchy_actions)
@@ -31286,6 +31335,41 @@ mod tests {
         assert!(context.contains(
             "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
         ));
+    }
+
+    #[test]
+    fn post_fai_folder_type_probe_loop_context_requires_reopen_and_repeated_probes() {
+        let mut state = PostHierarchyActionState::default();
+        state.post_inbox_fai_handoff_logged = true;
+        state.post_inbox_fai_reopen_logged = true;
+        state.inbox_associated_contents_table_observed = true;
+        state.inbox_open_folder_probe_count = 3;
+        state.inbox_folder_type_getprops_probe_count = 2;
+        state.last_inbox_open_folder_context = "output_handle=25".to_string();
+        state.last_inbox_folder_type_getprops_context = "folder_type=1".to_string();
+        state.last_inbox_associated_query_context = "window=returned=6".to_string();
+        state.last_inbox_related_release_context = "handle=20;role=ipm_subtree".to_string();
+        state
+            .recent_probe_actions
+            .push("OpenFolder(in=1,handle=8,out=25,folder=0x0000000000050001)".to_string());
+        state
+            .recent_probe_actions
+            .push("GetPropertiesSpecific(in=2,handle=25,tags=0x36010003)".to_string());
+
+        let context = format_post_fai_folder_type_probe_loop_context(&state).unwrap();
+
+        assert!(context.contains("open_folder_count=3"));
+        assert!(context.contains("folder_type_getprops_count=2"));
+        assert!(context.contains("last_open=output_handle=25"));
+        assert!(context.contains("last_folder_type_getprops=folder_type=1"));
+        assert!(context.contains("last_associated_query=window=returned=6"));
+        assert!(context.contains("last_inbox_related_release=handle=20;role=ipm_subtree"));
+        assert!(context.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        ));
+
+        state.inbox_normal_contents_table_observed = true;
+        assert!(format_post_fai_folder_type_probe_loop_context(&state).is_none());
     }
 
     #[test]
