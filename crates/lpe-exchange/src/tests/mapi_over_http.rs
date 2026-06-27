@@ -38265,14 +38265,14 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
                 .try_into()
                 .unwrap()
         ),
-        3
+        4
     );
     assert!(contains_bytes(response_rops, b"IPM\0"));
     assert!(contains_bytes(response_rops, b"IPM.Note\0"));
     assert!(contains_bytes(response_rops, b"IPM.Appointment\0"));
     let mut row_offset = table_offset + 10;
     let mut receive_folder_rows = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         assert_eq!(response_rops[row_offset], 0);
         row_offset += 1;
         let folder_id = crate::mapi::identity::object_id_from_wire_id(
@@ -38296,11 +38296,18 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
         row_offset += 8;
         receive_folder_rows.push((message_class, folder_id, last_modified));
     }
-    assert_eq!(receive_folder_rows[0].0, "IPM.Appointment");
-    assert_eq!(
-        receive_folder_rows[0].1,
-        crate::mapi::identity::CALENDAR_FOLDER_ID
-    );
+    assert!(receive_folder_rows
+        .iter()
+        .any(|(message_class, folder_id, last_modified)| {
+            message_class.is_empty()
+                && *folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+                && *last_modified
+                    == mapi_mailstore::filetime_from_change_number(
+                        mapi_mailstore::change_number_for_store_id(
+                            crate::mapi::identity::INBOX_FOLDER_ID,
+                        ),
+                    )
+        }));
     assert!(receive_folder_rows
         .iter()
         .any(|(message_class, folder_id, _)| {

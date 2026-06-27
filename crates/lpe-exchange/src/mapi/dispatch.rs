@@ -3763,14 +3763,15 @@ fn format_post_fai_hierarchy_release_without_inbox_contents_context(
     {
         return None;
     }
-    let row_count = hierarchy_row_count_excluding_deleted(
+    let computed_row_count = hierarchy_row_count_excluding_deleted(
         *folder_id,
         mailboxes,
         snapshot,
         deleted_advertised_special_folders,
     );
+    let row_count = computed_row_count.max((*position).min(u32::MAX as usize) as u32);
     Some(format!(
-        "handle={};folder=0x{folder_id:016x};role={};position={position};row_count={row_count};columns={};sort={};restriction={};last_associated_query={};last_hierarchy_table={};last_hierarchy_query={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        "handle={};folder=0x{folder_id:016x};role={};position={position};row_count={row_count};computed_row_count={computed_row_count};columns={};sort={};restriction={};last_associated_query={};last_hierarchy_table={};last_hierarchy_query={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
         format_optional_debug_handle(released_handle),
         debug_role_for_folder_id(*folder_id),
         format_debug_property_tags(columns),
@@ -14287,6 +14288,8 @@ where
                     &same_execute_released_handles,
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                let open_folder_response =
+                    rop_open_folder_response(&request, is_public_folder_ghosted);
                 if folder_id == INBOX_FOLDER_ID {
                     let first_loop_transition = format!(
                         "trigger=open_folder;open_probe_before={};folder_type_probe_before={};input_index={};input_handle={};input_kind={};input_folder={};input_context={};output_index={};output_handle={};open_mode=0x{:02x};requested_folder=0x{requested_folder_id:016x};resolved_folder=0x{folder_id:016x};alias_resolved={};recent_before={}",
@@ -14318,7 +14321,7 @@ where
                     }
                     session.record_inbox_open_folder_probe();
                     session.record_last_inbox_open_folder_context(format!(
-                        "input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={};open_mode=0x{:02x};display_name={};folder_type={};container_class={};content_count={};unread_count={};subfolders={};record_key={};source_key={};parent_source_key={}",
+                        "input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={};open_mode=0x{:02x};display_name={};folder_type={};container_class={};content_count={};unread_count={};subfolders={};record_key={};source_key={};parent_source_key={};open_folder_response_bytes={};open_folder_response_preview={}",
                         request.input_handle_index().unwrap_or(0),
                         format_optional_debug_handle(input_handle_value),
                         input_object_kind,
@@ -14334,7 +14337,9 @@ where
                         inbox_contract_subfolders,
                         inbox_contract_record_key,
                         inbox_contract_source_key,
-                        inbox_contract_parent_source_key
+                        inbox_contract_parent_source_key,
+                        open_folder_response.len(),
+                        hex_preview(&open_folder_response, 32)
                     ));
                     session.record_recent_probe_action(format!(
                         "OpenFolder(in={},handle={},out={},folder=0x{folder_id:016x})",
@@ -14343,8 +14348,6 @@ where
                         handle
                     ));
                 }
-                let open_folder_response =
-                    rop_open_folder_response(&request, is_public_folder_ghosted);
                 let post_fai_reopen_stall = folder_id == INBOX_FOLDER_ID
                     && inbox_post_fai_reopen_stall_observed(&session.post_hierarchy_actions)
                     && !session.post_hierarchy_actions.post_inbox_fai_reopen_logged;

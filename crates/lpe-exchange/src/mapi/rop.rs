@@ -4320,6 +4320,10 @@ struct ReceiveFolderEntry {
 
 const RECEIVE_FOLDER_ENTRIES: &[ReceiveFolderEntry] = &[
     ReceiveFolderEntry {
+        message_class: "",
+        folder_id: INBOX_FOLDER_ID,
+    },
+    ReceiveFolderEntry {
         message_class: "IPM.Appointment",
         folder_id: CALENDAR_FOLDER_ID,
     },
@@ -4348,12 +4352,6 @@ fn receive_folder_entry_matches(entry: ReceiveFolderEntry, message_class: &str) 
 }
 
 fn receive_folder_entry_for_message_class(message_class: &str) -> ReceiveFolderEntry {
-    if message_class.is_empty() {
-        return ReceiveFolderEntry {
-            message_class: "",
-            folder_id: INBOX_FOLDER_ID,
-        };
-    }
     RECEIVE_FOLDER_ENTRIES
         .iter()
         .copied()
