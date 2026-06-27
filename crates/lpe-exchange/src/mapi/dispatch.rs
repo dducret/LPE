@@ -15206,9 +15206,7 @@ where
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                let row_count = if associated && contents_folder_id == COMMON_VIEWS_FOLDER_ID {
-                    common_views_navigation_shortcut_count(snapshot)
-                } else if associated {
+                let row_count = if associated {
                     associated_folder_message_count(contents_folder_id, snapshot)
                 } else {
                     folder_message_count(contents_folder_id, mailboxes, emails, snapshot)
