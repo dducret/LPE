@@ -20286,7 +20286,7 @@ async fn mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallb
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(stream.message_changes.len(), 2);
     assert_eq!(
         stream.message_changes[0].subject,
         "Partial fallback subject"
@@ -34728,7 +34728,7 @@ async fn mapi_over_http_inbox_fai_sync_exports_identity_and_final_state() {
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops)
         .unwrap_or_else(|error| panic!("{error}: {response_rops:02x?}"));
-    assert_eq!(stream.message_changes.len(), 2);
+    assert_eq!(stream.message_changes.len(), 1);
     assert!(stream
         .message_changes
         .iter()
@@ -34761,9 +34761,9 @@ async fn mapi_over_http_inbox_fai_sync_exports_identity_and_final_state() {
 
     assert!(contains_bytes(
         &response_rops,
-        &utf16z("IPM.Configuration.UMOLK.UserOptions")
+        &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Compact")));
+    assert!(contains_bytes(&response_rops, &utf16z("Messages")));
     for suppressed_counter in [
         0x7FFF_FFFF_FFE3,
         0x7FFF_FFFF_FFED,

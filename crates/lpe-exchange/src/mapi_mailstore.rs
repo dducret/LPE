@@ -1488,7 +1488,9 @@ pub(crate) fn fai_debug_state_origin(
     if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
         if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(item_id) {
             "mapi_virtual"
-        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id) {
+        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id)
+            || crate::mapi_store::is_outlook_default_folder_named_view_id(item_id)
+        {
             "mapi_synthetic_default"
         } else if special_object.is_some() {
             "sql_associated"

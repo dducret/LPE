@@ -3582,9 +3582,8 @@ fn format_inbox_fai_handoff_visibility_context(
         Some(&prefix_restriction),
         account_id,
     );
-    let advertised_default_view = snapshot.common_view_named_view_message_for_id(
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-    );
+    let advertised_default_view =
+        debug_default_folder_associated_named_view(snapshot, INBOX_FOLDER_ID);
     let advertised_default_view_rows = advertised_default_view
         .as_ref()
         .map(|view| {
@@ -3595,7 +3594,7 @@ fn format_inbox_fai_handoff_visibility_context(
         })
         .unwrap_or_default();
     format!(
-        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x};default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
+        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x};default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
         advertised_default_view
             .as_ref()
             .map(|view| format!("0x{:016x}", view.id))
@@ -9875,7 +9874,20 @@ fn format_outlook_view_handoff_table_contract(
         )
     };
     let folder_local_default_supported = !uses_common_views && view.is_some();
-    let folder_local_default_visible_in_fai_table = false;
+    let exact_named_view_restriction = MapiRestriction::Property {
+        relop: 0x04,
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: MapiValue::String("IPM.Microsoft.FolderDesign.NamedView".to_string()),
+    };
+    let folder_local_default_visible_in_fai_table = folder_local_default_supported
+        && debug_associated_table_rows(
+            folder_id,
+            snapshot,
+            Some(&exact_named_view_restriction),
+            Uuid::nil(),
+        )
+        .iter()
+        .any(|row| debug_associated_row_id(row) == expected_view_message_id);
     let descriptor_summary = view
         .as_ref()
         .map(|message| {
@@ -12473,6 +12485,7 @@ fn common_views_link_row_expected_default(property_tag: u32) -> bool {
 #[derive(Clone)]
 enum DebugAssociatedTableRow {
     Config(crate::mapi_store::MapiAssociatedConfigMessage),
+    NamedView(crate::mapi_store::MapiCommonViewNamedViewMessage),
 }
 
 fn debug_associated_table_rows(
@@ -12487,14 +12500,20 @@ fn debug_associated_table_rows(
         restriction,
         &mut config_messages,
     );
-    config_messages
+    let mut rows = config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(DebugAssociatedTableRow::Config)
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    if let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
+            rows.push(DebugAssociatedTableRow::NamedView(message));
+        }
+    }
+    rows
 }
 
 fn append_exact_virtual_inbox_debug_associated_config(
@@ -12631,24 +12650,30 @@ fn debug_associated_row_property_value(
         DebugAssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
         }
+        DebugAssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
     }
 }
 
 fn debug_associated_row_id(message: &DebugAssociatedTableRow) -> u64 {
     match message {
         DebugAssociatedTableRow::Config(message) => message.id,
+        DebugAssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
 fn debug_associated_row_class(message: &DebugAssociatedTableRow) -> &str {
     match message {
         DebugAssociatedTableRow::Config(message) => &message.message_class,
+        DebugAssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
     }
 }
 
 fn debug_associated_row_subject(message: &DebugAssociatedTableRow) -> &str {
     match message {
         DebugAssociatedTableRow::Config(message) => &message.subject,
+        DebugAssociatedTableRow::NamedView(message) => &message.name,
     }
 }
 
@@ -12660,6 +12685,9 @@ fn serialize_debug_associated_row(
     match message {
         DebugAssociatedTableRow::Config(message) => {
             serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        DebugAssociatedTableRow::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
     }
 }
@@ -28893,7 +28921,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_view_handoff_table_contract_reports_common_views_default_view() {
+    fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             INBOX_FOLDER_ID,
@@ -28902,12 +28930,15 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=false"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains(&format!(
-            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+            "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
         )));
-        assert!(contract.contains("expected_view_message_id=0x7ffffffffff70001"));
+        assert!(contract.contains(&format!(
+            "expected_view_message_id=0x{:016x}",
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        )));
     }
 
     #[test]
@@ -28927,19 +28958,19 @@ mod tests {
         );
 
         assert!(context.contains(&format!(
-            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+            "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
         )));
-        assert!(context.contains("default_view_id=0x7ffffffffff70001"));
-        assert!(context.contains("current_count=0"));
-        assert!(context.contains("unfiltered_count=0"));
-        assert!(context.contains("prefix_ipm_configuration_count=0"));
+        assert!(context.contains(&format!(
+            "default_view_id=0x{:016x}",
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        )));
         assert!(context.contains("exact_named_view_count=1"));
         assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
-        assert!(context.contains("subject=Compact"));
+        assert!(context.contains("subject=Messages"));
     }
 
     #[test]
-    fn junk_view_handoff_table_contract_reports_common_views_default_view() {
+    fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let contract = format_outlook_view_handoff_table_contract(
             JUNK_FOLDER_ID,
@@ -28948,12 +28979,15 @@ mod tests {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=false"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains(&format!(
-            "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+            "advertised_default_view_folder_id=0x{JUNK_FOLDER_ID:016x}"
         )));
-        assert!(contract.contains("expected_view_message_id=0x7ffffffffff70001"));
+        assert!(contract.contains(&format!(
+            "expected_view_message_id=0x{:016x}",
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        )));
     }
 
     #[test]
@@ -28967,7 +29001,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains(
             "visible_column_tags=0x001a001e,0x3001001e,0x8083001e,0x3a1c001e,0x3a16001e,0x3a17001e"
         ));
@@ -28985,7 +29019,7 @@ mod tests {
         );
 
         assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains(
             "visible_column_tags=0x001a001e,0x0037001e,0x85160040,0x85170040,0x8208001e,0x82050003"
         ));
@@ -31089,7 +31123,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_named_view_debug_summaries_suppress_synthetic_row() {
+    fn inbox_associated_named_view_debug_summaries_expose_folder_default_view() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let snapshot = MapiMailStoreSnapshot::empty();
         let restriction = MapiRestriction::Property {
@@ -31139,34 +31173,34 @@ mod tests {
             &snapshot,
         );
 
-        assert!(window.contains("total=0"), "{window}");
+        assert!(window.contains("total=1"), "{window}");
         assert!(
-            !window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{window}"
         );
         assert!(
-            !values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{values}"
         );
         assert!(
-            !values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
+            values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
             "{values}"
         );
         assert!(
-            !values.contains(&format!(
+            values.contains(&format!(
                 "0x674a0014={}",
                 crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
             )),
             "{values}"
         );
-        assert!(!values.contains("0x683a0003=8"), "{values}");
-        assert!(wire.is_empty(), "{wire}");
+        assert!(values.contains("0x683a0003=8"), "{values}");
+        assert!(!wire.is_empty(), "{wire}");
         assert!(
-            !wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+            wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
             "{wire}"
         );
-        assert!(!wire.contains("value_len=32"), "{wire}");
-        assert!(!wire.contains("query_rows_len=33"), "{wire}");
+        assert!(wire.contains("value_len=32"), "{wire}");
+        assert!(wire.contains("query_rows_len=33"), "{wire}");
     }
 
     #[test]
@@ -32999,13 +33033,11 @@ mod tests {
             default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
 
         assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-        assert!(debug.contains(&format!(
-            "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
-        )));
-        assert!(debug.contains("decoded_folder_name=common_views"));
+        assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(debug.contains("decoded_folder_name=inbox"));
         assert!(debug.contains(&format!(
             "decoded_message_id=0x{:016x}",
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
         )));
     }
 

@@ -190,12 +190,14 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
 #[derive(Clone)]
 enum AssociatedTableRow {
     Config(MapiAssociatedConfigMessage),
+    NamedView(MapiCommonViewNamedViewMessage),
 }
 
 fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
     !snapshot
         .associated_config_messages_for_folder(folder_id)
         .is_empty()
+        || default_folder_associated_named_view(snapshot, folder_id).is_some()
 }
 
 fn should_use_associated_config_table(
@@ -227,14 +229,41 @@ fn associated_table_rows(
 ) -> Vec<AssociatedTableRow> {
     let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
     append_exact_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
-    config_messages
+    let mut rows = config_messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(AssociatedTableRow::Config)
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
+            rows.push(AssociatedTableRow::NamedView(message));
+        }
+    }
+    rows
+}
+
+fn default_folder_associated_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| {
+            let (_, _, container_class, _) = special_folder_metadata(folder_id);
+            (!container_class.is_empty()).then_some(container_class)
+        })?;
+    default_view_supported_folder(folder_id, container_class)
+        .then(|| {
+            snapshot.default_folder_named_view_message(
+                folder_id,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+        })
+        .flatten()
 }
 
 fn append_exact_virtual_inbox_associated_config(
@@ -10813,17 +10842,14 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_find_row_does_not_return_outlook_named_view_config() {
+    fn inbox_associated_find_row_returns_folder_default_named_view() {
         let response = inbox_associated_find_row_response_for_message_class(
             "IPM.Microsoft.FolderDesign.NamedView",
         );
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
-        assert_eq!(
-            u32::from_le_bytes(response[2..6].try_into().unwrap()),
-            0x8004_010F
-        );
-        assert_eq!(response.len(), 6);
+        assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+        assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
     }
 
     #[test]
@@ -11230,7 +11256,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_table_does_not_expose_synthetic_folder_default_named_view() {
+    fn inbox_associated_table_exposes_folder_default_named_view() {
         let restriction = MapiRestriction::Property {
             relop: 0x04,
             property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -11245,7 +11271,12 @@ mod tests {
             Uuid::nil(),
         );
 
-        assert!(rows.is_empty());
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(rows[0], AssociatedTableRow::NamedView(_)));
+        assert_eq!(
+            associated_table_row_id(&rows[0]),
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        );
         assert_eq!(
             restricted_associated_folder_message_count(
                 INBOX_FOLDER_ID,
@@ -11253,7 +11284,7 @@ mod tests {
                 Some(&restriction),
                 Uuid::nil()
             ),
-            0
+            1
         );
     }
 
@@ -11975,10 +12006,10 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
         assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
@@ -12016,9 +12047,10 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
         assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
         assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
     }
 
@@ -12085,7 +12117,7 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 4);
         assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
         assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
@@ -12156,9 +12188,9 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
-        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
         assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+        assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
         assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
     }
 
@@ -15437,6 +15469,9 @@ fn serialize_associated_table_row(
         AssociatedTableRow::Config(message) => {
             serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
+        AssociatedTableRow::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
     }
 }
 
@@ -15448,6 +15483,9 @@ fn associated_table_row_property_value(
     match message {
         AssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
         }
     }
 }
@@ -15461,6 +15499,9 @@ fn associated_table_row_matches(
         AssociatedTableRow::Config(message) => {
             restriction_matches_associated_config(restriction, message)
         }
+        AssociatedTableRow::NamedView(message) => {
+            restriction_matches_common_view_named_view(restriction, message, _mailbox_guid)
+        }
     }
 }
 
@@ -15469,18 +15510,21 @@ fn associated_table_row_config(
 ) -> Option<&MapiAssociatedConfigMessage> {
     match message {
         AssociatedTableRow::Config(message) => Some(message),
+        AssociatedTableRow::NamedView(_) => None,
     }
 }
 
 fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
     match message {
         AssociatedTableRow::Config(message) => message.id,
+        AssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
 fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
     match message {
         AssociatedTableRow::Config(message) => &message.message_class,
+        AssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
     }
 }
 
