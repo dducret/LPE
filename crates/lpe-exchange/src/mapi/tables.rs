@@ -15,6 +15,7 @@ use crate::mapi_store::{
     MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage,
     MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
+use lpe_domain::days_from_civil;
 use lpe_storage::SearchFolderDefinition;
 
 pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
@@ -16957,7 +16958,7 @@ pub(in crate::mapi) fn date_time_to_filetime(date: &str, time: &str) -> u64 {
         .get(3..5)
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
-    let days = days_from_civil(year, month, day).max(0) as u64;
+    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day)).max(0) as u64;
     let unix_seconds = days
         .saturating_mul(86_400)
         .saturating_add(u64::from(hour.min(23)) * 3_600)
@@ -16989,17 +16990,6 @@ pub(in crate::mapi) fn filetime_to_unix_seconds(filetime: u64) -> Option<u64> {
     filetime
         .checked_div(10_000_000)?
         .checked_sub(11_644_473_600)
-}
-
-pub(in crate::mapi) fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
-    let year = i64::from(year) - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = i64::from(month);
-    let day = i64::from(day);
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
 }
 
 pub(in crate::mapi) fn unread_from_read_flags(read_flags: Option<u8>) -> Option<bool> {

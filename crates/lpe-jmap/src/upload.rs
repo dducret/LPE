@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use lpe_domain::{days_from_civil, month_abbrev};
 use lpe_magika::ExpectedKind;
 use lpe_storage::{JmapEmail, JmapEmailAddress};
 use uuid::Uuid;
@@ -253,7 +254,7 @@ fn rfc5322_utc_date(value: &str) -> String {
 }
 
 fn weekday_name(year: i32, month: i32, day: i32) -> &'static str {
-    let days = days_from_civil(year, month, day);
+    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day));
     match (days + 4).rem_euclid(7) {
         0 => "Sun",
         1 => "Mon",
@@ -266,28 +267,8 @@ fn weekday_name(year: i32, month: i32, day: i32) -> &'static str {
 }
 
 fn month_name(month: i32) -> &'static str {
-    match month {
-        1 => "Jan",
-        2 => "Feb",
-        3 => "Mar",
-        4 => "Apr",
-        5 => "May",
-        6 => "Jun",
-        7 => "Jul",
-        8 => "Aug",
-        9 => "Sep",
-        10 => "Oct",
-        11 => "Nov",
-        _ => "Dec",
-    }
-}
-
-fn days_from_civil(year: i32, month: i32, day: i32) -> i32 {
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let doy = (153 * month_prime + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    u8::try_from(month)
+        .ok()
+        .and_then(month_abbrev)
+        .unwrap_or("Dec")
 }

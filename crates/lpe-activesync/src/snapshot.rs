@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lpe_domain::{civil_from_days, days_from_civil};
 use lpe_storage::{
     parse_calendar_participants_metadata, ActiveSyncAttachment, CalendarParticipantMetadata,
     ClientContact, ClientEvent, JmapEmail, JmapUploadBlob,
@@ -363,29 +364,6 @@ fn parse_time(value: &str) -> Option<(i64, i64)> {
     let hour = parts.next()?.parse().ok()?;
     let minute = parts.next()?.parse().ok()?;
     Some((hour, minute))
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - if month <= 2 { 1 } else { 0 };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let doy = (153 * month_prime + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
-}
-
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let days = days + 719468;
-    let era = if days >= 0 { days } else { days - 146096 } / 146097;
-    let doe = days - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    (year + if month <= 2 { 1 } else { 0 }, month, day)
 }
 
 fn recurrence_application_data(rrule: &str) -> Option<Value> {

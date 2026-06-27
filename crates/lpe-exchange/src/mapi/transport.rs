@@ -17,6 +17,7 @@ use super::rop::*;
 use super::session::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
+use lpe_domain::{month_abbrev, utc_from_unix_seconds, weekday_abbrev_from_unix_days};
 
 pub(in crate::mapi) const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 pub(in crate::mapi) const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
@@ -2396,40 +2397,20 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
 }
 
 fn mapi_http_date(time: SystemTime) -> String {
-    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     let duration = time
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    let total_seconds = duration.as_secs();
-    let days = (total_seconds / 86_400) as i64;
-    let seconds_of_day = total_seconds % 86_400;
-    let (year, month, day) = civil_from_days(days);
-    let hour = seconds_of_day / 3_600;
-    let minute = (seconds_of_day % 3_600) / 60;
-    let second = seconds_of_day % 60;
-    let weekday = WEEKDAYS[days.rem_euclid(7) as usize];
+    let date = utc_from_unix_seconds(duration.as_secs());
+    let weekday = weekday_abbrev_from_unix_days(date.unix_days);
+    let month = month_abbrev(date.month).unwrap_or("Jan");
     format!(
-        "{weekday}, {day:02} {} {year:04} {hour:02}:{minute:02}:{second:02} GMT",
-        MONTHS[(month - 1) as usize]
+        "{weekday}, {day:02} {month} {year:04} {hour:02}:{minute:02}:{second:02} GMT",
+        day = date.day,
+        year = date.year,
+        hour = date.hour,
+        minute = date.minute,
+        second = date.second
     )
-}
-
-fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
-    let days = days_since_epoch + 719_468;
-    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_position = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_position + 2) / 5 + 1;
-    let month = month_position + if month_position < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    (year, month as u32, day as u32)
 }
 
 #[derive(Clone, Copy, Debug)]

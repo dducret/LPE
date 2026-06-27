@@ -1,5 +1,6 @@
 pub mod account;
 pub mod bridge_auth;
+pub mod civil_time;
 pub mod document;
 mod encoding;
 pub mod mailbox_name;
@@ -11,6 +12,10 @@ pub use crate::bridge_auth::{
     current_unix_timestamp, BridgeAuthError, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS,
     INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
     INTEGRATION_TIMESTAMP_HEADER,
+};
+pub use crate::civil_time::{
+    civil_from_days, days_from_civil, month_abbrev, utc_from_unix_seconds,
+    weekday_abbrev_from_unix_days, UtcDateTime,
 };
 pub use crate::document::{
     AccessScope, DocumentAnnotation, DocumentChunk, DocumentKind, DocumentProjection,

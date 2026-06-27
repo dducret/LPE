@@ -1497,6 +1497,7 @@ dependencies = [
  "axum",
  "base64",
  "lpe-core",
+ "lpe-domain",
  "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use hmac::{Hmac, Mac};
+use lpe_domain::utc_from_unix_seconds;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, CONTENT_LENGTH},
     Client, Method, StatusCode, Url,
@@ -803,30 +804,13 @@ fn s3_timestamp(now: SystemTime) -> Result<(String, String)> {
     let duration = now.duration_since(UNIX_EPOCH).map_err(|_| {
         StorageBackendError::InvalidConfig("storage backend clock is invalid".into())
     })?;
-    let seconds = duration.as_secs() as i64;
-    let days = seconds.div_euclid(86_400);
-    let seconds_of_day = seconds.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
-    let hour = seconds_of_day / 3_600;
-    let minute = (seconds_of_day % 3_600) / 60;
-    let second = seconds_of_day % 60;
-    let date_stamp = format!("{year:04}{month:02}{day:02}");
-    let amz_date = format!("{date_stamp}T{hour:02}{minute:02}{second:02}Z");
+    let date = utc_from_unix_seconds(duration.as_secs());
+    let date_stamp = format!("{:04}{:02}{:02}", date.year, date.month, date.day);
+    let amz_date = format!(
+        "{date_stamp}T{:02}{:02}{:02}Z",
+        date.hour, date.minute, date.second
+    );
     Ok((date_stamp, amz_date))
-}
-
-fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
-    let z = days_since_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096).div_euclid(365);
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2).div_euclid(153);
-    let d = doy - (153 * mp + 2).div_euclid(5) + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if m <= 2 { 1 } else { 0 };
-    (year, m, d)
 }
 
 fn normalize_credentials_ref(value: &str) -> Result<String> {

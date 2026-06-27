@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use lpe_domain::days_from_civil;
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
@@ -328,7 +329,12 @@ fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
     {
         return None;
     }
-    Some(days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second)
+    Some(
+        days_from_civil(i64::from(year), i64::from(month), i64::from(day)) * 86_400
+            + hour * 3_600
+            + minute * 60
+            + second,
+    )
 }
 
 fn parse_digits(bytes: &[u8]) -> Option<u32> {
@@ -336,16 +342,6 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
         byte.is_ascii_digit()
             .then_some(value * 10 + u32::from(byte - b'0'))
     })
-}
-
-fn days_from_civil(mut year: i32, month: i32, day: i32) -> i64 {
-    year -= i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_position = month + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * month_position + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    i64::from(era * 146_097 + day_of_era - 719_468)
 }
 
 pub(crate) fn sync_state_token_with_attachments(

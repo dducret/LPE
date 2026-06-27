@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{http::HeaderMap, response::Response};
-use lpe_domain::MailboxNamePolicy;
+use lpe_domain::{days_from_civil, MailboxNamePolicy};
 use lpe_magika::{
     collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
@@ -3903,16 +3903,6 @@ fn compact_datetime_date(value: &str) -> Result<String> {
         bail!("invalid ActiveSync recurrence Until");
     }
     Ok(date.to_string())
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - if month <= 2 { 1 } else { 0 };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let doy = (153 * month_prime + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
 }
 
 fn search_query_text(store: &WbxmlNode) -> Option<String> {
