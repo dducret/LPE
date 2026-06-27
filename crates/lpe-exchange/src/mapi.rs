@@ -86,6 +86,14 @@ static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_TABLE_TOTAL_ROW_COUNT: Atomi
 static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_CONVERSATION_ACTION: AtomicU64 =
     AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_QUICK_STEP: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_BOOTSTRAP_PHASE: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_MAX_BOOTSTRAP_PHASE: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_STALL_CODE: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_STALL_AFTER_INBOX_FAI_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_STALL_AFTER_IPM_HIERARCHY_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MapiFolderPurgeMetrics {
@@ -108,6 +116,14 @@ pub struct MapiOutlookViewMetrics {
     pub last_ipm_subtree_hierarchy_table_total_row_count: u64,
     pub last_ipm_subtree_hierarchy_has_conversation_action: u64,
     pub last_ipm_subtree_hierarchy_has_quick_step: u64,
+    pub last_bootstrap_phase: u64,
+    pub max_bootstrap_phase: u64,
+    pub last_stall_code: u64,
+    pub stall_after_inbox_fai_total: u64,
+    pub stall_after_ipm_hierarchy_total: u64,
+    pub repeated_inbox_folder_type_probe_total: u64,
+    pub last_inbox_open_probe_count: u64,
+    pub last_inbox_folder_type_getprops_probe_count: u64,
 }
 
 pub(crate) fn record_mapi_folder_purge_metrics(
@@ -176,6 +192,39 @@ pub(crate) fn record_mapi_outlook_view_ipm_subtree_hierarchy_query(
     }
 }
 
+pub(crate) fn record_mapi_outlook_view_bootstrap_progress(
+    phase: u64,
+    stall_code: u64,
+    inbox_open_probe_count: usize,
+    inbox_folder_type_getprops_probe_count: usize,
+) {
+    MAPI_OUTLOOK_VIEW_LAST_BOOTSTRAP_PHASE.store(phase, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_MAX_BOOTSTRAP_PHASE.fetch_max(phase, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_STALL_CODE.store(stall_code, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT
+        .store(inbox_open_probe_count as u64, AtomicOrdering::Relaxed);
+    MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT.store(
+        inbox_folder_type_getprops_probe_count as u64,
+        AtomicOrdering::Relaxed,
+    );
+}
+
+pub(crate) fn record_mapi_outlook_view_bootstrap_stall(stall_code: u64) {
+    match stall_code {
+        1 => {
+            MAPI_OUTLOOK_VIEW_STALL_AFTER_INBOX_FAI_TOTAL.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        2 => {
+            MAPI_OUTLOOK_VIEW_STALL_AFTER_IPM_HIERARCHY_TOTAL.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        3 => {
+            MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL
+                .fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        _ => {}
+    }
+}
+
 pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
     MapiOutlookViewMetrics {
         inbox_fai_handoff_without_contents_total:
@@ -207,6 +256,20 @@ pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
                 .load(AtomicOrdering::Relaxed),
         last_ipm_subtree_hierarchy_has_quick_step:
             MAPI_OUTLOOK_VIEW_LAST_IPM_SUBTREE_HIERARCHY_HAS_QUICK_STEP
+                .load(AtomicOrdering::Relaxed),
+        last_bootstrap_phase: MAPI_OUTLOOK_VIEW_LAST_BOOTSTRAP_PHASE.load(AtomicOrdering::Relaxed),
+        max_bootstrap_phase: MAPI_OUTLOOK_VIEW_MAX_BOOTSTRAP_PHASE.load(AtomicOrdering::Relaxed),
+        last_stall_code: MAPI_OUTLOOK_VIEW_LAST_STALL_CODE.load(AtomicOrdering::Relaxed),
+        stall_after_inbox_fai_total: MAPI_OUTLOOK_VIEW_STALL_AFTER_INBOX_FAI_TOTAL
+            .load(AtomicOrdering::Relaxed),
+        stall_after_ipm_hierarchy_total: MAPI_OUTLOOK_VIEW_STALL_AFTER_IPM_HIERARCHY_TOTAL
+            .load(AtomicOrdering::Relaxed),
+        repeated_inbox_folder_type_probe_total:
+            MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL.load(AtomicOrdering::Relaxed),
+        last_inbox_open_probe_count: MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT
+            .load(AtomicOrdering::Relaxed),
+        last_inbox_folder_type_getprops_probe_count:
+            MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT
                 .load(AtomicOrdering::Relaxed),
     }
 }

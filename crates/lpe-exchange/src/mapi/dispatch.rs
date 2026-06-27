@@ -2432,6 +2432,12 @@ fn log_execute_rop_debug(
         last_completed_hierarchy_sync_root = %post_hierarchy.last_completed_hierarchy_sync_root,
         content_sync_started_after_hierarchy =
             post_hierarchy.content_sync_configure_observed,
+        outlook_bootstrap_phase = post_hierarchy.outlook_bootstrap_phase,
+        outlook_bootstrap_phase_name = post_hierarchy.outlook_bootstrap_phase_name,
+        outlook_bootstrap_stall_code = post_hierarchy.outlook_bootstrap_stall_code,
+        outlook_bootstrap_stall_name = post_hierarchy.outlook_bootstrap_stall_name,
+        outlook_bootstrap_next_expected_phase =
+            post_hierarchy.outlook_bootstrap_next_expected_phase,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
         outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
@@ -14073,6 +14079,7 @@ where
                     post_inbox_fai_handoff_context
                 {
                     record_mapi_outlook_view_inbox_fai_handoff_without_contents();
+                    record_mapi_outlook_view_bootstrap_stall(1);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -14092,6 +14099,7 @@ where
                 }
                 if let Some(context) = post_fai_hierarchy_release_without_inbox_contents {
                     record_mapi_outlook_view_post_fai_hierarchy_without_contents();
+                    record_mapi_outlook_view_bootstrap_stall(2);
                     session.record_outlook_view_failure_trace_event(format!(
                         "post_fai_hierarchy_release_without_inbox_contents:{context}"
                     ));
@@ -15647,6 +15655,7 @@ where
                     if let Some(context) = format_post_fai_folder_type_probe_loop_context(
                         &session.post_hierarchy_actions,
                     ) {
+                        record_mapi_outlook_view_bootstrap_stall(3);
                         session.record_outlook_view_failure_trace_event(format!(
                             "post_fai_folder_type_probe_loop:{context}"
                         ));

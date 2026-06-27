@@ -1552,6 +1552,11 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
+    pub(in crate::mapi) outlook_bootstrap_phase: u64,
+    pub(in crate::mapi) outlook_bootstrap_phase_name: &'static str,
+    pub(in crate::mapi) outlook_bootstrap_stall_code: u64,
+    pub(in crate::mapi) outlook_bootstrap_stall_name: &'static str,
+    pub(in crate::mapi) outlook_bootstrap_next_expected_phase: &'static str,
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: String,
     pub(in crate::mapi) content_sync_configure_observed: bool,
@@ -1573,7 +1578,20 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
     disconnect_client_initiated: bool,
 ) -> PostHierarchyActionDebugSummary {
     let actions = &session.post_hierarchy_actions;
+    let bootstrap_phase = outlook_bootstrap_phase(actions);
+    let bootstrap_stall_code = outlook_bootstrap_stall_code(actions);
+    record_mapi_outlook_view_bootstrap_progress(
+        bootstrap_phase,
+        bootstrap_stall_code,
+        actions.inbox_open_folder_probe_count,
+        actions.inbox_folder_type_getprops_probe_count,
+    );
     PostHierarchyActionDebugSummary {
+        outlook_bootstrap_phase: bootstrap_phase,
+        outlook_bootstrap_phase_name: outlook_bootstrap_phase_name(bootstrap_phase),
+        outlook_bootstrap_stall_code: bootstrap_stall_code,
+        outlook_bootstrap_stall_name: outlook_bootstrap_stall_name(bootstrap_stall_code),
+        outlook_bootstrap_next_expected_phase: outlook_bootstrap_next_expected_phase(actions),
         execute_count: actions.execute_count,
         rop_ids_seen: format_rop_ids_for_debug(&actions.rop_ids_seen),
         content_sync_configure_observed: actions.content_sync_configure_observed,
@@ -1602,6 +1620,100 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
             .collect::<Vec<_>>()
             .join("|"),
         outlook_view_trace_events: actions.outlook_view_failure_trace_events.join(">"),
+    }
+}
+
+fn outlook_bootstrap_phase(actions: &PostHierarchyActionState) -> u64 {
+    if actions.content_sync_configure_observed {
+        11
+    } else if actions.inbox_normal_contents_table_query_rows_observed {
+        10
+    } else if actions.inbox_normal_contents_table_setcolumns_observed {
+        9
+    } else if actions.inbox_normal_contents_table_observed {
+        8
+    } else if actions.post_inbox_fai_folder_type_probe_loop_logged {
+        7
+    } else if actions.inbox_open_folder_probe_count >= 2
+        && !actions.last_inbox_hierarchy_query_context.is_empty()
+    {
+        6
+    } else if !actions.last_inbox_hierarchy_query_context.is_empty()
+        || actions
+            .last_completed_hierarchy_sync_root
+            .is_some_and(|folder_id| folder_id == IPM_SUBTREE_FOLDER_ID)
+    {
+        5
+    } else if actions.inbox_associated_contents_table_observed
+        && !actions.last_inbox_related_release_context.is_empty()
+    {
+        4
+    } else if actions.inbox_associated_contents_table_observed {
+        3
+    } else if actions.bootstrap_probe_observed {
+        2
+    } else if actions.execute_count > 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn outlook_bootstrap_phase_name(phase: u64) -> &'static str {
+    match phase {
+        11 => "content_sync_configure_observed",
+        10 => "inbox_normal_contents_query_rows_observed",
+        9 => "inbox_normal_contents_setcolumns_observed",
+        8 => "inbox_normal_contents_table_opened",
+        7 => "repeated_inbox_folder_type_probe_loop",
+        6 => "inbox_reopened_after_ipm_hierarchy",
+        5 => "ipm_hierarchy_rows_completed",
+        4 => "inbox_fai_released_without_normal_contents",
+        3 => "inbox_fai_query_rows_completed",
+        2 => "bootstrap_probe_observed",
+        1 => "execute_started",
+        _ => "none",
+    }
+}
+
+fn outlook_bootstrap_stall_code(actions: &PostHierarchyActionState) -> u64 {
+    if actions.post_inbox_fai_folder_type_probe_loop_logged {
+        3
+    } else if !actions.last_inbox_hierarchy_query_context.is_empty()
+        && actions.inbox_open_folder_probe_count >= 2
+        && !actions.inbox_normal_contents_table_observed
+    {
+        2
+    } else if actions.inbox_associated_contents_table_observed
+        && !actions.inbox_normal_contents_table_observed
+        && !actions.last_inbox_related_release_context.is_empty()
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn outlook_bootstrap_stall_name(stall_code: u64) -> &'static str {
+    match stall_code {
+        3 => "repeated_inbox_folder_type_probe_without_contents",
+        2 => "after_ipm_hierarchy_without_inbox_contents",
+        1 => "after_inbox_fai_without_inbox_contents",
+        _ => "none",
+    }
+}
+
+fn outlook_bootstrap_next_expected_phase(actions: &PostHierarchyActionState) -> &'static str {
+    if actions.content_sync_configure_observed {
+        "outlook_running_content_sync"
+    } else if actions.inbox_normal_contents_table_query_rows_observed {
+        "content_sync_configure_or_message_open"
+    } else if actions.inbox_normal_contents_table_setcolumns_observed {
+        "inbox_normal_contents_query_rows"
+    } else if actions.inbox_normal_contents_table_observed {
+        "inbox_normal_contents_setcolumns"
+    } else {
+        "open_inbox_normal_contents_table_or_sync_configure"
     }
 }
 
@@ -3193,6 +3305,80 @@ mod tests {
         state.inbox_normal_contents_table_observed = true;
 
         assert!(post_fai_inbox_probe_loop_terminal_summary(&state).is_none());
+    }
+
+    #[test]
+    fn outlook_bootstrap_phase_classifies_current_wall_and_successful_progress() {
+        let mut state = PostHierarchyActionState {
+            post_inbox_fai_handoff_logged: true,
+            post_inbox_fai_reopen_logged: true,
+            post_inbox_fai_folder_type_probe_loop_logged: true,
+            inbox_associated_contents_table_observed: true,
+            inbox_open_folder_probe_count: 6,
+            inbox_folder_type_getprops_probe_count: 6,
+            last_inbox_hierarchy_query_context: "rows=16".to_string(),
+            ..PostHierarchyActionState::default()
+        };
+
+        assert_eq!(outlook_bootstrap_phase(&state), 7);
+        assert_eq!(
+            outlook_bootstrap_phase_name(outlook_bootstrap_phase(&state)),
+            "repeated_inbox_folder_type_probe_loop"
+        );
+        assert_eq!(outlook_bootstrap_stall_code(&state), 3);
+        assert_eq!(
+            outlook_bootstrap_stall_name(outlook_bootstrap_stall_code(&state)),
+            "repeated_inbox_folder_type_probe_without_contents"
+        );
+        assert_eq!(
+            outlook_bootstrap_next_expected_phase(&state),
+            "open_inbox_normal_contents_table_or_sync_configure"
+        );
+
+        state.inbox_normal_contents_table_observed = true;
+
+        assert_eq!(outlook_bootstrap_phase(&state), 8);
+        assert_eq!(
+            outlook_bootstrap_phase_name(outlook_bootstrap_phase(&state)),
+            "inbox_normal_contents_table_opened"
+        );
+    }
+
+    #[test]
+    fn post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard() {
+        let mut session = test_session(HashMap::new());
+        session.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;
+        session.post_hierarchy_actions.post_inbox_fai_reopen_logged = true;
+        session
+            .post_hierarchy_actions
+            .post_inbox_fai_folder_type_probe_loop_logged = true;
+        session
+            .post_hierarchy_actions
+            .inbox_associated_contents_table_observed = true;
+        session.post_hierarchy_actions.inbox_open_folder_probe_count = 4;
+        session
+            .post_hierarchy_actions
+            .inbox_folder_type_getprops_probe_count = 4;
+        session
+            .post_hierarchy_actions
+            .last_inbox_hierarchy_query_context = "rows=16".to_string();
+
+        let summary = post_hierarchy_action_summary(&session, false);
+
+        assert_eq!(summary.outlook_bootstrap_phase, 7);
+        assert_eq!(
+            summary.outlook_bootstrap_phase_name,
+            "repeated_inbox_folder_type_probe_loop"
+        );
+        assert_eq!(summary.outlook_bootstrap_stall_code, 3);
+        assert_eq!(
+            summary.outlook_bootstrap_stall_name,
+            "repeated_inbox_folder_type_probe_without_contents"
+        );
+        assert_eq!(
+            summary.outlook_bootstrap_next_expected_phase,
+            "open_inbox_normal_contents_table_or_sync_configure"
+        );
     }
 
     #[test]
