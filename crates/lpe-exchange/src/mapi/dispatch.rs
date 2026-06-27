@@ -3927,9 +3927,9 @@ fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool
             ) && value == "IPM.Configuration."
                 && fuzzy_level_low & 0x0002 != 0
         }
-        MapiRestriction::And(children) | MapiRestriction::Or(children) => children
-            .iter()
-            .any(is_broad_ipm_configuration_restriction),
+        MapiRestriction::And(children) | MapiRestriction::Or(children) => {
+            children.iter().any(is_broad_ipm_configuration_restriction)
+        }
         MapiRestriction::Not(child)
         | MapiRestriction::Count { child, .. }
         | MapiRestriction::SubObject { child, .. } => is_broad_ipm_configuration_restriction(child),

@@ -1,5 +1,8 @@
 use anyhow::{bail, Result};
-use lpe_domain::{days_from_civil, month_abbrev};
+use lpe_domain::mail_format::{
+    format_mailbox_address, normalize_mime_body, rfc5322_utc_date, sanitize_header_value,
+    DisplayNamePolicy,
+};
 use lpe_magika::ExpectedKind;
 use lpe_storage::{JmapEmail, JmapEmailAddress};
 use uuid::Uuid;
@@ -151,13 +154,13 @@ pub(crate) fn message_rfc822_bytes(email: &JmapEmail, include_bcc: bool) -> Vec<
             push_header(&mut message, "Content-Type", "text/html; charset=utf-8");
             push_header(&mut message, "Content-Transfer-Encoding", "8bit");
             message.push_str("\r\n");
-            message.push_str(&normalize_body(html));
+            message.push_str(&normalize_mime_body(html));
         }
         (text, None) => {
             push_header(&mut message, "Content-Type", "text/plain; charset=utf-8");
             push_header(&mut message, "Content-Transfer-Encoding", "8bit");
             message.push_str("\r\n");
-            message.push_str(&normalize_body(text));
+            message.push_str(&normalize_mime_body(text));
         }
     }
 
@@ -175,7 +178,7 @@ fn push_mime_part(message: &mut String, boundary: &str, media_type: &str, body: 
     );
     push_header(message, "Content-Transfer-Encoding", "8bit");
     message.push_str("\r\n");
-    message.push_str(&normalize_body(body));
+    message.push_str(&normalize_mime_body(body));
     message.push_str("\r\n");
 }
 
@@ -199,76 +202,5 @@ fn push_address_list(message: &mut String, name: &str, addresses: &[JmapEmailAdd
 }
 
 fn header_address(address: &str, display_name: Option<&str>) -> String {
-    let address = sanitize_header_value(address);
-    match display_name
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(display_name) => format!("{} <{}>", quote_display_name(display_name), address),
-        None => address,
-    }
-}
-
-fn quote_display_name(value: &str) -> String {
-    let value = sanitize_header_value(value);
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '.' | '_' | '-'))
-    {
-        value
-    } else {
-        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-    }
-}
-
-fn sanitize_header_value(value: &str) -> String {
-    value
-        .replace(['\r', '\n'], " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn normalize_body(value: &str) -> String {
-    let normalized = value.replace("\r\n", "\n").replace('\r', "\n");
-    let mut normalized = normalized.replace('\n', "\r\n");
-    if !normalized.ends_with("\r\n") {
-        normalized.push_str("\r\n");
-    }
-    normalized
-}
-
-fn rfc5322_utc_date(value: &str) -> String {
-    let Some((date, time)) = value.trim_end_matches('Z').split_once('T') else {
-        return sanitize_header_value(value);
-    };
-    let mut date_parts = date.split('-').filter_map(|part| part.parse::<i32>().ok());
-    let (Some(year), Some(month), Some(day)) =
-        (date_parts.next(), date_parts.next(), date_parts.next())
-    else {
-        return sanitize_header_value(value);
-    };
-    let weekday = weekday_name(year, month, day);
-    let month_name = month_name(month);
-    format!("{weekday}, {day:02} {month_name} {year:04} {time} +0000")
-}
-
-fn weekday_name(year: i32, month: i32, day: i32) -> &'static str {
-    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day));
-    match (days + 4).rem_euclid(7) {
-        0 => "Sun",
-        1 => "Mon",
-        2 => "Tue",
-        3 => "Wed",
-        4 => "Thu",
-        5 => "Fri",
-        _ => "Sat",
-    }
-}
-
-fn month_name(month: i32) -> &'static str {
-    u8::try_from(month)
-        .ok()
-        .and_then(month_abbrev)
-        .unwrap_or("Dec")
+    format_mailbox_address(address, display_name, DisplayNamePolicy::Include)
 }

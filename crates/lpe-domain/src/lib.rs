@@ -3,6 +3,7 @@ pub mod bridge_auth;
 pub mod civil_time;
 pub mod document;
 mod encoding;
+pub mod mail_format;
 pub mod mailbox_name;
 pub mod submission;
 pub mod transport;

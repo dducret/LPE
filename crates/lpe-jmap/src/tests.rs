@@ -372,6 +372,7 @@ impl FakeStore {
             modseq: 1,
             total_emails: 1,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }
     }
@@ -471,6 +472,7 @@ impl FakeStore {
             modseq: 1,
             total_emails: 1,
             unread_emails: 1,
+            size_octets: 0,
             is_subscribed: true,
         }
     }
@@ -1089,6 +1091,7 @@ impl JmapStore for FakeStore {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: input.is_subscribed,
         })
     }
@@ -1108,6 +1111,7 @@ impl JmapStore for FakeStore {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: input.is_subscribed.unwrap_or(true),
         })
     }
@@ -3592,6 +3596,7 @@ async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
         modseq: 1,
         total_emails: 1,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let mut email = FakeStore::inbox_email();
@@ -5152,6 +5157,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let second_mailbox = JmapMailbox {
@@ -5163,6 +5169,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let first_contact = ClientContact {
@@ -5437,6 +5444,7 @@ async fn mailbox_query_changes_report_mailbox_reorders() {
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let second_mailbox = JmapMailbox {
@@ -5448,6 +5456,7 @@ async fn mailbox_query_changes_report_mailbox_reorders() {
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let initial = JmapService::new(FakeStore {
@@ -6214,6 +6223,7 @@ async fn mailbox_set_update_validates_and_normalizes_unicode_names() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }],
         ..Default::default()
@@ -6258,6 +6268,7 @@ async fn mailbox_set_rejects_canonical_equivalent_sibling_duplicates() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }],
         ..Default::default()
@@ -6305,6 +6316,7 @@ async fn mailbox_set_rejects_controls_and_delimiters_at_method_level() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }],
         ..Default::default()
@@ -6365,6 +6377,7 @@ async fn mailbox_set_rejects_invisible_bidi_mixed_script_and_confusable_names() 
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }],
         ..Default::default()
@@ -6442,6 +6455,7 @@ async fn mailbox_get_returns_nfc_unicode_names_as_json_strings() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         }],
         ..Default::default()
@@ -6488,6 +6502,7 @@ async fn mailbox_get_returns_canonical_system_names_and_roles() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
         ],
@@ -6537,6 +6552,7 @@ async fn mailbox_get_exposes_backed_exchange_compatibility_mail_folders() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -6548,6 +6564,7 @@ async fn mailbox_get_exposes_backed_exchange_compatibility_mail_folders() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -6559,6 +6576,7 @@ async fn mailbox_get_exposes_backed_exchange_compatibility_mail_folders() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
         ],
@@ -6718,6 +6736,7 @@ async fn mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     };
     let child = JmapMailbox {
@@ -6729,6 +6748,7 @@ async fn mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: false,
     };
     let store = FakeStore {
@@ -6804,6 +6824,7 @@ async fn mailbox_set_rejects_parent_cycles_and_unknown_parents() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
             JmapMailbox {
@@ -6815,6 +6836,7 @@ async fn mailbox_set_rejects_parent_cycles_and_unknown_parents() {
                 modseq: 1,
                 total_emails: 0,
                 unread_emails: 0,
+                size_octets: 0,
                 is_subscribed: true,
             },
         ],
@@ -14837,6 +14859,7 @@ async fn benchmark_mailbox_listing_and_push_paths() {
             modseq: 1,
             total_emails: (index % 17) as u32,
             unread_emails: (index % 5) as u32,
+            size_octets: 0,
             is_subscribed: true,
         }
     }

@@ -15,6 +15,9 @@ use base64::{
     Engine as _,
 };
 use lpe_core::sieve::{Action, Statement};
+use lpe_domain::mail_format::{
+    format_mailbox_address, quote_header_parameter, sanitize_header_value, DisplayNamePolicy,
+};
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
     Validator,
@@ -9729,39 +9732,15 @@ fn render_mime_recipients(recipients: &[JmapEmailAddress]) -> String {
 }
 
 fn render_mime_address(display_name: Option<&str>, address: &str) -> String {
-    let address = sanitize_header_value(address);
-    match display_name
-        .map(sanitize_header_value)
-        .filter(|value| !value.trim().is_empty() && value != &address)
-    {
-        Some(display_name) => format!("{} <{}>", quote_display_name(&display_name), address),
-        None => address,
-    }
-}
-
-fn quote_display_name(value: &str) -> String {
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '.' | '_' | '-'))
-    {
-        value.to_string()
-    } else {
-        format!("\"{}\"", quote_mime_parameter(value))
-    }
+    format_mailbox_address(
+        address,
+        display_name,
+        DisplayNamePolicy::OmitIfEqualsAddress,
+    )
 }
 
 fn quote_mime_parameter(value: &str) -> String {
-    sanitize_header_value(value)
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-}
-
-fn sanitize_header_value(value: &str) -> String {
-    value
-        .replace(['\r', '\n'], " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    quote_header_parameter(value)
 }
 
 fn base64_mime_lines(bytes: &[u8]) -> String {

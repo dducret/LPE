@@ -1,6 +1,6 @@
-use super::*;
 use super::session::MapiSession;
 use super::sync::{INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID};
+use super::*;
 
 const STARTUP_GATES: [&str; 10] = [
     "profile_session_established",
@@ -29,7 +29,11 @@ pub(in crate::mapi) fn normalized_rop_sequence_signature(names_csv: &str) -> Str
     let mut compressed = Vec::new();
     let mut current = "";
     let mut count = 0usize;
-    for name in names_csv.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+    for name in names_csv
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
         if name == current {
             count += 1;
             continue;
@@ -114,8 +118,8 @@ pub(in crate::mapi) fn configured_smart_input_variant() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::session::MapiLogonIdentityDebug;
+    use super::*;
 
     #[test]
     fn normalized_signature_collapses_repeated_release_loops() {
