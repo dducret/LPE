@@ -1,12 +1,11 @@
 use anyhow::{anyhow, bail, Result};
-use hmac::{Hmac, Mac};
+use lpe_domain::crypto::{hex_lower, hmac_sha256, hmac_sha256_hex, sha256_hex};
 use lpe_domain::utc_from_unix_seconds;
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, CONTENT_LENGTH},
     Client, Method, StatusCode, Url,
 };
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     env, fmt,
@@ -15,8 +14,6 @@ use std::{
 use uuid::Uuid;
 
 use crate::StoragePoolConfigSummary;
-
-type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) const STORAGE_POOL_KIND_POSTGRES: &str = "postgres";
 pub(crate) const STORAGE_POOL_KIND_S3_COMPATIBLE: &str = "s3_compatible";
@@ -638,7 +635,7 @@ fn signed_s3_request(
         sha256_hex(canonical_request.as_bytes())
     );
     let signing_key = s3_signing_key(&credentials.secret_access_key, &date_stamp, config)?;
-    let signature = hmac_sha256_hex(&signing_key, string_to_sign.as_bytes())?;
+    let signature = hmac_sha256_hex(&signing_key, string_to_sign.as_bytes());
     let authorization = format!(
         "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
         credentials.access_key_id, credential_scope, signed_headers, signature
@@ -723,36 +720,10 @@ fn s3_signing_key(
     let date = hmac_sha256(
         format!("AWS4{secret_access_key}").as_bytes(),
         date_stamp.as_bytes(),
-    )?;
-    let region = hmac_sha256(&date, config.signing_region.as_bytes())?;
-    let service = hmac_sha256(&region, b"s3")?;
-    hmac_sha256(&service, b"aws4_request")
-}
-
-fn hmac_sha256(key: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
-    let mut mac = HmacSha256::new_from_slice(key).map_err(|_| {
-        StorageBackendError::InvalidConfig("storage backend signing key is invalid".into())
-    })?;
-    mac.update(payload);
-    Ok(mac.finalize().into_bytes().to_vec())
-}
-
-fn hmac_sha256_hex(key: &[u8], payload: &[u8]) -> Result<String> {
-    hmac_sha256(key, payload).map(|bytes| hex_lower(&bytes))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex_lower(&Sha256::digest(bytes))
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
+    );
+    let region = hmac_sha256(&date, config.signing_region.as_bytes());
+    let service = hmac_sha256(&region, b"s3");
+    Ok(hmac_sha256(&service, b"aws4_request"))
 }
 
 fn canonical_host(url: &Url) -> Result<String> {

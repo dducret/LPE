@@ -1,5 +1,4 @@
 use anyhow::Result;
-use lpe_ai::{summarize_projection, LocalModelProvider};
 use lpe_attachments::AttachmentFormat;
 use lpe_domain::{AccessScope, Account, DocumentChunk, DocumentKind, DocumentProjection};
 use std::env;
@@ -51,24 +50,6 @@ impl CoreService {
                     .to_string(),
             token_estimate: 16,
         }]
-    }
-
-    pub fn summarize_bootstrap_projection(
-        &self,
-        provider: &dyn LocalModelProvider,
-        principal_account_id: Uuid,
-    ) -> Result<String> {
-        let projection = self.bootstrap_mail_projection(principal_account_id);
-        let chunks = self.bootstrap_projection_chunks(projection.id);
-        let annotation = summarize_projection(
-            provider,
-            principal_account_id,
-            "stub-local",
-            projection,
-            chunks,
-        )?;
-
-        Ok(annotation.payload_json)
     }
 
     pub fn supported_attachment_formats(&self) -> Vec<AttachmentFormat> {

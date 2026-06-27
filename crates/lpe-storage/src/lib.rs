@@ -9,6 +9,7 @@ pub mod conversation_actions;
 pub mod core;
 pub mod inbound;
 pub mod mail;
+pub mod mail_items;
 mod message_ops;
 pub mod models;
 pub mod notes_journal;

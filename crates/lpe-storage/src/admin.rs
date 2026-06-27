@@ -2025,8 +2025,8 @@ impl Storage {
             },
             None => LocalAiSettings {
                 enabled: true,
-                provider: "stub-local".to_string(),
-                model: "gemma3-local".to_string(),
+                provider: "not-configured".to_string(),
+                model: String::new(),
                 offline_only: true,
                 indexing_enabled: true,
             },

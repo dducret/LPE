@@ -3,8 +3,6 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
-use lpe_core::CoreService;
 use lpe_storage::{
     normalize_mailbox_email, AccountCredentialInput, AdminCredentialInput, AdminDashboard,
     AuditEntryInput, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, LocalAiSettings,
@@ -37,20 +35,11 @@ pub(crate) async fn local_ai_health(
         .fetch_admin_dashboard()
         .await
         .map_err(internal_error)?;
-    let provider = StubLocalModelProvider;
-    let models = provider
-        .describe_models()
-        .into_iter()
-        .map(|model| model.id)
-        .collect();
-    let bootstrap_summary_payload = CoreService
-        .summarize_bootstrap_projection(&provider, Uuid::new_v4())
-        .map_err(internal_error)?;
 
     Ok(Json(LocalAiHealthResponse {
         provider: dashboard.local_ai_settings.provider,
-        models,
-        bootstrap_summary_payload,
+        models: Vec::new(),
+        bootstrap_summary_payload: String::new(),
         enabled: dashboard.local_ai_settings.enabled,
         offline_only: dashboard.local_ai_settings.offline_only,
     }))

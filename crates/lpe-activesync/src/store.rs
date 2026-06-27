@@ -450,8 +450,14 @@ impl ActiveSyncStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail> {
         Box::pin(async move {
-            self.update_jmap_email_flags(account_id, message_id, unread, flagged, audit)
-                .await
+            lpe_storage::mail_items::update_message_flags(
+                self,
+                account_id,
+                message_id,
+                lpe_storage::mail_items::MessageFlagUpdate { unread, flagged },
+                audit,
+            )
+            .await
         })
     }
 

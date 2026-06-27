@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::normalization;
 use lpe_storage::{
     AccessibleContact, AuthenticatedAccount, CollaborationCollection, ContactNameFields,
     ContactSourceFields, RecipientSuggestion, UpsertClientContactInput,
@@ -889,10 +890,6 @@ fn validate_address_book_ids(value: Option<&Value>) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn normalize_email(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
 fn parse_contact_name(value: Option<&Value>) -> Result<String> {
     let value = value.ok_or_else(|| anyhow!("name is required"))?;
     let object = value
@@ -945,7 +942,8 @@ fn contact_object_string(object: &Map<String, Value>, key: &str) -> String {
 }
 
 fn parse_contact_email(value: Option<&Value>) -> Result<String> {
-    parse_contact_property_string(value, "emails", "address").map(|email| normalize_email(&email))
+    parse_contact_property_string(value, "emails", "address")
+        .map(|email| normalization::normalize_trimmed_lowercase(&email))
 }
 
 fn parse_contact_phone(value: Option<&Value>) -> Result<String> {

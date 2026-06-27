@@ -565,21 +565,11 @@ impl Storage {
         flagged: Option<bool>,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
-        self.update_jmap_email_followup_flags(
+        crate::mail_items::update_message_flags(
+            self,
             account_id,
             message_id,
-            crate::JmapEmailFollowupUpdate {
-                unread,
-                flagged,
-                followup_flag_status: flagged.map(|flagged| {
-                    if flagged {
-                        "flagged".to_string()
-                    } else {
-                        "none".to_string()
-                    }
-                }),
-                ..Default::default()
-            },
+            crate::mail_items::MessageFlagUpdate { unread, flagged },
             audit,
         )
         .await

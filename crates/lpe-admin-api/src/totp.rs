@@ -1,4 +1,4 @@
-use sha2::{Digest, Sha256};
+use lpe_domain::crypto::hmac_sha256;
 use uuid::Uuid;
 
 const TOTP_STEP_SECONDS: u64 = 30;
@@ -58,33 +58,6 @@ fn generate_code(secret: &str, unix_time: u64) -> Option<String> {
         value % 10_u32.pow(TOTP_DIGITS),
         width = TOTP_DIGITS as usize
     ))
-}
-
-fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    let mut normalized_key = [0u8; 64];
-    if key.len() > 64 {
-        let digest = Sha256::digest(key);
-        normalized_key[..32].copy_from_slice(&digest);
-    } else {
-        normalized_key[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner_pad = [0u8; 64];
-    let mut outer_pad = [0u8; 64];
-    for (idx, value) in normalized_key.iter().enumerate() {
-        inner_pad[idx] = value ^ 0x36;
-        outer_pad[idx] = value ^ 0x5c;
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(inner_pad);
-    inner.update(data);
-    let inner_hash = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(outer_pad);
-    outer.update(inner_hash);
-    outer.finalize().into()
 }
 
 fn encode_base32(bytes: &[u8]) -> String {

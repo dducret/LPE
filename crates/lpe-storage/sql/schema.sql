@@ -467,8 +467,8 @@ CREATE INDEX sieve_vacation_responses_last_sent_idx
 CREATE TABLE local_ai_settings (
     tenant_id UUID PRIMARY KEY,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    provider TEXT NOT NULL DEFAULT 'stub-local',
-    model TEXT NOT NULL DEFAULT 'gemma3-local',
+    provider TEXT NOT NULL DEFAULT 'not-configured',
+    model TEXT NOT NULL DEFAULT '',
     offline_only BOOLEAN NOT NULL DEFAULT TRUE,
     indexing_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

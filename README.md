@@ -67,3 +67,17 @@ cargo check
 ```
 
 For installation and reset workflows on `Debian Trixie`, see [installation/README.md](installation/README.md).
+
+## Repository Checks
+
+Report production source files above the 1,500-line threshold:
+
+```sh
+python3 tools/check_oversized_sources.py
+```
+
+Use `--fail` when the check should exit non-zero for CI enforcement:
+
+```sh
+python3 tools/check_oversized_sources.py --fail
+```

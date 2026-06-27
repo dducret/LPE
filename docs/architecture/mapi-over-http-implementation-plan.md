@@ -582,6 +582,46 @@ not by itself authorize broad client publication.
 | Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
 | Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut and associated configuration FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
 
+## Outlook Compatibility Metadata Boundaries
+
+MAPI over HTTP has three separate state boundaries. New Outlook compatibility
+work must place data in exactly one boundary before adding persistence or
+session handling.
+
+| Boundary | Owns | Tables or storage | Rule |
+| --- | --- | --- | --- |
+| Canonical mailbox and collaboration state | Mailbox membership, messages, MIME/body/blob rows, submission queue state, contacts, calendars, tasks, notes, journals, search folders, public-folder state, grants, sender rights, and user-visible settings. | Canonical LPE tables such as `messages`, `mailboxes`, `mailbox_messages`, `submission_queue`, `contact_books`, `contacts`, `calendars`, `calendar_events`, `task_lists`, `tasks`, `search_folders`, public-folder tables, grants, `sieve_scripts`, `account_identities`, and `server_settings`. | This is the source of truth. MAPI projects from and mutates this state through canonical APIs or storage paths. No `mapi_*` compatibility table may shadow a canonical field such as subject, body, flags, attendees, permissions, Sent membership, or submission status. |
+| Durable Outlook compatibility metadata | Stable protocol identity, bounded profile reuse data, Outlook-only custom properties, associated configuration rows, navigation shortcuts, and resumable EMSMDB/ICS cursors. | `mapi_mailbox_replicas`, `mapi_object_identities`, `mapi_named_properties`, `mapi_custom_property_values`, `mapi_profile_settings`, `mapi_folder_profile_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, and `mapi_sync_checkpoints`. | These rows are durable because Outlook cached-mode clients need stable ids, named-property mappings, profile hints, FAI/config replay, and sync cursors across sessions. They do not own mailbox or collaboration content; when a value has a canonical LPE field, the canonical field wins. |
+| Session-only MAPI transport state | HTTP request sequencing, cookies, active `MapiContext` and `MapiSequence`, handle tables, open table category/collapse state, pending ROP buffers, transfer-source/collector handles, notification registrations, replay dedupe, and accepted writeback caches that are documented as live-handle-only. | In-memory EMSMDB/NSPI/MAPI session structures and per-handle state only. | Losing this state may force reconnect, replay, or resynchronization, but must not lose committed user data. Session state is persisted only when code explicitly commits a canonical mutation or writes one of the bounded durable Outlook metadata rows above. |
+
+Durable compatibility metadata is intentionally narrower than canonical state:
+
+- `mapi_mailbox_replicas` and `mapi_object_identities` provide stable Outlook
+  replica, FID/MID, source-key, change-key, and instance-key mappings for
+  canonical or bounded compatibility objects.
+- `mapi_named_properties` stores stable per-account named-property ID
+  allocations; active session registries are caches.
+- `mapi_custom_property_values` stores opaque Outlook/custom MAPI property
+  values only for supported canonical object kinds when no canonical field owns
+  that property.
+- `mapi_profile_settings` and `mapi_folder_profile_property_values` store
+  bounded profile and folder display metadata needed for cached-mode reopen;
+  they must not become arbitrary Exchange profile or folder truth.
+- `mapi_navigation_shortcuts` stores Common Views shortcut and group-header FAI
+  rows for Outlook navigation-pane compatibility, not canonical folders.
+- `mapi_associated_config_messages` stores bounded associated/configuration FAI
+  messages for view, form, and client configuration sync replay. These rows are
+  not normal mailbox messages and are not exposed through non-MAPI message APIs.
+- `mapi_sync_checkpoints` stores EMSMDB/ICS cursor state only. Checkpoints may
+  resume canonical change replay, but they do not store mailbox content.
+
+When a MAPI operation appears to update both Outlook compatibility metadata and
+canonical state, the implementation must perform the canonical mutation through
+the canonical subsystem first, then update durable compatibility metadata only
+for protocol identity, profile reuse, or replay continuity. Metadata-only
+client uploads that cannot map to canonical state may be acknowledged only where
+this plan explicitly documents that compatibility behavior.
+
 ## Outlook Profile Settings Matrix
 
 | Setting area | Canonical storage today | Profile behavior |

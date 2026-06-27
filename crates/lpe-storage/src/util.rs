@@ -1,51 +1,23 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::normalization;
 use lpe_domain::MailboxNamePolicy;
-use sha2::{Digest, Sha256};
 use std::env;
 use uuid::Uuid;
 
 pub fn normalize_mailbox_domain(value: &str) -> String {
-    normalize_domain_name(value).unwrap_or_default()
+    normalization::normalize_mailbox_domain(value)
 }
 
 pub fn normalize_mailbox_email(value: &str) -> String {
-    normalize_email(value)
+    normalization::normalize_mailbox_email(value)
 }
 
 pub(crate) fn normalize_email(value: &str) -> String {
-    normalize_email_result(value).unwrap_or_default()
+    normalization::normalize_mailbox_email(value)
 }
 
 pub(crate) fn normalize_domain_name(value: &str) -> Result<String> {
-    let trimmed = value.trim().trim_end_matches('.');
-    if trimmed.is_empty() {
-        bail!("domain name is required");
-    }
-    if trimmed
-        .chars()
-        .any(|ch| ch.is_control() || ch.is_whitespace())
-    {
-        bail!("invalid domain name");
-    }
-    let ascii = idna::domain_to_ascii(trimmed).map_err(|_| anyhow!("invalid domain name"))?;
-    let normalized = ascii.to_ascii_lowercase();
-    if normalized.is_empty() {
-        bail!("domain name is required");
-    }
-    Ok(normalized)
-}
-
-fn normalize_email_result(value: &str) -> Result<String> {
-    let trimmed = value.trim();
-    let Some((local_part, domain)) = trimmed.split_once('@') else {
-        bail!("email address must contain a domain");
-    };
-    if local_part.trim().is_empty() || local_part.contains('@') {
-        bail!("email address local part is invalid");
-    }
-    let local_part = local_part.trim().to_lowercase();
-    let domain = normalize_domain_name(domain)?;
-    Ok(format!("{local_part}@{domain}"))
+    normalization::normalize_domain_name(value).map_err(Into::into)
 }
 
 pub(crate) fn normalize_admin_session_auth_method(value: &str) -> &'static str {
@@ -78,11 +50,7 @@ pub(crate) fn normalize_task_list_name(value: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
-}
+pub(crate) use lpe_domain::crypto::sha256_hex;
 
 pub(crate) fn domain_from_email(email: &str) -> Result<String> {
     email

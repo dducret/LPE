@@ -42,32 +42,6 @@ pub trait LocalModelProvider: Send + Sync {
     fn infer(&self, request: InferenceRequest) -> Result<InferenceResponse>;
 }
 
-#[derive(Debug, Default)]
-pub struct StubLocalModelProvider;
-
-impl LocalModelProvider for StubLocalModelProvider {
-    fn describe_models(&self) -> Vec<LocalModelDescriptor> {
-        vec![LocalModelDescriptor {
-            id: "stub-local".to_string(),
-            family: "local".to_string(),
-            capabilities: vec![
-                ModelCapability::Summarize,
-                ModelCapability::Classify,
-                ModelCapability::Extract,
-            ],
-        }]
-    }
-
-    fn infer(&self, request: InferenceRequest) -> Result<InferenceResponse> {
-        Ok(InferenceResponse {
-            request_id: request.request_id,
-            model_id: request.model_id,
-            output_text: "Local inference is not wired yet.".to_string(),
-            provenance_chunk_ids: request.chunks.iter().map(|chunk| chunk.id).collect(),
-        })
-    }
-}
-
 pub fn summarize_projection(
     provider: &dyn LocalModelProvider,
     principal_account_id: Uuid,

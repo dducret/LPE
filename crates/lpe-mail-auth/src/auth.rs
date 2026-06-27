@@ -4,6 +4,7 @@ use argon2::{
     Argon2,
 };
 use axum::http::HeaderMap;
+use lpe_domain::normalization;
 use lpe_storage::AuditEntryInput;
 
 use crate::{
@@ -162,11 +163,7 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
 }
 
 pub fn normalize_login_name(username: &str, hinted_user: Option<&str>) -> String {
-    if username.contains('@') {
-        username.trim().to_lowercase()
-    } else {
-        hinted_user.unwrap_or(username).trim().to_lowercase()
-    }
+    normalization::normalize_login_name(username, hinted_user)
 }
 
 pub fn verify_password(password_hash: &str, password: &str) -> bool {

@@ -1,3 +1,4 @@
+use lpe_domain::normalization;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -128,22 +129,11 @@ pub fn calendar_participant_label(participant: &CalendarParticipantMetadata) -> 
 }
 
 pub fn normalize_calendar_email(value: &str) -> String {
-    value
-        .trim()
-        .strip_prefix("mailto:")
-        .unwrap_or(value.trim())
-        .trim()
-        .to_ascii_lowercase()
+    normalization::normalize_calendar_email(value)
 }
 
 pub fn normalize_calendar_participation_status(value: &str) -> String {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "accepted" => "accepted".to_string(),
-        "declined" => "declined".to_string(),
-        "tentative" => "tentative".to_string(),
-        "delegated" => "delegated".to_string(),
-        _ => "needs-action".to_string(),
-    }
+    normalization::normalize_calendar_participation_status(value)
 }
 
 fn normalize_calendar_participants_metadata(

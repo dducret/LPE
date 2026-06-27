@@ -1,6 +1,5 @@
-use hmac::{Hmac, Mac};
+use crate::crypto::{hmac_sha256_hex, sha256_hex};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -9,8 +8,6 @@ pub const INTEGRATION_TIMESTAMP_HEADER: &str = "x-lpe-integration-timestamp";
 pub const INTEGRATION_NONCE_HEADER: &str = "x-lpe-integration-nonce";
 pub const INTEGRATION_SIGNATURE_HEADER: &str = "x-lpe-integration-signature";
 pub const DEFAULT_MAX_SKEW_SECONDS: i64 = 300;
-
-type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedIntegrationHeaders {
@@ -173,31 +170,16 @@ fn sign_components(
     nonce: &str,
     payload: &[u8],
 ) -> String {
-    let body_hash = hex_sha256(payload);
-    let mut mac = HmacSha256::new_from_slice(shared_secret.as_bytes())
-        .expect("shared secret is always a valid HMAC key");
-    mac.update(method.trim().to_ascii_uppercase().as_bytes());
-    mac.update(b"\n");
-    mac.update(path.trim().as_bytes());
-    mac.update(b"\n");
-    mac.update(timestamp.trim().as_bytes());
-    mac.update(b"\n");
-    mac.update(nonce.trim().as_bytes());
-    mac.update(b"\n");
-    mac.update(body_hash.as_bytes());
-    hex_bytes(mac.finalize().into_bytes())
-}
-
-fn hex_sha256(payload: &[u8]) -> String {
-    hex_bytes(Sha256::digest(payload))
-}
-
-fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    let body_hash = sha256_hex(payload);
+    let payload = [
+        method.trim().to_ascii_uppercase(),
+        path.trim().to_string(),
+        timestamp.trim().to_string(),
+        nonce.trim().to_string(),
+        body_hash,
+    ]
+    .join("\n");
+    hmac_sha256_hex(shared_secret.as_bytes(), payload.as_bytes())
 }
 
 #[cfg(test)]

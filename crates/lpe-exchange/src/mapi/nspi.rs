@@ -7,6 +7,7 @@ use super::transport::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
 use crate::store::ExchangeAddressBookEntryDetails;
+use lpe_domain::normalization;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
@@ -2519,13 +2520,7 @@ pub(in crate::mapi) fn decode_utf16le_string(bytes: &[u8]) -> Option<String> {
 }
 
 pub(in crate::mapi) fn normalize_nspi_lookup_value(value: &str) -> String {
-    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
-    if let Some(rest) = value.strip_prefix("=smtp:") {
-        value = rest.to_string();
-    } else if let Some(rest) = value.strip_prefix("smtp:") {
-        value = rest.to_string();
-    }
-    value
+    normalization::normalize_smtp_lookup_value(value)
 }
 
 fn nspi_lookup_value_is_plausible(value: &str) -> bool {

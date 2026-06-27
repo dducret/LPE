@@ -18,6 +18,7 @@ use lpe_core::sieve::{Action, Statement};
 use lpe_domain::mail_format::{
     format_mailbox_address, quote_header_parameter, sanitize_header_value, DisplayNamePolicy,
 };
+use lpe_domain::normalization;
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
     Validator,
@@ -63,6 +64,16 @@ use crate::{
         UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
+
+mod ews {
+    pub(super) mod mime;
+    pub(super) mod notifications;
+    pub(super) mod xml;
+}
+
+use ews::mime::*;
+use ews::notifications::*;
+use ews::xml::*;
 
 const EWS_PATH: &str = "/EWS/Exchange.asmx";
 const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
@@ -6223,7 +6234,7 @@ fn parse_ews_delegate_user(
     let user_id = element_content(user, "UserId").unwrap_or(user);
     let grantee_email = element_text(user_id, "PrimarySmtpAddress")
         .or_else(|| element_text(user_id, "EmailAddress"))
-        .map(|email| email.trim().to_ascii_lowercase())
+        .map(|email| normalization::normalize_trimmed_lowercase(&email))
         .filter(|email| !email.is_empty())
         .ok_or_else(|| anyhow!("Delegate UserId PrimarySmtpAddress is required"))?;
     if grantee_email.eq_ignore_ascii_case(&principal.email) {
@@ -6303,7 +6314,7 @@ fn parse_delegate_user_id_emails(request: &str) -> Vec<String> {
             element_text(user_id, "PrimarySmtpAddress")
                 .or_else(|| element_text(user_id, "EmailAddress"))
         })
-        .map(|email| email.trim().to_ascii_lowercase())
+        .map(|email| normalization::normalize_trimmed_lowercase(&email))
         .filter(|email| !email.is_empty())
         .collect()
 }
@@ -8729,159 +8740,6 @@ fn requested_folder_ids(request: &str) -> Vec<String> {
         .collect()
 }
 
-fn attribute_values_for_tag<'a>(xml: &'a str, local_name: &str, attr: &str) -> Vec<&'a str> {
-    let mut values = Vec::new();
-    let mut rest = xml;
-    while let Some(tag_start) = rest.find('<') {
-        let tag_text = rest[tag_start + 1..].trim_start();
-        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
-            rest = &tag_text[1..];
-            continue;
-        }
-        let Some(tag_end) = tag_text.find('>') else {
-            break;
-        };
-        let open_tag = &tag_text[..tag_end];
-        let Some(qualified_name) = open_tag
-            .split(|value: char| value.is_whitespace() || value == '/')
-            .next()
-        else {
-            rest = &tag_text[tag_end + 1..];
-            continue;
-        };
-        if qualified_name.rsplit(':').next() == Some(local_name) {
-            if let Some(value) = attribute_value(open_tag, attr) {
-                values.push(value);
-            }
-        }
-        rest = &tag_text[tag_end + 1..];
-    }
-    values
-}
-
-fn attribute_value_after<'a>(body: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
-    let index = body.find(tag)?;
-    let rest = &body[index..];
-    let end = rest.find('>')?;
-    let tag_text = &rest[..end];
-    attribute_value(tag_text, attr)
-}
-
-fn ews_bool_attribute(body: &str, tag: &str, attr: &str) -> Option<bool> {
-    attribute_value_after(body, tag, attr)
-        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
-}
-
-fn attribute_value<'a>(tag_text: &'a str, attr: &str) -> Option<&'a str> {
-    let pattern = format!("{attr}=");
-    let start = tag_text.find(&pattern)? + pattern.len();
-    let quote = tag_text[start..].chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let value_start = start + quote.len_utf8();
-    let value_end = tag_text[value_start..].find(quote)? + value_start;
-    Some(&tag_text[value_start..value_end])
-}
-
-fn open_tag_text<'a>(xml: &'a str, local_name: &str) -> Option<&'a str> {
-    let mut rest = xml;
-    while let Some(tag_start) = rest.find('<') {
-        let tag_text = rest[tag_start + 1..].trim_start();
-        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
-            rest = &tag_text[1..];
-            continue;
-        }
-        let tag_end = tag_text.find('>')?;
-        let open_tag = &tag_text[..tag_end];
-        let qualified_name = open_tag
-            .split(|value: char| value.is_whitespace() || value == '/')
-            .next()?;
-        if qualified_name.rsplit(':').next()? == local_name {
-            return Some(open_tag);
-        }
-        rest = &tag_text[tag_end + 1..];
-    }
-    None
-}
-
-fn element_text(xml: &str, local_name: &str) -> Option<String> {
-    element_content(xml, local_name).map(xml_text)
-}
-
-fn element_content<'a>(xml: &'a str, local_name: &str) -> Option<&'a str> {
-    element_contents(xml, local_name).into_iter().next()
-}
-
-fn element_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
-    let mut values = Vec::new();
-    let mut rest = xml;
-    while let Some(tag_start) = rest.find('<') {
-        let tag_text = rest[tag_start + 1..].trim_start();
-        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
-            rest = &tag_text[1..];
-            continue;
-        }
-        let Some(tag_end) = tag_text.find('>') else {
-            break;
-        };
-        let open_tag = &tag_text[..tag_end];
-        let Some(qualified_name) = open_tag
-            .split(|value: char| value.is_whitespace() || value == '/')
-            .next()
-        else {
-            break;
-        };
-        if qualified_name.rsplit(':').next() != Some(local_name) {
-            rest = &tag_text[tag_end + 1..];
-            continue;
-        }
-        if open_tag.trim_end().ends_with('/') {
-            values.push("");
-            rest = &tag_text[tag_end + 1..];
-            continue;
-        }
-
-        let content_start = tag_start + 1 + tag_text[..tag_end + 1].len();
-        let closing_tag = format!("</{qualified_name}>");
-        let Some(relative_end) = rest[content_start..].find(&closing_tag) else {
-            break;
-        };
-        let content_end = content_start + relative_end;
-        values.push(&rest[content_start..content_end]);
-        rest = &rest[content_end + closing_tag.len()..];
-    }
-    values
-}
-
-fn xml_text(value: &str) -> String {
-    value
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .trim()
-        .to_string()
-}
-
-fn html_to_text(value: &str) -> String {
-    let mut output = String::with_capacity(value.len());
-    let mut in_tag = false;
-    for ch in value.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                output.push(' ');
-            }
-            _ if !in_tag => output.push(ch),
-            _ => {}
-        }
-    }
-    output.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn find_item_response(items: String) -> String {
     format!(
         concat!(
@@ -9568,239 +9426,6 @@ fn message_item_xml_with_details(
         ),
     );
     xml
-}
-
-fn render_mime_message(email: &JmapEmail, attachments: &[ActiveSyncAttachmentContent]) -> Vec<u8> {
-    let mut message = render_mime_header(email, attachments.is_empty());
-    if attachments.is_empty() {
-        message.push_str(&render_standalone_body_mime(email));
-    } else {
-        let boundary = mixed_boundary(email);
-        message.push_str(&format!("--{boundary}\r\n"));
-        message.push_str(&render_body_mime_part(email));
-        if !message.ends_with("\r\n") {
-            message.push_str("\r\n");
-        }
-        for attachment in attachments {
-            message.push_str(&format!("--{boundary}\r\n"));
-            message.push_str(&render_attachment_mime_part(attachment));
-        }
-        message.push_str(&format!("--{boundary}--\r\n"));
-    }
-    message.into_bytes()
-}
-
-fn render_standalone_body_mime(email: &JmapEmail) -> String {
-    if let Some(html) = email.body_html_sanitized.as_deref() {
-        let boundary = alternative_boundary(email);
-        return format!(
-            concat!(
-                "--{boundary}\r\n",
-                "Content-Type: text/plain; charset=UTF-8\r\n",
-                "Content-Transfer-Encoding: 7bit\r\n",
-                "\r\n",
-                "{text}\r\n",
-                "--{boundary}\r\n",
-                "Content-Type: text/html; charset=UTF-8\r\n",
-                "Content-Transfer-Encoding: 7bit\r\n",
-                "\r\n",
-                "{html}\r\n",
-                "--{boundary}--\r\n"
-            ),
-            boundary = boundary,
-            text = email.body_text,
-            html = html,
-        );
-    }
-
-    email.body_text.clone()
-}
-
-fn render_mime_header(email: &JmapEmail, without_attachments: bool) -> String {
-    let mut lines = Vec::new();
-    lines.push(format!(
-        "Date: {}",
-        sanitize_header_value(&email.received_at)
-    ));
-    lines.push(format!(
-        "From: {}",
-        render_mime_address(email.from_display.as_deref(), email.from_address.as_str())
-    ));
-    if !email.to.is_empty() {
-        lines.push(format!("To: {}", render_mime_recipients(&email.to)));
-    }
-    if !email.cc.is_empty() {
-        lines.push(format!("Cc: {}", render_mime_recipients(&email.cc)));
-    }
-    if !email.bcc.is_empty() && matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
-        lines.push(format!("Bcc: {}", render_mime_recipients(&email.bcc)));
-    }
-    lines.push(format!(
-        "Subject: {}",
-        sanitize_header_value(&email.subject)
-    ));
-    if let Some(message_id) = email.internet_message_id.as_deref() {
-        lines.push(format!("Message-Id: {}", sanitize_header_value(message_id)));
-    }
-    lines.push("MIME-Version: 1.0".to_string());
-    let content_type = if without_attachments {
-        body_content_type(email)
-    } else {
-        format!("multipart/mixed; boundary=\"{}\"", mixed_boundary(email))
-    };
-    lines.push(format!("Content-Type: {content_type}"));
-    lines.join("\r\n") + "\r\n\r\n"
-}
-
-fn render_body_mime_part(email: &JmapEmail) -> String {
-    if let Some(html) = email.body_html_sanitized.as_deref() {
-        let boundary = alternative_boundary(email);
-        return format!(
-            concat!(
-                "Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n",
-                "\r\n",
-                "--{boundary}\r\n",
-                "Content-Type: text/plain; charset=UTF-8\r\n",
-                "Content-Transfer-Encoding: 7bit\r\n",
-                "\r\n",
-                "{text}\r\n",
-                "--{boundary}\r\n",
-                "Content-Type: text/html; charset=UTF-8\r\n",
-                "Content-Transfer-Encoding: 7bit\r\n",
-                "\r\n",
-                "{html}\r\n",
-                "--{boundary}--\r\n"
-            ),
-            boundary = boundary,
-            text = email.body_text,
-            html = html,
-        );
-    }
-
-    format!(
-        concat!(
-            "Content-Type: text/plain; charset=UTF-8\r\n",
-            "Content-Transfer-Encoding: 7bit\r\n",
-            "\r\n",
-            "{}\r\n"
-        ),
-        email.body_text,
-    )
-}
-
-fn render_attachment_mime_part(attachment: &ActiveSyncAttachmentContent) -> String {
-    let file_name = quote_mime_parameter(&attachment.file_name);
-    format!(
-        concat!(
-            "Content-Type: {content_type}; name=\"{file_name}\"\r\n",
-            "Content-Transfer-Encoding: base64\r\n",
-            "Content-Disposition: attachment; filename=\"{file_name}\"\r\n",
-            "\r\n",
-            "{body}\r\n"
-        ),
-        content_type = sanitize_header_value(&attachment.media_type),
-        file_name = file_name,
-        body = base64_mime_lines(&attachment.blob_bytes),
-    )
-}
-
-fn body_content_type(email: &JmapEmail) -> String {
-    if email.body_html_sanitized.is_some() {
-        format!(
-            "multipart/alternative; boundary=\"{}\"",
-            alternative_boundary(email)
-        )
-    } else {
-        "text/plain; charset=UTF-8".to_string()
-    }
-}
-
-fn mixed_boundary(email: &JmapEmail) -> String {
-    format!("lpe-ews-mixed-{}", email.id.simple())
-}
-
-fn alternative_boundary(email: &JmapEmail) -> String {
-    format!("lpe-ews-alt-{}", email.id.simple())
-}
-
-fn render_mime_recipients(recipients: &[JmapEmailAddress]) -> String {
-    recipients
-        .iter()
-        .map(|recipient| render_mime_address(recipient.display_name.as_deref(), &recipient.address))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn render_mime_address(display_name: Option<&str>, address: &str) -> String {
-    format_mailbox_address(
-        address,
-        display_name,
-        DisplayNamePolicy::OmitIfEqualsAddress,
-    )
-}
-
-fn quote_mime_parameter(value: &str) -> String {
-    quote_header_parameter(value)
-}
-
-fn base64_mime_lines(bytes: &[u8]) -> String {
-    bytes
-        .chunks(57)
-        .map(|chunk| BASE64_STANDARD.encode(chunk))
-        .collect::<Vec<_>>()
-        .join("\r\n")
-}
-
-fn message_attachments_xml(attachments: &[ActiveSyncAttachment]) -> String {
-    if attachments.is_empty() {
-        return String::new();
-    }
-
-    format!(
-        "<t:Attachments>{}</t:Attachments>",
-        attachments
-            .iter()
-            .map(file_attachment_reference_xml)
-            .collect::<String>()
-    )
-}
-
-fn file_attachment_reference_xml(attachment: &ActiveSyncAttachment) -> String {
-    format!(
-        concat!(
-            "<t:FileAttachment>",
-            "<t:AttachmentId Id=\"{file_reference}\"/>",
-            "<t:Name>{name}</t:Name>",
-            "<t:ContentType>{content_type}</t:ContentType>",
-            "<t:Size>{size}</t:Size>",
-            "<t:IsInline>false</t:IsInline>",
-            "</t:FileAttachment>"
-        ),
-        file_reference = escape_xml(&attachment.file_reference),
-        name = escape_xml(&attachment.file_name),
-        content_type = escape_xml(&attachment.media_type),
-        size = attachment.size_octets,
-    )
-}
-
-fn file_attachment_content_xml(content: &ActiveSyncAttachmentContent) -> String {
-    format!(
-        concat!(
-            "<t:FileAttachment>",
-            "<t:AttachmentId Id=\"{file_reference}\"/>",
-            "<t:Name>{name}</t:Name>",
-            "<t:ContentType>{content_type}</t:ContentType>",
-            "<t:Size>{size}</t:Size>",
-            "<t:IsInline>false</t:IsInline>",
-            "<t:Content>{body}</t:Content>",
-            "</t:FileAttachment>"
-        ),
-        file_reference = escape_xml(&content.file_reference),
-        name = escape_xml(&content.file_name),
-        content_type = escape_xml(&content.media_type),
-        size = content.blob_bytes.len(),
-        body = BASE64_STANDARD.encode(&content.blob_bytes),
-    )
 }
 
 fn root_item_id_xml(email: &JmapEmail) -> String {
@@ -11499,213 +11124,6 @@ fn get_room_lists_response(
     )
 }
 
-fn subscribe_success_response(subscription_id: &str, watermark: &str) -> String {
-    format!(
-        concat!(
-            "<m:SubscribeResponse>",
-            "<m:ResponseMessages>",
-            "<m:SubscribeResponseMessage ResponseClass=\"Success\">",
-            "<m:ResponseCode>NoError</m:ResponseCode>",
-            "<m:SubscriptionId>{subscription_id}</m:SubscriptionId>",
-            "<m:Watermark>{watermark}</m:Watermark>",
-            "</m:SubscribeResponseMessage>",
-            "</m:ResponseMessages>",
-            "</m:SubscribeResponse>"
-        ),
-        subscription_id = escape_xml(subscription_id),
-        watermark = escape_xml(watermark),
-    )
-}
-
-fn get_events_queued_response(
-    subscription_id: &str,
-    previous_watermark: &str,
-    events: &[EwsQueuedNotification],
-    has_more: bool,
-) -> String {
-    let mut event_xml = String::new();
-    for event in events {
-        event_xml.push_str(&queued_notification_event_xml(subscription_id, event));
-    }
-    format!(
-        concat!(
-            "<m:GetEventsResponse>",
-            "<m:ResponseMessages>",
-            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
-            "<m:ResponseCode>NoError</m:ResponseCode>",
-            "<m:Notification>",
-            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
-            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
-            "<t:MoreEvents>{more_events}</t:MoreEvents>",
-            "{event_xml}",
-            "</m:Notification>",
-            "</m:GetEventsResponseMessage>",
-            "</m:ResponseMessages>",
-            "</m:GetEventsResponse>"
-        ),
-        subscription_id = escape_xml(subscription_id),
-        previous_watermark = escape_xml(previous_watermark),
-        more_events = if has_more { "true" } else { "false" },
-        event_xml = event_xml,
-    )
-}
-
-fn get_streaming_events_queued_response(
-    subscription_id: &str,
-    previous_watermark: &str,
-    events: &[EwsQueuedNotification],
-    has_more: bool,
-) -> String {
-    get_events_queued_response(subscription_id, previous_watermark, events, has_more)
-        .replace("GetEventsResponse", "GetStreamingEventsResponse")
-        .replace(
-            "GetEventsResponseMessage",
-            "GetStreamingEventsResponseMessage",
-        )
-}
-
-fn queued_notification_event_xml(subscription_id: &str, event: &EwsQueuedNotification) -> String {
-    let event_name = match event.kind {
-        EwsNotificationKind::Created => "CreatedEvent",
-        EwsNotificationKind::Deleted => "DeletedEvent",
-        EwsNotificationKind::NewMail => "NewMailEvent",
-    };
-    let folder_marker = format!("mailbox:{}", event.mailbox_id);
-    let watermark = notification_watermark(subscription_id, Some(&folder_marker), event.sequence);
-    format!(
-        concat!(
-            "<t:{event_name}>",
-            "<t:Watermark>{watermark}</t:Watermark>",
-            "<t:TimeStamp>{timestamp}</t:TimeStamp>",
-            "<t:ItemId Id=\"message:{item_id}\" ChangeKey=\"{change_key}\"/>",
-            "<t:ParentFolderId Id=\"mailbox:{mailbox_id}\" ChangeKey=\"{folder_change_key}\"/>",
-            "</t:{event_name}>",
-        ),
-        event_name = event_name,
-        watermark = escape_xml(&watermark),
-        timestamp = escape_xml(&event.timestamp),
-        item_id = event.item_id,
-        change_key = escape_xml(&event.change_key),
-        mailbox_id = event.mailbox_id,
-        folder_change_key = escape_xml(&folder_change_key(&event.mailbox_id.to_string())),
-    )
-}
-
-fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
-    let folder_marker = notification_watermark_folder_marker(previous_watermark);
-    let previous_sequence = notification_watermark_sequence(previous_watermark).unwrap_or(0);
-    let next_sequence = if previous_sequence == 0 {
-        1
-    } else {
-        previous_sequence
-    };
-    let next_watermark =
-        notification_watermark(subscription_id, folder_marker.as_deref(), next_sequence);
-    format!(
-        concat!(
-            "<m:GetEventsResponse>",
-            "<m:ResponseMessages>",
-            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
-            "<m:ResponseCode>NoError</m:ResponseCode>",
-            "<m:Notification>",
-            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
-            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
-            "<t:MoreEvents>false</t:MoreEvents>",
-            "<t:StatusEvent>",
-            "<t:Watermark>{next_watermark}</t:Watermark>",
-            "</t:StatusEvent>",
-            "</m:Notification>",
-            "</m:GetEventsResponseMessage>",
-            "</m:ResponseMessages>",
-            "</m:GetEventsResponse>"
-        ),
-        subscription_id = escape_xml(subscription_id),
-        previous_watermark = escape_xml(previous_watermark),
-        next_watermark = escape_xml(&next_watermark),
-    )
-}
-
-fn get_streaming_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
-    get_events_status_response(subscription_id, previous_watermark)
-        .replace("GetEventsResponse", "GetStreamingEventsResponse")
-        .replace(
-            "GetEventsResponseMessage",
-            "GetStreamingEventsResponseMessage",
-        )
-}
-
-fn unsubscribe_success_response() -> String {
-    concat!(
-        "<m:UnsubscribeResponse>",
-        "<m:ResponseMessages>",
-        "<m:UnsubscribeResponseMessage ResponseClass=\"Success\">",
-        "<m:ResponseCode>NoError</m:ResponseCode>",
-        "</m:UnsubscribeResponseMessage>",
-        "</m:ResponseMessages>",
-        "</m:UnsubscribeResponse>"
-    )
-    .to_string()
-}
-
-fn notification_subscription_id(account_id: Uuid, request: &str) -> String {
-    let folder_ids = requested_folder_ids(request).join(",");
-    let distinguished_folder_id = requested_distinguished_folder_id(request).unwrap_or_default();
-    let account_id = account_id.to_string();
-    let mut hash = 0xcbf29ce484222325_u64;
-    for part in [
-        "ews-pull-subscription",
-        &account_id,
-        &folder_ids,
-        distinguished_folder_id,
-    ] {
-        for byte in part.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-    }
-    format!(
-        "00000000-0000-4000-8000-{tail:012x}",
-        tail = hash & 0xffff_ffff_ffff
-    )
-}
-
-fn pull_subscription_subscribes_to_all_folders(request: &str) -> bool {
-    open_tag_text(request, "PullSubscriptionRequest")
-        .and_then(|tag| attribute_value(tag, "SubscribeToAllFolders"))
-        .is_some_and(parse_xml_bool_attr)
-}
-
-fn notification_watermark(
-    subscription_id: &str,
-    folder_marker: Option<&str>,
-    sequence: u64,
-) -> String {
-    match folder_marker {
-        Some(folder_marker) => format!("lpe:{subscription_id}:{folder_marker}:{sequence}"),
-        None => format!("lpe:{subscription_id}:all:{sequence}"),
-    }
-}
-
-fn notification_watermark_folder_marker(watermark: &str) -> Option<String> {
-    let mut parts = watermark.split(':');
-    if parts.next()? != "lpe" {
-        return None;
-    }
-    parts.next()?;
-    let kind = parts.next()?;
-    match kind {
-        "mailbox" => Uuid::parse_str(parts.next()?)
-            .ok()
-            .map(|mailbox_id| format!("mailbox:{mailbox_id}")),
-        "role" => parts.next().map(|role| format!("role:{role}")),
-        _ => None,
-    }
-}
-
-fn notification_watermark_sequence(watermark: &str) -> Option<u64> {
-    watermark.rsplit(':').next()?.parse().ok()
-}
-
 fn get_item_error_response(code: &str, message: &str) -> String {
     format!(
         concat!(
@@ -12155,13 +11573,7 @@ fn address_book_entry_matches(
 }
 
 fn normalize_address_book_lookup(value: &str) -> String {
-    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
-    if let Some(rest) = value.strip_prefix("=smtp:") {
-        value = rest.to_string();
-    } else if let Some(rest) = value.strip_prefix("smtp:") {
-        value = rest.to_string();
-    }
-    value
+    normalization::normalize_smtp_lookup_value(value)
 }
 
 fn ews_mailbox_type(entry: &ExchangeAddressBookEntry) -> &'static str {
@@ -15624,7 +15036,7 @@ fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
             end += 1;
         }
         if let Ok(value) = std::str::from_utf8(&request[start + SMTP_PREFIX_ASCII.len()..end]) {
-            let value = value.trim().to_ascii_lowercase();
+            let value = normalization::normalize_trimmed_lowercase(value);
             if value.contains('@') {
                 return Some(value);
             }
@@ -15653,7 +15065,7 @@ fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
     }
     String::from_utf16(&units)
         .ok()
-        .map(|value| value.trim().to_ascii_lowercase())
+        .map(|value| normalization::normalize_trimmed_lowercase(&value))
         .filter(|value| value.contains('@'))
 }
 
@@ -15977,13 +15389,7 @@ fn rpc_proxy_nspi_utf16_lookup_values(request: &[u8]) -> Vec<String> {
 }
 
 fn rpc_proxy_normalize_nspi_lookup_value(value: &str) -> String {
-    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
-    if let Some(rest) = value.strip_prefix("=smtp:") {
-        value = rest.to_string();
-    } else if let Some(rest) = value.strip_prefix("smtp:") {
-        value = rest.to_string();
-    }
-    value
+    normalization::normalize_smtp_lookup_value(value)
 }
 
 fn rpc_proxy_push_rowset_pointer(buffer: &mut Vec<u8>, rows: &[Vec<(u32, RpcProxyNspiValue)>]) {
