@@ -37,18 +37,21 @@ change log. Bounded MAPI `RopModifyRules` writes only generated canonical Sieve
 scripts for rule rows that can be represented safely. It does not create
 protocol-local rule rows, hidden Exchange rule messages, or
 deferred-action-message stores. `RopUpdateDeferredActionMessages` stays a
-parseable unsupported path and must not activate or create Sieve scripts.
+parseable not-implemented path until canonical deferred-action semantics exist,
+and it must not activate or create Sieve scripts.
 
 The Outlook projection is intentionally bounded. It exposes the script id, name,
 active state, source kind, Sieve-derived condition/action summaries, size,
-updated timestamp, and an explicit unsupported Exchange feature list. MAPI rule
+updated timestamp, and an explicit gated Exchange feature list. MAPI rule
 mutation accepts only LPE-generated bounded provider data for subject/from
 predicates and actions that map to canonical behavior: file into a folder,
 discard/delete, redirect/forward through canonical submission, mark-read as a
 canonical rule action marker, and stop-processing. Full Exchange rule condition
 blobs, action blobs, provider-specific predicates, client-only rule execution,
 delegate rule templates, deferred-action provider data, and deferred-action
-message updates are rejected with parseable ROP errors and are not represented.
+message updates remain gated until canonical rule/deferred-action semantics
+exist; until then they are rejected with parseable ROP errors and are not
+represented.
 Rule creation, update,
 activation, rename, and delete continue to use the Sieve script persistence and
 canonical rule change log.
@@ -66,4 +69,4 @@ canonical rule change log.
 | `vacation` | canonical resubmission |
 | Outlook rule API/JMAP/MAPI read projection | supported from canonical `sieve_scripts` |
 | Bounded `RopModifyRules` | supported for generated canonical Sieve rules only |
-| Exchange rule blobs / deferred actions | unsupported |
+| Exchange rule blobs / deferred actions | gated until canonical rule/deferred-action semantics exist |

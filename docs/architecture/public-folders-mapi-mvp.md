@@ -36,7 +36,7 @@ Current bounded EWS coverage includes public-folder `FindFolder`, `GetFolder`,
 `DeleteItem`, `CopyItem`, and `MoveItem`.
 `CopyItem` and `MoveItem` for public-folder posts are public-folder-to-public-
 folder only; message-to-public-folder and public-folder-to-mailbox conversion
-remain out of scope until a canonical cross-store conversion rule is documented.
+remain gated until a canonical cross-store conversion rule is documented.
 
 ## Implementation/Usage
 
@@ -174,8 +174,9 @@ public-folder item IDs but keep their status bits session-local.
 single-chunk LPE-owned stream derived from canonical
 `public_folder_per_user_state`; `WritePerUserInformation` only accepts that
 stream shape back into canonical read-state patches. Arbitrary
-Exchange-compatible binary per-user blobs remain unsupported and must not be
-stored as protocol-local state. `RopOpenFolder` and
+Exchange-compatible binary per-user blobs remain gated until a canonical
+per-user public-folder data model is documented, and they must not be stored as
+protocol-local state. `RopOpenFolder` and
 `RopPublicFolderIsGhosted` validate the target against the canonical
 public-folder container and return `IsGhosted = false` when the folder has at
 least one active `public_folder_replicas` owner row. Folders with no active

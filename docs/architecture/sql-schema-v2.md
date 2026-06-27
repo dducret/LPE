@@ -144,7 +144,8 @@ bounded projections of these rows for Outlook profile visibility. Bounded MAPI
 mutation path when the rule maps cleanly to canonical behavior; full Exchange
 rule blobs, provider-specific predicates, client-only rules, delegate rule
 templates, deferred-action provider data, and deferred action message updates
-are explicitly unsupported and must not activate Sieve.
+remain gated until canonical rule/deferred-action semantics exist and must not
+activate Sieve before then.
 Sieve script create, update, activation, rename, and delete paths write
 canonical rule change rows; deletes write tombstones before removing the live
 script.
