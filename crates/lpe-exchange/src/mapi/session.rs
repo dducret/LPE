@@ -1,5 +1,6 @@
 use super::dispatch::*;
 use super::notifications::*;
+use super::outlook_startup::*;
 use super::properties::*;
 use super::rop::*;
 use super::store_adapter::*;
@@ -58,6 +59,8 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) inbox_associated_config_stream_handles: HashSet<u32>,
     pub(in crate::mapi) inbox_rule_organizer_stream_handles: HashSet<u32>,
     pub(in crate::mapi) logon_identity: Option<MapiLogonIdentityDebug>,
+    pub(in crate::mapi) outlook_smart_input_variant: String,
+    pub(in crate::mapi) outlook_smart_input_variant_applied: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -105,6 +108,9 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_normal_contents_table_setcolumns_handle: Option<u32>,
     pub(in crate::mapi) last_inbox_normal_contents_table_query_rows_handle: Option<u32>,
     pub(in crate::mapi) inbox_associated_contents_table_observed: bool,
+    pub(in crate::mapi) inbox_associated_broad_ipm_configuration_findrow_matched: bool,
+    pub(in crate::mapi) inbox_associated_query_rows_returned_non_empty: bool,
+    pub(in crate::mapi) receive_folder_verification_passed: bool,
     pub(in crate::mapi) inbox_associated_config_open_observed: bool,
     pub(in crate::mapi) inbox_associated_config_stream_open_observed: bool,
     pub(in crate::mapi) inbox_associated_config_stream_read_observed: bool,
@@ -568,6 +574,8 @@ pub(in crate::mapi) fn create_session(
         inbox_associated_config_stream_handles: HashSet::new(),
         inbox_rule_organizer_stream_handles: HashSet::new(),
         logon_identity: None,
+        outlook_smart_input_variant: configured_smart_input_variant(),
+        outlook_smart_input_variant_applied: false,
     };
     session.record_transport_request(request_type, request_id);
     let mut guard = sessions()
@@ -960,6 +968,23 @@ impl MapiSession {
     pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_broad_findrow(&mut self, matched: bool) {
+        if matched {
+            self.post_hierarchy_actions
+                .inbox_associated_broad_ipm_configuration_findrow_matched = true;
+        }
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_query_rows_returned_non_empty(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_query_rows_returned_non_empty = true;
+    }
+
+    pub(in crate::mapi) fn record_receive_folder_verification_passed(&mut self) {
+        self.post_hierarchy_actions
+            .receive_folder_verification_passed = true;
     }
 
     pub(in crate::mapi) fn record_inbox_associated_config_open(&mut self) {

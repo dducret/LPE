@@ -2099,6 +2099,8 @@ mod tests {
             inbox_associated_config_stream_handles: HashSet::new(),
             inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
+            outlook_smart_input_variant: "none".to_string(),
+            outlook_smart_input_variant_applied: false,
         }
     }
 

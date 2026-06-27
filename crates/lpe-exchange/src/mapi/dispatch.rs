@@ -1,5 +1,6 @@
 use super::notifications::*;
 use super::nspi::{normalize_nspi_lookup_value, principal_legacy_dn_aliases};
+use super::outlook_startup::*;
 use super::permissions::*;
 use super::properties::*;
 use super::rop::*;
@@ -2384,6 +2385,8 @@ fn log_execute_rop_debug(
     let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let post_hierarchy = post_hierarchy_action_summary(session, false);
+    let startup_gates = outlook_startup_gate_summary(session);
+    let sequence_signature = normalized_rop_sequence_signature(&request.names_csv);
     let message = "rca debug mapi execute rops";
 
     tracing::info!(
@@ -2399,17 +2402,9 @@ fn log_execute_rop_debug(
         client_application = %client_application,
         client_info = %client_info,
         trace_id = %trace_id,
-        package_name = crate::build_info::PACKAGE_NAME,
-        package_version = crate::build_info::PACKAGE_VERSION,
-        git_commit = crate::build_info::GIT_COMMIT,
-        git_commit_full = crate::build_info::GIT_COMMIT_FULL,
-        git_commit_time = crate::build_info::GIT_COMMIT_TIME,
-        git_dirty = crate::build_info::GIT_DIRTY,
-        build_unix_time = crate::build_info::BUILD_UNIX_TIME,
-        target = crate::build_info::TARGET,
-        profile = crate::build_info::PROFILE,
         request_rop_ids = %request.ids_csv,
         request_rop_names = %request.names_csv,
+        request_rop_sequence_signature = %sequence_signature,
         request_rop_count = request.total_count,
         request_rop_debug_entry_count = request.ids.len(),
         request_rop_debug_truncated = request.truncated,
@@ -2438,6 +2433,14 @@ fn log_execute_rop_debug(
         outlook_bootstrap_stall_name = post_hierarchy.outlook_bootstrap_stall_name,
         outlook_bootstrap_next_expected_phase =
             post_hierarchy.outlook_bootstrap_next_expected_phase,
+        outlook_startup_last_successful_gate = startup_gates.last_successful_gate,
+        outlook_startup_first_missing_gate = startup_gates.first_missing_gate,
+        outlook_startup_gate_count = startup_gates.gate_count,
+        outlook_startup_passed_gate_count = startup_gates.passed_count,
+        outlook_startup_gates = %startup_gates.gates,
+        outlook_abandoned_immediately_after_fai =
+            startup_gates.abandoned_immediately_after_fai,
+        outlook_smart_input_variant = %session.outlook_smart_input_variant,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
         outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
@@ -3884,6 +3887,96 @@ fn format_inbox_associated_prefix_find_summary(
         first_class == "IPM.Configuration.AccountPrefs",
         classes
     )
+}
+
+fn inbox_associated_broad_findrow_matched(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    response: &[u8],
+) -> bool {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        ..
+    }) = object
+    else {
+        return false;
+    };
+    *folder_id == INBOX_FOLDER_ID
+        && *associated
+        && response.get(7).copied().unwrap_or(0) != 0
+        && request
+            .restriction()
+            .ok()
+            .flatten()
+            .as_ref()
+            .is_some_and(is_broad_ipm_configuration_restriction)
+}
+
+fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool {
+    match restriction {
+        MapiRestriction::Content {
+            property_tag,
+            value,
+            fuzzy_level_low,
+            ..
+        } => {
+            matches!(
+                canonical_property_storage_tag(*property_tag),
+                PID_TAG_MESSAGE_CLASS_W
+            ) && value == "IPM.Configuration."
+                && fuzzy_level_low & 0x0002 != 0
+        }
+        MapiRestriction::And(children) | MapiRestriction::Or(children) => children
+            .iter()
+            .any(is_broad_ipm_configuration_restriction),
+        MapiRestriction::Not(child)
+        | MapiRestriction::Count { child, .. }
+        | MapiRestriction::SubObject { child, .. } => is_broad_ipm_configuration_restriction(child),
+        _ => false,
+    }
+}
+
+fn apply_outlook_smart_input_variant_before_query_rows(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    request_rop_names: &str,
+) -> Option<String> {
+    if session.outlook_smart_input_variant != "fai_cursor_reset_before_query_rows" {
+        return None;
+    }
+    let input_index = request.input_handle_index().unwrap_or(0);
+    let handle = input_handle(handle_slots, request);
+    let Some(handle_value) = handle else {
+        return None;
+    };
+    let Some(mut object) = session.handles.remove(&handle_value) else {
+        return None;
+    };
+    let applied = match &mut object {
+        MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            position,
+            ..
+        } if *folder_id == INBOX_FOLDER_ID && *associated => {
+            let previous_position = *position;
+            *position = 0;
+            Some((*folder_id, previous_position))
+        }
+        _ => None,
+    };
+    session.handles.insert(handle_value, object);
+    let Some((folder_id, previous_position)) = applied else {
+        return None;
+    };
+    session.outlook_smart_input_variant_applied = true;
+    Some(format!(
+        "variant=fai_cursor_reset_before_query_rows;request_id={request_id};request_rops={request_rop_names};input_index={input_index};handle={};folder=0x{folder_id:016x};associated=true;previous_position={previous_position};new_position=0",
+        format_optional_debug_handle(handle)
+    ))
 }
 
 fn format_common_views_inbox_shortcut_context(
@@ -18488,7 +18581,7 @@ where
                     snapshot,
                 );
                 let inbox_associated_query_context = format_inbox_associated_query_context(
-                    query_object,
+                    input_object(session, &handle_slots, &request),
                     &request,
                     principal.account_id,
                     snapshot,
@@ -18526,6 +18619,30 @@ where
                         message = "rca debug mapi inbox hierarchy query rows"
                     );
                 }
+                let smart_input_variant_context =
+                    apply_outlook_smart_input_variant_before_query_rows(
+                        session,
+                        &handle_slots,
+                        &request,
+                        request_id,
+                        &request_rop_names,
+                    );
+                if let Some(context) = smart_input_variant_context {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        mapi_request_id = %request_id,
+                        request_rop_id = "0x15",
+                        outlook_smart_input_variant = %session.outlook_smart_input_variant,
+                        outlook_smart_input_variant_scope = "session",
+                        outlook_smart_input_variant_applied = true,
+                        outlook_smart_input_variant_context = %context,
+                        message = "rca debug mapi outlook smart input variant applied"
+                    );
+                }
                 let queried_position = input_object(session, &handle_slots, &request)
                     .and_then(table_position)
                     .unwrap_or(0);
@@ -18558,6 +18675,7 @@ where
                     snapshot,
                     queried_position,
                 );
+                let mut inbox_associated_query_rows_returned_non_empty = false;
                 if let Some(MapiObject::ContentsTable {
                     folder_id,
                     associated,
@@ -18573,6 +18691,9 @@ where
                         .and_then(|bytes| bytes.try_into().ok())
                         .map(u16::from_le_bytes)
                         .unwrap_or(0);
+                    if *folder_id == INBOX_FOLDER_ID && *associated && row_count > 0 {
+                        inbox_associated_query_rows_returned_non_empty = true;
+                    }
                     session.record_last_table_query_rows_context(format!(
                         "phase=query_rows;request_id={request_id};request_rops={request_rop_names};input_index={};handle={};folder=0x{folder_id:016x};role={};associated={associated};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_row_count={row_count};columns={};sort={};restriction={}",
                         request.input_handle_index().unwrap_or(0),
@@ -18584,6 +18705,9 @@ where
                         format_debug_sort_orders(sort_orders),
                         format_debug_restriction_option(restriction.as_ref())
                     ));
+                }
+                if inbox_associated_query_rows_returned_non_empty {
+                    session.record_inbox_associated_query_rows_returned_non_empty();
                 }
                 responses.extend_from_slice(&response);
                 if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
@@ -20289,6 +20413,13 @@ where
                     &response,
                 ) {
                     session.record_last_inbox_associated_find_context(context);
+                }
+                if inbox_associated_broad_findrow_matched(
+                    input_object(session, &handle_slots, &request),
+                    &request,
+                    &response,
+                ) {
+                    session.record_inbox_associated_broad_findrow(true);
                 }
                 if let Some(trace) = find_trace {
                     session.record_outlook_view_failure_trace_event(trace);
@@ -22784,6 +22915,7 @@ where
                     response_folder_id,
                     explicit_receive_folder_message_class(message_class),
                 ));
+                session.record_receive_folder_verification_passed();
                 session.record_post_hierarchy_request_contract(
                     post_hierarchy_get_receive_folder_contract(message_class, response_folder_id),
                 );
@@ -25526,7 +25658,8 @@ where
                         "PidTagFolderId,PidTagMessageClass,PidTagLastModificationTime",
                     message = "rca debug mapi receive folder table"
                 );
-                responses.extend_from_slice(&rop_get_receive_folder_table_response(&request))
+                responses.extend_from_slice(&rop_get_receive_folder_table_response(&request));
+                session.record_receive_folder_verification_passed();
             }
             Some(RopId::LongTermIdFromId) => {
                 let source_id_bytes = request
@@ -28910,6 +29043,52 @@ mod tests {
         assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
         assert!(context.contains("name=view custom column"));
         assert!(!context.contains("0x0037001f"));
+    }
+
+    #[test]
+    fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
+        let mut session = test_mapi_session();
+        session.outlook_smart_input_variant = "fai_cursor_reset_before_query_rows".to_string();
+        session.handles.insert(
+            9,
+            MapiObject::ContentsTable {
+                folder_id: INBOX_FOLDER_ID,
+                associated: true,
+                columns: Vec::new(),
+                columns_set: false,
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 3,
+            },
+        );
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: vec![0x00, 0x01, 0x01, 0x00],
+        };
+        let handle_slots = vec![u32::MAX, u32::MAX, 9];
+
+        let context = apply_outlook_smart_input_variant_before_query_rows(
+            &mut session,
+            &handle_slots,
+            &request,
+            "request:42",
+            "QueryRows",
+        )
+        .expect("variant should apply");
+
+        assert!(context.contains("previous_position=3"));
+        assert!(session.outlook_smart_input_variant_applied);
+        let Some(MapiObject::ContentsTable { position, .. }) = session.handles.get(&9) else {
+            panic!("expected contents table");
+        };
+        assert_eq!(*position, 0);
     }
 
     #[test]
@@ -33650,6 +33829,8 @@ mod tests {
             inbox_associated_config_stream_handles: HashSet::new(),
             inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
+            outlook_smart_input_variant: "none".to_string(),
+            outlook_smart_input_variant_applied: false,
         }
     }
 

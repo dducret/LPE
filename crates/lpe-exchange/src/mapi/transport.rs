@@ -12,6 +12,7 @@ use super::identity::{
 };
 use super::notifications::*;
 use super::nspi::*;
+use super::outlook_startup::*;
 use super::rop::*;
 use super::session::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
@@ -411,7 +412,7 @@ fn log_connect_body_debug(
         MapiEndpoint::Nspi => "nspi",
     };
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint,
@@ -481,6 +482,7 @@ pub(in crate::mapi) fn log_mapi_session_establish(
     let content_length = safe_header(headers, "content-length").unwrap_or_default();
     let store_replica_guid = Uuid::from_bytes(STORE_REPLICA_GUID);
     let store_replica_guid_hex = hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len());
+    let outlook_smart_input_variant = configured_smart_input_variant();
 
     tracing::info!(
         rca_debug = true,
@@ -507,6 +509,8 @@ pub(in crate::mapi) fn log_mapi_session_establish(
         host = %host,
         content_type = %content_type,
         content_length = %content_length,
+        outlook_smart_input_variant = %outlook_smart_input_variant,
+        outlook_smart_input_variant_scope = "session",
         message = "rca debug mapi session establish",
     );
 }
@@ -799,6 +803,7 @@ fn log_mapi_session_disconnect(
         && all_sync_sources_completed;
     let final_phase_abandoned_after_inbox_fai_query_rows =
         session.abandoned_after_inbox_fai_query_rows();
+    let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
     } else if post_fai_inbox_probe_loop_terminal {
@@ -835,6 +840,45 @@ fn log_mapi_session_disconnect(
     } else {
         "client_next_request"
     };
+
+    if endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect" {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            outlook_startup_last_successful_gate =
+                outlook_startup_gates.last_successful_gate,
+            outlook_startup_first_missing_gate =
+                outlook_startup_gates.first_missing_gate,
+            outlook_startup_gate_count = outlook_startup_gates.gate_count,
+            outlook_startup_passed_gate_count = outlook_startup_gates.passed_count,
+            outlook_startup_gates = %outlook_startup_gates.gates,
+            outlook_abandoned_immediately_after_fai =
+                outlook_startup_gates.abandoned_immediately_after_fai,
+            outlook_smart_input_variant = %session.outlook_smart_input_variant,
+            outlook_smart_input_variant_scope = "session",
+            outlook_smart_input_variant_selected =
+                session.outlook_smart_input_variant != "none"
+                    && !session.outlook_smart_input_variant.starts_with("unknown:"),
+            outlook_smart_input_variant_applied =
+                session.outlook_smart_input_variant_applied,
+            outlook_smart_input_variant_result =
+                if session.outlook_smart_input_variant_applied {
+                    "applied"
+                } else {
+                    "not_applied"
+                },
+            next_debug_focus = final_phase_next_debug_focus,
+            "rca debug mapi outlook startup gate summary"
+        );
+    }
 
     if endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect" {
         tracing::info!(
@@ -1001,7 +1045,7 @@ fn log_mapi_session_disconnect(
         );
     }
 
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint_label,
@@ -1092,7 +1136,7 @@ fn log_mapi_session_disconnect(
         outlook_stream_batch_summaries = %outlook_stream_batch_summaries,
         "rca debug mapi session disconnect"
     );
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         endpoint = endpoint_label,
@@ -2881,7 +2925,7 @@ pub(in crate::mapi) fn is_authentication_error(message: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::mapi) mod tests {
     use super::*;
 
     fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
@@ -2926,7 +2970,13 @@ mod tests {
             inbox_associated_config_stream_handles: HashSet::new(),
             inbox_rule_organizer_stream_handles: HashSet::new(),
             logon_identity: None,
+            outlook_smart_input_variant: "none".to_string(),
+            outlook_smart_input_variant_applied: false,
         }
+    }
+
+    pub(in crate::mapi) fn test_session_for_outlook_startup() -> MapiSession {
+        test_session(HashMap::new())
     }
 
     fn test_principal() -> AccountPrincipal {

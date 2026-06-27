@@ -46,6 +46,7 @@ mod dispatch;
 pub(crate) mod identity;
 pub(crate) mod notifications;
 mod nspi;
+mod outlook_startup;
 pub(crate) mod permissions;
 pub(crate) mod properties;
 mod rop;
