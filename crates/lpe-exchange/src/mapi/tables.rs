@@ -1112,8 +1112,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     TRASH_FOLDER_ID,
     CONTACTS_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID,
-    QUICK_CONTACTS_FOLDER_ID,
-    IM_CONTACT_LIST_FOLDER_ID,
     CALENDAR_FOLDER_ID,
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
@@ -1121,7 +1119,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SYNC_ISSUES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
 ];
 
@@ -9503,10 +9500,10 @@ mod tests {
         let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
         assert!(row_ids.contains(&CALENDAR_FOLDER_ID));
         assert!(row_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
-        assert!(row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
-        assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(row_ids.contains(&TASKS_FOLDER_ID));
-        assert!(row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
+        assert!(!row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
+        assert!(!row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
+        assert!(!row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
@@ -9527,10 +9524,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(sync_ids.contains(&CALENDAR_FOLDER_ID));
         assert!(sync_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
-        assert!(sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
-        assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(sync_ids.contains(&TASKS_FOLDER_ID));
-        assert!(sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
+        assert!(!sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
+        assert!(!sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
+        assert!(!sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));
@@ -9558,11 +9555,7 @@ mod tests {
             .windows(class.len())
             .any(|window| window == class));
 
-        for (folder_id, expected) in [
-            (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
-            (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
-            (TASKS_FOLDER_ID, "IPF.Task"),
-        ] {
+        for (folder_id, expected) in [(TASKS_FOLDER_ID, "IPF.Task")] {
             let row = rows
                 .iter()
                 .find(|row| hierarchy_row_id(row) == folder_id)
@@ -9582,12 +9575,27 @@ mod tests {
                 .windows(class.len())
                 .any(|window| window == class));
         }
+        for (folder_id, expected) in [
+            (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
+            (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
+        ] {
+            let serialized = serialize_advertised_special_folder_row_with_mailbox_guid(
+                folder_id,
+                &[PID_TAG_CONTAINER_CLASS_W],
+                Uuid::nil(),
+            );
+            let class = expected
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            assert!(serialized
+                .windows(class.len())
+                .any(|window| window == class));
+        }
 
         assert_eq!(
             folder_message_class(
-                &sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &[])
-                    .into_iter()
-                    .find(|mailbox| mapi_folder_id(mailbox) == QUICK_CONTACTS_FOLDER_ID)
+                &mapi_mailstore::virtual_special_mailbox(QUICK_CONTACTS_FOLDER_ID)
                     .expect("quick contacts virtual mailbox")
             ),
             "IPF.Contact.MOC.QuickContacts"

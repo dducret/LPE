@@ -22382,9 +22382,16 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((33, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((31, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
+    for name in [
+        "Quick Contacts",
+        "IM Contact List",
+        "Conversation Action Settings",
+    ] {
+        assert!(!contains_bytes(&hierarchy_rops, &utf16z(name)));
+    }
 }
 
 #[tokio::test]
@@ -25578,9 +25585,9 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
             .expect("stable folder counter");
         assert!(
-            strict_replguid_globset_contains_counter(&decoded.idset_given, &globcnt_bytes(counter))
+            !strict_replguid_globset_contains_counter(&decoded.idset_given, &globcnt_bytes(counter))
                 .expect("hierarchy final IDSET"),
-            "final hierarchy state should acknowledge advertised stable folder 0x{folder_id:016x}"
+            "final hierarchy state should not acknowledge non-hierarchy special folder 0x{folder_id:016x}"
         );
     }
     let sync_issues = decoded
@@ -25780,16 +25787,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
         ),
         (
-            "Quick Contacts",
-            "IPF.Contact.MOC.QuickContacts",
-            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
-        ),
-        (
-            "IM Contact List",
-            "IPF.Contact.MOC.ImContactList",
-            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-        ),
-        (
             "Journal",
             "IPF.Journal",
             crate::mapi::identity::JOURNAL_FOLDER_ID,
@@ -25836,6 +25833,9 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
         "Conflicts",
         "Local Failures",
         "Server Failures",
+        "Quick Contacts",
+        "IM Contact List",
+        "Conversation Action Settings",
         "Quick Step Settings",
     ] {
         assert!(!contains_bytes(&response_rops, &utf16z(name)));
@@ -28780,8 +28780,8 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(checkpoint.last_change_sequence, 44);
-    assert_eq!(checkpoint.last_modseq, 9);
+    assert_eq!(checkpoint.last_change_sequence, 42);
+    assert_eq!(checkpoint.last_modseq, 7);
     assert_eq!(
         checkpoint
             .cursor_json

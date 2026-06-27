@@ -7148,7 +7148,7 @@ fn execute_body(rop_buffer: &[u8]) -> Vec<u8> {
     body.extend_from_slice(&0u32.to_le_bytes());
     body.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
     body.extend_from_slice(rop_buffer);
-    body.extend_from_slice(&4096u32.to_le_bytes());
+    body.extend_from_slice(&65536u32.to_le_bytes());
     body.extend_from_slice(&0u32.to_le_bytes());
     body
 }
@@ -7563,8 +7563,8 @@ const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 21;
-const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 17;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
+const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 15;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 13;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
 const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
