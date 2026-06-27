@@ -25891,7 +25891,7 @@ async fn mapi_over_http_open_conversation_history_requires_real_mailbox() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_table_once() {
+async fn mapi_over_http_real_conversation_history_mailbox_stays_out_of_startup_hierarchy_table() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![
@@ -25950,7 +25950,7 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_t
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(
         u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
-        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT + 1
+        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT
     );
     let query_offset = 8 + 10 + 7;
     assert_eq!(
@@ -25959,7 +25959,7 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_t
                 .try_into()
                 .unwrap()
         ),
-        (OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT + 1) as u16
+        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT as u16
     );
     let source_key = mapi_mailstore::source_key_for_store_id(
         crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
@@ -25969,17 +25969,16 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_t
             .windows(source_key.len())
             .filter(|window| *window == source_key.as_slice())
             .count(),
-        1
+        0
     );
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Conversation History")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
 }
 
 #[tokio::test]
-async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_sync_once() {
+async fn mapi_over_http_real_conversation_history_mailbox_stays_out_of_startup_hierarchy_sync() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![
@@ -26024,7 +26023,7 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_s
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(
         mapi_sync_manifest_counts(&response_rops),
-        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT + 1, 0))
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
     );
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
@@ -26034,21 +26033,7 @@ async fn mapi_over_http_real_conversation_history_mailbox_appears_in_hierarchy_s
         .filter(|folder| folder.display_name == "Conversation History")
         .collect::<Vec<_>>();
 
-    assert_eq!(conversation_history.len(), 1);
-    assert_eq!(
-        conversation_history[0].source_key,
-        mapi_mailstore::source_key_for_store_id(
-            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID
-        )
-    );
-    assert_eq!(
-        conversation_history[0].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
-    );
-    assert_eq!(
-        conversation_history[0].container_class.as_deref(),
-        Some("IPF.Note")
-    );
+    assert!(conversation_history.is_empty());
 }
 
 #[tokio::test]

@@ -1180,6 +1180,7 @@ pub(in crate::mapi) fn mailbox_shadowed_by_active_outlook_special_folder(
             | "conflicts"
             | "contacts"
             | "contacts search"
+            | "conversation history"
             | "conversation action settings"
             | "drafts"
             | "im contact list"
@@ -9363,12 +9364,15 @@ mod tests {
             Uuid::parse_str("aaaaaaaa-8888-4111-8111-aaaaaaaaaaaa").unwrap();
         let tasks_shadow_id = Uuid::parse_str("aaaaaaaa-9999-4111-8111-aaaaaaaaaaaa").unwrap();
         let quick_step_shadow_id = Uuid::parse_str("aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa").unwrap();
+        let conversation_history_shadow_id =
+            Uuid::parse_str("aaaaaaaa-bbbb-4111-8111-aaaaaaaaaaaa").unwrap();
         let shadow_folder_id = crate::mapi::identity::mapi_store_id(0x4f);
         let suggested_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x54);
         let quick_contacts_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x55);
         let im_contacts_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x56);
         let tasks_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x57);
         let quick_step_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x58);
+        let conversation_history_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x59);
         crate::mapi::identity::remember_mapi_identity(shadow_id, shadow_folder_id);
         crate::mapi::identity::remember_mapi_identity(
             suggested_shadow_id,
@@ -9386,6 +9390,10 @@ mod tests {
         crate::mapi::identity::remember_mapi_identity(
             quick_step_shadow_id,
             quick_step_shadow_folder_id,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            conversation_history_shadow_id,
+            conversation_history_shadow_folder_id,
         );
         let mailboxes = vec![
             JmapMailbox {
@@ -9460,6 +9468,18 @@ mod tests {
                 size_octets: 0,
                 is_subscribed: true,
             },
+            JmapMailbox {
+                id: conversation_history_shadow_id,
+                parent_id: None,
+                role: "conversation_history".to_string(),
+                name: "Conversation History".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            },
         ];
         let task_collection = CollaborationCollection {
             id: "default".to_string(),
@@ -9511,6 +9531,7 @@ mod tests {
         assert!(!row_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&tasks_shadow_folder_id));
         assert!(!row_ids.contains(&quick_step_shadow_folder_id));
+        assert!(!row_ids.contains(&conversation_history_shadow_folder_id));
         assert_eq!(
             rows.iter()
                 .filter(|row| hierarchy_row_display_name(row) == "Tasks")
@@ -9535,6 +9556,7 @@ mod tests {
         assert!(!sync_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!sync_ids.contains(&tasks_shadow_folder_id));
         assert!(!sync_ids.contains(&quick_step_shadow_folder_id));
+        assert!(!sync_ids.contains(&conversation_history_shadow_folder_id));
 
         let calendar_row = rows
             .iter()

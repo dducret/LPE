@@ -2152,7 +2152,6 @@ mod tests {
             ("junk", JUNK_FOLDER_ID),
             ("rss_feeds", RSS_FEEDS_FOLDER_ID),
             ("archive", ARCHIVE_FOLDER_ID),
-            ("conversation_history", CONVERSATION_HISTORY_FOLDER_ID),
         ];
         let mailboxes = roles
             .iter()
@@ -2177,6 +2176,13 @@ mod tests {
                 "{role} should appear once"
             );
         }
+        assert_eq!(
+            rows.iter()
+                .filter(|mailbox| mailbox.role == "conversation_history")
+                .count(),
+            0,
+            "persisted Conversation History is Outlook-internal and must stay out of startup hierarchy sync"
+        );
     }
 
     #[test]
