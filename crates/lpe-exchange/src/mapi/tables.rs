@@ -4380,7 +4380,10 @@ fn is_inbox_broad_startup_config_visible(
     if exact {
         return !is_empty_inbox_configuration_placeholder(message);
     }
-    if restriction.is_none() || is_broad_outlook_configuration_restriction(restriction) {
+    if is_broad_outlook_configuration_restriction(restriction) {
+        return is_modeled_inbox_broad_startup_config(message);
+    }
+    if restriction.is_none() {
         return is_modeled_inbox_broad_startup_config(message)
             || !is_empty_inbox_configuration_placeholder(message);
     }
@@ -11759,12 +11762,12 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            2
+            0
         );
-        assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_some());
+        assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
         assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
         assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
-        assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_some());
+        assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
         assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
         assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
         assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
@@ -11880,11 +11883,11 @@ mod tests {
         assert_eq!(query_response[0], RopId::QueryRows.as_u8());
         assert_eq!(
             u16::from_le_bytes([query_response[7], query_response[8]]),
-            2
+            1
         );
         assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
         assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
-        assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
+        assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
     }
 
     #[test]
@@ -11904,17 +11907,11 @@ mod tests {
             .map(|message| message.message_class.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            classes,
-            vec![
-                "IPM.Configuration.AccountPrefs",
-                "IPM.Configuration.MessageListSettings"
-            ]
-        );
+        assert_eq!(classes, vec!["IPM.Configuration.AccountPrefs"]);
     }
 
     #[test]
-    fn inbox_associated_broad_configuration_restriction_projects_persisted_outlook_configs() {
+    fn inbox_associated_broad_configuration_restriction_hides_persisted_extra_outlook_configs() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let autocomplete_id = Uuid::from_u128(0x6d617069_6175_746f_8000_000000000101);
         crate::mapi::identity::remember_mapi_identity(
@@ -11949,14 +11946,7 @@ mod tests {
             .map(|message| message.message_class.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            classes,
-            vec![
-                "IPM.Configuration.Autocomplete",
-                "IPM.Configuration.AccountPrefs",
-                "IPM.Configuration.MessageListSettings"
-            ]
-        );
+        assert_eq!(classes, vec!["IPM.Configuration.AccountPrefs"]);
     }
 
     #[test]
