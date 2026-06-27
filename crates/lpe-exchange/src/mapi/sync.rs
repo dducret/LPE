@@ -649,8 +649,10 @@ pub(in crate::mapi) fn special_sync_objects_for(
             _ => Vec::new(),
         });
     }
-    if let Some(message) = default_folder_named_view_sync_message(snapshot, folder_id) {
-        objects.push(common_view_named_view_sync_object(&message, account_id));
+    if default_folder_named_view_sync_supported(folder_id) {
+        if let Some(message) = default_folder_named_view_sync_message(snapshot, folder_id) {
+            objects.push(common_view_named_view_sync_object(&message, account_id));
+        }
     }
     objects.extend(
         snapshot
@@ -659,6 +661,20 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .map(associated_config_sync_object),
     );
     objects
+}
+
+fn default_folder_named_view_sync_supported(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        INBOX_FOLDER_ID
+            | OUTBOX_FOLDER_ID
+            | SENT_FOLDER_ID
+            | TRASH_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | JUNK_FOLDER_ID
+            | ARCHIVE_FOLDER_ID
+            | CONVERSATION_HISTORY_FOLDER_ID
+    )
 }
 
 fn default_folder_named_view_sync_message(
@@ -2139,6 +2155,28 @@ mod tests {
         assert_eq!(objects.len(), 1);
         assert_eq!(objects[0].message_class, "IPM.Appointment");
         assert_eq!(objects[0].subject, "Test");
+    }
+
+    #[test]
+    fn collaboration_default_views_are_not_synthetic_fai_sync_objects() {
+        let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        for folder_id in [
+            CALENDAR_FOLDER_ID,
+            TASKS_FOLDER_ID,
+            NOTES_FOLDER_ID,
+            JOURNAL_FOLDER_ID,
+        ] {
+            let objects = special_sync_objects_for(folder_id, 0x01, &snapshot, account_id);
+
+            assert!(
+                objects
+                    .iter()
+                    .all(|object| object.message_class != "IPM.Microsoft.FolderDesign.NamedView"),
+                "folder 0x{folder_id:016x} should not synthesize default view FAI sync objects"
+            );
+        }
     }
 
     #[test]
