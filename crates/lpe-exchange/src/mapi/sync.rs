@@ -1371,8 +1371,15 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
     emails
         .iter()
         .filter_map(|email| {
+            let message_id = mapi_message_id(email);
             let attachments = snapshot
-                .attachments_for_message(folder_id, mapi_message_id(email))
+                .attachments_for_message(folder_id, message_id)
+                .or_else(|| {
+                    let canonical_folder_id = mapi_folder_id_for_email(email);
+                    (canonical_folder_id != folder_id)
+                        .then(|| snapshot.attachments_for_message(canonical_folder_id, message_id))
+                        .flatten()
+                })
                 .unwrap_or_default();
             if attachments.is_empty() {
                 return None;

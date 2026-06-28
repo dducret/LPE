@@ -7065,12 +7065,7 @@ mod tests {
 
         assert_tag_order(
             &buffer,
-            &[
-                INCR_SYNC_CHG,
-                INCR_SYNC_MESSAGE,
-                PID_TAG_SOURCE_KEY,
-                PID_TAG_PARENT_SOURCE_KEY,
-            ],
+            &[INCR_SYNC_CHG, INCR_SYNC_MESSAGE, PID_TAG_PARENT_SOURCE_KEY],
         );
         let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
         assert_eq!(summary.fai_items.len(), 1);

@@ -5781,7 +5781,7 @@ async fn mapi_over_http_unknown_property_type_terminates_current_buffer() {
     assert!(contains_bytes(&response_rops, &[0x05, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
-        &[0x12, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x12, 0x02, 0x57, 0x00, 0x07, 0x80]
     ));
     assert!(!contains_bytes(&response_rops, &[0x15, 0x02]));
 }

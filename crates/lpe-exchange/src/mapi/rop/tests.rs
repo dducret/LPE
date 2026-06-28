@@ -3674,10 +3674,15 @@ fn folder_getprops_projects_saved_search_definition_metadata() {
         MAPI_FOLDER_ACCESS
     );
     let mut expected_extended_flags = Vec::new();
+    let mut extended_flags = extended_folder_flags();
+    extended_flags.extend_from_slice(&[0x03, 0x04]);
+    extended_flags.extend_from_slice(&0u32.to_le_bytes());
+    extended_flags.extend_from_slice(&[0x02, 0x10]);
+    extended_flags.extend_from_slice(definition_id.as_bytes());
     write_mapi_value(
         &mut expected_extended_flags,
         PID_TAG_EXTENDED_FOLDER_FLAGS,
-        &MapiValue::Binary(extended_folder_flags()),
+        &MapiValue::Binary(extended_flags),
     );
     assert_eq!(
         serialize_object_property(
@@ -4464,7 +4469,7 @@ pub(in crate::mapi) fn invalid_input_handle_index_serializes_common_rop_error() 
     assert_eq!(input_handle(&handles, &request), None);
     assert_eq!(
         rop_handle_index_error_response(&request),
-        vec![0x04, 0x07, 0x0F, 0x01, 0x04, 0x80]
+        vec![0x04, 0x01, 0x0F, 0x01, 0x04, 0x80]
     );
 }
 

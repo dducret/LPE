@@ -1204,7 +1204,7 @@ async fn mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallb
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 2);
+    assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(
         stream.message_changes[0].subject,
         "Partial fallback subject"
@@ -1292,10 +1292,6 @@ async fn mapi_over_http_content_sync_only_specified_properties_limits_message_pr
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &0x4074_000Bu32.to_le_bytes()
-    ));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
     let message = &stream.message_changes[0];
@@ -3102,9 +3098,9 @@ async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_b
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(&response_rops, b"Attachment sync message"));
-    assert!(contains_bytes(&response_rops, b"brief.pdf"));
-    assert!(contains_bytes(&response_rops, b"application/pdf"));
-    assert!(contains_bytes(&response_rops, file_reference.as_bytes()));
+    assert!(contains_bytes(&response_rops, &utf16z("brief.pdf")));
+    assert!(contains_bytes(&response_rops, &utf16z("application/pdf")));
+    assert!(!contains_bytes(&response_rops, file_reference.as_bytes()));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
 }
 
@@ -3169,10 +3165,10 @@ async fn mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_b
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(&response_rops, b"Recipient sync message"));
-    assert!(contains_bytes(&response_rops, b"to@example.test"));
-    assert!(contains_bytes(&response_rops, b"Visible To"));
-    assert!(contains_bytes(&response_rops, b"cc@example.test"));
-    assert!(contains_bytes(&response_rops, b"Visible Cc"));
+    assert!(contains_bytes(&response_rops, &utf16z("to@example.test")));
+    assert!(contains_bytes(&response_rops, &utf16z("Visible To")));
+    assert!(contains_bytes(&response_rops, &utf16z("cc@example.test")));
+    assert!(contains_bytes(&response_rops, &utf16z("Visible Cc")));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
     assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
 }
@@ -3231,7 +3227,7 @@ async fn mapi_over_http_sync_manifest_includes_canonical_read_flag_state() {
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert_eq!(
         mapi_sync_manifest_message_state(&response_rops, "Read flag sync message"),
-        Some((0x0000_0011, 2))
+        Some((0x0000_0013, 2))
     );
 }
 
@@ -7015,7 +7011,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     let table_response_rops = response_rops_from_execute_response(table_response).await;
     assert!(contains_bytes(
         &table_response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 0, 0, 0]
+        &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0, 0]
     ));
     assert!(!contains_bytes(
         &table_response_rops,

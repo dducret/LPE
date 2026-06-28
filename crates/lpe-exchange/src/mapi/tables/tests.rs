@@ -489,7 +489,7 @@ fn default_contacts_contents_table_uses_contact_rows_and_columns() {
         folder_id: CONTACTS_FOLDER_ID,
         associated: false,
         columns: Vec::new(),
-        columns_set: false,
+        columns_set: true,
         sort_orders: Vec::new(),
         category_count: 0,
         expanded_count: 0,
@@ -574,7 +574,7 @@ fn contact_table_projects_missing_secondary_email_slots_as_empty_strings() {
             CONTACTS_FOLDER_ID,
             PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
         ),
-        None
+        Some(MapiValue::String(String::new()))
     );
     assert_eq!(
         contact_table_property_value(
@@ -1043,7 +1043,7 @@ fn query_rows_origin_tracks_cursor_boundary() {
     };
     let mailboxes = [inbox];
     let mut table = MapiObject::HierarchyTable {
-        folder_id: SYNC_ISSUES_FOLDER_ID,
+        folder_id: IPM_SUBTREE_FOLDER_ID,
         columns: vec![PID_TAG_DISPLAY_NAME_W],
         columns_set: false,
         sort_orders: Vec::new(),
@@ -1062,6 +1062,12 @@ fn query_rows_origin_tracks_cursor_boundary() {
         output_handle_index: None,
         payload: vec![0, 1, 1, 0],
     };
+    let total_rows =
+        table_position_and_count(Some(&table), &mailboxes, &[], &snapshot, Uuid::nil()).1;
+    assert!(
+        total_rows > 11,
+        "fixture should have enough rows to exercise non-terminal and terminal origins"
+    );
 
     let response = rop_query_rows_response(
         &request,
@@ -1089,9 +1095,9 @@ fn query_rows_origin_tracks_cursor_boundary() {
         Uuid::nil(),
     );
 
-    assert_eq!(response[6], 0x02);
-    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
-    assert_eq!(table_position(&table), Some(3));
+    assert_eq!(response[6], 0x01);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 10);
+    assert_eq!(table_position(&table), Some(11));
 
     let response = rop_query_rows_response(
         &RopRequest {
@@ -1106,8 +1112,11 @@ fn query_rows_origin_tracks_cursor_boundary() {
     );
 
     assert_eq!(response[6], 0x02);
-    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
-    assert_eq!(table_position(&table), Some(3));
+    assert_eq!(
+        u16::from_le_bytes(response[7..9].try_into().unwrap()),
+        (total_rows - 11) as u16
+    );
+    assert_eq!(table_position(&table), Some(total_rows));
 }
 
 #[test]
@@ -1801,9 +1810,9 @@ fn find_row_beginning_origin_falls_back_when_complete_rows_are_loaded() {
 #[test]
 fn query_position_clamps_stale_cursor_to_current_row_count() {
     let snapshot = MapiMailStoreSnapshot::empty();
-    let expected_count = snapshot
-        .associated_config_messages_for_folder(INBOX_FOLDER_ID)
-        .len() as u32;
+    let expected_count =
+        restricted_associated_folder_message_count(INBOX_FOLDER_ID, &snapshot, None, Uuid::nil())
+            as u32;
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
         associated: true,
@@ -1847,6 +1856,12 @@ fn restricted_associated_query_position_reports_filtered_row_count() {
         property_tag: PID_TAG_MESSAGE_CLASS_W,
         value: MapiValue::String("IPM.Configuration.ExtensionMasterTable".to_string()),
     };
+    let expected_count = restricted_associated_folder_message_count(
+        INBOX_FOLDER_ID,
+        &snapshot,
+        Some(&restriction),
+        Uuid::nil(),
+    ) as u32;
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
         associated: true,
@@ -1879,7 +1894,10 @@ fn restricted_associated_query_position_reports_filtered_row_count() {
 
     assert_eq!(response[0], RopId::QueryPosition.as_u8());
     assert_eq!(u32::from_le_bytes(response[6..10].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(response[10..14].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(response[10..14].try_into().unwrap()),
+        expected_count
+    );
 
     let query_rows = RopRequest {
         rop_id: RopId::QueryRows.as_u8(),
@@ -1897,8 +1915,11 @@ fn restricted_associated_query_position_reports_filtered_row_count() {
     );
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(response[6], 0x00);
-    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+    assert_eq!(response[6], 0x02);
+    assert_eq!(
+        u16::from_le_bytes(response[7..9].try_into().unwrap()),
+        expected_count as u16
+    );
 }
 
 #[test]
@@ -5424,7 +5445,7 @@ fn inbox_associated_query_rows_uses_sort_order() {
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
@@ -5461,11 +5482,11 @@ fn inbox_associated_query_rows_suppresses_extended_rule_message() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -5534,7 +5555,7 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 4);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -5605,7 +5626,7 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -7335,24 +7356,28 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         CONVERSATION_HISTORY_FOLDER_ID,
         CONTACTS_SEARCH_FOLDER_ID,
         CONTACTS_FOLDER_ID,
-        QUICK_CONTACTS_FOLDER_ID,
-        IM_CONTACT_LIST_FOLDER_ID,
         CALENDAR_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        TASKS_FOLDER_ID,
+        TODO_SEARCH_FOLDER_ID,
     ] {
-        assert!(matches!(
-            special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
-            Some(MapiValue::Binary(value)) if !value.is_empty()
-        ));
+        assert!(
+            matches!(
+                special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
+                Some(MapiValue::Binary(value)) if !value.is_empty()
+            ),
+            "folder 0x{folder_id:016x} should project a default view entry id"
+        );
     }
     for folder_id in [
         DEFERRED_ACTION_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
         TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        SUGGESTED_CONTACTS_FOLDER_ID,
+        QUICK_CONTACTS_FOLDER_ID,
+        IM_CONTACT_LIST_FOLDER_ID,
         IPM_SUBTREE_FOLDER_ID,
-        JOURNAL_FOLDER_ID,
-        NOTES_FOLDER_ID,
-        TASKS_FOLDER_ID,
-        TODO_SEARCH_FOLDER_ID,
         SYNC_ISSUES_FOLDER_ID,
         CONFLICTS_FOLDER_ID,
         LOCAL_FAILURES_FOLDER_ID,

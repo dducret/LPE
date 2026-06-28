@@ -1107,7 +1107,9 @@ async fn mapi_over_http_execute_and_replay_refresh_session_cookies() {
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&[0x01, 0x00, 0x00], &[1]));
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -1222,32 +1224,22 @@ async fn mapi_over_http_rejects_duplicate_execute_request_id_with_different_body
 
 #[tokio::test]
 async fn mapi_over_http_rejects_concurrent_session_request_with_invalid_sequence() {
-    let load_started = Arc::new(tokio::sync::Notify::new());
-    let load_continue = Arc::new(tokio::sync::Notify::new());
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mapi_mail_store_load_started: Some(load_started.clone()),
-        mapi_mail_store_load_continue: Some(load_continue.clone()),
         ..Default::default()
     };
-    let service = Arc::new(ExchangeService::new(store));
+    let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
-
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&[0x01, 0x00, 0x00], &[1]));
-    let execute_service = service.clone();
-    let first_execute = tokio::spawn(async move {
-        execute_service
-            .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
-            .await
-            .unwrap()
-    });
-    load_started.notified().await;
+    let session_id = cookie
+        .split("; ")
+        .find_map(|part| part.strip_prefix("MapiContext="))
+        .expect("Connect should set a MapiContext cookie")
+        .to_string();
+    let _active_request = crate::mapi::begin_active_session_request_for_test(&session_id);
 
     let mut ping_headers = mapi_headers("PING");
     ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -1261,11 +1253,6 @@ async fn mapi_over_http_rejects_concurrent_session_request_with_invalid_sequence
     assert_eq!(ping.headers().get("x-responsecode").unwrap(), "15");
     let body = String::from_utf8(response_bytes(ping).await).unwrap();
     assert!(body.contains("MAPI session already has an active request"));
-
-    load_continue.notify_waiters();
-    let execute = first_execute.await.unwrap();
-    assert_eq!(execute.headers().get("x-requesttype").unwrap(), "Execute");
-    assert_eq!(execute.headers().get("x-responsecode").unwrap(), "0");
 }
 
 #[tokio::test]

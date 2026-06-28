@@ -70,14 +70,25 @@ For installation and reset workflows on `Debian Trixie`, see [installation/READM
 
 ## Repository Checks
 
-Report production source files above the 1,500-line threshold:
+Report tracked production source files above the 1,500-line threshold:
 
 ```sh
 python3 tools/check_oversized_sources.py
 ```
 
+The check is intentionally lightweight and portable for Debian Trixie. It scans
+tracked source files and excludes lockfiles, generated/cache areas, `.git`,
+`node_modules`, `target`, build output, and test directories by default.
+
 Use `--fail` when the check should exit non-zero for CI enforcement:
 
 ```sh
 python3 tools/check_oversized_sources.py --fail
+```
+
+Use `--include-tests` when reviewing oversized test files as part of a planned
+test-module split:
+
+```sh
+python3 tools/check_oversized_sources.py --include-tests
 ```

@@ -2790,7 +2790,6 @@ fn debug_expected_container_class(folder_id: u64) -> Option<&'static str> {
         | VIEWS_FOLDER_ID
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
-        | FREEBUSY_DATA_FOLDER_ID
         | SPOOLER_QUEUE_FOLDER_ID => None,
         CALENDAR_FOLDER_ID => Some("IPF.Appointment"),
         CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID => {
@@ -6191,7 +6190,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             false,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
-        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
+        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "IPF.Note", false),
         CONVERSATION_HISTORY_FOLDER_ID => (
             "Conversation History",
             IPM_SUBTREE_FOLDER_ID,

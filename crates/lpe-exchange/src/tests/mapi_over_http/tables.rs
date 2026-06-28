@@ -3268,7 +3268,6 @@ async fn mapi_over_http_root_hierarchy_table_uses_none_container_classes_for_roo
         "Common Views",
         "Schedule",
         "Personal Views",
-        "FreeBusy Data",
     ] {
         let (_, container_class) = rows
             .iter()
@@ -3276,6 +3275,11 @@ async fn mapi_over_http_root_hierarchy_table_uses_none_container_classes_for_roo
             .unwrap_or_else(|| panic!("{name} hierarchy row"));
         assert_eq!(container_class, "");
     }
+    let (_, freebusy_container_class) = rows
+        .iter()
+        .find(|(display_name, _)| display_name == "FreeBusy Data")
+        .expect("FreeBusy Data hierarchy row");
+    assert_eq!(freebusy_container_class, "IPF.Note");
     let (_, shortcuts_container_class) = rows
         .iter()
         .find(|(display_name, _)| display_name == "Shortcuts")

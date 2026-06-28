@@ -483,6 +483,11 @@ pub(in crate::mapi) fn begin_active_session_request(
     }
 }
 
+#[cfg(test)]
+pub(crate) fn begin_active_session_request_for_test(session_id: &str) -> impl Drop {
+    begin_active_session_request(session_id).expect("test session should not already be active")
+}
+
 pub(in crate::mapi) fn session_request_is_active(session_id: &str) -> bool {
     let guard = active_session_requests()
         .lock()

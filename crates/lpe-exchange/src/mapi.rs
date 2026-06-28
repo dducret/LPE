@@ -66,6 +66,9 @@ pub(crate) use crate::mapi::{
     },
 };
 
+#[cfg(test)]
+pub(crate) use crate::mapi::session::begin_active_session_request_for_test;
+
 static MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);

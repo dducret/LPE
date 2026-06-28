@@ -9991,7 +9991,8 @@ fn mapi_wrapped_x500_recipient_row(display_name: &str, legacy_dn: &str) -> Vec<u
 
 fn mapi_content_restriction(property_tag: u32, value: &str) -> Vec<u8> {
     let mut restriction = vec![0x03];
-    restriction.extend_from_slice(&0u32.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
+    restriction.extend_from_slice(&0x0001u16.to_le_bytes());
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     restriction.extend_from_slice(&utf16z(value));
