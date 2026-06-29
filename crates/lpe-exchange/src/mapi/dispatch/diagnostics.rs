@@ -33,13 +33,27 @@ use crate::mapi::wire::RopId;
 
 use super::MAX_ROP_DEBUG_ENTRIES;
 
+mod default_folders;
+mod execute;
 mod fast_transfer;
+mod named_properties;
+mod open_folder;
 mod post_hierarchy;
+mod property_names;
+mod property_responses;
 mod recipients;
+mod values;
 
+pub(super) use default_folders::*;
+pub(super) use execute::*;
 pub(super) use fast_transfer::*;
+pub(super) use named_properties::*;
+pub(super) use open_folder::*;
 pub(super) use post_hierarchy::*;
+pub(super) use property_names::*;
+pub(super) use property_responses::*;
 pub(super) use recipients::*;
+pub(super) use values::*;
 
 #[derive(Debug, Default)]
 pub(super) struct RopRequestDebugSummary {
@@ -1358,216 +1372,4 @@ pub(super) fn format_live_handle_debug_summary(session: &MapiSession) -> String 
         })
         .collect::<Vec<_>>()
         .join("|")
-}
-
-pub(super) fn mapi_value_debug_string(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
-    match properties.get(&tag) {
-        Some(MapiValue::String(value)) => value.clone(),
-        Some(value) => mapi_value_debug_shape(value),
-        None => "missing".to_string(),
-    }
-}
-
-pub(super) fn mapi_value_debug_u32(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
-    match properties.get(&tag) {
-        Some(MapiValue::U32(value)) => value.to_string(),
-        Some(MapiValue::I32(value)) => value.to_string(),
-        Some(value) => mapi_value_debug_shape(value),
-        None => "missing".to_string(),
-    }
-}
-
-pub(super) fn mapi_value_debug_bool(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
-    match properties.get(&tag) {
-        Some(MapiValue::Bool(value)) => value.to_string(),
-        Some(value) => mapi_value_debug_shape(value),
-        None => "missing".to_string(),
-    }
-}
-
-pub(super) fn mapi_value_debug_binary_decode(
-    properties: &HashMap<u32, MapiValue>,
-    tag: u32,
-) -> String {
-    match properties.get(&tag) {
-        Some(MapiValue::Binary(bytes)) => {
-            let decoded_folder_id = object_id_from_source_key(bytes)
-                .or_else(|| object_id_from_folder_identifier_bytes(bytes));
-            format!(
-                "bytes={};decoded={}",
-                bytes.len(),
-                format_optional_folder_id(decoded_folder_id)
-            )
-        }
-        Some(value) => mapi_value_debug_shape(value),
-        None => "missing".to_string(),
-    }
-}
-
-pub(super) fn format_optional_folder_id(folder_id: Option<u64>) -> String {
-    folder_id
-        .map(|folder_id| format!("0x{folder_id:016x}"))
-        .unwrap_or_default()
-}
-
-pub(super) fn mapi_value_debug_shape(value: &MapiValue) -> String {
-    match value {
-        MapiValue::Bool(_) => "bool".to_string(),
-        MapiValue::I16(_) => "i16".to_string(),
-        MapiValue::I32(_) => "i32".to_string(),
-        MapiValue::I64(_) => "i64".to_string(),
-        MapiValue::F64(_) => "f64".to_string(),
-        MapiValue::U32(_) => "u32".to_string(),
-        MapiValue::U64(_) => "u64".to_string(),
-        MapiValue::String(value) => format!("string:chars={}", value.chars().count()),
-        MapiValue::Binary(value) => {
-            format!(
-                "binary:bytes={}:preview={}",
-                value.len(),
-                hex_preview(value, 32)
-            )
-        }
-        MapiValue::Guid(_) => "guid".to_string(),
-        MapiValue::Error(error) => format!("error:{error:#010x}"),
-        MapiValue::MultiI16(value) => format!("multi_i16:count={}", value.len()),
-        MapiValue::MultiI32(value) => format!("multi_i32:count={}", value.len()),
-        MapiValue::MultiI64(value) => format!("multi_i64:count={}", value.len()),
-        MapiValue::MultiString(value) => format!("multi_string:count={}", value.len()),
-        MapiValue::MultiBinary(value) => format!("multi_binary:count={}", value.len()),
-        MapiValue::MultiGuid(value) => format!("multi_guid:count={}", value.len()),
-    }
-}
-
-pub(super) fn mapi_value_debug_u32_from_value(value: &MapiValue) -> String {
-    match value {
-        MapiValue::U32(value) => format!("{value:#010x}"),
-        MapiValue::I32(value) => format!("{value:#010x}"),
-        _ => mapi_value_debug_shape(value),
-    }
-}
-
-pub(super) fn format_inbox_folder_type_getprops_response_context(response: &[u8]) -> String {
-    let return_value = response
-        .get(2..6)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u32::from_le_bytes)
-        .map(|value| format!("0x{value:08x}"))
-        .unwrap_or_else(|| "truncated".to_string());
-    let row_preview = if response.len() > 6 {
-        hex_preview(&response[6..], 64)
-    } else {
-        String::new()
-    };
-    format!(
-        "response_bytes={};return_value={};row_bytes={};row_preview={}",
-        response.len(),
-        return_value,
-        response.len().saturating_sub(6),
-        row_preview
-    )
-}
-
-pub(super) fn debug_context_or_none(context: &str) -> &str {
-    if context.is_empty() {
-        "none"
-    } else {
-        context
-    }
-}
-
-pub(super) fn log_execute_dispatch_start_debug(
-    endpoint: MapiEndpoint,
-    principal: &AccountPrincipal,
-    _headers: &HeaderMap,
-    request_id: &str,
-    mailbox_count: usize,
-    email_count: usize,
-) {
-    let endpoint = match endpoint {
-        MapiEndpoint::Emsmdb => "emsmdb",
-        MapiEndpoint::Nspi => "nspi",
-    };
-    let message = "rca debug mapi execute dispatch start";
-
-    tracing::debug!(
-        rca_debug = true,
-        adapter = "mapi",
-        endpoint = endpoint,
-        tenant_id = %principal.tenant_id,
-        account_id = %principal.account_id,
-        mailbox = %principal.email,
-        request_type = "Execute",
-        mapi_request_id = request_id,
-        mailbox_count = mailbox_count,
-        email_count = email_count,
-        message = message,
-    );
-}
-
-pub(super) fn log_execute_parse_failure_debug(
-    endpoint: MapiEndpoint,
-    principal: &AccountPrincipal,
-    headers: &HeaderMap,
-    request_id: &str,
-    body: &[u8],
-    error: &anyhow::Error,
-) {
-    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
-    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
-    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
-    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
-    let endpoint = match endpoint {
-        MapiEndpoint::Emsmdb => "emsmdb",
-        MapiEndpoint::Nspi => "nspi",
-    };
-    let flags = read_le_u32_at(body, 0);
-    let rop_buffer_size = read_le_u32_at(body, 4);
-    let rop_buffer_end = rop_buffer_size.and_then(|size| 8usize.checked_add(size as usize));
-    let max_rop_out = rop_buffer_end.and_then(|offset| read_le_u32_at(body, offset));
-    let auxiliary_buffer_size =
-        rop_buffer_end.and_then(|offset| read_le_u32_at(body, offset.saturating_add(4)));
-    let expected_body_bytes = match (rop_buffer_end, auxiliary_buffer_size) {
-        (Some(offset), Some(auxiliary_buffer_size)) => offset
-            .checked_add(8)
-            .and_then(|offset| offset.checked_add(auxiliary_buffer_size as usize)),
-        _ => None,
-    };
-    tracing::warn!(
-        rca_debug = true,
-        adapter = "mapi",
-        endpoint = endpoint,
-        tenant_id = %principal.tenant_id,
-        account_id = %principal.account_id,
-        mailbox = %principal.email,
-        request_type = "Execute",
-        mapi_request_id = request_id,
-        client_request_id = %client_request_id,
-        client_application = %client_application,
-        client_info = %client_info,
-        trace_id = %trace_id,
-        request_body_bytes = body.len(),
-        execute_flags = flags.map(format_hex_u32).unwrap_or_default(),
-        declared_rop_buffer_size = rop_buffer_size
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        max_rop_out = max_rop_out.map(|value| value.to_string()).unwrap_or_default(),
-        declared_auxiliary_buffer_size = auxiliary_buffer_size
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        expected_body_bytes = expected_body_bytes
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        body_preview_hex = %debug_payload_preview_hex(body),
-        parse_error = %error,
-        "rca debug mapi execute parse failure"
-    );
-}
-
-fn read_le_u32_at(bytes: &[u8], offset: usize) -> Option<u32> {
-    let value = bytes.get(offset..offset.checked_add(4)?)?;
-    Some(u32::from_le_bytes(value.try_into().ok()?))
-}
-
-fn format_hex_u32(value: u32) -> String {
-    format!("0x{value:08x}")
 }

@@ -1071,3 +1071,810 @@ of silently losing them.
   test -p lpe-exchange`. The broad run passed with 1593 tests and doc tests
   passing. Current line counts: `dispatch.rs` 29,204 lines,
   `dispatch/tables.rs` 34 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopSeekRowFractional` branch wiring into `dispatch/tables.rs`. Fractional
+  seek validation, cursor movement, and table row semantics remain owned by
+  `mapi/tables.rs`; dispatch only delegates response construction.
+- 2026-06-29 verification for the fractional seek dispatch extraction: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_seek_row_fractional_moves_table_cursor`; `cargo test
+  -p lpe-exchange
+  mapi_over_http_seek_row_fractional_rejects_zero_denominator_without_batch_drift`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest`;
+  `cargo test -p lpe-exchange`. The first broad run hit a transient
+  FastTransfer copy-folder assertion that passed in isolation; the immediate
+  broad rerun passed with 1593 tests and doc tests passing. Current line
+  counts: `dispatch.rs` 29,204 lines, `dispatch/tables.rs` 44 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  collapse-state ROP branch wiring into `dispatch/tables.rs`. `RopCollapseRow`,
+  `RopGetCollapseState`, and `RopSetCollapseState` still delegate to
+  `mapi/tables.rs` for collapse encoding, bookmark state, cursor semantics, and
+  row behavior.
+- 2026-06-29 verification for the collapse-state dispatch extraction: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_categorized_table_collapse_state_restores_bookmark`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 65 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopExpandRow` branch wiring into `dispatch/tables.rs`. The folder-handle
+  guard remains in dispatch, and expand-row evaluation, row output, and
+  category behavior remain owned by `mapi/tables.rs`.
+- 2026-06-29 verification for the expand-row dispatch extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_expand_row_on_folder_cannot_delete_messages`; `cargo test -p
+  lpe-exchange
+  mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest`;
+  `cargo test -p lpe-exchange`. The first broad run again hit the transient
+  FastTransfer copy-folder assertion that passed in isolation; the immediate
+  broad rerun passed with 1593 tests and doc tests passing. Current line
+  counts: `dispatch.rs` 29,204 lines, `dispatch/tables.rs` 74 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopQueryPosition` response construction into `dispatch/tables.rs`.
+  Calendar trace context, RCA logging, and table-position diagnostics remain in
+  `dispatch.rs`; row counts and cursor position semantics remain owned by
+  `mapi/tables.rs`.
+- 2026-06-29 verification for the query-position dispatch extraction: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_query_position_reports_table_cursor`; `cargo test
+  -p lpe-exchange`. The broad run passed with 1593 tests and doc tests
+  passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 84 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopGetStatus` and `RopSeekRow` response construction into
+  `dispatch/tables.rs`. Seek-row before-position capture, named-property
+  context, and RCA diagnostics remain in `dispatch.rs`; cursor movement and
+  status response semantics remain owned by `mapi/tables.rs`.
+- 2026-06-29 verification for the get-status/seek-row dispatch extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_seek_row_moves_contents_table_cursor`; `cargo test
+  -p lpe-exchange
+  mapi_over_http_microsoft_table_control_rops_require_table_handles`; `cargo
+  test -p lpe-exchange
+  mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity`;
+  `cargo test -p lpe-exchange`. The first broad run hit an order-dependent
+  calendar identity-mapping panic that passed in isolation; the immediate broad
+  rerun passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 29,204 lines, `dispatch/tables.rs` 97 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopFindRow` response construction into `dispatch/tables.rs`. Inbox trace
+  context, named-property diagnostics, associated-message tracking, and
+  broad-findrow session hints remain in `dispatch.rs`; row matching, cursor
+  updates, and response bytes remain owned by `mapi/tables.rs`.
+- 2026-06-29 verification for the find-row dispatch extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_find_row_returns_matching_contents_row`; `cargo test -p
+  lpe-exchange mapi_over_http_findrow_rejects_invalid_microsoft_find_row_flags`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 107 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopQueryRows` response construction into `dispatch/tables.rs`. Bootstrap
+  phase logging, smart-input adjustment, query-row response diagnostics,
+  hierarchy diagnostics, session trace contexts, and Outlook view hints remain
+  in `dispatch.rs`; row paging, cursor movement, and response bytes remain
+  owned by `mapi/tables.rs`.
+- 2026-06-29 verification for the query-rows dispatch extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_query_rows_no_advance_preserves_table_position`; `cargo test
+  -p lpe-exchange mapi_over_http_query_rows_reads_backward_from_table_position`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 117 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  successful `RopSetColumns`, `RopSortTable`, and `RopRestrict` response
+  construction into `dispatch/tables.rs`. Validation, table mutation,
+  invalid-state marking, named-property normalization, RCA logging, and
+  session trace contexts remain in `dispatch.rs`.
+- 2026-06-29 verification for the set-columns/sort/restrict response
+  extraction: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_oxctabl_4_1_to_4_4_contents_table_setcolumns_sort_query_rows`;
+  `cargo test -p lpe-exchange mapi_over_http_restrict_filters_contents_table_rows`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 126 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  `RopGetSearchCriteria` response construction into `dispatch/tables.rs`.
+  Search-folder lookup, builtin fallback selection, canonical definition
+  conversion, and error mapping remain in `dispatch.rs`.
+- 2026-06-29 verification for the get-search-criteria response extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_set_get_search_criteria_updates_canonical_search_folder`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_folder_id`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,199 lines,
+  `dispatch/tables.rs` 134 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  table-opening response construction for `RopGetHierarchyTable`,
+  `RopGetContentsTable`, `RopGetAttachmentTable`,
+  `RopGetReceiveFolderTable`, `RopGetPermissionsTable`, and
+  `RopGetRulesTable` into `dispatch/tables.rs`. Handle allocation, input
+  validation, row counts, table object state, RCA logging, and session
+  diagnostics remain in `dispatch.rs`; response bytes still come from the
+  existing ROP/table builders.
+- 2026-06-29 verification for the table-opening response extraction: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_table`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_contents_table_lists_canonical_messages`; `cargo test -p
+  lpe-exchange
+  mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_attachments`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_get_receive_folder_table_requires_private_logon_handle`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_permissions_table_maps_delegate_folder_access`; `cargo test
+  -p lpe-exchange
+  mapi_over_http_get_rules_table_projects_canonical_sieve_rules`; `cargo test
+  -p lpe-exchange`. The broad run passed with 1593 tests and doc tests
+  passing. Current line counts: `dispatch.rs` 29,207 lines,
+  `dispatch/tables.rs` 152 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  table object construction defaults for hierarchy, contents, attachment,
+  permissions, and rules tables into `dispatch/tables.rs`. Dispatch still owns
+  handle allocation, input validation, access checks, row counts, and logging;
+  the helpers only centralize the default `MapiObject::*Table` state used when
+  opening table handles.
+- 2026-06-29 verification for the table object construction extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_table`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_contents_table_lists_canonical_messages`; `cargo test -p
+  lpe-exchange
+  mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_attachments`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_permissions_table_maps_delegate_folder_access`; `cargo test
+  -p lpe-exchange
+  mapi_over_http_get_rules_table_projects_canonical_sieve_rules`; `cargo test
+  -p lpe-exchange`. The broad run passed with 1593 tests and doc tests
+  passing. Current line counts: `dispatch.rs` 29,153 lines,
+  `dispatch/tables.rs` 216 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving
+  table column-support diagnostics into `dispatch/tables.rs`. The moved
+  helpers classify normal-message, associated-content, defaulted, and
+  named/dynamic table columns for Outlook debug summaries; row projection and
+  wire output remain unchanged.
+- 2026-06-29 verification for the table column-support helper extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  normal_message_column_support_covers_outlook_mail_view_columns`; `cargo test
+  -p lpe-exchange associated_column_support_covers_inbox_configuration_columns`;
+  `cargo test -p lpe-exchange
+  associated_column_support_covers_inbox_view_descriptor_columns`; `cargo test
+  -p lpe-exchange
+  associated_column_support_covers_common_views_wlink_binary_variants`; `cargo
+  test -p lpe-exchange
+  mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest`;
+  `cargo test -p lpe-exchange`. The first broad run hit the known transient
+  FastTransfer copy-folder assertion, that test passed in isolation, and the
+  immediate broad rerun passed with 1593 tests and doc tests passing. Current
+  line counts: `dispatch.rs` 28,964 lines, `dispatch/tables.rs` 405 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving table
+  column named-property normalization into `dispatch/tables.rs`. The moved
+  helpers normalize stale Outlook sharing aliases and well-known named
+  property IDs for table column selection; named-property cache mutation
+  remains in `dispatch.rs` where it is shared with non-table property ROPs.
+- 2026-06-29 verification for the table column-normalization helper
+  extraction: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  table_columns_normalize`; `cargo test -p lpe-exchange`. The focused run
+  passed 6 normalization tests, and the broad run passed with 1593 tests and
+  doc tests passing. Current line counts: `dispatch.rs` 28,924 lines,
+  `dispatch/tables.rs` 448 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  effective contents-table column selection helper into `dispatch/tables.rs`.
+  The helper still chooses the same default columns for normal contents,
+  associated Inbox/Quick Step contents, Common Views navigation shortcuts, and
+  conversation actions.
+- 2026-06-29 verification for the effective contents-table column helper
+  extraction: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  quick_step_synthetic_folder_allows_associated_message_creation`; `cargo test
+  -p lpe-exchange
+  ipm_configuration_contract_summary_reports_required_columns_and_streams`;
+  `cargo test -p lpe-exchange`. The focused tests passed, and the broad run
+  passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 28,910 lines, `dispatch/tables.rs` 466 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving table
+  restriction diagnostic wrappers into `dispatch/tables.rs`. The moved helpers
+  decode request restriction bytes, format parsed restriction trees, and collect
+  restriction property tags for table diagnostics; restriction parsing,
+  matching, table mutation, and row output remain in the existing ROP/table
+  paths.
+- 2026-06-29 verification for the table restriction diagnostic helper
+  extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `request_restriction_bytes`, `restriction_property_tags_from_request`,
+  `collect_restriction_property_tags`, `format_debug_restriction`,
+  `format_debug_restriction_option`, `format_debug_restriction_property_tags`,
+  and `format_debug_parsed_restriction` definitions now live in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange restriction` passed 27
+  focused tests; `cargo test -p lpe-exchange` passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 28,762 lines,
+  `dispatch/tables.rs` 619 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the same table diagnostics slice by moving the adjacent
+  `MapiValue` and text debug formatters into `dispatch/tables.rs`. These
+  helpers are used by table row/window diagnostics and by the moved restriction
+  formatter; no protocol row serialization or response bytes changed.
+- 2026-06-29 verification for the table value debug formatter extraction:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_debug_mapi_value`, `format_debug_text_value`,
+  `format_debug_restriction`, and `format_debug_parsed_restriction`
+  definitions live in `dispatch/tables.rs`; `cargo test -p lpe-exchange
+  restriction` passed 27 focused tests. The first broad `cargo test -p
+  lpe-exchange` run hit the known transient
+  `mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity`
+  identity assertion; that test passed in isolation, and the immediate broad
+  rerun passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 28,732 lines, `dispatch/tables.rs` 649 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the table diagnostics slice by moving the pure
+  `select_query_window` helper into `dispatch/tables.rs`. The helper only
+  computes debug/table window indices for forward and backward reads; cursor
+  mutation, row serialization, and table output remain unchanged.
+- 2026-06-29 verification for the query-window helper extraction: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the `select_query_window` definition
+  now lives in `dispatch/tables.rs`; `cargo test -p lpe-exchange query_row`
+  passed 54 focused tests; `cargo test -p lpe-exchange` passed with 1593 tests
+  and doc tests passing. Current line counts: `dispatch.rs` 28,719 lines,
+  `dispatch/tables.rs` 662 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the table diagnostics slice by moving associated table
+  debug-row helpers into `dispatch/tables.rs`. The moved cluster owns the
+  `DebugAssociatedTableRow` wrapper, associated-config/named-view debug row
+  selection, debug sorting, row property lookup, row identity/class/subject
+  accessors, and debug-row serialization. Higher-level diagnostic summaries
+  still live in `dispatch.rs`; table row projection and wire output remain in
+  the existing table/property builders.
+- 2026-06-29 verification for the associated debug-row helper extraction:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the
+  `DebugAssociatedTableRow` and direct helper definitions now live in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange associated` passed 105
+  focused tests; `cargo test -p lpe-exchange` passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 28,521 lines,
+  `dispatch/tables.rs` 860 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the table diagnostics slice by moving associated Inbox
+  and Common Views query-window debug formatters into `dispatch/tables.rs`.
+  These helpers only assemble diagnostic strings for selected associated table
+  rows; table cursors, row projection, and wire output remain unchanged.
+- 2026-06-29 verification for the associated/Common Views query-window
+  formatter extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_inbox_associated_query_row_window` and
+  `format_common_views_query_row_window` definitions now live in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange query_row` passed 54
+  focused tests; `cargo test -p lpe-exchange` passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 28,431 lines,
+  `dispatch/tables.rs` 950 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the same table diagnostics slice by moving the
+  top-level associated query-window dispatcher `format_outlook_query_row_window`
+  into `dispatch/tables.rs`. It only routes associated query diagnostics to the
+  Inbox and Common Views formatters; non-associated tables, cursor state, row
+  projection, and response bytes remain unchanged.
+- 2026-06-29 verification for the associated query-window dispatcher
+  extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_outlook_query_row_window` is now defined in `dispatch/tables.rs`;
+  `cargo test -p lpe-exchange query_row` passed 54 focused tests. The first
+  broad `cargo test -p lpe-exchange` run hit the known order-dependent
+  hierarchy empty-folder assertion; that test passed in isolation, and the
+  immediate broad rerun passed with 1593 tests and doc tests passing. Current
+  line counts: `dispatch.rs` 28,393 lines, `dispatch/tables.rs` 988 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  associated/Common Views query-row value debug formatter
+  `format_outlook_query_row_values` into `dispatch/tables.rs`. The helper only
+  formats diagnostic property-value summaries for selected associated table
+  rows; table cursors, row projection, and response bytes remain unchanged.
+- 2026-06-29 verification for the associated query-row value formatter
+  extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_outlook_query_row_values` is now defined in `dispatch/tables.rs`;
+  `cargo test -p lpe-exchange query_row` passed 54 focused tests; `cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing. Current line
+  counts: `dispatch.rs` 28,285 lines, `dispatch/tables.rs` 1,096 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  normal-message query-row debug summary and its contact-table sub-summary into
+  `dispatch/tables.rs`. These helpers only format diagnostic row summaries for
+  mail/contact table windows; table cursor mutation, row serialization, and
+  response bytes remain unchanged.
+- 2026-06-29 verification for the normal-message/contact query-row debug
+  summary extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_normal_message_query_row_summary` and
+  `format_contact_query_row_summary` definitions now live in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange query_row` passed 54
+  focused tests; `cargo test -p lpe-exchange` passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 28,137 lines,
+  `dispatch/tables.rs` 1,244 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  calendar event query-position debug summary into `dispatch/tables.rs`. The
+  helper only formats calendar table diagnostic row summaries; calendar row
+  projection, cursor mutation, and response bytes remain unchanged.
+- 2026-06-29 verification for the calendar query-position debug summary
+  extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_calendar_event_query_position_summary` is now defined in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange query_row` passed 54
+  focused tests. The first broad `cargo test -p lpe-exchange` run hit the
+  known order-dependent
+  `mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest`
+  assertion; that test passed in isolation, and the immediate broad rerun
+  passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 28,082 lines, `dispatch/tables.rs` 1,299 lines, and
+  `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the MR-002/MR-007 table-dispatch slice by moving the
+  normal-message find-row failure diagnostic formatter and its candidate-tag
+  selector into `dispatch/tables.rs`. These helpers only summarize candidate
+  table rows for diagnostics when `FindRow` does not match; table matching,
+  cursor mutation, and response bytes remain unchanged.
+- 2026-06-29 verification for the normal-message find-row failure diagnostic
+  extraction: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_normal_message_find_row_failure_candidates` and
+  `candidate_find_row_debug_tags` definitions now live in
+  `dispatch/tables.rs`; `cargo test -p lpe-exchange find_row` passed 47
+  focused tests; `cargo test -p lpe-exchange` passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 27,982 lines,
+  `dispatch/tables.rs` 1,399 lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Started a focused table diagnostics split by adding
+  `dispatch/table_diagnostics.rs` and moving the low-dependency MAPI debug
+  value, text, and parsed-restriction formatters out of `dispatch/tables.rs`.
+  This keeps the table-dispatch module below the 1,500-line target while
+  preserving diagnostic output, table matching, row projection, and response
+  bytes.
+- 2026-06-29 verification for the table diagnostics formatter split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed `format_debug_mapi_value`,
+  `format_debug_text_value`, and `format_debug_parsed_restriction` definitions
+  now live in `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  restriction` passed 27 focused tests; `cargo test -p lpe-exchange query_row`
+  passed 54 focused tests; `cargo test -p lpe-exchange` passed with 1593 tests
+  and doc tests passing. Current line counts: `dispatch.rs` 27,984 lines,
+  `dispatch/tables.rs` 1,294 lines, `dispatch/table_diagnostics.rs` 106
+  lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the table diagnostics split by moving request
+  restriction-byte extraction, restriction property-tag collection, and
+  restriction debug wrapper helpers into `dispatch/table_diagnostics.rs`.
+  Restriction parsing, table matching, table mutation, and response bytes remain
+  unchanged.
+- 2026-06-29 verification for the restriction diagnostic helper split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed `request_restriction_bytes`,
+  `restriction_property_tags_from_request`, `format_debug_restriction`,
+  `format_debug_restriction_option`,
+  `format_debug_restriction_property_tags`, and
+  `collect_restriction_property_tags` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange restriction`
+  passed 27 focused tests; `cargo test -p lpe-exchange` passed with 1593 tests
+  and doc tests passing. Current line counts: `dispatch.rs` 27,984 lines,
+  `dispatch/tables.rs` 1,216 lines, `dispatch/table_diagnostics.rs` 184
+  lines, and `dispatch/execute.rs` 257 lines.
+- 2026-06-29: Extended the table diagnostics split by moving associated
+  debug-row helpers into `dispatch/table_diagnostics.rs`. The moved cluster
+  owns `DebugAssociatedTableRow`, associated-config/named-view debug row
+  selection, debug sorting, row property lookup, row identity/class/subject
+  accessors, debug-row serialization, and default-folder associated named-view
+  diagnostics. Associated table projection, matching semantics, cursor
+  mutation, and response bytes remain unchanged.
+- 2026-06-29 verification for the associated debug-row diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `DebugAssociatedTableRow`, `debug_associated_table_rows`,
+  `sort_debug_associated_table_rows`,
+  `debug_associated_row_property_value`, `debug_associated_row_id`,
+  `debug_associated_row_class`, `debug_associated_row_subject`,
+  `serialize_debug_associated_row`,
+  `debug_default_folder_associated_named_view`,
+  `append_exact_virtual_inbox_debug_associated_config`,
+  `debug_exact_message_class_restriction_value`, and
+  `compare_debug_mapi_values` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange associated`
+  passed 105 focused tests; `cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. Current line counts: `dispatch.rs` 27,984
+  lines, `dispatch/tables.rs` 1,018 lines,
+  `dispatch/table_diagnostics.rs` 382 lines, and `dispatch/execute.rs` 257
+  lines.
+- 2026-06-29: Extended the MR-001 diagnostics split by moving state-only
+  Outlook post-hierarchy/startup diagnostic formatters into
+  `dispatch/diagnostics/post_hierarchy.rs`. The moved helpers cover Inbox open
+  loop summaries, post-FAI reopen stall classification, post-FAI folder-type
+  probe-loop summaries, and post-FAI handoff context formatting. The
+  session-mutating smart-input variant helper remains in `dispatch.rs`.
+- 2026-06-29 verification for the post-hierarchy diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed
+  `format_inbox_open_loop_summary`,
+  `inbox_post_fai_reopen_stall_observed`,
+  `format_post_fai_folder_type_probe_loop_context`, and
+  `format_inbox_post_fai_handoff_context` definitions now live in
+  `dispatch/diagnostics/post_hierarchy.rs`; `cargo test -p lpe-exchange
+  post_fai` passed 5 focused tests; `cargo test -p lpe-exchange
+  inbox_open_loop` passed 1 focused test; `cargo test -p lpe-exchange
+  post_sync_release_flags` passed 1 focused test; `cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 27,874 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 186 lines,
+  `dispatch/tables.rs` 1,018 lines,
+  `dispatch/table_diagnostics.rs` 382 lines, and `dispatch/execute.rs` 257
+  lines.
+- 2026-06-29: Extended the table diagnostics split by moving Inbox FAI
+  handoff visibility formatting and its associated debug-row list formatter
+  into `dispatch/table_diagnostics.rs`. The moved code only formats
+  associated-row diagnostic context from existing snapshot/restriction inputs;
+  row matching, table projection, cursor state, and response bytes remain
+  unchanged.
+- 2026-06-29 verification for the FAI handoff visibility diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_inbox_fai_handoff_visibility_context` and
+  `format_debug_associated_row_list` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  inbox_fai_handoff_visibility_context` passed 1 focused test; `cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. Current
+  oversized-check line counts: `dispatch.rs` 28,557 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 195 lines,
+  `dispatch/tables.rs` 1,074 lines,
+  `dispatch/table_diagnostics.rs` 468 lines, and `dispatch/execute.rs` 276
+  lines.
+- 2026-06-29: Extended the table diagnostics split by moving adjacent Inbox
+  hierarchy/associated query context, post-FAI hierarchy release context,
+  associated `FindRow` context, and broad associated `FindRow` classification
+  helpers into `dispatch/table_diagnostics.rs`. These helpers only format or
+  classify diagnostic context around existing table state; the smart-input
+  cursor reset helper remains in `dispatch.rs` because it mutates session
+  state.
+- 2026-06-29 verification for the Inbox table diagnostic context split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_inbox_hierarchy_query_context`,
+  `format_inbox_associated_query_context`,
+  `format_post_fai_hierarchy_release_without_inbox_contents_context`,
+  `format_inbox_associated_find_context`,
+  `inbox_associated_broad_findrow_matched`, and
+  `is_broad_ipm_configuration_restriction` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  inbox_fai_handoff` passed 1 focused test; `cargo test -p lpe-exchange
+  post_fai_hierarchy_release` passed 1 focused test; `cargo test -p
+  lpe-exchange associated_find` passed 17 focused tests; `cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. The oversized
+  source check reports `dispatch.rs` at 28,256 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` at 195 lines,
+  `dispatch/tables.rs` at 1,074 lines,
+  `dispatch/table_diagnostics.rs` at 769 lines, and `dispatch/execute.rs` at
+  276 lines.
+- 2026-06-29: Extended the table diagnostics split by moving Common Views Inbox
+  shortcut context and Inbox-related release context formatting into
+  `dispatch/table_diagnostics.rs`. These helpers only format selected table
+  rows, WLink diagnostics, and release-state context; release handling and
+  session state recording remain in `dispatch.rs`.
+- 2026-06-29 verification for the Common Views/release diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_common_views_inbox_shortcut_context` and
+  `format_inbox_related_release_context` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange common_views`
+  passed 45 focused tests; `cargo test -p lpe-exchange
+  inbox_release_context` passed 1 focused test; `cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. The oversized source check
+  reports `dispatch.rs` at 28,131 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` at 195 lines,
+  `dispatch/tables.rs` at 1,074 lines,
+  `dispatch/table_diagnostics.rs` at 894 lines, and `dispatch/execute.rs` at
+  276 lines.
+- 2026-06-29: Extended the table diagnostics split by moving hierarchy
+  query-row wire summary and IPM subtree hierarchy metric helpers into
+  `dispatch/table_diagnostics.rs`. The moved code only decodes hierarchy table
+  response bytes for RCA/debug summaries and metric flags; hierarchy row
+  serialization, cursor movement, and response construction remain unchanged.
+- 2026-06-29 verification for the hierarchy wire diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed
+  `HierarchyResponseMetricSummary`, `hierarchy_response_metric_summary`,
+  `format_hierarchy_query_rows_wire_summary`,
+  `format_hierarchy_debug_folder_id`,
+  `format_hierarchy_debug_wire_folder_id`,
+  `format_hierarchy_debug_string`, `format_hierarchy_debug_count`, and
+  `format_hierarchy_debug_bool` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  hierarchy_query_rows_wire_summary` passed 1 focused test; `cargo test -p
+  lpe-exchange hierarchy` passed 157 focused tests; `cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. The oversized
+  source check reports `dispatch.rs` at 27,961 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` at 195 lines,
+  `dispatch/tables.rs` at 1,074 lines,
+  `dispatch/table_diagnostics.rs` at 1,064 lines, and `dispatch/execute.rs`
+  at 276 lines.
+- 2026-06-29: Extended the table diagnostics split by moving the Inbox
+  `IPM.Configuration.*` set-column and row-contract diagnostic helpers into
+  `dispatch/table_diagnostics.rs`. The moved code only formats required-column,
+  sort-order, stream-presence, and debug property-tag summaries from existing
+  associated-config rows; table projection, row serialization, and response
+  bytes remain unchanged.
+- 2026-06-29 verification for the IPM configuration contract diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `format_ipm_configuration_set_columns_contract`,
+  `format_ipm_configuration_contract_summary`, `missing_debug_property_tags`,
+  `OUTLOOK_VIEW_DESCRIPTOR_NAMED_STRING_PLACEHOLDER_TAG`,
+  `debug_property_tag_present`, `format_ipm_configuration_row_contract`, and
+  `ipm_configuration_row_issues` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  ipm_configuration` passed 1 focused test; `cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current
+  oversized-check line counts: `dispatch.rs` 27,777 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 195 lines, `dispatch/tables.rs`
+  1,074 lines, `dispatch/table_diagnostics.rs` 1,248 lines, and
+  `dispatch/execute.rs` 276 lines.
+- 2026-06-29: Extended the table diagnostics split by moving Common Views WLink
+  target-decoding and selected-column contract summary formatters into
+  `dispatch/table_diagnostics.rs`. These helpers only format diagnostics for
+  navigation shortcut identity and expected defaulted WLink columns; Common
+  Views row projection, persistence, and wire output remain unchanged.
+- 2026-06-29 verification for the Common Views WLink diagnostics split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed
+  `format_common_views_wlink_target_decoding` and
+  `format_common_views_wlink_contract_summary` definitions now live in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange common_views`
+  passed 45 focused tests; `cargo test -p lpe-exchange` passed with 1593 tests
+  and doc tests passing; `python tools/check_oversized_sources.py` passed in
+  warning mode. Current oversized-check line counts: `dispatch.rs` 27,645
+  lines, `dispatch/diagnostics/post_hierarchy.rs` 195 lines,
+  `dispatch/tables.rs` 1,074 lines, `dispatch/table_diagnostics.rs` 1,380
+  lines, and `dispatch/execute.rs` 276 lines.
+- 2026-06-29: Split execute parse/dispatch logging diagnostics out of the
+  oversized `dispatch/diagnostics.rs` hub into
+  `dispatch/diagnostics/execute.rs`. The moved helpers only emit RCA/debug
+  logging for Execute request dispatch start and parse failures; request
+  parsing, response construction, session handling, and ROP behavior remain
+  unchanged.
+- 2026-06-29 verification for the execute diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `mod execute`,
+  `log_execute_dispatch_start_debug`, and `log_execute_parse_failure_debug`
+  are wired through `dispatch/diagnostics/execute.rs`; `cargo test -p
+  lpe-exchange execute` passed 55 focused tests; `cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer
+  reports `dispatch/diagnostics.rs`. Current line counts:
+  `dispatch/diagnostics.rs` 1,478 lines,
+  `dispatch/diagnostics/execute.rs` 98 lines, `dispatch.rs` 27,645 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Moved post-hierarchy GetProperties/SetProperties/OpenFolder and
+  GetReceiveFolder diagnostic contract formatters from `dispatch.rs` into
+  `dispatch/diagnostics/post_hierarchy.rs`. The moved helpers only classify
+  probe shape, object context, write mode, and response summaries for existing
+  RCA/debug state; property parsing, response construction, canonical writes,
+  and session recording remain unchanged.
+- 2026-06-29 verification for the post-hierarchy contract diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `post_hierarchy_getprops_contract`, `post_hierarchy_setprops_contract`,
+  `post_hierarchy_open_folder_contract`, and
+  `post_hierarchy_get_receive_folder_contract` definitions now live in
+  `dispatch/diagnostics/post_hierarchy.rs`; `cargo test -p lpe-exchange
+  post_hierarchy` passed 9 focused tests; `cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 27,452 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 394 lines,
+  `dispatch/diagnostics.rs` 1,478 lines,
+  `dispatch/diagnostics/execute.rs` 98 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Extended the post-hierarchy diagnostics split by moving the
+  GetProperties contract response summary, access-value shape formatting,
+  set-properties problem-count parsing, and zero/default value classification
+  helpers into `dispatch/diagnostics/post_hierarchy.rs`. The moved code only
+  classifies existing diagnostic response bytes; GetProperties response
+  construction, property parsing, SetProperties behavior, canonical writes, and
+  session state remain unchanged.
+- 2026-06-29 verification for the GetProperties response-summary diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `GetPropsContractResponseSummary`, `getprops_contract_response_summary`,
+  `mapi_getprops_contract_value_debug`, `set_properties_problem_count`, and
+  `mapi_value_is_zero_or_default` definitions now live in
+  `dispatch/diagnostics/post_hierarchy.rs`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary` passed 1 focused test; `cargo test -p
+  lpe-exchange post_hierarchy` passed 9 focused tests; `cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 27,321 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 525 lines,
+  `dispatch/diagnostics.rs` 1,478 lines,
+  `dispatch/diagnostics/execute.rs` 98 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Extended the post-hierarchy diagnostics split by moving the
+  default-folder `SetProperties` RCA/debug logging helper and property-problem
+  detail parser into `dispatch/diagnostics/post_hierarchy.rs`. The moved code
+  only emits diagnostics from already-built SetProperties responses; ROP
+  execution, response construction, property validation, canonical writes, and
+  session state remain unchanged.
+- 2026-06-29 verification for the default-folder SetProperties diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `log_set_properties_default_folder_response_debug` and
+  `set_properties_problem_details_for_debug` definitions now live in
+  `dispatch/diagnostics/post_hierarchy.rs`; `cargo test -p lpe-exchange
+  set_property` passed 4 focused tests; `cargo test -p lpe-exchange
+  post_hierarchy` passed 9 focused tests; `cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 27,254 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 592 lines,
+  `dispatch/diagnostics.rs` 1,478 lines,
+  `dispatch/diagnostics/execute.rs` 98 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/property_names.rs` and moved the
+  SetProperties diagnostic property-name formatter there. This keeps the
+  generic property-name mapping out of the dispatch hub without growing
+  `dispatch/diagnostics.rs` past the production-source target. The moved code
+  only formats diagnostic names; property IDs, property validation, response
+  bytes, and canonical mutations remain unchanged.
+- 2026-06-29 verification for the property-name diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `format_set_property_names_for_debug`
+  and `set_property_debug_name` definitions now live in
+  `dispatch/diagnostics/property_names.rs`; `cargo test -p lpe-exchange
+  set_property` passed 4 focused tests. A parallel `cargo test -p
+  lpe-exchange` run hit known order-dependent MAPI-over-HTTP failures in
+  custom-calendar hierarchy identity and hard-delete hierarchy cleanup; both
+  tests passed in isolation, and `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 27,172 lines,
+  `dispatch/diagnostics.rs` 1,480 lines,
+  `dispatch/diagnostics/property_names.rs` 83 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 592 lines,
+  `dispatch/diagnostics/execute.rs` 98 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/values.rs` and moved diagnostic
+  MAPI value-shape, optional folder-id, debug context, and Inbox folder-type
+  GetProperties response-context formatters out of `dispatch/diagnostics.rs`.
+  The moved code only formats diagnostics from existing values and response
+  bytes; it does not change property parsing, response construction, ROP
+  behavior, or canonical state.
+- 2026-06-29 verification for the diagnostic value formatter split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `mapi_value_debug_string`,
+  `mapi_value_debug_u32`, `mapi_value_debug_bool`,
+  `mapi_value_debug_binary_decode`, `format_optional_folder_id`,
+  `mapi_value_debug_shape`, `mapi_value_debug_u32_from_value`,
+  `format_inbox_folder_type_getprops_response_context`, and
+  `debug_context_or_none` definitions now live in
+  `dispatch/diagnostics/values.rs`; `cargo test -p lpe-exchange
+  debug_named_property_context_reports_session_and_unresolved_properties`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  inbox_folder_type_getprops_response_context` passed 1 focused test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode. Current line counts: `dispatch.rs` 27,172 lines,
+  `dispatch/diagnostics.rs` 1,367 lines,
+  `dispatch/diagnostics/values.rs` 127 lines,
+  `dispatch/diagnostics/property_names.rs` 83 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 592 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/default_folders.rs` and moved
+  default-folder entry-id debug decoding, `PidTagAdditionalRenEntryIdsEx`
+  debug parsing, indexed special-folder entry-id summaries, and default-folder
+  GetProperties value summaries out of `dispatch.rs`. The moved code only
+  formats RCA/debug evidence from existing values and response bytes; default
+  folder identification, property parsing, response construction, property
+  validation, canonical writes, and session state remain unchanged.
+- 2026-06-29 verification for the default-folder diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed
+  `default_folder_entry_id_values_for_debug`,
+  `default_folder_getprops_response_values_for_debug`,
+  `default_folder_getprops_value_for_debug`,
+  `additional_ren_entry_ids_ex_for_debug`, and
+  `indexed_special_folder_entry_ids_for_debug` definitions now live only in
+  `dispatch/diagnostics/default_folders.rs`; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug` passed 4 focused tests; `cargo test -p
+  lpe-exchange default_folder_identification` passed 2 focused tests; `cargo
+  test -p lpe-exchange
+  first_post_hierarchy_probe_summary_identifies_set_properties_shapes` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 26,831 lines,
+  `dispatch/diagnostics/default_folders.rs` 347 lines,
+  `dispatch/diagnostics.rs` 1,369 lines,
+  `dispatch/diagnostics/values.rs` 127 lines,
+  `dispatch/diagnostics/property_names.rs` 83 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 592 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/property_responses.rs` and moved
+  SetProperties RCA/debug logging, GetProperties response logging, Outlook
+  view response summaries, associated-config stream write summaries, and
+  GetProperties diagnostic value-shape formatting out of `dispatch.rs`. The
+  moved code only emits or formats diagnostics from already-parsed requests,
+  response bytes, and existing values; SetProperties validation, GetProperties
+  response construction, property IDs, property parsing, canonical writes, and
+  session state remain unchanged.
+- 2026-06-29 verification for the property response diagnostics split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed
+  `log_set_properties_specific_debug`,
+  `log_get_properties_default_folder_response_debug`,
+  `log_get_properties_specific_response_debug`,
+  `log_get_properties_view_response_debug`,
+  `associated_config_stream_write_summary`,
+  `get_properties_specific_response_values_for_debug`, and
+  `get_properties_view_response_values_for_debug` definitions now live in
+  `dispatch/diagnostics/property_responses.rs`; `cargo test -p lpe-exchange
+  associated_config_stream_write_summary_names_roaming_xml` passed 1 focused
+  test; `cargo test -p lpe-exchange set_property` passed 4 focused tests;
+  `cargo test -p lpe-exchange getprops_contract_response_summary` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 26,471 lines,
+  `dispatch/diagnostics/property_responses.rs` 363 lines,
+  `dispatch/diagnostics/default_folders.rs` 347 lines,
+  `dispatch/diagnostics.rs` 1,371 lines,
+  `dispatch/diagnostics/values.rs` 127 lines,
+  `dispatch/diagnostics/property_names.rs` 83 lines,
+  `dispatch/diagnostics/post_hierarchy.rs` 592 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/named_properties.rs` and moved
+  named-property diagnostic formatting out of `dispatch.rs`: returned property
+  ID summaries, requested/missing named-property summaries, explicit named
+  property tag context, and contents-table named-property context. The moved
+  code only formats diagnostics from existing session mappings, requested
+  tags, and table columns; named-property allocation, cache updates,
+  well-known property mapping, returned property IDs, and wire responses remain
+  unchanged.
+- 2026-06-29 verification for the named-property diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `format_debug_property_ids`,
+  `format_debug_named_properties`, `format_debug_named_property_context`, and
+  `format_contents_table_named_property_context` definitions now live in
+  `dispatch/diagnostics/named_properties.rs`; `cargo test -p lpe-exchange
+  named_property_context` passed 2 focused tests; `cargo test -p lpe-exchange
+  get_property_ids` passed 3 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode. Current
+  line counts: `dispatch.rs` 26,401 lines,
+  `dispatch/diagnostics/named_properties.rs` 76 lines,
+  `dispatch/diagnostics/property_responses.rs` 363 lines,
+  `dispatch/diagnostics/default_folders.rs` 347 lines,
+  `dispatch/diagnostics.rs` 1,373 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Extended `dispatch/diagnostics/default_folders.rs` by moving the
+  default-folder discovery contract logger, the root default-folder
+  identification contract formatter, and the default-folder hierarchy
+  projection formatter out of `dispatch.rs`. The moved code only emits RCA
+  diagnostics from existing special-folder projections, mailbox rows, and
+  snapshot state; default-folder discovery specs, parent/container
+  expectations, response construction, canonical folder projection, and
+  session state remain unchanged.
+- 2026-06-29 verification for the default-folder discovery diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `default_folder_identification_contract_for_debug`,
+  `log_default_folder_discovery_contract`, and
+  `default_folder_hierarchy_projection_for_debug` definitions now live in
+  `dispatch/diagnostics/default_folders.rs`; `cargo test -p lpe-exchange
+  default_folder_identification` passed 2 focused tests; `cargo test -p
+  lpe-exchange default_folder_hierarchy_projection` passed 1 focused test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode. Current line counts: `dispatch.rs` 26,280 lines,
+  `dispatch/diagnostics/default_folders.rs` 470 lines,
+  `dispatch/diagnostics/named_properties.rs` 76 lines,
+  `dispatch/diagnostics/property_responses.rs` 363 lines,
+  `dispatch/diagnostics.rs` 1,373 lines,
+  `dispatch/table_diagnostics.rs` 1,380 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Moved the `SetSearchCriteria` debug-scope formatter from
+  `dispatch.rs` into `dispatch/table_diagnostics.rs` next to the restriction
+  debug formatters it already uses. The moved code only describes the raw
+  search-criteria payload for RCA/debug logging; search criteria parsing,
+  validation, response construction, table state, and canonical search-folder
+  behavior remain unchanged.
+- 2026-06-29 verification for the search-criteria debug-scope split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed
+  `format_debug_search_criteria_scope` now lives in
+  `dispatch/table_diagnostics.rs`; `cargo test -p lpe-exchange
+  search_criteria_debug_scope` passed 1 focused test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode. Current line counts: `dispatch.rs` 26,216 lines,
+  `dispatch/table_diagnostics.rs` 1,444 lines,
+  `dispatch/diagnostics/default_folders.rs` 470 lines,
+  `dispatch/diagnostics/named_properties.rs` 76 lines,
+  `dispatch/diagnostics/property_responses.rs` 363 lines,
+  `dispatch/diagnostics.rs` 1,373 lines, and `dispatch/tables.rs` 1,074
+  lines.
