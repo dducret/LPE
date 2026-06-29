@@ -253,6 +253,9 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
             *object_id,
         );
         append_rop_set_properties(&mut set_rops, object_handle, 1, &property_values);
+        if index == 0 {
+            append_rop_save_changes_message(&mut set_rops, object_handle, object_handle);
+        }
     }
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie.clone());
@@ -285,7 +288,6 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
         .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     {
         let stored_values = stored_custom_values.lock().unwrap();
-        assert_eq!(stored_values.len(), cases.len());
         for (_, _, _, value) in cases.iter() {
             assert!(
                 stored_values
@@ -294,6 +296,7 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
                 "missing stored custom value {value}"
             );
         }
+        assert_eq!(stored_values.len(), cases.len());
     }
 
     let mut delete_rops = Vec::new();
@@ -624,6 +627,16 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
         server_name.as_slice()
     );
     offset += server_name.len();
+
+    let connected_icon_len =
+        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
+    assert!(connected_icon_len > 0);
+    offset += 2 + connected_icon_len;
+
+    let account_icon_len =
+        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
+    assert!(account_icon_len > 0);
+    offset += 2 + account_icon_len;
 
     assert_eq!(response_rops[offset], 1);
     offset += 1;
@@ -1013,7 +1026,6 @@ async fn mapi_over_http_delete_properties_no_replicate_clears_pending_message_pr
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
-    append_rop_save_changes_message(&mut rops, 2, 2);
     rops.extend_from_slice(&[
         0x7A, 0x00, 0x02, // RopDeletePropertiesNoReplicate
     ]);
@@ -5335,7 +5347,7 @@ async fn mapi_over_http_folder_get_properties_specific_flags_unknown_properties(
                 .try_into()
                 .unwrap()
         ),
-        0x8004_0102
+        0x8004_010F
     );
 }
 

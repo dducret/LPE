@@ -1815,7 +1815,7 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
     rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
     rops.extend_from_slice(legacy_dn);
     rops.extend_from_slice(&[
-        0x6D, 0x00, 0x01, // RopGetTransportFolder against the logon handle.
+        0x6D, 0x00, 0x00, // RopGetTransportFolder against the logon handle.
     ]);
 
     let mut execute_headers = mapi_headers("Execute");
@@ -1829,9 +1829,17 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    let transport_offset = response_rops.len() - 14;
+    let transport_frame: Vec<u8> = {
+        let mut expected = vec![0x6D, 0x00, 0, 0, 0, 0];
+        append_mapi_wire_id(&mut expected, crate::mapi::identity::OUTBOX_FOLDER_ID);
+        expected
+    };
+    let transport_offset = response_rops
+        .windows(transport_frame.len())
+        .position(|window| window == transport_frame.as_slice())
+        .unwrap_or_else(|| panic!("transport folder response frame: {response_rops:02x?}"));
     assert_eq!(response_rops[transport_offset], 0x6D);
-    assert_eq!(response_rops[transport_offset + 1], 0x01);
+    assert_eq!(response_rops[transport_offset + 1], 0x00);
     assert_eq!(
         u32::from_le_bytes(
             response_rops[transport_offset + 2..transport_offset + 6]
@@ -1845,7 +1853,7 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
             &response_rops[transport_offset + 6..transport_offset + 14]
         )
         .unwrap(),
-        test_mapi_folder_id(6)
+        crate::mapi::identity::OUTBOX_FOLDER_ID
     );
 }
 
@@ -1903,9 +1911,16 @@ async fn mapi_over_http_microsoft_transport_spooler_rops_keep_batch_aligned_with
         &[0x34, 0x00, 0x0F, 0x01, 0x04, 0x80]
     ));
     assert!(contains_bytes(&response_rops, &[0x47, 0x00, 0, 0, 0, 0]));
-    for rop_id in [0x48, 0x51, 0x57] {
-        assert!(contains_bytes(&response_rops, &[rop_id, 0x00, 0, 0, 0, 0]));
+    for rop_id in [0x48, 0x51] {
+        assert!(
+            contains_bytes(&response_rops, &[rop_id, 0x00, 0, 0, 0, 0]),
+            "{response_rops:02x?}"
+        );
     }
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x57, 0x00, 0x02, 0x01, 0x04, 0x80]
+    ));
     assert!(contains_bytes(
         &response_rops,
         &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]

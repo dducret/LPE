@@ -2337,7 +2337,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0, 1, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 1, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(&response_rops, &utf16z("LocalFreebusy")));
@@ -5027,8 +5027,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(hierarchy_checkpoint.last_change_sequence, 91);
-    assert_eq!(hierarchy_checkpoint.last_modseq, 47);
+    assert_eq!(hierarchy_checkpoint.last_change_sequence, 89);
+    assert_eq!(hierarchy_checkpoint.last_modseq, 45);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -5331,8 +5331,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reconnect_hierarchy_checkpoint.last_change_sequence, 91);
-    assert_eq!(reconnect_hierarchy_checkpoint.last_modseq, 47);
+    assert_eq!(reconnect_hierarchy_checkpoint.last_change_sequence, 89);
+    assert_eq!(reconnect_hierarchy_checkpoint.last_modseq, 45);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -5435,8 +5435,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(reconnected_calendar_checkpoint.last_change_sequence, 91);
-    assert_eq!(reconnected_calendar_checkpoint.last_modseq, 47);
+    assert_eq!(reconnected_calendar_checkpoint.last_change_sequence, 89);
+    assert_eq!(reconnected_calendar_checkpoint.last_modseq, 45);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

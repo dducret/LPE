@@ -820,14 +820,9 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
         &[0x81, 0x02, 0, 0, 0, 0]
     );
     let query_offset = reset_offset + 6;
-    assert_eq!(response_rops[query_offset], 0x15);
     assert_eq!(
-        u16::from_le_bytes(
-            response_rops[query_offset + 7..query_offset + 9]
-                .try_into()
-                .unwrap()
-        ),
-        0
+        &response_rops[query_offset..],
+        &[0x15, 0x02, 0xB9, 0x04, 0, 0]
     );
 }
 
@@ -1114,13 +1109,13 @@ async fn mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_me
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_get_store_state_requires_logon_handle_without_batch_drift() {
+async fn mapi_over_http_microsoft_get_store_state_accepts_live_handle_without_batch_drift() {
     let mut rops = vec![
         0x7B, 0x00, 0x01, // RopGetStoreState on missing handle 1.
     ];
     append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(5));
     rops.extend_from_slice(&[
-        0x7B, 0x00, 0x02, // RopGetStoreState on folder handle 2.
+        0x7B, 0x00, 0x02, // RopGetStoreState on live folder handle 2.
         0x7B, 0x00, 0x00, // RopGetStoreState succeeds on the logon handle.
     ]);
 
@@ -1133,7 +1128,7 @@ async fn mapi_over_http_microsoft_get_store_state_requires_logon_handle_without_
     assert!(contains_bytes(&response_rops, &[0x02, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
-        &[0x7B, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x7B, 0x02, 0, 0, 0, 0, 0, 0, 0, 0]
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -1176,8 +1171,8 @@ async fn mapi_over_http_execute_returns_empty_transport_options_data() {
     rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
     rops.extend_from_slice(legacy_dn);
     rops.extend_from_slice(&[
-        0x49, 0x00, 0x01, // RopGetAddressTypes
-        0x6F, 0x00, 0x01, // RopOptionsData
+        0x49, 0x00, 0x00, // RopGetAddressTypes
+        0x6F, 0x00, 0x00, // RopOptionsData
     ]);
     rops.extend_from_slice(b"SMTP\0");
     rops.push(0);
@@ -1196,6 +1191,6 @@ async fn mapi_over_http_execute_returns_empty_transport_options_data() {
     assert!(contains_bytes(&response_rops, b"EX\0SMTP\0"));
     assert_eq!(
         &response_rops[response_rops.len() - 11..],
-        &[0x6F, 0x01, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+        &[0x6F, 0x00, 0, 0, 0, 0, 1, 0, 0, 0, 0]
     );
 }

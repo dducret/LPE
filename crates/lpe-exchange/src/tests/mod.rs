@@ -2169,6 +2169,26 @@ impl FakeStore {
                     || crate::mapi::identity::legacy_migration_object_id(&task.id) == object_id
             })
             .map(|task| (MapiIdentityObjectKind::Task, task.id));
+        let note_match = self
+            .notes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|note| {
+                identities.get(&note.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&note.id) == object_id
+            })
+            .map(|note| (MapiIdentityObjectKind::Note, note.id));
+        let journal_entry_match = self
+            .journal_entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| {
+                identities.get(&entry.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&entry.id) == object_id
+            })
+            .map(|entry| (MapiIdentityObjectKind::JournalEntry, entry.id));
         let rule_match = self
             .mailbox_rules
             .lock()
@@ -2225,6 +2245,8 @@ impl FakeStore {
             .or(contact_match)
             .or(event_match)
             .or(task_match)
+            .or(note_match)
+            .or(journal_entry_match)
             .or(rule_match)
             .or(account_match)
             .or(public_folder_match)

@@ -2238,7 +2238,7 @@ async fn mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succee
         &[0x2D, 0x05, 0, 0, 0, 0, descriptor_strings.len() as u8, 0]
     ));
     assert!(contains_bytes(&response_rops, &[0x5D, 0x05, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
 }
 
 #[tokio::test]

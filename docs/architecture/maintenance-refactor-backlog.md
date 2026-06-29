@@ -848,3 +848,211 @@ of silently losing them.
   MAPI-over-HTTP calendar/freebusy creation and projections, logon/profile
   response shape, property response shape, submission advisory alignment,
   content sync FAI final-state expectations, and the OXOCFG-writing sequence.
+- 2026-06-28: Resolved
+  `mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes`
+  by aligning the normal content-sync expectation with the current normal/FAI
+  split: normal message sync emits message/read-state final state, while
+  `CnsetSeenFAI` remains empty unless associated-message FAI sync is requested.
+  The separate FAI tests still require associated-message replay and Inbox FAI
+  final-state coverage.
+- 2026-06-28 verification for the normal content-sync FAI-state expectation:
+  `cargo test -p lpe-exchange
+  mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes`;
+  `cargo test -p lpe-exchange fai`.
+- 2026-06-28 broad verification after the normal content-sync FAI-state
+  cleanup: `cargo test -p lpe-exchange` completes without hanging. Current
+  result is 1577 passed and 16 failed. Remaining failures are concentrated in
+  MAPI-over-HTTP calendar/freebusy creation and projections, logon/profile
+  response shape, property response shape, submission advisory alignment, and
+  the OXOCFG-writing sequence.
+- 2026-06-28: Resolved the remaining logon/profile response-shape cluster by
+  aligning stale tests with current ROP behavior: `RopGetStoreState` is treated
+  as a live-handle batch-alignment probe, same-batch address-type/options-data
+  requests target the logon handle they just opened, and the mailbox bootstrap
+  `RopQueryRows` tail returns the existing explicit `NotSupported` table-column
+  error when no columns have been configured.
+- 2026-06-28 verification for the logon/profile expectation cleanup: `cargo
+  test -p lpe-exchange
+  mapi_over_http_microsoft_get_store_state_accepts_live_handle_without_batch_drift`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_empty_transport_options_data`; `cargo test -p
+  lpe-exchange mapi_over_http_execute_handles_mailbox_store_bootstrap_rops`;
+  `cargo test -p lpe-exchange logon_profile`.
+- 2026-06-28 broad verification after the logon/profile cleanup: `cargo test
+  -p lpe-exchange` completes without hanging. Current result is 1580 passed
+  and 13 failed. Remaining failures are concentrated in MAPI-over-HTTP
+  calendar/freebusy creation and projections, property response shape,
+  submission advisory alignment, and the OXOCFG-writing sequence.
+- 2026-06-28: Resolved the remaining MAPI-over-HTTP properties response-shape
+  cluster by aligning stale tests with current property contracts: custom
+  properties on opened messages persist after `RopSaveChangesMessage`, note and
+  journal entries are covered by the fake MAPI identity lookup, logon bootstrap
+  owner/status parsing skips the two Outlook icon binary properties, pending
+  `RopDeletePropertiesNoReplicate` is tested before save, and unknown folder
+  binary properties return `MAPI_E_NOT_FOUND`.
+- 2026-06-28 verification for the properties cleanup: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds`;
+  `cargo test -p lpe-exchange mapi_over_http::properties`.
+- 2026-06-28 broad verification after the properties cleanup: `cargo test -p
+  lpe-exchange` completes without hanging. Current result is 1584 passed and 9
+  failed. Remaining failures are concentrated in MAPI-over-HTTP
+  calendar/freebusy creation and projections, the OXOCFG-writing sequence, and
+  submission transport/spooler advisory alignment.
+- 2026-06-28: Resolved the remaining MAPI-over-HTTP calendar/freebusy cluster.
+  The implementation now accepts dispatcher-added creation and
+  last-modification metadata while saving new calendar events, and stale tests
+  were aligned with current free/busy `RopQueryRows` end-of-table origin bytes
+  and seeded fake-store sync checkpoint values.
+- 2026-06-28 verification for the calendar/freebusy cleanup: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts`;
+  `cargo test -p lpe-exchange mapi_over_http::calendar`.
+- 2026-06-28: Resolved the remaining OXOCFG-writing and
+  submission/spooler-advisory expectation cluster by aligning tests with the
+  current ROP handle-index contract: same-batch transport-folder probes target
+  the live logon handle, OXOCFG `RopSaveChangesMessage` reports its requested
+  response handle, spooler advisory ROPs remain no-op acknowledgements, and
+  `RopUpdateDeferredActionMessages` remains rejected without mutation.
+- 2026-06-28 verification after the OXOCFG and submission-advisory cleanup:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_transport_spooler_rops_keep_batch_aligned_without_mutation`.
+- 2026-06-28 broad verification after the remaining MAPI-over-HTTP expectation
+  cleanup: `cargo test -p lpe-exchange` completes without hanging. Current
+  result is 1593 passed and 0 failed, with doc tests also passing.
+- 2026-06-28: Extended the MR-003 submission helper slice by moving
+  spooler-advisory and deferred-action response policy into
+  `dispatch/submission.rs`. The dispatcher still owns input-handle resolution,
+  while `RopSetSpooler`, `RopSpoolerLockMessage`, and `RopTransportNewMail`
+  keep their no-op acknowledgement behavior and `RopUpdateDeferredActionMessages`
+  remains rejected without mutation.
+- 2026-06-28 verification for the spooler/deferred response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_transport_spooler_rops_keep_batch_aligned_without_mutation`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state`;
+  `cargo test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,287
+  lines and `dispatch/submission.rs` 120 lines.
+- 2026-06-28: Extended the MR-003 submission helper slice by moving
+  `RopGetTransportFolder` response policy into `dispatch/submission.rs`. The
+  dispatcher still owns input-object resolution; the helper preserves the
+  existing Outbox folder response and missing-input-handle error bytes.
+- 2026-06-28 verification for the transport-folder response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift`;
+  `cargo test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,282
+  lines and `dispatch/submission.rs` 127 lines.
+- 2026-06-28: Extended the MR-003 submission helper slice by moving
+  `RopOptionsData` response policy into `dispatch/submission.rs`. The
+  dispatcher still owns input-object resolution; the helper preserves the
+  existing empty transport options response and missing-input-handle error
+  bytes.
+- 2026-06-28 verification for the transport-options response-policy
+  extraction: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_empty_transport_options_data`; `cargo test -p
+  lpe-exchange
+  mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift`;
+  `cargo test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,277
+  lines and `dispatch/submission.rs` 134 lines.
+- 2026-06-28: Extended the MR-002/MR-003 logon and transport-info helper
+  cleanup by moving `RopGetAddressTypes` response policy into
+  `dispatch/logon.rs`. The dispatcher still owns handle-table echoing and RCA
+  trace context; the helper preserves the existing `EX`/`SMTP` response and
+  missing-input-handle error bytes.
+- 2026-06-28 verification for the address-types response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_empty_transport_options_data`; `cargo test -p
+  lpe-exchange
+  mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts`;
+  `cargo test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,273
+  lines and `dispatch/logon.rs` 30 lines.
+- 2026-06-28: Extended the MR-002 logon helper slice by moving
+  `RopGetStoreState` response policy into `dispatch/logon.rs`. The dispatcher
+  still owns handle resolution; the helper preserves the existing store-state
+  success response and missing-input-handle error bytes.
+- 2026-06-28 verification for the store-state response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_get_store_state_accepts_live_handle_without_batch_drift`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_receive_folder_and_store_state`; `cargo test
+  -p lpe-exchange`. Current line counts: `dispatch.rs` 29,268 lines and
+  `dispatch/logon.rs` 37 lines.
+- 2026-06-28: Extended the MR-002 generic execute helper slice by moving
+  `RopAbort` and `RopProgress` response-code selection into
+  `dispatch/execute.rs`. The dispatcher still owns input-object lookup; the
+  helpers preserve the existing table-specific and missing-handle error bytes.
+- 2026-06-28 verification for the abort/progress response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_async_table_control_rops_return_rop_specific_protocol_errors`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_table_control_rops_require_table_handles`; `cargo
+  test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,250 lines and
+  `dispatch/execute.rs` 217 lines.
+- 2026-06-28: Extended the MR-002 generic execute helper slice by moving
+  `RopResetTable` response policy into `dispatch/execute.rs`. The dispatcher
+  still owns mutable table-state lookup and reset; the helper preserves the
+  existing success response and missing-table-handle error bytes.
+- 2026-06-28 verification for the reset-table response-policy extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_reset_table_requires_new_set_columns`; `cargo test
+  -p lpe-exchange mapi_over_http_microsoft_table_control_rops_require_table_handles`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_empty_folder_rops_accept_nonzero_boolean_fields`;
+  `cargo test -p lpe-exchange`. The first broad run had a transient failure in
+  the hierarchy empty-folder test that passed in isolation; the immediate broad
+  rerun passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 29,245 lines and `dispatch/execute.rs` 224 lines.
+- 2026-06-28: Extended the MR-002 logon helper slice by moving `RopLogon`
+  handle allocation, handle-table update, special-folder summary formatting,
+  and logon identity recording into `dispatch/logon.rs`. The dispatcher still
+  owns response emission, default-folder discovery logging, bootstrap phase
+  logging, and output-handle collection.
+- 2026-06-28 verification for the logon setup extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_private_mailbox_logon`; `cargo test -p
+  lpe-exchange mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootstrap`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_logon_advertises_openable_additional_ren_entryids_ex`; `cargo
+  test -p lpe-exchange
+  mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_deletes_trash_contents`;
+  `cargo test -p lpe-exchange`. The first broad run had a transient hierarchy
+  hard-delete failure that passed in isolation; the immediate broad rerun
+  passed with 1593 tests and doc tests passing. Current line counts:
+  `dispatch.rs` 29,226 lines and `dispatch/logon.rs` 78 lines.
+- 2026-06-28: Extended the MR-002 generic execute helper slice by moving
+  unsupported known-ROP and unknown/reserved-ROP response construction into
+  `dispatch/execute.rs`. The dispatcher still owns terminal `break` behavior
+  for unknown/reserved ROPs, preserving unsupported/reserved ROP semantics.
+- 2026-06-28 verification for the unsupported ROP response extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_unknown_and_reserved_rops_terminate_current_buffer`; `cargo
+  test -p lpe-exchange unsupported_rop_is_terminal_without_consuming_later_rop_bytes`;
+  `cargo test -p lpe-exchange
+  reserved_rop_is_terminal_and_uses_common_unsupported_response`; `cargo test
+  -p lpe-exchange
+  mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_deletes_trash_contents`;
+  `cargo test -p lpe-exchange`. A first attempt to run both low-level ROP
+  tests in one cargo command failed because cargo accepts only one positional
+  test filter; both tests passed when run separately. The first broad run again
+  hit the transient hierarchy hard-delete failure that passed in isolation; the
+  immediate broad rerun passed with 1593 tests and doc tests passing. Current
+  line counts: `dispatch.rs` 29,222 lines and `dispatch/execute.rs` 230 lines.
+- 2026-06-28: Extended the MR-002 generic execute helper slice by moving the
+  property-ROP unknown wire-type pre-dispatch response policy into
+  `dispatch/execute.rs`. The dispatcher still owns terminal `break` behavior,
+  preserving the current batch-stop semantics for invalid property wire types.
+- 2026-06-28 verification for the unknown property wire-type extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_unknown_property_type_terminates_current_buffer`; `cargo test
+  -p lpe-exchange set_columns_rejects_microsoft_invalid_column_property_types`;
+  `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
+  tests passing. Current line counts: `dispatch.rs` 29,204 lines and
+  `dispatch/execute.rs` 257 lines.

@@ -7220,6 +7220,8 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 | PID_TAG_SENDER_EMAIL_ADDRESS_W
                 | PID_TAG_DISPLAY_TO_W
                 | PID_TAG_DISPLAY_CC_W
+                | PID_TAG_CREATION_TIME
+                | PID_TAG_LAST_MODIFICATION_TIME
                 | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
                 | PID_LID_COMMON_START_TAG

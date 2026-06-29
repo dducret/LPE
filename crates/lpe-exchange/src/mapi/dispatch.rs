@@ -43,6 +43,7 @@ mod rules;
 mod submission;
 mod sync_import;
 mod table_validation;
+mod tables;
 
 use attachments::*;
 pub(in crate::mapi) use diagnostics::*;
@@ -56,6 +57,7 @@ use rules::*;
 use submission::*;
 use sync_import::*;
 use table_validation::*;
+use tables::*;
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -11647,26 +11649,8 @@ where
         let typed_request = request.typed();
         let mut completed_hierarchy_sync = None;
         let mut content_sync_configure_observed = false;
-        if matches!(request.rop_id, 0x07 | 0x0B | 0x7A)
-            && !property_tags_have_known_wire_types(&request.property_tags())
-        {
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %principal.email,
-                request_type = "Execute",
-                request_rop_id = %format!("{:#04x}", request.rop_id),
-                input_handle_index = request.input_handle_index().unwrap_or(0),
-                property_tags = %format_debug_property_tags(&request.property_tags()),
-                failure_reason = "unknown_property_wire_type",
-                "rca debug mapi property rop rejected"
-            );
-            responses.extend_from_slice(&rop_error_response(
-                request.rop_id,
-                request.response_handle_index(),
-                0x8004_0102,
-            ));
+        if let Some(response) = unknown_property_wire_type_response(principal, &request) {
+            responses.extend_from_slice(&response);
             break;
         }
         match RopId::from_u8(typed_request.rop_id()) {
@@ -16629,7 +16613,7 @@ where
                 responses.extend_from_slice(&response);
             }
             Some(RopId::SeekRowBookmark) => {
-                responses.extend_from_slice(&rop_seek_row_bookmark_response(
+                responses.extend_from_slice(&seek_row_bookmark_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
                     mailboxes,
@@ -16648,16 +16632,14 @@ where
                     principal.account_id,
                 ))
             }
-            Some(RopId::CreateBookmark) => {
-                responses.extend_from_slice(&rop_create_bookmark_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    principal.account_id,
-                ))
-            }
+            Some(RopId::CreateBookmark) => responses.extend_from_slice(&create_bookmark_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+                principal.account_id,
+            )),
             Some(RopId::QueryColumnsAll) => {
                 responses.extend_from_slice(&rop_query_columns_all_response(
                     &request,
@@ -19550,41 +19532,22 @@ where
                 }
             }
             Some(RopId::SetSpooler) => {
-                if input_handle(&handle_slots, &request).is_some() {
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x47,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                }
+                responses.extend_from_slice(&spooler_advisory_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
-                if input_handle(&handle_slots, &request).is_some() {
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                }
+                responses.extend_from_slice(&spooler_advisory_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::UpdateDeferredActionMessages) => {
-                if input_handle(&handle_slots, &request).is_some() {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                }
+                responses.extend_from_slice(&deferred_action_messages_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::CommitStream) => {
                 let requested_handle = input_handle(&handle_slots, &request);
@@ -23317,26 +23280,16 @@ where
                 }
             }
             Some(RopId::GetTransportFolder) => {
-                if input_object(session, &handle_slots, &request).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x6D,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_get_transport_folder_response(&request))
+                responses.extend_from_slice(&transport_folder_response(
+                    &request,
+                    input_object(session, &handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::OptionsData) => {
-                if input_object(session, &handle_slots, &request).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x6F,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_options_data_response(&request))
+                responses.extend_from_slice(&options_data_response(
+                    &request,
+                    input_object(session, &handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::GetReceiveFolderTable) => {
                 if !private_logon_request_handle(session, &handle_slots, &request) {
@@ -23740,11 +23693,7 @@ where
                 echo_input_handle_table = true;
                 let object = input_object(session, &handle_slots, &request);
                 if object.is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x49,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
+                    responses.extend_from_slice(&address_types_response(&request, false));
                     continue;
                 }
                 tracing::info!(
@@ -23761,7 +23710,7 @@ where
                     address_types = "EX,SMTP",
                     message = "rca debug mapi get address types",
                 );
-                responses.extend_from_slice(&rop_get_address_types_response(&request));
+                responses.extend_from_slice(&address_types_response(&request, true));
             }
             Some(RopId::GetNamesFromPropertyIds) => {
                 let property_ids = request.property_ids();
@@ -24522,59 +24471,31 @@ where
                 }
             }
             Some(RopId::GetStoreState) => {
-                if input_handle(&handle_slots, &request).is_some() {
-                    responses.extend_from_slice(&rop_get_store_state_response(&request));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x7B,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                }
+                responses.extend_from_slice(&store_state_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                ));
             }
             Some(RopId::Abort) => {
-                let result = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. }) => {
-                        0x8004_0114
-                    }
-                    _ => 0x8004_0102,
-                };
-                responses.extend_from_slice(&rop_error_response(
-                    0x38,
-                    request.response_handle_index(),
-                    result,
+                responses.extend_from_slice(&abort_response(
+                    &request,
+                    input_object(session, &handle_slots, &request),
                 ));
             }
             Some(RopId::Progress) => {
-                let result = if !matches!(request.payload.first().copied(), Some(0x00 | 0x01)) {
-                    0x8007_0057
-                } else {
-                    match input_object(session, &handle_slots, &request) {
-                        Some(
-                            MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. },
-                        ) => 0x8004_0400,
-                        _ => 0x8004_0102,
-                    }
-                };
-                responses.extend_from_slice(&rop_error_response(
-                    0x50,
-                    request.response_handle_index(),
-                    result,
+                responses.extend_from_slice(&progress_response(
+                    &request,
+                    input_object(session, &handle_slots, &request),
                 ));
             }
             Some(RopId::ResetTable) => {
-                if input_object_mut(session, &handle_slots, &request).is_some_and(reset_table_state)
-                {
-                    responses.extend_from_slice(&rop_reset_table_response(&request));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x81,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                }
+                responses.extend_from_slice(&reset_table_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request)
+                        .is_some_and(reset_table_state),
+                ));
             }
-            Some(RopId::FreeBookmark) => responses.extend_from_slice(&rop_free_bookmark_response(
+            Some(RopId::FreeBookmark) => responses.extend_from_slice(&free_bookmark_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
             )),
@@ -24582,32 +24503,13 @@ where
                 if let TypedRopRequest::Logon(logon_request) = &typed_request {
                     log_rop_logon_request_identity(principal, request_id, logon_request);
                 }
-                let is_private_logon = request.payload.first().copied().unwrap_or(0) & 0x01 != 0;
-                let logon_object = if is_private_logon {
-                    MapiObject::Logon
-                } else {
-                    MapiObject::PublicFolderLogon
-                };
-                let handle =
-                    session.allocate_output_handle(request.output_handle_index, logon_object);
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                let special_folder_ids = if is_private_logon {
-                    PRIVATE_LOGON_SPECIAL_FOLDER_IDS.as_slice()
-                } else {
-                    PUBLIC_LOGON_SPECIAL_FOLDER_IDS.as_slice()
-                }
-                .iter()
-                .map(|folder_id| format!("{folder_id:#018x}"))
-                .collect::<Vec<_>>()
-                .join(",");
-                session.record_logon_identity(MapiLogonIdentityDebug {
-                    mailbox_guid: principal.account_id.to_string(),
-                    replid: STORE_REPLICA_ID.to_string(),
-                    replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
-                    response_flags: if is_private_logon { "0x07" } else { "0x00" }.to_string(),
-                    special_folder_ids: special_folder_ids.clone(),
-                });
-                if is_private_logon {
+                let logon_context = allocate_logon_response_context(
+                    session,
+                    &mut handle_slots,
+                    principal,
+                    &request,
+                );
+                if logon_context.is_private_logon {
                     responses.extend_from_slice(&rop_logon_response_body(principal, &request));
                     log_default_folder_discovery_contract(
                         principal,
@@ -24631,20 +24533,16 @@ where
                     false,
                     None,
                     None,
-                    Some(handle),
-                    &special_folder_ids,
+                    Some(logon_context.handle),
+                    &logon_context.special_folder_ids,
                 );
-                output_handles.push(handle);
+                output_handles.push(logon_context.handle);
             }
-            Some(rop_id) => responses.extend_from_slice(&unsupported_rop_response(
-                rop_id.as_u8(),
-                request.response_handle_index(),
-            )),
+            Some(rop_id) => {
+                responses.extend_from_slice(&unsupported_known_rop_response(rop_id, &request));
+            }
             None => {
-                responses.extend_from_slice(&unsupported_rop_response(
-                    request.rop_id,
-                    request.response_handle_index(),
-                ));
+                responses.extend_from_slice(&unsupported_unknown_rop_response(&request));
                 break;
             }
         }

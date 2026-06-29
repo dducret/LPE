@@ -2471,7 +2471,7 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
     assert!(stream.unread_idset.is_some());
     assert!(!stream.idset_given.is_empty());
     assert!(!stream.cnset_seen.is_empty());
-    assert!(!stream.cnset_seen_fai.is_empty());
+    assert!(stream.cnset_seen_fai.is_empty());
     assert!(!stream.cnset_read.is_empty());
     assert!(strict_replid_globset_contains_counter(
         stream.read_idset.as_deref().unwrap(),

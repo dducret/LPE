@@ -205,3 +205,72 @@ pub(super) fn execute_response_handle_table(
     }
     response_handle_table(handle_slots, output_handles, echo_input_handle_table)
 }
+
+pub(super) fn abort_response(request: &RopRequest, input_object: Option<&MapiObject>) -> Vec<u8> {
+    let result = match input_object {
+        Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. }) => 0x8004_0114,
+        _ => 0x8004_0102,
+    };
+    rop_error_response(0x38, request.response_handle_index(), result)
+}
+
+pub(super) fn progress_response(
+    request: &RopRequest,
+    input_object: Option<&MapiObject>,
+) -> Vec<u8> {
+    let result = if !matches!(request.payload.first().copied(), Some(0x00 | 0x01)) {
+        0x8007_0057
+    } else {
+        match input_object {
+            Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. }) => {
+                0x8004_0400
+            }
+            _ => 0x8004_0102,
+        }
+    };
+    rop_error_response(0x50, request.response_handle_index(), result)
+}
+
+pub(super) fn reset_table_response(request: &RopRequest, reset_succeeded: bool) -> Vec<u8> {
+    if reset_succeeded {
+        rop_reset_table_response(request)
+    } else {
+        rop_error_response(0x81, request.response_handle_index(), 0x8004_0102)
+    }
+}
+
+pub(super) fn unknown_property_wire_type_response(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+) -> Option<Vec<u8>> {
+    if !matches!(request.rop_id, 0x07 | 0x0B | 0x7A)
+        || property_tags_have_known_wire_types(&request.property_tags())
+    {
+        return None;
+    }
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = %format!("{:#04x}", request.rop_id),
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        property_tags = %format_debug_property_tags(&request.property_tags()),
+        failure_reason = "unknown_property_wire_type",
+        "rca debug mapi property rop rejected"
+    );
+    Some(rop_error_response(
+        request.rop_id,
+        request.response_handle_index(),
+        0x8004_0102,
+    ))
+}
+
+pub(super) fn unsupported_known_rop_response(rop_id: RopId, request: &RopRequest) -> Vec<u8> {
+    unsupported_rop_response(rop_id.as_u8(), request.response_handle_index())
+}
+
+pub(super) fn unsupported_unknown_rop_response(request: &RopRequest) -> Vec<u8> {
+    unsupported_rop_response(request.rop_id, request.response_handle_index())
+}

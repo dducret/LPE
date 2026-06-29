@@ -52,6 +52,22 @@ pub(super) fn submitted_message_handle_object(
     }
 }
 
+pub(super) fn transport_folder_response(request: &RopRequest, has_input_object: bool) -> Vec<u8> {
+    if has_input_object {
+        rop_get_transport_folder_response(request)
+    } else {
+        rop_error_response(0x6D, request.response_handle_index(), 0x8004_0102)
+    }
+}
+
+pub(super) fn options_data_response(request: &RopRequest, has_input_object: bool) -> Vec<u8> {
+    if has_input_object {
+        rop_options_data_response(request)
+    } else {
+        rop_error_response(0x6F, request.response_handle_index(), 0x8004_0102)
+    }
+}
+
 pub(super) fn abort_submit_source_is_sent(email: &JmapEmail) -> bool {
     email.mailbox_role == "sent"
         || email
@@ -97,6 +113,25 @@ pub(super) fn abort_submit_cancel_response(
         Ok(CancelSubmissionResult::NotCancellable) | Err(_) => {
             rop_error_response(0x34, request.response_handle_index(), 0x8004_0102)
         }
+    }
+}
+
+pub(super) fn spooler_advisory_response(request: &RopRequest, has_input_handle: bool) -> Vec<u8> {
+    if has_input_handle {
+        rop_simple_success_response(request)
+    } else {
+        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_010F)
+    }
+}
+
+pub(super) fn deferred_action_messages_response(
+    request: &RopRequest,
+    has_input_handle: bool,
+) -> Vec<u8> {
+    if has_input_handle {
+        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102)
+    } else {
+        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_010F)
     }
 }
 
