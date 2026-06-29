@@ -1,3 +1,26 @@
+use axum::{
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+};
+
+pub(in crate::service) fn xml_response(status: StatusCode, body: String) -> Response {
+    let mut response = (status, body).into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/xml; charset=utf-8"),
+    );
+    response
+}
+
+pub(in crate::service) fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 pub(in crate::service) fn attribute_values_for_tag<'a>(
     xml: &'a str,
     local_name: &str,

@@ -63,7 +63,7 @@ working tree proves, not the desired end state.
 | MR-001 | Partial | Dispatch diagnostics and helper-only modules exist under `crates/lpe-exchange/src/mapi/dispatch/`; focused tests are recorded in progress notes. | `dispatch.rs` remains the largest source file; more helper/error extraction is still needed. |
 | MR-002 | Partial | Folder, message, logon, public-folder, recipient, rule, attachment, table-validation, execute, and sync-import helper slices are recorded in progress notes. | ROP execution branches, submission, properties, tables, associated config, and more mutation routing still need extraction. |
 | MR-003 | Partial | Spooler/advisory behavior is documented in `docs/architecture/mapi-spooler-advisory-model.md`, and `dispatch/submission.rs` now owns submission response-policy helpers. | Full submission ROP execution extraction into `dispatch/submission.rs` is not yet complete. |
-| MR-004 | Pending | No completed service routing split is recorded in this backlog. | Extract EWS HTTP route/SOAP dispatch without endpoint or response changes. |
+| MR-004 | Partial | `service/http_routes.rs` now owns the endpoint path constants and RPC proxy path list, with focused route/RPC/EWS verification recorded in progress notes. | Extract EWS SOAP operation dispatch without endpoint, auth, or response changes. |
 | MR-005 | Pending | No completed EWS item-family split is recorded in this backlog. | Extract EWS mail/contact/calendar/task/MIME operation modules and verify behavior. |
 | MR-006 | Pending | No completed `ExchangeStore` split is recorded in this backlog. | Split `crates/lpe-exchange/src/store.rs` by storage family while preserving trait semantics. |
 | MR-007 | Pending | Earlier table helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `tables.rs` and prove table row output is unchanged. |
@@ -2590,3 +2590,855 @@ of silently losing them.
   `dispatch.rs` at 20,293 production-check lines; `git diff --check` exited 0
   with CRLF warnings only. Current physical line counts: `dispatch.rs` 19,823
   lines and `dispatch/recoverable_items.rs` 36 lines.
+- 2026-06-29: Added `dispatch/associated_config.rs` and moved the
+  associated-configuration mutation and persistence helpers into it:
+  `delete_associated_config_properties`,
+  `associated_config_message_for_mutation`,
+  `associated_config_mutation_base_properties`,
+  `persist_associated_config_message`,
+  `persist_associated_config_stream_message`,
+  `persist_released_associated_config_stream`,
+  `message_list_settings_placeholder_persisted_properties`,
+  `is_empty_inbox_message_list_settings_placeholder`,
+  `associated_config_uuid`, `associated_config_class_and_subject`,
+  `transient_associated_message_id`, and
+  `transient_client_local_message_id`. This is a behavior-preserving
+  associated-configuration dispatch split: saved-handle mutation fallback,
+  property deletion, stream release persistence, placeholder suppression,
+  deterministic identity generation, class/subject defaults, transient
+  client-local ID detection, and ROP callers remain unchanged.
+- 2026-06-29 verification for the associated-configuration dispatch split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/associated_config.rs`; `cargo test -p lpe-exchange
+  associated_config` passed 39 focused tests; `cargo test -p lpe-exchange
+  common_views` passed 45 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 19,990 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 19,532
+  lines and `dispatch/associated_config.rs` 299 lines.
+- 2026-06-29: Moved the Common Views descriptor diagnostics test
+  `view_handoff_descriptor_summary_reports_outlook_view_shape` from the
+  inline `dispatch.rs` test module into `dispatch/diagnostics/common_views.rs`
+  beside `format_view_descriptor_binary_summary`. This is a behavior-preserving
+  diagnostics test split: the descriptor summary helper, Outlook view
+  descriptor bytes, asserted summary fields, and runtime code remain unchanged.
+- 2026-06-29 verification for the Common Views diagnostics test split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the test now lives only in
+  `dispatch/diagnostics/common_views.rs`; `cargo test -p lpe-exchange
+  view_handoff_descriptor_summary_reports_outlook_view_shape` passed 1 focused
+  test; `cargo test -p lpe-exchange common_views` passed 46 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 19,973
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `dispatch.rs` 19,517 lines and
+  `dispatch/diagnostics/common_views.rs` 493 lines.
+- 2026-06-29: Extended `dispatch/messages.rs` with staged canonical-message
+  mutation helpers: `stage_message_property_values`,
+  `apply_staged_message_property_values`,
+  `apply_staged_message_recipient_replacement`, and
+  `delete_canonical_message_text_properties`. This is a behavior-preserving
+  message dispatch split: staged SetProperties validation, follow-up property
+  validation, pending property application, canonical recipient replacement,
+  text-property deletion, audit action/subject values, and ROP callers remain
+  unchanged.
+- 2026-06-29 verification for the staged message mutation split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/messages.rs`; `cargo test -p lpe-exchange message` passed 205
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 19,829 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 19,377
+  lines and `dispatch/messages.rs` 354 lines.
+- 2026-06-29: Added `service/http_routes.rs` and moved the Exchange HTTP
+  endpoint path constants plus `rpc_proxy_paths` into it. This is a
+  behavior-preserving service routing split: the uppercase and lowercase EWS
+  paths, MAPI EMSMDB/NSPI trailing-slash variants, RPC proxy compatibility
+  path, Outlook canonical RPC proxy casing, router registration, handlers,
+  authentication behavior, SOAP response handling, and MIME output remain
+  unchanged.
+- 2026-06-29 verification for the service HTTP route split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the route constants and
+  `rpc_proxy_paths` definitions now live in `service/http_routes.rs` while
+  `service.rs` consumes them; `cargo test -p lpe-exchange
+  rpc_proxy_routes_include_outlook_canonical_case` passed 1 focused test;
+  `cargo test -p lpe-exchange rpc_proxy` passed 51 focused tests; `cargo test
+  -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,573
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,722 lines and
+  `service/http_routes.rs` 22 lines.
+- 2026-06-29: Added `service/ews/errors.rs` and moved the top-level SOAP
+  authentication/error response helpers into it: `error_response`,
+  `is_authentication_error`, `soap_auth_challenge`, and `soap_error`. This is
+  a behavior-preserving EWS XML response split: the crate-visible
+  `service::error_response` API, Basic challenge realm, SOAP fault envelope,
+  XML escaping, status codes, endpoint handlers, and operation dispatch remain
+  unchanged.
+- 2026-06-29 verification for the EWS SOAP error helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/errors.rs`; `cargo test -p lpe-exchange
+  authentication_errors_return_basic_challenge` passed 1 focused test; `cargo
+  test -p lpe-exchange unknown_ews_operations_return_parseable_invalid_operation_errors`
+  passed 1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,535
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,688 lines,
+  `service/http_routes.rs` 22 lines, and `service/ews/errors.rs` 37 lines.
+- 2026-06-29: Moved the EWS XML response primitives `xml_response` and
+  `escape_xml` from `service.rs` into `service/ews/xml.rs`. This is a
+  behavior-preserving XML helper split: the `text/xml; charset=utf-8` response
+  header, status-code handling, XML escaping order, SOAP faults, item/folder
+  rendering, notification rendering, MIME attachment XML fragments, and
+  existing unqualified call sites remain unchanged.
+- 2026-06-29 verification for the EWS XML helper split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed `xml_response` and `escape_xml` definitions now
+  live in `service/ews/xml.rs`; `cargo test -p lpe-exchange
+  authentication_errors_return_basic_challenge` passed 1 focused test; `cargo
+  test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,517
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,672 lines,
+  `service/ews/xml.rs` 170 lines, `service/ews/errors.rs` 37 lines, and
+  `service/http_routes.rs` 22 lines.
+- 2026-06-29: Added `service/ews/responses.rs` and moved reusable EWS error
+  response builders into it: `mail_app_operation_error_response`,
+  `get_item_error_response`, `get_folder_error_response`,
+  `get_user_availability_error_response`,
+  `set_user_oof_settings_error_response`, `ews_error_code_or`,
+  `operation_error_response`, `get_user_photo_error_response`, and
+  `get_password_expiration_date_error_response`. This is a
+  behavior-preserving response-helper split: XML element names, response
+  classes, response codes, descriptive link keys, mail-app error-code mapping,
+  access-denied fallback mapping, escaping, handlers, and success response
+  renderers remain unchanged.
+- 2026-06-29 verification for the EWS response-helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/responses.rs`; `cargo test -p lpe-exchange
+  unknown_ews_operations_return_parseable_invalid_operation_errors` passed 1
+  focused test; `cargo test -p lpe-exchange user_oof_settings` passed 6 focused
+  tests; `cargo test -p lpe-exchange user_availability` passed 2 focused
+  tests; `cargo test -p lpe-exchange mail_app` passed 1 focused test; `cargo
+  test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,380
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,544 lines,
+  `service/ews/responses.rs` 147 lines, `service/ews/xml.rs` 170 lines,
+  `service/ews/errors.rs` 37 lines, and `service/http_routes.rs` 22 lines.
+- 2026-06-29: Added `service/ews/mail_tips.rs` and moved the MailTips and
+  service-configuration response rendering family into it:
+  `MailTipProjection`, `RequestedServiceConfiguration`,
+  `get_mail_tips_response`, `get_service_configuration_response`,
+  `service_configuration_success_message`, `service_configuration_error_message`,
+  and `mail_tip_xml`. This is a behavior-preserving EWS response split:
+  requested-service parsing, recipient lookup, OOF projection inputs, supported
+  MailTips limits, unsupported service-configuration gap responses, XML element
+  names, mailbox type mapping, and escaping remain unchanged.
+- 2026-06-29 verification for the MailTips/service-configuration split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/mail_tips.rs`; `cargo test -p lpe-exchange mail_tips` passed 3
+  focused tests; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,222
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,393 lines and
+  `service/ews/mail_tips.rs` 156 lines.
+- 2026-06-29: Added `service/ews/rooms.rs` and moved the EWS room-list
+  response helpers into it: `computed_room_list_address`,
+  `get_rooms_response`, and `get_room_lists_response`. This is a
+  behavior-preserving EWS response split: room/equipment filtering, the
+  `rooms@domain` fallback, requested RoomList comparison behavior, room-list
+  advertisement only when room or equipment entries exist, XML element names
+  and casing, escaping, and handler routing remain unchanged.
+- 2026-06-29 verification for the EWS rooms split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/rooms.rs`; `cargo test -p lpe-exchange rooms` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 15,152
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,326 lines and
+  `service/ews/rooms.rs` 70 lines.
+- 2026-06-29: Added `service/ews/retention.rs` and moved the EWS retention
+  policy tag response helpers into it: `get_user_retention_policy_tags_response`,
+  `retention_policy_tag_xml`, `ews_retention_tag_type`, and
+  `ews_retention_action`. This is a behavior-preserving response split:
+  canonical retention assignment lookup, tenant visibility, XML element names,
+  retention tag type/action mappings, archive flag derivation, escaping, and
+  handler routing remain unchanged.
+- 2026-06-29 verification for the EWS retention split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/retention.rs`; `cargo test -p lpe-exchange
+  get_user_retention_policy_tags` passed 2 focused tests; `cargo test -p
+  lpe-exchange ews` passed 215 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and
+  reported `service.rs` at 15,089 production-check lines; `git diff --check`
+  exited 0 with CRLF warnings only. Current physical line counts:
+  `service.rs` 14,267 lines and `service/ews/retention.rs` 64 lines.
+- 2026-06-29: Added `service/ews/compliance.rs` and moved the EWS
+  compliance/eDiscovery response helpers into it:
+  `get_discovery_search_configuration_response`,
+  `get_searchable_mailboxes_response`, `search_mailboxes_response`,
+  `get_hold_on_mailboxes_response`, `set_hold_on_mailboxes_response`,
+  `hold_mailbox_xml`, `get_non_indexable_item_details_response`,
+  `get_non_indexable_item_statistics_response`, and
+  `non_indexable_report_xml`. This is a behavior-preserving response split:
+  canonical compliance/search/hold/non-indexable report store calls, Bcc-safe
+  search result projection, tenant visibility, XML element names, hold action
+  values, per-mailbox non-indexable counts, escaping, and handler routing
+  remain unchanged.
+- 2026-06-29 verification for the EWS compliance split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/compliance.rs`; `cargo test -p lpe-exchange
+  ediscovery_configuration_and_searchable_mailboxes_project_canonical_compliance_state`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  search_mailboxes_records_canonical_discovery_search_results_without_bcc`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  non_indexable_reports_project_canonical_search_diagnostics` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,826
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 14,013 lines and
+  `service/ews/compliance.rs` 268 lines.
+- 2026-06-29: Added `service/ews/message_tracking.rs` and moved the EWS
+  message-tracking response helpers into it:
+  `find_message_tracking_report_response`,
+  `get_message_tracking_report_response`, and `message_tracking_report_xml`.
+  This is a behavior-preserving response split: canonical LPE-CT trace lookup,
+  tenant boundary filtering, report/detail selection, XML element names,
+  recipient/event rendering, diagnostics escaping, and handler routing remain
+  unchanged.
+- 2026-06-29 verification for the EWS message-tracking split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/message_tracking.rs`; `cargo test -p lpe-exchange
+  message_tracking_reports` passed 2 focused tests; `cargo test -p
+  lpe-exchange ews` passed 215 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and
+  reported `service.rs` at 14,735 production-check lines; `git diff --check`
+  exited 0 with CRLF warnings only. Current physical line counts:
+  `service.rs` 13,925 lines and `service/ews/message_tracking.rs` 95 lines.
+- 2026-06-29: Added `service/ews/bulk_transfer.rs` and moved the EWS
+  bulk-transfer response renderer into it: `transfer_job_response`. This is a
+  behavior-preserving response split: `UploadItems` and `ExportItems` operation
+  names, response wrapper element names, response class/code, transfer job
+  status/direction projection, transfer entry field order, canonical/source ID
+  rendering, escaping, and handler routing remain unchanged.
+- 2026-06-29 verification for the EWS bulk-transfer split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `transfer_job_response` now has its
+  only definition in `service/ews/bulk_transfer.rs`; `cargo test -p
+  lpe-exchange bulk_transfer_operations_record_canonical_transfer_jobs` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,685
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,876 lines and
+  `service/ews/bulk_transfer.rs` 52 lines.
+- 2026-06-29: Added `service/ews/mail_apps.rs` and moved the EWS Mail Apps
+  success response renderers into it: `get_app_manifests_response`,
+  `get_app_marketplace_url_response`, `mail_app_state_response`, and
+  `get_client_access_token_response`. This is a behavior-preserving response
+  split: canonical mail-app catalog/install/token store calls, marketplace
+  policy handling, generated token custody, audit actions, operation names,
+  XML element names, manifest/status/token field projection, scope rendering,
+  escaping, and handler routing remain unchanged.
+- 2026-06-29 verification for the EWS Mail Apps split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/mail_apps.rs`; `cargo test -p lpe-exchange
+  mail_app_operations_use_canonical_catalog_install_and_token_state` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,572
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,767 lines and
+  `service/ews/mail_apps.rs` 116 lines.
+- 2026-06-29: Added `service/ews/unified_messaging.rs` and moved the EWS
+  Unified Messaging phone-call response renderers into it:
+  `play_on_phone_response`, `phone_call_information_response`,
+  `disconnect_phone_call_response`, and their shared
+  `unified_messaging_call_xml` helper. This is a behavior-preserving response
+  split: canonical call creation/fetch/disconnect store calls, message ID
+  lookup, phone-number parsing, error mapping, audit actions, operation names,
+  XML element names, call field projection, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS Unified Messaging split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/unified_messaging.rs`; `cargo test -p lpe-exchange
+  unified_messaging_operations_use_canonical_call_state` passed 1 focused test;
+  `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,494
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,693 lines and
+  `service/ews/unified_messaging.rs` 79 lines.
+- 2026-06-29: Added `service/ews/ucs.rs` and moved the EWS UCS/instant
+  messaging response renderers into it: `get_im_item_list_response`,
+  `get_im_items_response`, `im_group_operation_response`,
+  `im_member_operation_response`, `simple_ews_operation_result`, and their
+  private IM group/member XML helpers. This is a behavior-preserving response
+  split: canonical contact-group store calls, distribution-list visibility
+  checks, request parsing, audit actions, operation names, XML element names,
+  IM member ID/value construction, requested-item filtering, and escaping
+  remain unchanged.
+- 2026-06-29 verification for the EWS UCS split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/ucs.rs`; `cargo test -p lpe-exchange
+  ucs_im_group_operations_use_canonical_contact_group_state` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  ucs_distribution_list_membership_stays_tenant_scoped` passed 1 focused test;
+  `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,357
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,565 lines and
+  `service/ews/ucs.rs` 137 lines.
+- 2026-06-29: Added `service/ews/user_configuration.rs` and moved the EWS
+  user-configuration response renderer into it:
+  `get_user_configuration_response`, the requested-property selector, and the
+  private dictionary XML renderer. This is a behavior-preserving response
+  split: user-configuration key/upsert parsing, canonical configuration store
+  reads/writes/deletes, audit actions, operation names, response class/code,
+  selected Dictionary/XmlData/BinaryData projection, base64 payload rendering,
+  item ID/change-key rendering, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS user-configuration split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `service/ews/user_configuration.rs`; `cargo test -p lpe-exchange
+  user_configuration_create_get_update_and_delete_use_canonical_storage` passed
+  1 focused test; `cargo test -p lpe-exchange
+  user_configuration_supports_mailbox_scoped_names_and_not_found_errors` passed
+  1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,245
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,457 lines and
+  `service/ews/user_configuration.rs` 115 lines.
+- 2026-06-29: Added `service/ews/rules.rs` and moved the EWS Inbox Rules
+  response renderer into it: `get_inbox_rules_response`. This is a
+  behavior-preserving response split: canonical Sieve-backed rule listing,
+  bounded EWS rule-to-Sieve mutation parsing, Exchange-only rule rejection,
+  audit actions, operation names, XML element names, rule priority ordering,
+  enabled/unsupported projection, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS Inbox Rules split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed `get_inbox_rules_response` now has its only
+  definition in `service/ews/rules.rs`; `cargo test -p lpe-exchange
+  inbox_rules_project_and_update_canonical_sieve_rules` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effects`
+  passed 1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,206
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,419 lines and
+  `service/ews/rules.rs` 41 lines.
+- 2026-06-29: Added `service/ews/reminders.rs` and moved the EWS reminders
+  response renderer into it: `get_reminders_response` and its private
+  `reminder_item_id` helper. This is a behavior-preserving response split:
+  canonical reminder query/action paths, dismiss/snooze mutations, operation
+  names, XML element names, reminder item ID construction with optional
+  occurrence start, start/due fallback behavior, status change-key rendering,
+  action item ID parsing, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS reminders split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed `get_reminders_response` and
+  `reminder_item_id` now live in `service/ews/reminders.rs` while
+  `parse_reminder_item_id` remains local to the reminder action path; `cargo
+  test -p lpe-exchange reminders_are_read_and_dismissed_from_canonical_reminder_state`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  perform_reminder_action_snoozes_calendar_and_task_canonical_reminders` passed
+  1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,153
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,368 lines and
+  `service/ews/reminders.rs` 54 lines.
+- 2026-06-29: Added `service/ews/sharing.rs` and moved the EWS sharing
+  response renderers into it: `get_sharing_metadata_response`,
+  `get_sharing_folder_response`, `refresh_sharing_folder_response`,
+  `accept_sharing_invitation_response`, and their private rights/folder-class
+  XML helpers. This is a behavior-preserving response split: same-tenant
+  sharing grant verification, canonical collaboration collection reads,
+  invitation grant creation, operation names, response class/code values,
+  folder IDs/change keys, owner/initiator fields, data-type mapping,
+  permission-level mapping, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS sharing split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the sharing response definitions now live in
+  `service/ews/sharing.rs`; `cargo test -p lpe-exchange
+  get_sharing_folder_returns_accessible_same_tenant_calendar_grant` passed 1
+  focused test; `cargo test -p lpe-exchange
+  refresh_sharing_folder_verifies_accessible_shared_contacts_folder` passed 1
+  focused test; `cargo test -p lpe-exchange
+  accept_sharing_invitation_creates_same_tenant_calendar_grant` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests,
+  including `get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_tokens`;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 14,002
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,225 lines and
+  `service/ews/sharing.rs` 150 lines.
+- 2026-06-29: Added `service/ews/delegation.rs` and moved the EWS delegate
+  response renderers into it: `delegate_operation_response`,
+  `get_delegate_response`, `delegate_success_response_message`,
+  `delegate_error_response_message`, and their private delegate-user and
+  permission-level XML helpers. This is a behavior-preserving response split:
+  delegate parsing, cross-tenant rejection, canonical permission/preference
+  mutations, operation names, response class/code values, user identity fields,
+  calendar/inbox permission projection, meeting-copy/private-item flags, and
+  escaping remain unchanged.
+- 2026-06-29 verification for the EWS delegation split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the delegate response definitions now live in
+  `service/ews/delegation.rs`; `cargo test -p lpe-exchange
+  delegate_operations_use_canonical_permissions_and_preferences` passed 1
+  focused test; `cargo test -p lpe-exchange
+  delegate_add_rejects_cross_tenant_delegate` passed 1 focused test; `cargo
+  test -p lpe-exchange
+  delegate_add_rejects_unsupported_exchange_only_permission_shapes` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,919
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,148 lines and
+  `service/ews/delegation.rs` 86 lines.
+- 2026-06-29: Added `service/ews/availability.rs` and moved the EWS
+  availability/time-zone response renderers into it:
+  `get_server_time_zones_response`,
+  `get_user_availability_success_response`, and
+  `availability_suggestions_response`. This is a behavior-preserving response
+  split: authenticated-mailbox free/busy validation, canonical calendar event
+  fetching, availability window filtering, event ordering, error response
+  handling, operation names, UTC and W. Europe time-zone definitions,
+  suggestion-day fallback, busy-type projection, and escaping remain
+  unchanged.
+- 2026-06-29 verification for the EWS availability split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the availability/time-zone response
+  definitions now live in `service/ews/availability.rs`; `cargo test -p
+  lpe-exchange get_server_time_zones_returns_minimal_definitions` passed 1
+  focused test; `cargo test -p lpe-exchange
+  get_user_availability_returns_canonical_busy_events` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  get_user_availability_returns_suggestions_when_requested` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,832
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,064 lines and
+  `service/ews/availability.rs` 87 lines.
+- 2026-06-29: Added `service/ews/oof.rs` and moved the EWS out-of-office
+  response renderers into it: `get_user_oof_settings_response` and
+  `set_user_oof_settings_success_response`. This is a behavior-preserving
+  response split: active Sieve script lookup, OOF metadata parsing, vacation
+  script generation, enable/disable writes, scheduled duration handling,
+  external-audience normalization, error response shape, operation names,
+  response class/code values, reply body projection, and escaping remain
+  unchanged.
+- 2026-06-29 verification for the EWS OOF split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the OOF response definitions now live in
+  `service/ews/oof.rs`; `cargo test -p lpe-exchange
+  get_user_oof_settings_returns_disabled_without_active_vacation` passed 1
+  focused test; `cargo test -p lpe-exchange
+  get_user_oof_settings_projects_canonical_sieve_vacation` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  set_user_oof_settings_writes_canonical_sieve_vacation` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  set_user_oof_settings_scheduled_round_trips_canonical_sieve_metadata` passed
+  1 focused test; `cargo test -p lpe-exchange
+  set_user_oof_settings_disables_active_sieve_script` passed 1 focused test;
+  `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,782
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 13,016 lines and
+  `service/ews/oof.rs` 51 lines.
+- 2026-06-29: Added `service/ews/folders.rs` and moved folder-specific EWS
+  response/XML renderers into it: `create_folder_success_response`,
+  `create_public_folder_success_response`, `folders_operation_success_response`,
+  `delete_folder_success_response`, `root_folder_xml`, `folder_xml`,
+  `mailbox_folder_xml`, `public_folder_xml`, and `folder_change_key`. This is a
+  behavior-preserving response split: canonical mailbox/public-folder
+  mutations, hierarchy and folder sync query logic, public-folder rights,
+  collaboration collection projection, operation names, folder IDs, change-key
+  strings, effective-rights XML, count fields, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS folder response split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the folder XML/response definitions
+  now live in `service/ews/folders.rs`; `cargo test -p lpe-exchange
+  create_folder_uses_canonical_mailbox_store` passed 1 focused test; `cargo
+  test -p lpe-exchange create_folder_uses_canonical_public_folder_store` passed
+  1 focused test; `cargo test -p lpe-exchange
+  find_folder_lists_contact_and_calendar_folders` passed 1 focused test; `cargo
+  test -p lpe-exchange get_folder_returns_multiple_supported_folder_kinds`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  sync_folder_hierarchy_lists_contact_and_calendar_folders` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,579
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 12,822 lines and
+  `service/ews/folders.rs` 204 lines.
+- 2026-06-29: Added `service/ews/directory.rs` and moved the EWS
+  directory/persona response helpers into it: `resolve_names_response`,
+  `find_people_response`, `get_persona_response`, `expand_dl_response`,
+  `visible_address_book_email`, and their private mailbox/persona lookup and
+  XML helpers. This is a behavior-preserving response split: canonical
+  address-book fetching, tenant/contact visibility checks, distribution-list
+  membership projection, persona ID format, mailbox type strings, operation
+  names, response class/code values, no-results errors, and escaping remain
+  unchanged.
+- 2026-06-29 verification for the EWS directory/persona split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the directory/persona helper
+  definitions now live in `service/ews/directory.rs`; `cargo test -p
+  lpe-exchange resolve_names_returns_tenant_directory_account_match` passed 1
+  focused test; `cargo test -p lpe-exchange
+  find_people_projects_canonical_accounts_and_contacts` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  get_persona_resolves_only_visible_stateless_persona_ids` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  expand_dl_projects_same_tenant_directory_group_members` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,176
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 12,441 lines and
+  `service/ews/directory.rs` 384 lines.
+- 2026-06-29: Added `service/ews/ids.rs` and moved the EWS `ConvertId`
+  response renderers into it: `convert_id_success_response` and
+  `convert_id_xml`. This is a behavior-preserving response split: alternate ID
+  parsing/conversion stays in `service.rs`, canonical object-family mapping
+  stays unchanged, and `AlternateId`, `AlternatePublicFolderId`, and
+  `AlternatePublicFolderItemId` XML output remains unchanged.
+- 2026-06-29 verification for the EWS ConvertId response split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the ConvertId response definitions
+  now live in `service/ews/ids.rs`; `cargo test -p lpe-exchange
+  convert_id_round_trips_supported_canonical_object_families` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  convert_id_round_trips_hex_entry_id_attachment_payload` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,148
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 12,415 lines and
+  `service/ews/ids.rs` 29 lines.
+- 2026-06-29: Added `service/ews/attachments.rs` and moved the EWS attachment
+  success response envelopes into it: `get_attachment_success_response`,
+  `create_attachment_success_response`, and
+  `delete_attachment_success_response`. This is a behavior-preserving response
+  split: Magika validation, canonical attachment creation/deletion, blob
+  custody, attachment ID parsing, root item rendering, and handler routing
+  remain unchanged.
+- 2026-06-29 verification for the EWS attachment response split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the attachment response definitions
+  now live in `service/ews/attachments.rs`; `cargo test -p lpe-exchange
+  get_attachment_returns_canonical_attachment_content` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  create_attachment_validates_and_adds_canonical_attachment` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  delete_attachment_removes_canonical_attachment_reference` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 13,100
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 12,370 lines and
+  `service/ews/attachments.rs` 50 lines.
+- 2026-06-29: Added `service/ews/contacts.rs` and moved the EWS contact
+  projection helpers into it: `contact_change_key`, `contact_summary_xml`,
+  `contact_item_xml`, `contact_item_xml_with_change_key`, and the private
+  email/phone/URL XML helpers. This is a behavior-preserving projection split:
+  contact create/update/delete handlers, canonical contact store calls, rich
+  contact parsing, sync-version selection, XML field names, change-key inputs,
+  and escaping remain unchanged.
+- 2026-06-29 verification for the EWS contact projection split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the contact projection definitions
+  now live in `service/ews/contacts.rs`; `cargo test -p lpe-exchange
+  create_delete_contact_round_trips_through_sync_folder_items` passed 1
+  focused test; `cargo test -p lpe-exchange
+  update_contact_round_trips_through_sync_folder_items` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state` passed
+  1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,908
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 12,188 lines and
+  `service/ews/contacts.rs` 191 lines.
+- 2026-06-29: Added `service/ews/calendar.rs` and moved the EWS calendar
+  projection helpers into it: `calendar_change_key`,
+  `calendar_item_summary_xml`, `calendar_item_xml`,
+  `calendar_item_xml_with_change_key`, attendee XML helpers, and bounded
+  recurrence XML conversion helpers. This is a behavior-preserving projection
+  split: calendar create/update/delete handlers, canonical event store calls,
+  request date parsing, availability date helpers, participant metadata
+  parsing, XML field names, change-key inputs, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS calendar projection split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the calendar projection definitions
+  now live in `service/ews/calendar.rs`; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed 1
+  focused test; `cargo test -p lpe-exchange
+  find_item_returns_calendar_items_from_canonical_store` passed 1 focused test;
+  `cargo test -p lpe-exchange get_user_availability_returns_canonical_busy_events`
+  passed 1 focused test; `cargo test -p lpe-exchange ews` passed 215 focused
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,621
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 11,916 lines and
+  `service/ews/calendar.rs` 281 lines.
+- 2026-06-29: Added `service/ews/tasks.rs` and moved the EWS task projection
+  helpers into it: `task_change_key`, `task_item_summary_xml`,
+  `task_item_xml`, `task_item_xml_with_change_key`,
+  `create_task_success_response`, and private task status/optional text XML
+  helpers. This is a behavior-preserving projection split: task
+  create/update/delete handlers, canonical task store calls, request parsing,
+  task status input conversion, sync-version selection, XML field names,
+  change-key inputs, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS task projection split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the task projection definitions now
+  live in `service/ews/tasks.rs`; `cargo test -p lpe-exchange
+  create_update_task_round_trips_through_sync_folder_items` passed 1 focused
+  test; `cargo test -p lpe-exchange delete_item_deletes_canonical_task`
+  passed 1 focused test; `cargo test -p lpe-exchange task` passed 8 focused
+  task tests; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,506
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 11,809 lines and
+  `service/ews/tasks.rs` 113 lines.
+- 2026-06-29: Added `service/ews/mail.rs` and moved the EWS canonical message
+  projection helpers into it: `message_summary_xml`, `message_item_xml`,
+  `message_item_xml_with_details`, `root_item_id_xml`, and
+  `create_item_success_response`. This is a behavior-preserving rendering
+  split: EWS mail create/update/delete/move/copy/send handlers, canonical
+  submission and mailbox store calls, MIME rendering primitives, attachment
+  loading, Bcc-safe MIME policy, XML field names, and escaping remain
+  unchanged.
+- 2026-06-29 verification for the EWS mail projection split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the canonical message projection
+  definitions now live in `service/ews/mail.rs`; `cargo test -p lpe-exchange
+  create_item_saveonly_stores_message_as_canonical_draft` passed 1 focused
+  test; `cargo test -p lpe-exchange get_item_mime_content` passed 2 focused
+  MIME tests; `cargo test -p lpe-exchange
+  update_item_updates_message_read_and_flag_state` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  move_item_moves_custom_mailbox_message_to_target_folder` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  copy_item_copies_custom_mailbox_message_to_target_folder` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  send_item_submits_existing_draft_through_canonical_submission` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,418
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 11,727 lines and
+  `service/ews/mail.rs` 88 lines.
+- 2026-06-29: Added `service/ews/public_folders.rs` and moved the EWS
+  public-folder item projection helpers into it:
+  `public_folder_item_change_key`, `public_folder_item_summary_xml`,
+  `public_folder_item_xml`, and
+  `create_public_folder_item_success_response`. This is a
+  behavior-preserving rendering split: public-folder permission checks,
+  canonical public-folder item create/update/delete/move/copy store calls,
+  clone-input construction, XML field names, body selection, change-key
+  inputs, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS public-folder item projection split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the public-folder item
+  projection definitions now live in `service/ews/public_folders.rs`; `cargo
+  test -p lpe-exchange create_item_saveonly_stores_public_folder_post` passed
+  1 focused test; `cargo test -p lpe-exchange
+  update_item_updates_public_folder_item` passed 1 focused test; `cargo test
+  -p lpe-exchange find_item_lists_public_folder_items` passed 1 focused test;
+  `cargo test -p lpe-exchange sync_folder_items_reports_public_folder_items`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  get_item_returns_public_folder_item_body` passed 1 focused test; `cargo test
+  -p lpe-exchange move_item_moves_public_folder_item_to_target_public_folder`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  copy_item_copies_public_folder_item_to_target_public_folder` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,345
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 11,658 lines and
+  `service/ews/public_folders.rs` 74 lines.
+- 2026-06-29: Moved the EWS contact and calendar CreateItem success response
+  renderers into the existing object-family modules:
+  `create_contact_success_response` now lives in `service/ews/contacts.rs`,
+  and `create_event_success_response` now lives in `service/ews/calendar.rs`.
+  This is a behavior-preserving rendering split: contact/calendar
+  create/update/delete handlers, canonical store calls, request parsing,
+  calendar date/time helpers, XML field names, and escaping remain unchanged.
+- 2026-06-29 verification for the EWS contact/calendar create-response split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the CreateItem response
+  definitions now live in `service/ews/contacts.rs` and
+  `service/ews/calendar.rs`; `cargo test -p lpe-exchange
+  create_delete_contact_round_trips_through_sync_folder_items` passed 1
+  focused test; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed 1
+  focused test; `cargo test -p lpe-exchange
+  update_contact_round_trips_through_sync_folder_items` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  find_item_returns_calendar_items_from_canonical_store` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,292
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 11,607 lines,
+  `service/ews/contacts.rs` 215 lines, and `service/ews/calendar.rs` 308
+  lines.
+- 2026-06-29: Moved the remaining generic EWS response helpers into
+  `service/ews/responses.rs`: `update_item_success_response`,
+  `delete_item_success_response`, `move_item_success_response`,
+  `archive_item_success_response`, `copy_item_success_response`,
+  `simple_operation_success_response`, `mark_as_junk_success_response`,
+  `operation_response_message`, `sync_folder_items_response`, and
+  `unsupported_operation_response`. This is a behavior-preserving response
+  split: EWS operation dispatch, unsupported operation error text, sync-folder
+  item response XML, conversation-item error response shape, item operation
+  success envelopes, and XML escaping remain unchanged.
+- 2026-06-29 verification for the generic EWS response helper split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the generic response helper
+  definitions now live in `service/ews/responses.rs`; `cargo test -p
+  lpe-exchange unknown_ews_operations_return_parseable_invalid_operation_errors`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  sync_folder_items_returns_empty_sync_for_custom_mailbox_folder` passed 1
+  focused test; `cargo test -p lpe-exchange
+  get_conversation_items_returns_current_canonical_thread_nodes` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 12,142
+  production-check lines. Current physical line counts: `service.rs` 11,467
+  lines and `service/ews/responses.rs` 291 lines.
+- 2026-06-29: Added `service/ews/conversations.rs` and moved the EWS
+  conversation response renderers into it: `find_conversation_response`,
+  `get_conversation_items_response`, and their private conversation summary,
+  node, participant, sender, recipient, and delivery-time XML helpers. This is
+  a behavior-preserving rendering split: canonical message fetching,
+  conversation action mutation, persistent future-message rejection,
+  sort/order parsing, response operation names, item IDs, sync-state strings,
+  and XML escaping remain unchanged.
+- 2026-06-29 verification for the EWS conversation response split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the conversation response helper
+  definitions now live in `service/ews/conversations.rs`; `cargo test -p
+  lpe-exchange find_conversation_groups_messages_by_canonical_thread_in_folder`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  get_conversation_items_returns_current_canonical_thread_nodes` passed 1
+  focused test; `cargo test -p lpe-exchange apply_conversation_action` passed
+  3 focused tests; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,895
+  production-check lines. Current physical line counts: `service.rs` 11,232
+  lines and `service/ews/conversations.rs` 241 lines.
+- 2026-06-29: Added `service/ews/sync_state.rs` and moved EWS collaboration
+  sync-state helpers into it: `collaboration_sync_state`,
+  `collaboration_sync_state_items`, `collaboration_sync_state_collection_id`,
+  `sync_state_items_by_id`, `sync_version_by_id`, and their private sync-state
+  version/type definitions. This is a behavior-preserving helper split:
+  contact, calendar, task, and public-folder sync-state string formats,
+  legacy-sync-state parsing, change-key maps, and collection-id extraction
+  remain unchanged.
+- 2026-06-29 verification for the EWS sync-state helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the sync-state helper definitions
+  now live in `service/ews/sync_state.rs`; `cargo test -p lpe-exchange
+  sync_folder_items_returns_contacts_from_canonical_store` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed 1
+  focused test; `cargo test -p lpe-exchange
+  create_update_task_round_trips_through_sync_folder_items` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  sync_folder_items_reports_public_folder_items` passed 1 focused test; `cargo
+  test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,805
+  production-check lines. Current physical line counts: `service.rs` 11,151
+  lines and `service/ews/sync_state.rs` 93 lines.
+- 2026-06-29: Moved the generic EWS `FindItem` success response envelope into
+  `service/ews/responses.rs` as `find_item_response`. This is a
+  behavior-preserving rendering split: item lookup, folder-kind branching,
+  canonical store calls, public-folder permission checks, item XML projection,
+  `TotalItemsInView` counting, and response XML shape remain unchanged.
+- 2026-06-29 verification for the EWS `FindItem` response split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the `find_item_response` definition
+  now lives in `service/ews/responses.rs`; `cargo test -p lpe-exchange
+  find_item_lists_custom_mailbox_messages` passed 1 focused test; `cargo test
+  -p lpe-exchange find_item_lists_system_mailbox_messages_by_distinguished_id`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  find_item_lists_public_folder_items` passed 1 focused test; `cargo test -p
+  lpe-exchange find_item_returns_calendar_items_from_canonical_store` passed 1
+  focused test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,786
+  production-check lines. Current physical line counts: `service.rs` 11,133
+  lines and `service/ews/responses.rs` 309 lines.
+- 2026-06-29: Added `service/ews/request_ids.rs` and moved the generic EWS
+  request ID extractors into it: `requested_item_ids`,
+  `requested_attachment_ids`, `requested_transfer_item_ids`, and
+  `requested_folder_ids`. This is a behavior-preserving parser split:
+  mailbox UUID interpretation stays in `service.rs`, transfer upload fallback
+  ID generation is unchanged, attachment/item/folder XML attribute matching is
+  unchanged, and operation handlers keep the same routing and store calls.
+- 2026-06-29 verification for the EWS request ID parser split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the request ID extractor definitions
+  now live in `service/ews/request_ids.rs`; `cargo test -p lpe-exchange
+  get_item_returns_system_mailbox_message_body` passed 1 focused test; `cargo
+  test -p lpe-exchange get_attachment_returns_canonical_attachment_content`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  bulk_transfer_operations_record_canonical_transfer_jobs` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  sync_folder_items_accepts_any_folder_id_namespace_prefix` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,743
+  production-check lines. Current physical line counts: `service.rs` 11,094
+  lines and `service/ews/request_ids.rs` 42 lines.
+- 2026-06-29: Moved the EWS IM/UCS request parser helpers into the existing
+  `service/ews/ucs.rs` module: `requested_smtp_address`,
+  `requested_im_group_id`, `requested_im_group_name`,
+  `requested_im_member_kind`, `requested_im_member_value`,
+  `requested_im_contact_member`, and private `parse_prefixed_uuid`. This is a
+  behavior-preserving parser split: IM group/member store mutations, contact
+  creation, distribution-list tenant scoping, response XML, operation names,
+  and fallback member parsing remain unchanged.
+- 2026-06-29 verification for the EWS IM/UCS request parser split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the IM/UCS request parser
+  definitions now live in `service/ews/ucs.rs`; `cargo test -p lpe-exchange
+  ucs_im_group_operations_use_canonical_contact_group_state` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,613
+  production-check lines; `git diff --check` exited 0 with CRLF warnings only.
+  Current physical line counts: `service.rs` 10,971 lines,
+  `service/ews/request_ids.rs` 42 lines, and `service/ews/ucs.rs` 260 lines.

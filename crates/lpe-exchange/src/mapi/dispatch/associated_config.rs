@@ -1,0 +1,311 @@
+use super::*;
+
+pub(super) async fn delete_associated_config_properties<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    config_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<usize>
+where
+    S: ExchangeStore,
+{
+    if property_tags.is_empty() {
+        return Ok(0);
+    }
+    let Some(existing) = snapshot.associated_config_message_for_id(config_id) else {
+        return Err(anyhow!("MAPI associated config message was not found"));
+    };
+    if existing.folder_id != folder_id {
+        return Err(anyhow!("MAPI associated config message was not found"));
+    }
+    let mut properties = associated_config_mutation_base_properties(&existing);
+    let mut deleted = 0usize;
+    for tag in property_tags
+        .iter()
+        .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
+    {
+        if properties.remove(&tag).is_some() {
+            deleted += 1;
+        }
+    }
+    let (message_class, subject) = associated_config_class_and_subject(&properties);
+    store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(existing.canonical_id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(&properties),
+        })
+        .await?;
+    Ok(deleted)
+}
+
+pub(super) fn associated_config_message_for_mutation(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    config_id: u64,
+    saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
+) -> Option<crate::mapi_store::MapiAssociatedConfigMessage> {
+    snapshot
+        .associated_config_message_for_id(config_id)
+        .or_else(|| saved_message.cloned())
+        .filter(|message| message.folder_id == folder_id)
+}
+
+pub(super) fn associated_config_mutation_base_properties(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> HashMap<u32, MapiValue> {
+    let mut properties = mapi_properties_from_json(&message.properties_json);
+    for tag in [
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+    ] {
+        properties.entry(tag).or_insert_with(|| {
+            associated_config_property_value(message, tag)
+                .expect("associated config identity property should be available")
+        });
+    }
+    properties
+}
+
+pub(super) async fn persist_associated_config_message<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<(crate::store::MapiAssociatedConfigRecord, u64)>
+where
+    S: ExchangeStore,
+{
+    let source_key = imported_message_source_key(properties);
+    let reserved_global_counter = source_key
+        .as_deref()
+        .and_then(persistable_import_source_key_global_counter);
+    let id = associated_config_uuid(properties);
+    let (message_class, subject) = associated_config_class_and_subject(properties);
+    if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, properties) {
+        let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
+        let reserved_global_counter =
+            crate::mapi::identity::global_counter_from_store_id(default.id);
+        let persisted_properties = message_list_settings_placeholder_persisted_properties(&default);
+        let saved = store
+            .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+                id: Some(default.canonical_id),
+                account_id: principal.account_id,
+                folder_id: default.folder_id,
+                message_class: default.message_class.clone(),
+                subject: default.subject.clone(),
+                properties_json: mapi_properties_to_json(&persisted_properties),
+            })
+            .await?;
+        let message_id = remember_created_mapi_identity(
+            store,
+            principal,
+            MapiIdentityObjectKind::AssociatedConfig,
+            default.canonical_id,
+            reserved_global_counter,
+            None,
+        )
+        .await?;
+        return Ok((
+            crate::store::MapiAssociatedConfigRecord {
+                id: default.canonical_id,
+                account_id: principal.account_id,
+                folder_id: default.folder_id,
+                message_class: saved.message_class,
+                subject: saved.subject,
+                properties_json: saved.properties_json,
+            },
+            message_id,
+        ));
+    }
+    let saved = store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(properties),
+        })
+        .await?;
+    let message_id = remember_created_mapi_identity(
+        store,
+        principal,
+        MapiIdentityObjectKind::AssociatedConfig,
+        saved.id,
+        reserved_global_counter,
+        source_key.filter(|_| reserved_global_counter.is_some()),
+    )
+    .await?;
+    Ok((saved, message_id))
+}
+
+pub(super) async fn persist_associated_config_stream_message<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(message.canonical_id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class: message.message_class.clone(),
+            subject: message.subject.clone(),
+            properties_json: message.properties_json.clone(),
+        })
+        .await?;
+    Ok(())
+}
+
+pub(super) async fn persist_released_associated_config_stream<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    released_object: Option<&MapiObject>,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::AttachmentStream {
+        writable_target: Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
+        ..
+    }) = released_object
+    else {
+        return Ok(());
+    };
+    let message = match session.handles.get(handle) {
+        Some(MapiObject::AssociatedConfig {
+            folder_id,
+            saved_message: Some(message),
+            ..
+        }) => Some((*folder_id, message.clone())),
+        _ => None,
+    };
+    match message {
+        Some((folder_id, message)) => {
+            persist_associated_config_stream_message(store, principal, folder_id, &message).await
+        }
+        None => Err(anyhow!(
+            "MAPI associated config stream release target was not found"
+        )),
+    }
+}
+
+pub(super) fn message_list_settings_placeholder_persisted_properties(
+    default: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> HashMap<u32, MapiValue> {
+    HashMap::from([
+        (
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String(default.message_class.clone()),
+        ),
+        (
+            PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
+            MapiValue::String(default.message_class.clone()),
+        ),
+        (
+            PID_TAG_SUBJECT_W,
+            MapiValue::String(default.subject.clone()),
+        ),
+        (
+            PID_TAG_NORMALIZED_SUBJECT_W,
+            MapiValue::String(default.subject.clone()),
+        ),
+        (PID_TAG_ROAMING_DATATYPES, MapiValue::U32(0x0000_0004)),
+        (
+            PID_TAG_ROAMING_DICTIONARY,
+            MapiValue::Binary(minimal_roaming_dictionary_stream()),
+        ),
+    ])
+}
+
+pub(super) fn is_empty_inbox_message_list_settings_placeholder(
+    folder_id: u64,
+    message_class: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> bool {
+    folder_id == INBOX_FOLDER_ID
+        && message_class == "IPM.Configuration.MessageListSettings"
+        && properties
+            .get(&PID_TAG_ROAMING_DATATYPES)
+            .cloned()
+            .and_then(MapiValue::into_u32)
+            .unwrap_or(0)
+            == 0
+        && !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
+        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
+        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+        && !properties.contains_key(&0x7C09_0102)
+}
+
+pub(super) fn associated_config_uuid(properties: &HashMap<u32, MapiValue>) -> Uuid {
+    let mut hasher = Sha256::new();
+    if let Some(source_key) = imported_message_source_key(properties) {
+        hasher.update(source_key);
+    } else {
+        let mut tags = properties.keys().copied().collect::<Vec<_>>();
+        tags.sort_unstable();
+        for tag in tags {
+            hasher.update(tag.to_le_bytes());
+            if let Some(value) = properties.get(&tag) {
+                hasher.update(format!("{value:?}").as_bytes());
+            }
+        }
+    }
+    let digest = hasher.finalize();
+    Uuid::from_bytes(digest[..16].try_into().expect("sha256 digest prefix"))
+}
+
+pub(super) fn associated_config_class_and_subject(
+    properties: &HashMap<u32, MapiValue>,
+) -> (String, String) {
+    let message_class = properties
+        .get(&PID_TAG_MESSAGE_CLASS_W)
+        .or_else(|| properties.get(&0x001A_001E))
+        .cloned()
+        .and_then(MapiValue::into_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "IPM.Configuration".to_string());
+    let subject = properties
+        .get(&PID_TAG_SUBJECT_W)
+        .or_else(|| properties.get(&PID_TAG_NORMALIZED_SUBJECT_W))
+        .cloned()
+        .and_then(MapiValue::into_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| message_class.clone());
+    (message_class, subject)
+}
+
+pub(super) fn transient_associated_message_id(
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+) -> u64 {
+    imported_message_source_key(properties)
+        .as_deref()
+        .and_then(source_key_global_counter)
+        .map(crate::mapi::identity::mapi_store_id)
+        .unwrap_or_else(|| {
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER.saturating_add(
+                    crate::mapi::identity::global_counter_from_store_id(folder_id).unwrap_or(1),
+                ),
+            )
+        })
+}
+
+pub(super) fn transient_client_local_message_id(message_id: u64) -> bool {
+    crate::mapi::identity::global_counter_from_store_id(message_id)
+        .is_some_and(|counter| counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER)
+}
