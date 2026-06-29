@@ -1056,3 +1056,18 @@ of silently losing them.
   `cargo test -p lpe-exchange`. The broad run passed with 1593 tests and doc
   tests passing. Current line counts: `dispatch.rs` 29,204 lines and
   `dispatch/execute.rs` 257 lines.
+- 2026-06-28: Extended the focused MR-002/MR-007 table-dispatch module by
+  moving `RopQueryColumnsAll` branch wiring into `dispatch/tables.rs`, alongside
+  the existing bookmark ROP wrappers. Table cursor/bookmark semantics,
+  canonical table columns, and row output remain owned by `mapi/tables.rs`; the
+  dispatch module only delegates response construction.
+- 2026-06-28 verification for the table dispatch extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_free`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_categorized_table_collapse_state_restores_bookmark`;
+  `cargo test -p lpe-exchange
+  mapi_over_http_query_columns_all_reports_canonical_table_columns`; `cargo
+  test -p lpe-exchange`. The broad run passed with 1593 tests and doc tests
+  passing. Current line counts: `dispatch.rs` 29,204 lines,
+  `dispatch/tables.rs` 34 lines, and `dispatch/execute.rs` 257 lines.

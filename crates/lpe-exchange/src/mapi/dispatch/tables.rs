@@ -28,3 +28,11 @@ pub(super) fn free_bookmark_response(
 ) -> Vec<u8> {
     rop_free_bookmark_response(request, object)
 }
+
+pub(super) fn query_columns_all_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    rop_query_columns_all_response(request, object, snapshot)
+}

@@ -16641,7 +16641,7 @@ where
                 principal.account_id,
             )),
             Some(RopId::QueryColumnsAll) => {
-                responses.extend_from_slice(&rop_query_columns_all_response(
+                responses.extend_from_slice(&query_columns_all_response(
                     &request,
                     input_object(session, &handle_slots, &request),
                     snapshot,
