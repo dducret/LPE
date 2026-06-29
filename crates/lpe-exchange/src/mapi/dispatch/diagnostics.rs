@@ -33,26 +33,42 @@ use crate::mapi::wire::RopId;
 
 use super::MAX_ROP_DEBUG_ENTRIES;
 
+mod associated_config;
+mod calendar;
+mod common_views;
 mod default_folders;
 mod execute;
 mod fast_transfer;
+mod message;
 mod named_properties;
 mod open_folder;
 mod post_hierarchy;
+mod probes;
 mod property_names;
 mod property_responses;
 mod recipients;
+mod special_folders;
+mod sync_upload;
+mod table_queries;
 mod values;
 
+pub(super) use associated_config::*;
+pub(super) use calendar::*;
+pub(super) use common_views::*;
 pub(super) use default_folders::*;
 pub(super) use execute::*;
 pub(super) use fast_transfer::*;
+pub(super) use message::*;
 pub(super) use named_properties::*;
 pub(super) use open_folder::*;
 pub(super) use post_hierarchy::*;
+pub(super) use probes::*;
 pub(super) use property_names::*;
 pub(super) use property_responses::*;
 pub(super) use recipients::*;
+pub(super) use special_folders::*;
+pub(super) use sync_upload::*;
+pub(super) use table_queries::*;
 pub(super) use values::*;
 
 #[derive(Debug, Default)]
@@ -76,6 +92,42 @@ pub(super) struct RopRequestDebugSummary {
     pub(super) raw_frame_count: usize,
     pub(super) raw_frames: String,
     pub(super) extended: bool,
+    pub(super) parse_error: String,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct FirstPostHierarchyProbeDebugSummary {
+    pub(super) open_folder_request_count: usize,
+    pub(super) open_folder_requests: String,
+    pub(super) open_folder_response_shapes: String,
+    pub(super) get_properties_specific_request_count: usize,
+    pub(super) get_properties_specific_requests: String,
+    pub(super) get_properties_specific_response_shapes: String,
+    pub(super) set_properties_request_count: usize,
+    pub(super) set_properties_requests: String,
+    pub(super) set_properties_response_shapes: String,
+    pub(super) parse_error: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct OpenFolderProbeRequest {
+    pub(super) output_handle_index: u8,
+    pub(super) folder_id: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct GetPropertiesSpecificProbeRequest {
+    pub(super) input_handle_index: u8,
+    pub(super) property_tags: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct SetPropertiesProbeRequest {
+    pub(super) input_handle_index: u8,
+    pub(super) property_tags: Vec<u32>,
+    pub(super) property_value_shapes: String,
+    pub(super) associated_config_stream_summary: String,
+    pub(super) default_folder_entry_id_values: String,
     pub(super) parse_error: String,
 }
 

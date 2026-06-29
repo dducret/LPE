@@ -1,5 +1,21 @@
 use super::super::*;
 
+pub(in crate::mapi::dispatch) fn should_log_outlook_surface_getprops_info(
+    object: Option<&MapiObject>,
+) -> bool {
+    matches!(
+        object.and_then(MapiObject::folder_id),
+        Some(
+            INBOX_FOLDER_ID
+                | CONTACTS_FOLDER_ID
+                | CALENDAR_FOLDER_ID
+                | JOURNAL_FOLDER_ID
+                | NOTES_FOLDER_ID
+                | TASKS_FOLDER_ID
+        )
+    )
+}
+
 pub(in crate::mapi::dispatch) fn log_set_properties_specific_debug(
     principal: &AccountPrincipal,
     request_id: &str,

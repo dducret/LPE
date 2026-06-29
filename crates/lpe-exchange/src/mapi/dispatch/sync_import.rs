@@ -236,6 +236,205 @@ pub(super) fn import_source_key_identity_scope(counter: u64) -> &'static str {
     }
 }
 
+pub(super) fn upload_state_property_name(tag: u32) -> &'static str {
+    match tag {
+        0x4017_0003 | 0x4017_0102 => "MetaTagIdsetGiven",
+        0x4018_0102 => "MetaTagIdsetDeleted",
+        0x402D_0102 => "MetaTagIdsetRead",
+        0x402E_0102 => "MetaTagIdsetUnread",
+        0x6796_0102 => "MetaTagCnsetSeen",
+        0x67DA_0102 => "MetaTagCnsetSeenFAI",
+        0x67D2_0102 => "MetaTagCnsetRead",
+        _ => "unknown",
+    }
+}
+
+pub(super) fn upload_state_marker_bit(tag: u32) -> u8 {
+    match tag {
+        0x4017_0003 | 0x4017_0102 => 0x01,
+        0x6796_0102 => 0x02,
+        0x67DA_0102 => 0x04,
+        0x67D2_0102 => 0x08,
+        _ => 0,
+    }
+}
+
+pub(super) fn uploaded_state_has_delta_anchor(marker_mask: u8) -> bool {
+    marker_mask & 0x03 == 0x03
+}
+
+pub(super) fn mark_uploaded_state_stream(marker_mask: &mut u8, property_tag: u32) {
+    *marker_mask |= upload_state_marker_bit(property_tag);
+}
+
+pub(super) fn record_sync_upload_content_change(
+    session: &mut MapiSession,
+    folder_id: u64,
+    object_id: u64,
+    change_number: u64,
+    associated: bool,
+    read_state_changed: bool,
+) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x01 {
+            continue;
+        }
+        if !uploaded_object_ids.contains(&object_id) {
+            uploaded_object_ids.push(object_id);
+        }
+        if associated {
+            if !uploaded_fai_change_numbers.contains(&change_number) {
+                uploaded_fai_change_numbers.push(change_number);
+            }
+        } else if !uploaded_normal_change_numbers.contains(&change_number) {
+            uploaded_normal_change_numbers.push(change_number);
+        }
+        if read_state_changed && !uploaded_read_change_numbers.contains(&change_number) {
+            uploaded_read_change_numbers.push(change_number);
+        }
+        *state = mapi_mailstore::content_sync_state_stream_from_sets(
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+        );
+    }
+}
+
+pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, folder_id: u64) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x01 {
+            continue;
+        }
+        *state = mapi_mailstore::content_sync_state_stream_from_sets(
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+        );
+    }
+}
+
+pub(super) fn record_sync_upload_hierarchy_change(
+    session: &mut MapiSession,
+    folder_id: u64,
+    object_id: u64,
+) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x02 {
+            continue;
+        }
+        if !uploaded_object_ids.contains(&object_id) {
+            uploaded_object_ids.push(object_id);
+        }
+        let change_number = mapi_mailstore::change_number_for_store_id(object_id);
+        if !uploaded_normal_change_numbers.contains(&change_number) {
+            uploaded_normal_change_numbers.push(change_number);
+        }
+        *state = mapi_mailstore::final_sync_state_stream(
+            0x02,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+        );
+    }
+}
+
+pub(super) fn sync_mailboxes_with_collaboration_counts(
+    mut mailboxes: Vec<JmapMailbox>,
+    snapshot: &MapiMailStoreSnapshot,
+    sync_root_folder_id: u64,
+    sync_type: u8,
+) -> Vec<JmapMailbox> {
+    for mailbox in &mut mailboxes {
+        let Some(folder_id) = try_mapi_folder_id(mailbox) else {
+            continue;
+        };
+        if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
+            mailbox.total_emails = folder.item_count;
+            mailbox.unread_emails = 0;
+        }
+    }
+    if sync_type == MapiSyncType::Hierarchy.as_u8() {
+        let mut folder_ids = mailboxes
+            .iter()
+            .filter_map(try_mapi_folder_id)
+            .collect::<HashSet<_>>();
+        for folder in snapshot.collaboration_folders() {
+            if folder.kind != crate::mapi_store::MapiCollaborationFolderKind::Calendar {
+                continue;
+            }
+            if !collaboration_folder_in_hierarchy_sync_scope(folder.id, sync_root_folder_id) {
+                continue;
+            }
+            if !folder_ids.insert(folder.id) {
+                continue;
+            }
+            let Some(canonical_id) = crate::mapi_store::collaboration_folder_identity_canonical_id(
+                folder.kind,
+                &folder.collection,
+            ) else {
+                continue;
+            };
+            crate::mapi::identity::remember_mapi_identity(canonical_id, folder.id);
+            mailboxes.push(JmapMailbox {
+                id: canonical_id,
+                parent_id: Some(folder.collection.owner_account_id),
+                role: "__mapi_collaboration_calendar".to_string(),
+                name: folder.collection.display_name.clone(),
+                sort_order: 57,
+                modseq: mapi_mailstore::change_number_for_store_id(folder.id),
+                total_emails: folder.item_count,
+                unread_emails: 0,
+                size_octets: 0,
+                is_subscribed: true,
+            });
+        }
+    }
+    mailboxes
+}
+
+fn collaboration_folder_in_hierarchy_sync_scope(folder_id: u64, sync_root_folder_id: u64) -> bool {
+    matches!(sync_root_folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID)
+        || folder_id == sync_root_folder_id
+}
+
 pub(super) async fn mapi_message_ids_for_deleted_changes<S>(
     store: &S,
     principal: &AccountPrincipal,

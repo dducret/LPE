@@ -1,5 +1,26 @@
 use super::super::*;
 
+pub(in crate::mapi::dispatch) fn default_folder_discovery_specs() -> [(&'static str, u32, u64); 8] {
+    [
+        ("drafts", PID_TAG_IPM_DRAFTS_ENTRY_ID, DRAFTS_FOLDER_ID),
+        ("contacts", PID_TAG_IPM_CONTACT_ENTRY_ID, CONTACTS_FOLDER_ID),
+        (
+            "calendar",
+            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+            CALENDAR_FOLDER_ID,
+        ),
+        ("journal", PID_TAG_IPM_JOURNAL_ENTRY_ID, JOURNAL_FOLDER_ID),
+        ("notes", PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
+        ("tasks", PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
+        (
+            "reminders",
+            PID_TAG_REM_ONLINE_ENTRY_ID,
+            REMINDERS_FOLDER_ID,
+        ),
+        ("outbox", PID_TAG_IPM_OUTBOX_ENTRY_ID, OUTBOX_FOLDER_ID),
+    ]
+}
+
 pub(in crate::mapi::dispatch) fn default_folder_identification_contract_for_debug(
     principal: &AccountPrincipal,
 ) -> String {
@@ -181,6 +202,28 @@ pub(in crate::mapi::dispatch) fn default_folder_entry_id_values_for_debug(
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+pub(in crate::mapi::dispatch) fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
+    match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_SUBTREE_ENTRY_ID => "PidTagIpmSubtreeEntryId",
+        PID_TAG_IPM_OUTBOX_ENTRY_ID => "PidTagIpmOutboxEntryId",
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID => "PidTagIpmWastebasketEntryId",
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID => "PidTagIpmSentMailEntryId",
+        PID_TAG_VIEWS_ENTRY_ID => "PidTagViewsEntryId",
+        PID_TAG_COMMON_VIEWS_ENTRY_ID => "PidTagCommonViewsEntryId",
+        PID_TAG_FINDER_ENTRY_ID => "PidTagFinderEntryId",
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID => "PidTagIpmArchiveEntryId",
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+        PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+        PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+        PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
+        PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        PID_TAG_REM_OFFLINE_ENTRY_ID => "PidTagRemOfflineEntryId",
+        PID_TAG_IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
+        _ => "unknown",
+    }
 }
 
 pub(in crate::mapi::dispatch) fn default_folder_getprops_response_values_for_debug(

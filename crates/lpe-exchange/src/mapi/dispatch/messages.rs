@@ -69,3 +69,155 @@ pub(super) fn append_save_changes_message_response(
     set_handle_slot(handle_slots, Some(request.response_handle_index()), handle);
     responses.extend_from_slice(&rop_save_changes_message_response(request, message_id));
 }
+
+fn copyable_message_followup_property_tag(tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(tag),
+        PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_FLAG_STATUS
+            | PID_TAG_FOLLOWUP_ICON
+            | PID_TAG_TODO_ITEM_FLAGS
+            | PID_TAG_FLAG_COMPLETE_TIME
+            | PID_LID_TASK_START_DATE_TAG
+            | PID_LID_TASK_DUE_DATE_TAG
+            | PID_LID_REMINDER_SET_TAG
+            | PID_LID_REMINDER_TIME_TAG
+            | PID_LID_REMINDER_SIGNAL_TIME_TAG
+            | PID_LID_FLAG_REQUEST_W_TAG
+            | PID_TAG_SWAPPED_TODO_STORE
+            | PID_TAG_SWAPPED_TODO_DATA
+            | PID_NAME_KEYWORDS_TAG
+    )
+}
+
+pub(super) async fn copy_message_followup_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<Option<Vec<(usize, u32, u32)>>>
+where
+    S: ExchangeStore,
+{
+    if property_tags.is_empty()
+        || !property_tags
+            .iter()
+            .copied()
+            .all(copyable_message_followup_property_tag)
+    {
+        return Ok(None);
+    }
+    let Some(MapiObject::Message {
+        folder_id: source_folder_id,
+        message_id: source_message_id,
+        ..
+    }) = source
+    else {
+        return Ok(None);
+    };
+    let Some(destination_object @ MapiObject::Message { .. }) = destination else {
+        return Ok(None);
+    };
+    let Some(email) = message_for_id(*source_folder_id, *source_message_id, mailboxes, emails)
+    else {
+        return Ok(None);
+    };
+    let mut values = Vec::new();
+    let mut problems = Vec::new();
+    for (index, property_tag) in property_tags.iter().copied().enumerate() {
+        match normal_message_debug_property_value(email, property_tag) {
+            Some(value) => values.push((canonical_property_storage_tag(property_tag), value)),
+            None => problems.push((index, property_tag, 0x8004_010F)),
+        }
+    }
+    if !values.is_empty() {
+        apply_supported_object_property_values(
+            store,
+            principal,
+            destination_object,
+            values,
+            mailboxes,
+            emails,
+            snapshot,
+        )
+        .await?;
+    }
+    Ok(Some(problems))
+}
+
+pub(super) async fn copy_all_message_followup_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    destination: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    excluded_property_tags: &[u32],
+) -> Result<bool>
+where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::Message {
+        folder_id: source_folder_id,
+        message_id: source_message_id,
+        ..
+    }) = source
+    else {
+        return Ok(false);
+    };
+    let Some(destination_object @ MapiObject::Message { .. }) = destination else {
+        return Ok(false);
+    };
+    let Some(email) = message_for_id(*source_folder_id, *source_message_id, mailboxes, emails)
+    else {
+        return Ok(false);
+    };
+    let excluded = excluded_property_tags
+        .iter()
+        .copied()
+        .map(canonical_property_storage_tag)
+        .collect::<HashSet<_>>();
+    let mut values = Vec::new();
+    for property_tag in [
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_FOLLOWUP_ICON,
+        PID_TAG_TODO_ITEM_FLAGS,
+        PID_TAG_FLAG_COMPLETE_TIME,
+        PID_LID_TASK_START_DATE_TAG,
+        PID_LID_TASK_DUE_DATE_TAG,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_FLAG_REQUEST_W_TAG,
+        PID_TAG_SWAPPED_TODO_STORE,
+        PID_TAG_SWAPPED_TODO_DATA,
+        PID_NAME_KEYWORDS_TAG,
+    ] {
+        if excluded.contains(&property_tag) {
+            continue;
+        }
+        if let Some(value) = normal_message_debug_property_value(email, property_tag) {
+            values.push((property_tag, value));
+        }
+    }
+    if values.is_empty() {
+        return Ok(false);
+    }
+    apply_supported_object_property_values(
+        store,
+        principal,
+        destination_object,
+        values,
+        mailboxes,
+        emails,
+        snapshot,
+    )
+    .await?;
+    Ok(true)
+}

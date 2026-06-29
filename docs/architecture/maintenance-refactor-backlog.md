@@ -1878,3 +1878,715 @@ of silently losing them.
   `dispatch/diagnostics/property_responses.rs` 363 lines,
   `dispatch/diagnostics.rs` 1,373 lines, and `dispatch/tables.rs` 1,074
   lines.
+- 2026-06-29: Added `dispatch/diagnostics/open_folder.rs` and moved the
+  OpenFolder property-shape and metadata debug helpers out of `dispatch.rs`.
+  The moved code only formats existing folder properties and mailbox
+  projection metadata for RCA/debug output; OpenFolder response construction,
+  folder lookup, mailbox projection, and canonical state remain unchanged.
+- 2026-06-29 verification for the OpenFolder diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `debug_open_folder_property_shapes`
+  and `debug_open_folder_metadata` definitions now live in
+  `dispatch/diagnostics/open_folder.rs`; `cargo test -p lpe-exchange
+  open_folder_debug_metadata` passed 1 focused test; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode. Current
+  line counts: `dispatch.rs` 26,174 lines,
+  `dispatch/diagnostics/open_folder.rs` 45 lines,
+  `dispatch/table_diagnostics.rs` 1,444 lines,
+  `dispatch/diagnostics/default_folders.rs` 470 lines,
+  `dispatch/diagnostics.rs` 1,375 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/associated_config.rs` and moved the
+  associated-config debug field and open-shape helpers out of `dispatch.rs`.
+  The moved code only formats existing session handles, snapshot rows, and
+  associated-config property lengths for RCA/debug output; associated-config
+  lookup, opening, row projection, property parsing, persistence, and wire
+  output remain unchanged.
+- 2026-06-29 verification for the associated-config diagnostics split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed
+  `associated_config_debug_fields`, `associated_config_open_shape`, and
+  `associated_config_binary_property_len` definitions now live in
+  `dispatch/diagnostics/associated_config.rs`; `cargo test -p lpe-exchange
+  associated_config` passed 39 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode. Current
+  line counts: `dispatch.rs` 26,107 lines,
+  `dispatch/diagnostics/associated_config.rs` 68 lines,
+  `dispatch/diagnostics/open_folder.rs` 45 lines,
+  `dispatch/table_diagnostics.rs` 1,444 lines,
+  `dispatch/diagnostics/default_folders.rs` 470 lines,
+  `dispatch/diagnostics.rs` 1,377 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/message.rs` and moved the OpenMessage
+  and message GetProperties RCA/debug logging helpers out of `dispatch.rs`.
+  The moved code only emits diagnostics from already-selected message data,
+  request tags, and response lengths; message lookup, OpenMessage response
+  construction, GetProperties response construction, property parsing, and
+  canonical message state remain unchanged.
+- 2026-06-29 verification for the message diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `log_open_message_debug` and
+  `log_message_getprops_response_debug` definitions now live in
+  `dispatch/diagnostics/message.rs`; `cargo test -p lpe-exchange open_message`
+  passed 12 focused tests; `cargo test -p lpe-exchange getprops` passed 37
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 25,992 lines,
+  `dispatch/diagnostics/message.rs` 119 lines,
+  `dispatch/diagnostics/associated_config.rs` 68 lines,
+  `dispatch/diagnostics.rs` 1,379 lines,
+  `dispatch/table_diagnostics.rs` 1,444 lines, and `dispatch/tables.rs` 1,074
+  lines.
+- 2026-06-29: Added `dispatch/diagnostics/common_views.rs` and moved the
+  Common Views navigation-shortcut diagnostic summary helper out of
+  `dispatch.rs`. The moved code only formats already-decoded shortcut metadata
+  and staged property shapes for RCA/debug logs; Common Views import, save,
+  persistence, identity allocation, row projection, and wire output remain
+  unchanged.
+- 2026-06-29 verification for the Common Views shortcut diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `common_views_saved_shortcut_summary` and its private `property_value_by_id`
+  helper now live in `dispatch/diagnostics/common_views.rs`; `cargo test -p
+  lpe-exchange common_views` passed 45 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode. Current line counts: `dispatch.rs` 25,939 lines,
+  `dispatch/diagnostics/common_views.rs` 54 lines,
+  `dispatch/diagnostics/message.rs` 119 lines,
+  `dispatch/diagnostics/associated_config.rs` 68 lines,
+  `dispatch/diagnostics.rs` 1,381 lines, and
+  `dispatch/table_diagnostics.rs` 1,444 lines.
+- 2026-06-29: Added `dispatch/diagnostics/sync_upload.rs` and moved the
+  uploaded sync-state marker summary formatter out of `dispatch.rs`. The moved
+  code only formats an already-maintained upload-state marker bitmask for
+  RCA/debug logs; marker calculation, stream upload handling, checkpoint
+  selection, sync state persistence, and transfer buffers remain unchanged.
+- 2026-06-29 verification for the sync-upload marker diagnostics split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed
+  `uploaded_state_marker_summary` now lives in
+  `dispatch/diagnostics/sync_upload.rs`; `cargo test -p lpe-exchange
+  uploaded_state` passed 2 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 25,922 lines,
+  `dispatch/diagnostics/sync_upload.rs` 16 lines,
+  `dispatch/diagnostics/common_views.rs` 54 lines,
+  `dispatch/diagnostics.rs` 1,383 lines, and
+  `dispatch/table_diagnostics.rs` 1,444 lines.
+- 2026-06-29: Added `dispatch/diagnostics/calendar.rs` and moved calendar
+  folder-contract, hierarchy-query contract, identity-chain, and required-tag
+  diagnostic helpers out of `dispatch.rs`. The moved code only emits RCA/debug
+  evidence and formats expected calendar property tags; calendar folder
+  projection, hierarchy rows, content sync, checkpoint selection, canonical
+  event state, and wire output remain unchanged.
+- 2026-06-29 verification for the calendar diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `log_calendar_folder_contract`,
+  `log_calendar_hierarchy_query_rows_contract`, `log_calendar_identity_chain`,
+  and `format_calendar_required_property_tags` definitions now live in
+  `dispatch/diagnostics/calendar.rs`; `cargo test -p lpe-exchange calendar`
+  passed 145 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 25,642 lines,
+  `dispatch/diagnostics/calendar.rs` 281 lines,
+  `dispatch/diagnostics.rs` 1,385 lines, and
+  `dispatch/table_diagnostics.rs` 1,444 lines.
+- 2026-06-29: Added `dispatch/diagnostics/special_folders.rs` and moved the
+  special-folder RCA contract logger, calendar/special sync-object diagnostic
+  loggers, expected special-folder parent/item-class diagnostic helpers, and
+  private special sync-object property-shape helpers out of `dispatch.rs`.
+  The moved code only emits RCA/debug evidence or supports those diagnostics;
+  special-folder projection, receive-folder mapping, sync manifests, canonical
+  collaboration state, ROP responses, and wire output remain unchanged.
+- 2026-06-29 verification for the special-folder diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `log_special_folder_contract`,
+  `log_calendar_special_sync_objects`, `log_special_sync_objects`,
+  `expected_special_folder_parent_id`, `expected_special_folder_item_message_class`,
+  and `special_property_shape` definitions now live in
+  `dispatch/diagnostics/special_folders.rs`; `cargo test -p lpe-exchange
+  special_folder` passed 34 focused tests; `cargo test -p lpe-exchange
+  calendar` passed 145 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode. Current line
+  counts: `dispatch.rs` 24,492 physical lines,
+  `dispatch/diagnostics/special_folders.rs` 508 lines,
+  `dispatch/diagnostics/calendar.rs` 281 lines,
+  `dispatch/diagnostics.rs` 1,323 lines, and
+  `dispatch/table_diagnostics.rs` 1,444 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/associated_config.rs` with
+  inbox associated-config table summary helpers:
+  `format_inbox_associated_wire_row_summary`,
+  `sort_associated_config_messages_for_debug`, and
+  `format_inbox_associated_config_summary`. The moved code only formats
+  already-projected associated-config rows and debug wire previews; associated
+  config visibility rules, table selection, sorting behavior, query-row
+  serialization, persistence, and ROP responses remain unchanged.
+- 2026-06-29 verification for the associated-config summary split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the three moved definitions now live
+  in `dispatch/diagnostics/associated_config.rs`; `cargo test -p lpe-exchange
+  associated_config` passed 39 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 25,011 production-check lines. Current physical line
+  counts: `dispatch.rs` 24,378 lines,
+  `dispatch/diagnostics/associated_config.rs` 179 lines,
+  `dispatch/diagnostics/special_folders.rs` 508 lines, and
+  `dispatch/diagnostics.rs` 1,323 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/message.rs` with normal-message
+  debug property projection helpers: `normal_message_debug_property_value` and
+  `format_normal_message_debug_value`. The moved code only formats diagnostic
+  values for already-loaded `JmapEmail` rows used by table/debug summaries;
+  message property responses, row serialization, message mutations, and
+  canonical mailbox state remain unchanged.
+- 2026-06-29 verification for the normal-message diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/diagnostics/message.rs`; `cargo test -p lpe-exchange
+  normal_message` passed 6 focused tests; `cargo test -p lpe-exchange
+  open_message` passed 12 focused tests; `cargo test -p lpe-exchange getprops`
+  passed 37 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 24,916 production-check lines. Current physical line
+  counts: `dispatch.rs` 24,287 lines,
+  `dispatch/diagnostics/message.rs` 214 lines, and
+  `dispatch/diagnostics.rs` 1,323 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/common_views.rs` with Common
+  Views/view-handoff RCA helpers: `log_outlook_view_handoff`,
+  `format_outlook_view_handoff_table_contract`,
+  `format_inbox_view_descriptor_behavior_contract`,
+  `format_inbox_view_descriptor_set_columns_behavior_contract`,
+  `format_view_descriptor_binary_summary`, and the folder table debug-target
+  classifier. The moved code only builds debug contracts, descriptor summaries,
+  and invariant warnings for already-projected view metadata; Common Views
+  persistence, associated table rows, descriptor encoding, ROP response bytes,
+  and canonical state remain unchanged.
+- 2026-06-29 verification for the Common Views view-handoff diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/diagnostics/common_views.rs`; `cargo test -p lpe-exchange
+  common_views` passed 45 focused tests; `cargo test -p lpe-exchange
+  view_handoff` passed 5 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 24,479 production-check lines. Current physical line
+  counts: `dispatch.rs` 23,867 lines,
+  `dispatch/diagnostics/common_views.rs` 474 lines, and
+  `dispatch/diagnostics.rs` 1,323 lines.
+- 2026-06-29: Added `dispatch/diagnostics/table_queries.rs` and moved
+  `log_mapi_query_position_debug` out of `dispatch.rs`. The moved code only
+  logs the already-built `RopQueryPosition` response and table summary context;
+  query-position response construction, table cursors, restriction handling,
+  row counts, and wire bytes remain unchanged.
+- 2026-06-29 verification for the query-position diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `log_mapi_query_position_debug` now
+  lives in `dispatch/diagnostics/table_queries.rs`; `cargo test -p
+  lpe-exchange query_position` passed 5 focused tests; `cargo test -p
+  lpe-exchange tables` passed 194 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 24,334 production-check lines. Current physical line
+  counts: `dispatch.rs` 23,723 lines,
+  `dispatch/diagnostics/table_queries.rs` 145 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_hierarchy_table_query_rows_response`. The moved code logs the
+  already-built hierarchy `QueryRows` response and preserves the existing RCA
+  metric recording call; hierarchy row construction, table cursor state,
+  response framing, and wire bytes remain unchanged.
+- 2026-06-29 verification for the hierarchy query-row diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed both table-query
+  diagnostics helpers now live in `dispatch/diagnostics/table_queries.rs`;
+  `cargo test -p lpe-exchange hierarchy_table` passed 12 focused tests; `cargo
+  test -p lpe-exchange tables` passed 194 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 24,244
+  production-check lines. Current physical line counts: `dispatch.rs` 23,635
+  lines, `dispatch/diagnostics/table_queries.rs` 233 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_open` and
+  `log_outlook_contents_table_set_columns`. The moved code only emits
+  OpenContentsTable and SetColumns RCA/debug metadata from already-selected
+  folder, column, named-property, and view-handoff context; table handle
+  creation, SetColumns validation, selected column state, row projection, and
+  wire responses remain unchanged.
+- 2026-06-29 verification for the contents-table open/set-columns diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed both moved
+  definitions now live in `dispatch/diagnostics/table_queries.rs`; `cargo test
+  -p lpe-exchange contents_table` passed 21 focused tests; `cargo test -p
+  lpe-exchange set_columns` passed 13 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 24,138
+  production-check lines. Current physical line counts: `dispatch.rs` 23,533
+  lines, `dispatch/diagnostics/table_queries.rs` 335 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_sort` and
+  `log_outlook_contents_table_restrict`. The moved code only emits SortTable
+  and Restrict RCA/debug metadata from already-mutated table state, request
+  payloads, selected columns, restrictions, and view-handoff context; sort
+  validation, restriction parsing, table invalidation/recovery, cursor state,
+  row projection, and wire responses remain unchanged.
+- 2026-06-29 verification for the contents-table sort/restrict diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed both moved
+  definitions now live in `dispatch/diagnostics/table_queries.rs`; `cargo test
+  -p lpe-exchange sort_table` passed 4 focused tests; `cargo test -p
+  lpe-exchange restrict` passed 35 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 23,990
+  production-check lines. Current physical line counts: `dispatch.rs` 23,389
+  lines, `dispatch/diagnostics/table_queries.rs` 479 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_query_rows`. The moved code only emits
+  pre-response `QueryRows` RCA/debug metadata from already-selected table
+  state, selected columns, restriction/sort state, snapshots, and view-handoff
+  summaries; query execution, row selection, table cursor advancement,
+  response serialization, and wire bytes remain unchanged.
+- 2026-06-29 verification for the contents-table query-rows diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definition now
+  lives in `dispatch/diagnostics/table_queries.rs`; `cargo test -p
+  lpe-exchange query_rows` passed 52 focused tests; `cargo test -p
+  lpe-exchange tables` passed 194 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 23,819
+  production-check lines. Current physical line counts: `dispatch.rs` 23,221
+  lines, `dispatch/diagnostics/table_queries.rs` 647 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_query_rows_response`. The moved code only logs
+  the already-built contents-table `QueryRows` response and already-updated
+  table cursor state; row construction, row selection, response framing,
+  response serialization, cursor advancement, and wire bytes remain unchanged.
+- 2026-06-29 verification for the contents-table query-rows response
+  diagnostics split: `cargo fmt --package lpe-exchange`; `rg` confirmed the
+  moved definition now lives in `dispatch/diagnostics/table_queries.rs`; `cargo
+  test -p lpe-exchange query_rows` passed 52 focused tests; `cargo test -p
+  lpe-exchange tables` passed 194 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 23,710
+  production-check lines. Current physical line counts: `dispatch.rs` 23,114
+  lines, `dispatch/diagnostics/table_queries.rs` 754 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_seek_row`. The moved code only emits `SeekRow`
+  RCA/debug metadata from the request, already-built response, current table
+  position, selected columns, restriction/sort state, and view-handoff
+  context; seek validation, position calculation, cursor mutation, response
+  construction, and wire bytes remain unchanged.
+- 2026-06-29 verification for the contents-table seek-row diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definition now
+  lives in `dispatch/diagnostics/table_queries.rs`; `cargo test -p
+  lpe-exchange seek_row` passed 7 focused tests; `cargo test -p lpe-exchange
+  tables` passed 194 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 23,626 production-check lines. Current physical line
+  counts: `dispatch.rs` 23,032 lines,
+  `dispatch/diagnostics/table_queries.rs` 836 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with
+  `log_outlook_contents_table_find_row` and its private
+  `rop_response_return_value` decoder. The moved code only emits `FindRow`
+  RCA/debug metadata and invariant warnings from the request, already-built
+  response, selected columns, restriction/sort state, table position, and
+  view-handoff context; find-row validation, restriction evaluation, row
+  lookup, cursor handling, response construction, and wire bytes remain
+  unchanged.
+- 2026-06-29 verification for the contents-table find-row diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `log_outlook_contents_table_find_row` now lives in
+  `dispatch/diagnostics/table_queries.rs`; `cargo test -p lpe-exchange
+  find_row` passed 47 focused tests; `cargo test -p lpe-exchange tables`
+  passed 194 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 23,428 production-check lines. Current physical line
+  counts: `dispatch.rs` 22,837 lines,
+  `dispatch/diagnostics/table_queries.rs` 1,031 lines, and
+  `dispatch/diagnostics.rs` 1,325 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/execute.rs` with
+  `log_execute_rop_debug` and moved the shared first-post-hierarchy probe
+  summary structs into the diagnostics hub. The moved code only emits
+  Execute-level RCA/debug records from already-built request/response
+  summaries, session startup state, logon response summaries, and
+  post-hierarchy probe summaries; Execute parsing, ROP execution, response
+  construction, replay caching, session mutation, and wire bytes remain
+  unchanged.
+- 2026-06-29 verification for the Execute ROP diagnostics split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed `log_execute_rop_debug` now lives in
+  `dispatch/diagnostics/execute.rs`; `cargo test -p lpe-exchange
+  execute_rop_debug` passed 6 focused tests; `cargo test -p lpe-exchange
+  execute` passed 55 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,958 production-check lines. Current physical line
+  counts: `dispatch.rs` 22,381 lines,
+  `dispatch/diagnostics/execute.rs` 434 lines, and
+  `dispatch/diagnostics.rs` 1,357 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/property_responses.rs` with
+  `should_log_outlook_surface_getprops_info`. The moved code only decides
+  whether to emit Outlook-surface GetProperties RCA/debug logs based on the
+  already-open object's folder id; GetProperties response construction,
+  property projection, object lookup, session state, and wire bytes remain
+  unchanged.
+- 2026-06-29 verification for the Outlook-surface GetProperties diagnostics
+  predicate split: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `should_log_outlook_surface_getprops_info` now lives in
+  `dispatch/diagnostics/property_responses.rs`; `cargo test -p lpe-exchange
+  getprops` passed 37 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,944 production-check lines. Current physical line
+  counts: `dispatch.rs` 22,368 lines,
+  `dispatch/diagnostics/property_responses.rs` 368 lines, and
+  `dispatch/diagnostics.rs` 1,357 lines.
+- 2026-06-29: Added `dispatch/diagnostics/probes.rs` and moved the
+  first-post-hierarchy probe summary helpers into it:
+  `summarize_first_post_hierarchy_probe`, `set_properties_probe_request`, and
+  the OpenFolder/GetProperties/SetProperties response-shape summary helpers.
+  The moved code only parses already-built ROP request/response buffers for
+  RCA/debug summaries and tests; Execute parsing, SetProperties mutation,
+  GetProperties response construction, property projection, session state, and
+  wire bytes remain unchanged.
+- 2026-06-29 verification for the first-post-hierarchy probe diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed the moved
+  definitions now live in `dispatch/diagnostics/probes.rs`; `cargo test -p
+  lpe-exchange first_post_hierarchy_probe` passed 2 focused tests; `cargo test
+  -p lpe-exchange getprops` passed 37 focused tests; `cargo test -p
+  lpe-exchange set_properties` passed 19 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 22,686
+  production-check lines. Current physical line counts: `dispatch.rs` 22,118
+  lines,
+  `dispatch/diagnostics/probes.rs` 253 lines, and
+  `dispatch/diagnostics.rs` 1,359 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/sync_upload.rs` with
+  `sync_checkpoint_scope`. The moved code only classifies an already-loaded
+  SyncConfigure checkpoint for RCA/debug logging; SyncConfigure parsing,
+  checkpoint selection, manifest construction, checkpoint persistence, and
+  wire bytes remain unchanged.
+- 2026-06-29 verification for the SyncConfigure checkpoint-scope diagnostics
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed
+  `sync_checkpoint_scope` now lives in `dispatch/diagnostics/sync_upload.rs`;
+  `cargo test -p lpe-exchange sync_configure` passed 2 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 22,667
+  production-check lines. Current physical line counts: `dispatch.rs` 22,100
+  lines,
+  `dispatch/diagnostics/sync_upload.rs` 35 lines, and
+  `dispatch/diagnostics.rs` 1,359 lines.
+- 2026-06-29: Added `dispatch/object_ids.rs` and moved the
+  LongTermId/IdFromLongTermId object-scope helpers into it:
+  `debug_object_scope_for_id` and
+  `rop_long_term_id_from_id_response_for_scope` with their private loaded-scope
+  predicates. This is a behavior-preserving object-identity dispatch split,
+  not a diagnostics move: the helpers still decide whether `RopLongTermIdFromId`
+  returns the canonical conversion response or `ecNotFound`. LongTermId source
+  decoding, response serialization, object preload planning, and session state
+  remain unchanged.
+- 2026-06-29 verification for the object-id dispatch split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/object_ids.rs`; `cargo test -p lpe-exchange long_term_id` passed 8
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,570 production-check lines. Current physical line
+  counts: `dispatch.rs` 22,007 lines and
+  `dispatch/object_ids.rs` 96 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/table_queries.rs` with the
+  Outlook bootstrap QueryRows diagnostics helpers:
+  `outlook_bootstrap_query_rows_phase` and
+  `outlook_bootstrap_query_rows_total_count`. The moved code only supplies
+  RCA/debug startup phase and total-row-count fields from already-open table
+  objects and already-loaded snapshots; QueryRows validation, row selection,
+  cursor movement, response construction, and wire bytes remain unchanged.
+- 2026-06-29 verification for the bootstrap QueryRows diagnostics split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/diagnostics/table_queries.rs`; `cargo test -p lpe-exchange
+  bootstrap_query_rows` passed 1 focused test; `cargo test -p lpe-exchange
+  query_rows` passed 52 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,474 production-check lines. Current physical line
+  counts: `dispatch.rs` 21,913 lines and
+  `dispatch/diagnostics/table_queries.rs` 1,125 lines.
+- 2026-06-29: Extended `dispatch/diagnostics/default_folders.rs` with
+  `default_folder_discovery_specs` and `default_folder_entry_id_property_name`.
+  The moved code only names default-folder discovery properties and supplies
+  the ordered folder/tag list used by RCA/debug default-folder contracts;
+  default-folder SetProperties validation, canonical entry-id projection,
+  alias recording, and wire responses remain unchanged.
+- 2026-06-29 verification for the default-folder diagnostics helper split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/diagnostics/default_folders.rs`; `cargo test -p
+  lpe-exchange default_folder` passed 22 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `dispatch.rs` at 22,431
+  production-check lines. Current physical line counts: `dispatch.rs` 21,872
+  lines and
+  `dispatch/diagnostics/default_folders.rs` 494 lines.
+- 2026-06-29: Added `dispatch/default_folders.rs` and moved the default-folder
+  SetProperties validation helpers into it:
+  `default_folder_entry_id_expected_folder_id`, `folder_set_property_problems`,
+  and the private hidden-configuration-folder message-class helper. This is a
+  behavior-preserving dispatch split: default-folder validation rules,
+  supported hidden folder writes, problem indexes/error codes, canonical
+  entry-id checks, and SetProperties response construction remain unchanged.
+- 2026-06-29 verification for the default-folder validation dispatch split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/default_folders.rs`; `cargo test -p lpe-exchange
+  default_folder` passed 22 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,291 production-check lines. Current physical line
+  counts: `dispatch.rs` 21,735 lines and `dispatch/default_folders.rs` 140
+  lines.
+- 2026-06-29: Extended `dispatch/default_folders.rs` with the default-folder
+  safe-value and alias helpers:
+  `default_folder_identification_safe_property_values`,
+  `record_default_folder_entry_id_aliases`,
+  `default_folder_identification_values_stripped_by_safe_values`, and
+  `strips_default_folder_identification_value_for_folder_id`. This is a
+  behavior-preserving dispatch split: root/Inbox default-folder identification
+  stripping, canonical indexed special-folder projection, alias recording, and
+  SetProperties response behavior remain unchanged.
+- 2026-06-29 verification for the default-folder safe-value dispatch split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/default_folders.rs`; `cargo test -p lpe-exchange
+  default_folder` passed 22 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 22,113 production-check lines. Current physical line
+  counts: `dispatch.rs` 21,567 lines and `dispatch/default_folders.rs` 311
+  lines.
+- 2026-06-29: Added `dispatch/search_folders.rs` and moved the search-folder
+  projection and search-criteria conversion helpers into it:
+  `search_folder_handle_properties`, `bounded_search_criteria_from_rop`,
+  `bounded_search_criteria_to_rop`, `builtin_search_criteria_to_rop`,
+  `builtin_search_role_for_folder_id`, and
+  `builtin_search_criteria_to_rop_for_folder_id`. This is a
+  behavior-preserving dispatch split: `RopSetSearchCriteria`,
+  `RopGetSearchCriteria`, canonical search-folder persistence, built-in
+  search-folder fallbacks, bounded JSON criteria, restriction conversion, row
+  output, and ROP response bytes remain unchanged.
+- 2026-06-29 verification for the search-folder dispatch split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/search_folders.rs`; `cargo test -p lpe-exchange search_criteria`
+  passed 22 focused tests; `cargo test -p lpe-exchange search_folder` passed
+  29 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 21,341 production-check lines. Current physical line
+  counts: `dispatch.rs` 20,832 lines and `dispatch/search_folders.rs` 738
+  lines.
+- 2026-06-29: Added `dispatch/property_tags.rs` and moved the primitive
+  property-id comparison helpers into it: `property_ids_match` and
+  `common_views_link_row_expected_default`. This is a behavior-preserving
+  helper split: Common Views default-column classification, table projection
+  support checks, diagnostics naming, and row output remain unchanged.
+- 2026-06-29 verification for the property-tag helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/property_tags.rs`; `cargo test -p lpe-exchange common_views`
+  passed 45 focused tests; `cargo test -p lpe-exchange tables` passed 194
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 21,327 production-check lines. Current physical line
+  counts: `dispatch.rs` 20,820 lines and `dispatch/property_tags.rs` 15
+  lines.
+- 2026-06-29: Added `dispatch/contacts.rs` and moved the Outlook contact
+  folder-surface classifiers into it: `mapi_folder_is_outlook_contacts_surface`
+  and `is_contact_link_timestamp_config`. This is a behavior-preserving helper
+  split: ContactLink timestamp configuration handling, contacts-surface debug
+  fields, associated-config GetProperties diagnostics, contact table output,
+  and contact mutation behavior remain unchanged. The `OscContactSources`
+  named-property probe remains local to NameToId request handling.
+- 2026-06-29 verification for the contact helper split: `cargo fmt --package
+  lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/contacts.rs`; `cargo test -p lpe-exchange contacts` passed 39
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 21,314 production-check lines. Current physical line
+  counts: `dispatch.rs` 20,809 lines and `dispatch/contacts.rs` 14 lines.
+- 2026-06-29: Extended `dispatch/folders.rs` with the collaboration-folder
+  open/projection helper `collaboration_folder_handle_properties`. This is a
+  behavior-preserving folder helper split: the projected property tag list,
+  collaboration folder property values, open-folder response behavior, and row
+  output remain unchanged.
+- 2026-06-29 verification for the collaboration-folder helper split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the moved definition now lives in
+  `dispatch/folders.rs`; `cargo test -p lpe-exchange folder_properties_for_open`
+  passed 7 focused tests; a broad `cargo test -p lpe-exchange folder` filter
+  exposed the existing order-sensitive hard-delete test, and
+  `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_deletes_trash_contents`
+  passed in isolation; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 21,267 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 20,763
+  lines and `dispatch/folders.rs` 120 lines.
+- 2026-06-29: Extended `dispatch/messages.rs` with the message follow-up copy
+  helpers: `copy_message_followup_property_values_for_request`,
+  `copy_all_message_followup_property_values_for_request`, and their private
+  property-tag classifier. This is a behavior-preserving message helper split:
+  Move/CopyMessages follow-up property copying, canonical storage-tag
+  normalization, missing-property problem reporting, supported property
+  application, and response behavior remain unchanged.
+- 2026-06-29 verification for the message follow-up helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/messages.rs`; `cargo test -p lpe-exchange copy_message` passed 5
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 21,115 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 20,614
+  lines and `dispatch/messages.rs` 214 lines.
+- 2026-06-29: Extended `dispatch/sync_import.rs` with sync-upload state
+  bookkeeping helpers: `upload_state_property_name`, `upload_state_marker_bit`,
+  `uploaded_state_has_delta_anchor`, `mark_uploaded_state_stream`,
+  `record_sync_upload_content_change`,
+  `record_sync_upload_content_checkpoint`, and
+  `record_sync_upload_hierarchy_change`. This is a behavior-preserving sync
+  helper split: uploaded MetaTag marker handling, delta-anchor detection,
+  content/hierarchy collector checkpoint state, uploaded change-number sets,
+  and sync response behavior remain unchanged.
+- 2026-06-29 verification for the sync-upload helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/sync_import.rs`; `cargo test -p lpe-exchange uploaded_state`
+  passed 2 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,979 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 20,485
+  lines and `dispatch/sync_import.rs` 636 lines.
+- 2026-06-29: Extended `dispatch/sync_import.rs` with the sync mailbox
+  projection helpers `sync_mailboxes_with_collaboration_counts` and its
+  private collaboration-folder hierarchy-scope predicate. This is a
+  behavior-preserving sync helper split: collaboration folder item counts,
+  hierarchy sync inclusion for calendar collaboration folders, remembered MAPI
+  identities, sync root scoping, and emitted sync manifests remain unchanged.
+- 2026-06-29 verification for the sync mailbox projection helper split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the moved definition now lives in
+  `dispatch/sync_import.rs`; `cargo test -p lpe-exchange sync` passed 218
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,920 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 20,428
+  lines and `dispatch/sync_import.rs` 693 lines.
+- 2026-06-29: Extended `dispatch/public_folders.rs` with the public-folder
+  open/projection helper `public_folder_handle_properties`. This is a
+  behavior-preserving public-folder helper split: the projected property tag
+  list, canonical public-folder property values, public-folder open response
+  behavior, and public-folder row output remain unchanged.
+- 2026-06-29 verification for the public-folder helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definition now lives in
+  `dispatch/public_folders.rs`; `cargo test -p lpe-exchange public_folder`
+  passed 74 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,882 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 20,391
+  lines and `dispatch/public_folders.rs` 86 lines.
+- 2026-06-29: Extended `dispatch/folders.rs` with folder parent/trash
+  relationship helpers `mailbox_parent_folder_id_for_dispatch` and
+  `mailbox_is_trash_or_descendant`. This is a behavior-preserving folder
+  dispatch split: folder move parent resolution, collaboration calendar parent
+  mapping, trash-descendant checks for delete/sync-import paths, canonical
+  folder move/delete behavior, and ROP responses remain unchanged.
+- 2026-06-29 verification for the folder parent/trash helper split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/folders.rs`; `cargo test -p lpe-exchange folder` passed 406
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,853 production-check lines. Current physical line
+  counts: `dispatch.rs` 20,364 lines and `dispatch/folders.rs` 150 lines.
+- 2026-06-29: Extended `dispatch/folders.rs` with the open-folder snapshot
+  count helpers `snapshot_message_counts_for_folder`,
+  `snapshot_email_belongs_to_folder`, and `email_role_folder_id`. This is a
+  behavior-preserving folder projection split: folder content/unread count
+  calculation for unloaded snapshots, role-backed mailbox-state matching,
+  associated-content count projection, and open-folder response behavior remain
+  unchanged.
+- 2026-06-29 verification for the open-folder snapshot count helper split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/folders.rs`; `cargo test -p lpe-exchange
+  folder_properties_for_open` passed 7 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,827 production-check lines. Current physical line counts:
+  `dispatch.rs` 20,341 lines and `dispatch/folders.rs` 173 lines.
+- 2026-06-29: Extended `dispatch/folders.rs` with open-folder property
+  projection helpers `folder_properties_for_open` and
+  `folder_properties_for_open_from_mailboxes`. This is a behavior-preserving
+  folder projection split: mailbox-backed folder properties, collaboration
+  folder projection, public-folder projection, search-folder projection,
+  advertised special-folder fallbacks, persisted `PidTagExtendedFolderFlags`,
+  IPM subtree OST identity lookup, associated-content count projection, and
+  open-folder response behavior remain unchanged.
+- 2026-06-29 verification for the open-folder property projection split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/folders.rs`; `cargo test -p lpe-exchange
+  folder_properties_for_open` passed 7 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,661 production-check lines. Current physical line counts:
+  `dispatch.rs` 20,177 lines and `dispatch/folders.rs` 337 lines.
+- 2026-06-29: Extended `dispatch/folders.rs` with mailbox folder hard-delete
+  helpers `hard_delete_folder_contents` and
+  `hard_delete_mailbox_tree_contents`. This is a behavior-preserving folder
+  mutation split: canonical mailbox-message deletion, subtree mailbox
+  discovery, delete-right checks, partial-completion accounting, RCA/debug log
+  fields, purge metrics, changed-folder tracking, audit actions, and ROP
+  response callers remain unchanged.
+- 2026-06-29 verification for the mailbox folder hard-delete helper split:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the moved definitions now
+  live in `dispatch/folders.rs`; `cargo test -p lpe-exchange empty_folder`
+  passed 15 focused tests; `cargo test -p lpe-exchange hard_delete` passed 11
+  focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,465 production-check lines. Current physical line
+  counts: `dispatch.rs` 19,990 lines and `dispatch/folders.rs` 524 lines.
+- 2026-06-29: Extended `dispatch/public_folders.rs` with public-folder
+  mutation helpers `hard_delete_public_folder_contents` and
+  `copy_public_folder_tree_for_mapi`. This is a behavior-preserving
+  public-folder dispatch split: canonical public-folder item deletion,
+  tree-copy traversal, copied folder and item fields, audit actions, RCA/debug
+  log fields, purge metrics, partial-completion handling, and ROP response
+  callers remain unchanged.
+- 2026-06-29 verification for the public-folder mutation helper split: `cargo
+  fmt --package lpe-exchange`; `rg` confirmed the moved definitions now live in
+  `dispatch/public_folders.rs`; `cargo test -p lpe-exchange public_folder`
+  passed 74 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,327 production-check lines. Current physical line
+  counts: `dispatch.rs` 19,856 lines and `dispatch/public_folders.rs` 220
+  lines.
+- 2026-06-29: Added `dispatch/recoverable_items.rs` and moved
+  `hard_delete_recoverable_folder_contents` into it. This is a
+  behavior-preserving recoverable-items dispatch split: recoverable folder
+  validation, canonical recoverable item purge, partial-completion tracking,
+  changed-folder reporting, audit action/subject values, and EmptyFolder ROP
+  response callers remain unchanged.
+- 2026-06-29 verification for the recoverable-items dispatch split: `cargo fmt
+  --package lpe-exchange`; `rg` confirmed the moved definition now lives in
+  `dispatch/recoverable_items.rs`; `cargo test -p lpe-exchange recoverable`
+  passed 14 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reported
+  `dispatch.rs` at 20,293 production-check lines; `git diff --check` exited 0
+  with CRLF warnings only. Current physical line counts: `dispatch.rs` 19,823
+  lines and `dispatch/recoverable_items.rs` 36 lines.
