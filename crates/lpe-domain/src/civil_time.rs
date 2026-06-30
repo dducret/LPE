@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UtcDateTime {
     pub year: i64,
@@ -48,6 +50,43 @@ pub fn utc_from_unix_seconds(total_seconds: u64) -> UtcDateTime {
     }
 }
 
+pub const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: u64 = 11_644_473_600;
+pub const WINDOWS_FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
+
+pub fn windows_filetime_from_unix_seconds(unix_seconds: u64) -> u64 {
+    unix_seconds
+        .saturating_add(WINDOWS_UNIX_EPOCH_OFFSET_SECONDS)
+        .saturating_mul(WINDOWS_FILETIME_TICKS_PER_SECOND)
+}
+
+pub fn windows_filetime_from_signed_unix_seconds(unix_seconds: i64) -> u64 {
+    unix_seconds
+        .saturating_add(WINDOWS_UNIX_EPOCH_OFFSET_SECONDS as i64)
+        .max(0) as u64
+        * WINDOWS_FILETIME_TICKS_PER_SECOND
+}
+
+pub fn unix_seconds_from_windows_filetime(filetime: u64) -> Option<u64> {
+    filetime
+        .checked_div(WINDOWS_FILETIME_TICKS_PER_SECOND)?
+        .checked_sub(WINDOWS_UNIX_EPOCH_OFFSET_SECONDS)
+}
+
+pub fn current_windows_filetime() -> u64 {
+    let unix_ticks = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| {
+            duration
+                .as_secs()
+                .saturating_mul(WINDOWS_FILETIME_TICKS_PER_SECOND)
+                .saturating_add(u64::from(duration.subsec_nanos() / 100))
+        })
+        .unwrap_or(0);
+    WINDOWS_UNIX_EPOCH_OFFSET_SECONDS
+        .saturating_mul(WINDOWS_FILETIME_TICKS_PER_SECOND)
+        .saturating_add(unix_ticks)
+}
+
 pub fn weekday_abbrev_from_unix_days(days_since_epoch: i64) -> &'static str {
     const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     WEEKDAYS[days_since_epoch.rem_euclid(7) as usize]
@@ -91,5 +130,22 @@ mod tests {
         assert_eq!(date.second, 20);
         assert_eq!(weekday_abbrev_from_unix_days(date.unix_days), "Sat");
         assert_eq!(month_abbrev(date.month), Some("May"));
+    }
+
+    #[test]
+    fn windows_filetime_round_trips_unix_seconds() {
+        let filetime = windows_filetime_from_unix_seconds(1_780_144_640);
+        assert_eq!(
+            unix_seconds_from_windows_filetime(filetime),
+            Some(1_780_144_640)
+        );
+        assert_eq!(
+            windows_filetime_from_unix_seconds(0),
+            WINDOWS_UNIX_EPOCH_OFFSET_SECONDS * WINDOWS_FILETIME_TICKS_PER_SECOND
+        );
+        assert_eq!(
+            windows_filetime_from_signed_unix_seconds(-1),
+            116444735990000000
+        );
     }
 }

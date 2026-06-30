@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
+
 pub(super) fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
     let size = u16::from_le_bytes(request.payload.get(..2)?.try_into().ok()?) as usize;
     let bytes = request.payload.get(2..2 + size)?;
@@ -52,6 +54,628 @@ pub(super) fn commit_fast_transfer_destination_buffer(
     {
         *buffer = full_buffer;
     }
+}
+
+pub(super) fn append_tell_version_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    match input_object(session, handle_slots, request) {
+        Some(MapiObject::SynchronizationSource { .. })
+        | Some(MapiObject::SynchronizationCollector { .. })
+        | Some(MapiObject::FastTransferDestination { .. }) => {
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        _ => responses.extend_from_slice(&rop_error_response(
+            0x86,
+            request.response_handle_index(),
+            0x8004_0102,
+        )),
+    }
+}
+
+pub(super) fn append_set_local_replica_midset_deleted_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    match input_object_mut(session, handle_slots, request) {
+        Some(MapiObject::SynchronizationSource {
+            initial_state,
+            state,
+            ..
+        }) => {
+            initial_state.extend_from_slice(request.local_replica_midset_deleted());
+            state.extend_from_slice(request.local_replica_midset_deleted());
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        Some(MapiObject::SynchronizationCollector { state, .. }) => {
+            state.extend_from_slice(request.local_replica_midset_deleted());
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        _ => responses.extend_from_slice(&rop_error_response(
+            0x93,
+            request.response_handle_index(),
+            0x8004_0102,
+        )),
+    }
+}
+
+pub(super) fn append_upload_state_stream_begin_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailbox_email: &str,
+    request_id: &str,
+    responses: &mut Vec<u8>,
+) {
+    match input_object_mut(session, handle_slots, request) {
+        Some(MapiObject::SynchronizationSource {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            sync_type,
+            state_upload_property_tag,
+            state_upload_buffer,
+            ..
+        }) => {
+            let property_tag = request.upload_state_property_tag().unwrap_or_default();
+            let declared_bytes = request.upload_state_transfer_size().unwrap_or_default();
+            *state_upload_property_tag = Some(property_tag);
+            state_upload_buffer.clear();
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %mailbox_email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_rop_id = "0x75",
+                sync_context_kind = "source",
+                folder_id = format_args!("0x{:016x}", *folder_id),
+                folder_role = debug_role_for_folder_id(*folder_id),
+                folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                sync_type = format_args!("0x{:02x}", *sync_type),
+                checkpoint_kind = checkpoint_kind.as_str(),
+                checkpoint_mailbox_id = (*mailbox_id)
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                upload_state_property_name = upload_state_property_name(property_tag),
+                upload_state_declared_bytes = declared_bytes,
+                upload_state_empty_declared = declared_bytes == 0,
+                "rca debug mapi sync upload state begin"
+            );
+            responses.extend_from_slice(&rop_upload_state_success_response(request));
+        }
+        Some(MapiObject::SynchronizationCollector {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            sync_type,
+            state_upload_property_tag,
+            state_upload_buffer,
+            client_state_uploaded_bytes,
+            client_state_uploaded_marker_mask,
+            ..
+        }) => {
+            let property_tag = request.upload_state_property_tag().unwrap_or_default();
+            let declared_bytes = request.upload_state_transfer_size().unwrap_or_default();
+            *state_upload_property_tag = Some(property_tag);
+            state_upload_buffer.clear();
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %mailbox_email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_rop_id = "0x75",
+                sync_context_kind = "collector",
+                folder_id = format_args!("0x{:016x}", *folder_id),
+                folder_role = debug_role_for_folder_id(*folder_id),
+                folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                sync_type = format_args!("0x{:02x}", *sync_type),
+                checkpoint_kind = checkpoint_kind.as_str(),
+                checkpoint_mailbox_id = (*mailbox_id)
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                upload_state_property_name = upload_state_property_name(property_tag),
+                upload_state_declared_bytes = declared_bytes,
+                upload_state_empty_declared = declared_bytes == 0,
+                upload_state_client_bytes = *client_state_uploaded_bytes,
+                upload_state_marker_mask =
+                    format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
+                "rca debug mapi sync upload state begin"
+            );
+            responses.extend_from_slice(&rop_upload_state_success_response(request));
+        }
+        _ => responses.extend_from_slice(&rop_error_response(
+            0x75,
+            request.response_handle_index(),
+            0x8004_0102,
+        )),
+    }
+}
+
+pub(super) fn append_upload_state_stream_continue_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailbox_email: &str,
+    request_id: &str,
+    responses: &mut Vec<u8>,
+) {
+    match input_object_mut(session, handle_slots, request) {
+        Some(MapiObject::SynchronizationSource {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            sync_type,
+            state_upload_buffer,
+            ..
+        }) => {
+            let stream_data = request.stream_data();
+            state_upload_buffer.extend_from_slice(stream_data);
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %mailbox_email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_rop_id = "0x76",
+                sync_context_kind = "source",
+                folder_id = format_args!("0x{:016x}", *folder_id),
+                folder_role = debug_role_for_folder_id(*folder_id),
+                folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                sync_type = format_args!("0x{:02x}", *sync_type),
+                checkpoint_kind = checkpoint_kind.as_str(),
+                checkpoint_mailbox_id = (*mailbox_id)
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                upload_state_chunk_bytes = stream_data.len(),
+                upload_state_chunk_preview = %hex_preview(stream_data, 16),
+                upload_state_buffer_bytes = state_upload_buffer.len(),
+                "rca debug mapi sync upload state continue"
+            );
+            responses.extend_from_slice(&rop_upload_state_success_response(request));
+        }
+        Some(MapiObject::SynchronizationCollector {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            sync_type,
+            state_upload_buffer,
+            client_state_uploaded_bytes,
+            client_state_uploaded_marker_mask,
+            ..
+        }) => {
+            let stream_data = request.stream_data();
+            state_upload_buffer.extend_from_slice(stream_data);
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %mailbox_email,
+                request_type = "Execute",
+                mapi_request_id = request_id,
+                request_rop_id = "0x76",
+                sync_context_kind = "collector",
+                folder_id = format_args!("0x{:016x}", *folder_id),
+                folder_role = debug_role_for_folder_id(*folder_id),
+                folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                sync_type = format_args!("0x{:02x}", *sync_type),
+                checkpoint_kind = checkpoint_kind.as_str(),
+                checkpoint_mailbox_id = (*mailbox_id)
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                upload_state_chunk_bytes = stream_data.len(),
+                upload_state_chunk_preview = %hex_preview(stream_data, 16),
+                upload_state_buffer_bytes = state_upload_buffer.len(),
+                upload_state_client_bytes = *client_state_uploaded_bytes,
+                upload_state_marker_mask =
+                    format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
+                "rca debug mapi sync upload state continue"
+            );
+            responses.extend_from_slice(&rop_upload_state_success_response(request));
+        }
+        _ => responses.extend_from_slice(&rop_error_response(
+            0x76,
+            request.response_handle_index(),
+            0x8004_0102,
+        )),
+    }
+}
+
+pub(super) fn append_get_local_replica_ids_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    let (first_global_counter, _) = mapi_mailstore::local_replica_id_range(
+        principal.account_id,
+        request.local_replica_id_count(),
+        session.next_local_replica_sequence,
+    );
+    session.next_local_replica_sequence =
+        session.next_local_replica_sequence.saturating_add(1).max(1);
+    responses.extend_from_slice(&rop_get_local_replica_ids_response(
+        request,
+        first_global_counter,
+    ));
+}
+
+pub(super) fn append_fast_transfer_source_copy_messages_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let Some(folder_id) =
+        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x4B,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let requested_ids = request.fast_transfer_message_ids();
+    let mut selected = emails_for_folder(folder_id, mailboxes, emails)
+        .into_iter()
+        .filter(|email| requested_ids.contains(&mapi_message_id(email)))
+        .cloned()
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| left.id.cmp(&right.id));
+    let sync_attachment_facts = sync_attachment_facts_for(folder_id, &selected, snapshot);
+    let transfer_buffer = mapi_mailstore::fast_transfer_message_list_buffer_with_attachments(
+        &selected,
+        &sync_attachment_facts,
+    );
+    let handle = session.allocate_output_handle(
+        request.output_handle_index,
+        MapiObject::SynchronizationSource {
+            folder_id,
+            mailbox_id: None,
+            checkpoint_kind: MapiCheckpointKind::Content,
+            checkpoint_change_sequence: 0,
+            checkpoint_modseq: 1,
+            checkpoint_store_allowed: true,
+            checkpoint_skip_reason: "",
+            checkpoint_zero_delta: false,
+            sync_type: 0,
+            initial_state: Vec::new(),
+            state: Vec::new(),
+            state_upload_property_tag: None,
+            state_upload_buffer: Vec::new(),
+            client_state_uploaded_bytes: 0,
+            client_state_uploaded_marker_mask: 0,
+            incremental_transfer_buffer: None,
+            transfer_buffer,
+            transfer_position: 0,
+        },
+    );
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&rop_fast_transfer_source_copy_response(request));
+    output_handles.push(handle);
+}
+
+pub(super) fn append_fast_transfer_source_copy_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    principal_account_id: Uuid,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let Some(object) = input_object(session, handle_slots, request).cloned() else {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
+        request.rop_id,
+        &object,
+        principal_account_id,
+        mailboxes,
+        emails,
+        snapshot,
+    ) else {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let handle = session.allocate_output_handle(
+        request.output_handle_index,
+        MapiObject::SynchronizationSource {
+            folder_id,
+            mailbox_id: None,
+            checkpoint_kind: MapiCheckpointKind::Content,
+            checkpoint_change_sequence: 0,
+            checkpoint_modseq: 1,
+            checkpoint_store_allowed: true,
+            checkpoint_skip_reason: "",
+            checkpoint_zero_delta: false,
+            sync_type: 0,
+            initial_state: Vec::new(),
+            state: Vec::new(),
+            state_upload_property_tag: None,
+            state_upload_buffer: Vec::new(),
+            client_state_uploaded_bytes: 0,
+            client_state_uploaded_marker_mask: 0,
+            incremental_transfer_buffer: None,
+            transfer_buffer,
+            transfer_position: 0,
+        },
+    );
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&rop_fast_transfer_source_copy_response(request));
+    output_handles.push(handle);
+}
+
+pub(super) fn append_synchronization_get_transfer_state_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let source_object = input_object(session, handle_slots, request);
+    let Some((
+        folder_id,
+        mailbox_id,
+        checkpoint_kind,
+        checkpoint_change_sequence,
+        checkpoint_modseq,
+        checkpoint_store_allowed,
+        checkpoint_skip_reason,
+        sync_type,
+        state,
+    )) = synchronization_context_state(source_object)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x82,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let transfer_buffer = if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
+        let sync_mailboxes = sync_mailboxes_for_excluding_deleted(
+            folder_id,
+            sync_type,
+            mailboxes,
+            &session.deleted_advertised_special_folders,
+        );
+        let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+        let sync_attachment_facts = sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+        mapi_mailstore::sync_state_token_with_attachments(
+            sync_type,
+            folder_id,
+            &sync_mailboxes,
+            &sync_emails,
+            &sync_attachment_facts,
+        )
+    } else {
+        state
+    };
+    let (
+        checkpoint_store_allowed,
+        checkpoint_skip_reason,
+        client_state_uploaded_bytes,
+        client_state_uploaded_marker_mask,
+    ) = match source_object {
+        Some(MapiObject::SynchronizationCollector {
+            client_state_uploaded_bytes,
+            client_state_uploaded_marker_mask,
+            ..
+        }) if *client_state_uploaded_bytes > 0
+            && !uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask) =>
+        {
+            (
+                false,
+                "uploaded_client_state_transfer",
+                *client_state_uploaded_bytes,
+                *client_state_uploaded_marker_mask,
+            )
+        }
+        Some(MapiObject::SynchronizationCollector {
+            client_state_uploaded_bytes,
+            client_state_uploaded_marker_mask,
+            ..
+        }) => (
+            checkpoint_store_allowed,
+            checkpoint_skip_reason,
+            *client_state_uploaded_bytes,
+            *client_state_uploaded_marker_mask,
+        ),
+        _ => (checkpoint_store_allowed, checkpoint_skip_reason, 0, 0),
+    };
+    let handle = session.allocate_output_handle(
+        request.output_handle_index,
+        MapiObject::SynchronizationSource {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            checkpoint_change_sequence,
+            checkpoint_modseq,
+            checkpoint_store_allowed,
+            checkpoint_skip_reason,
+            checkpoint_zero_delta: false,
+            sync_type,
+            initial_state: transfer_buffer.clone(),
+            state: transfer_buffer.clone(),
+            state_upload_property_tag: None,
+            state_upload_buffer: Vec::new(),
+            client_state_uploaded_bytes,
+            client_state_uploaded_marker_mask,
+            incremental_transfer_buffer: None,
+            transfer_buffer,
+            transfer_position: 0,
+        },
+    );
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&rop_synchronization_get_transfer_state_response(request));
+    output_handles.push(handle);
+}
+
+pub(super) fn append_fast_transfer_destination_configure_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let Some(target_handle) = input_handle(handle_slots, request) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x53,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let Some(folder_id) = session
+        .handles
+        .get(&target_handle)
+        .and_then(fast_transfer_destination_target_folder_id)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x53,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let handle = session.allocate_output_handle(
+        request.output_handle_index,
+        MapiObject::FastTransferDestination {
+            folder_id,
+            target_handle,
+            buffer: Vec::new(),
+        },
+    );
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&rop_simple_success_response(request));
+    output_handles.push(handle);
+}
+
+pub(super) fn append_synchronization_open_collector_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let Some(folder_id) =
+        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x7E,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let handle = session.allocate_output_handle(
+        request.output_handle_index,
+        MapiObject::SynchronizationCollector {
+            folder_id,
+            mailbox_id: sync_checkpoint_mailbox_id(folder_id, request.sync_type(), mailboxes),
+            checkpoint_kind: sync_checkpoint_kind(request.sync_type()),
+            sync_type: request.sync_type(),
+            state: Vec::new(),
+            state_upload_property_tag: None,
+            state_upload_buffer: Vec::new(),
+            client_state_uploaded_bytes: 0,
+            client_state_uploaded_marker_mask: 0,
+            uploaded_object_ids: Vec::new(),
+            uploaded_normal_change_numbers: Vec::new(),
+            uploaded_fai_change_numbers: Vec::new(),
+            uploaded_read_change_numbers: Vec::new(),
+        },
+    );
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&rop_simple_success_response(request));
+    output_handles.push(handle);
+}
+
+pub(super) fn append_fast_transfer_destination_put_buffer_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool {
+    if first_fast_transfer_marker(request).is_some() {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return true;
+    }
+    let upload_data = request.fast_transfer_upload_data().to_vec();
+    let Some((target_handle, full_buffer)) =
+        staged_fast_transfer_destination_buffer(session, handle_slots, request)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return false;
+    };
+    let property_values = match fast_transfer_property_values(&full_buffer) {
+        Ok(values) => values,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return true;
+        }
+    };
+    if !property_values.is_empty()
+        && apply_fast_transfer_destination_properties(session, target_handle, property_values)
+            .is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return false;
+    }
+    commit_fast_transfer_destination_buffer(session, handle_slots, request, full_buffer);
+    responses.extend_from_slice(&rop_fast_transfer_put_buffer_response(
+        request,
+        upload_data.len(),
+    ));
+    false
 }
 
 pub(super) fn apply_fast_transfer_destination_properties(
@@ -163,6 +787,15 @@ pub(super) fn imported_property_source_key_global_counter(
         })
 }
 
+pub(super) fn imported_message_source_key(properties: &HashMap<u32, MapiValue>) -> Option<Vec<u8>> {
+    let source_key = match properties.get(&PID_TAG_SOURCE_KEY)? {
+        MapiValue::Binary(bytes) => bytes,
+        _ => return None,
+    };
+    (source_key.len() == 22 && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
+        .then(|| source_key.clone())
+}
+
 pub(super) fn import_message_change_conflicts_with_current_pcl(
     properties: &[(u32, MapiValue)],
     current_change_number: u64,
@@ -233,6 +866,124 @@ pub(super) fn import_source_key_identity_scope(counter: u64) -> &'static str {
         "out_of_lpe_persisted_range"
     } else {
         "persistable_dynamic"
+    }
+}
+
+pub(super) fn pending_message_is_sync_metadata_only(
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+) -> bool {
+    !properties.is_empty()
+        && recipients.is_empty()
+        && properties.keys().all(|tag| {
+            matches!(
+                *tag,
+                PID_TAG_SOURCE_KEY
+                    | PID_TAG_LAST_MODIFICATION_TIME
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+            )
+        })
+}
+
+pub(super) fn pending_message_is_trash_sync_artifact(
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+) -> bool {
+    folder_id == TRASH_FOLDER_ID
+        && !properties.is_empty()
+        && recipients.is_empty()
+        && properties.keys().any(|tag| {
+            matches!(
+                *tag,
+                PID_TAG_LAST_MODIFICATION_TIME
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+            )
+        })
+        && imported_message_source_key(properties)
+            .as_deref()
+            .and_then(source_key_global_counter)
+            .is_some_and(|counter| {
+                import_source_key_identity_scope(counter) == "out_of_lpe_persisted_range"
+            })
+}
+
+pub(super) fn imported_hierarchy_parent_mailbox_id(
+    hierarchy_values: &[(u32, MapiValue)],
+    collector_folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> Option<Uuid> {
+    hierarchy_values
+        .iter()
+        .find_map(|(tag, value)| match (tag, value) {
+            (tag, MapiValue::Binary(bytes)) if *tag == PID_TAG_PARENT_SOURCE_KEY => {
+                Some(bytes.as_slice())
+            }
+            _ => None,
+        })
+        .and_then(|parent_source_key| {
+            mailboxes
+                .iter()
+                .find(|mailbox| {
+                    mapi_mailstore::source_key_for_mailbox_folder(mailbox) == parent_source_key
+                })
+                .map(|mailbox| mailbox.id)
+        })
+        .or_else(|| {
+            mailboxes
+                .iter()
+                .find(|mailbox| mapi_folder_id(mailbox) == collector_folder_id)
+                .map(|mailbox| mailbox.id)
+        })
+}
+
+pub(super) fn hierarchy_checkpoint_status(
+    checkpoint_kind: MapiCheckpointKind,
+    folder_id: u64,
+    checkpoint: &MapiSyncCheckpoint,
+) -> &'static str {
+    if checkpoint_kind != MapiCheckpointKind::Hierarchy {
+        return "usable";
+    }
+    if checkpoint
+        .cursor_json
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        != Some("emsmdb-ics-download")
+    {
+        return "stale-source";
+    }
+    if checkpoint
+        .cursor_json
+        .get("hierarchySyncVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(HIERARCHY_SYNC_CURSOR_VERSION)
+    {
+        return "stale-version";
+    }
+    if checkpoint
+        .cursor_json
+        .get("syncRootFolderId")
+        .and_then(serde_json::Value::as_u64)
+        != Some(folder_id)
+    {
+        return "stale-root";
+    }
+    "usable"
+}
+
+pub(super) fn sync_property_filter_mode(
+    sync_flags: u16,
+    requested_property_tags: &[u32],
+) -> &'static str {
+    if requested_property_tags.is_empty() {
+        "none"
+    } else if sync_flags & 0x0080 == 0 {
+        "exclude"
+    } else {
+        "only-specified"
     }
 }
 

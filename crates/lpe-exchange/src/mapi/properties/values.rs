@@ -1,4 +1,5 @@
 use super::*;
+use lpe_domain::crypto::hex_lower;
 
 pub(in crate::mapi) fn mapi_properties_to_json(
     properties: &HashMap<u32, MapiValue>,
@@ -125,7 +126,7 @@ fn json_hex_values(value: &serde_json::Value) -> Option<Vec<Vec<u8>>> {
 }
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    hex_lower(bytes)
 }
 
 pub(super) fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {

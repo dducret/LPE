@@ -1,5 +1,47 @@
 use super::*;
 
+pub(super) fn apply_outlook_smart_input_variant_before_query_rows(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    request_rop_names: &str,
+) -> Option<String> {
+    if session.outlook_smart_input_variant != "fai_cursor_reset_before_query_rows" {
+        return None;
+    }
+    let input_index = request.input_handle_index().unwrap_or(0);
+    let handle = input_handle(handle_slots, request);
+    let Some(handle_value) = handle else {
+        return None;
+    };
+    let Some(mut object) = session.handles.remove(&handle_value) else {
+        return None;
+    };
+    let applied = match &mut object {
+        MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            position,
+            ..
+        } if *folder_id == INBOX_FOLDER_ID && *associated => {
+            let previous_position = *position;
+            *position = 0;
+            Some((*folder_id, previous_position))
+        }
+        _ => None,
+    };
+    session.handles.insert(handle_value, object);
+    let Some((folder_id, previous_position)) = applied else {
+        return None;
+    };
+    session.outlook_smart_input_variant_applied = true;
+    Some(format!(
+        "variant=fai_cursor_reset_before_query_rows;request_id={request_id};request_rops={request_rop_names};input_index={input_index};handle={};folder=0x{folder_id:016x};associated=true;previous_position={previous_position};new_position=0",
+        format_optional_debug_handle(handle)
+    ))
+}
+
 pub(super) fn hierarchy_table_object(
     folder_id: u64,
     deleted_advertised_special_folders: HashSet<u64>,
@@ -914,6 +956,41 @@ pub(super) fn get_receive_folder_table_response(request: &RopRequest) -> Vec<u8>
     rop_get_receive_folder_table_response(request)
 }
 
+pub(super) fn append_receive_folder_table_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    has_private_logon_handle: bool,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    if !has_private_logon_handle {
+        responses.extend_from_slice(&rop_error_response(
+            0x68,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x68",
+        row_count = 3u32,
+        first_message_class = "IPM.Appointment",
+        first_folder_id = format!("0x{CALENDAR_FOLDER_ID:016x}"),
+        calendar_row_present = true,
+        message_class_wire_type = "String8",
+        property_row_wire_shape =
+            "PidTagFolderId,PidTagMessageClass,PidTagLastModificationTime",
+        message = "rca debug mapi receive folder table"
+    );
+    responses.extend_from_slice(&get_receive_folder_table_response(request));
+    session.record_receive_folder_verification_passed();
+}
+
 pub(super) fn get_permissions_table_response(request: &RopRequest) -> Vec<u8> {
     rop_get_permissions_table_response(request)
 }
@@ -951,6 +1028,16 @@ pub(super) fn free_bookmark_response(
     rop_free_bookmark_response(request, object)
 }
 
+pub(super) fn append_free_bookmark_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    let object = input_object_mut(session, handle_slots, request);
+    responses.extend_from_slice(&free_bookmark_response(request, object));
+}
+
 pub(super) fn query_columns_all_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -982,6 +1069,163 @@ pub(super) fn get_search_criteria_response(
 
 pub(super) fn get_status_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
     rop_get_status_response(request, object)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn append_table_control_response(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetStatus) => responses.extend_from_slice(&get_status_response(
+            request,
+            input_object(session, handle_slots, request),
+        )),
+        Some(RopId::QueryPosition) => {
+            let calendar_normal_query_position_context =
+                match input_object(session, handle_slots, request) {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        restriction,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
+                    "handle={};input_index={};position_before={};columns={};sort={};restriction={}",
+                    format_optional_debug_handle(input_handle(handle_slots, request)),
+                    request.input_handle_index().unwrap_or(0),
+                    position,
+                    format_debug_property_tags(columns),
+                    format_debug_sort_orders(sort_orders),
+                    format_debug_restriction_option(restriction.as_ref())
+                )),
+                    _ => None,
+                };
+            let response = query_position_response(
+                request,
+                input_object(session, handle_slots, request),
+                mailboxes,
+                emails,
+                snapshot,
+                principal.account_id,
+            );
+            log_mapi_query_position_debug(
+                principal,
+                request_id,
+                request,
+                input_object(session, handle_slots, request),
+                &response,
+                mailboxes,
+                emails,
+                snapshot,
+            );
+            if let Some(context) = calendar_normal_query_position_context {
+                let position = response
+                    .get(6..10)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let row_count = response
+                    .get(10..14)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                session.record_outlook_view_failure_trace_event(format!(
+                    "calendar_normal_query_position:{context};response_position={position};response_row_count={row_count}"
+                ));
+            }
+            responses.extend_from_slice(&response);
+        }
+        Some(RopId::SeekRow) => {
+            let before_position =
+                input_object(session, handle_slots, request).and_then(table_position);
+            let selected_named_property_context = format_contents_table_named_property_context(
+                session,
+                input_object(session, handle_slots, request),
+            );
+            let response = seek_row_response(
+                request,
+                input_object_mut(session, handle_slots, request),
+                mailboxes,
+                emails,
+                snapshot,
+                principal.account_id,
+            );
+            log_outlook_contents_table_seek_row(
+                principal,
+                request,
+                input_object(session, handle_slots, request),
+                &selected_named_property_context,
+                snapshot,
+                before_position,
+                &response,
+            );
+            responses.extend_from_slice(&response);
+        }
+        Some(RopId::SeekRowBookmark) => responses.extend_from_slice(&seek_row_bookmark_response(
+            request,
+            input_object_mut(session, handle_slots, request),
+            mailboxes,
+            emails,
+            snapshot,
+            principal.account_id,
+        )),
+        Some(RopId::SeekRowFractional) => {
+            responses.extend_from_slice(&seek_row_fractional_response(
+                request,
+                input_object_mut(session, handle_slots, request),
+                mailboxes,
+                emails,
+                snapshot,
+                principal.account_id,
+            ))
+        }
+        Some(RopId::CreateBookmark) => responses.extend_from_slice(&create_bookmark_response(
+            request,
+            input_object_mut(session, handle_slots, request),
+            mailboxes,
+            emails,
+            snapshot,
+            principal.account_id,
+        )),
+        Some(RopId::QueryColumnsAll) => responses.extend_from_slice(&query_columns_all_response(
+            request,
+            input_object(session, handle_slots, request),
+            snapshot,
+        )),
+        Some(RopId::ExpandRow) => responses.extend_from_slice(&expand_row_response(
+            request,
+            input_object_mut(session, handle_slots, request),
+            mailboxes,
+            emails,
+            snapshot,
+        )),
+        Some(RopId::CollapseRow) => responses.extend_from_slice(&collapse_row_response(
+            request,
+            input_object_mut(session, handle_slots, request),
+            mailboxes,
+            emails,
+            snapshot,
+        )),
+        Some(RopId::GetCollapseState) => responses.extend_from_slice(&get_collapse_state_response(
+            request,
+            input_object(session, handle_slots, request),
+        )),
+        Some(RopId::SetCollapseState) => responses.extend_from_slice(&set_collapse_state_response(
+            request,
+            input_object_mut(session, handle_slots, request),
+        )),
+        _ => {}
+    }
 }
 
 pub(super) fn seek_row_response(

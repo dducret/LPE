@@ -214,6 +214,14 @@ pub(super) fn abort_response(request: &RopRequest, input_object: Option<&MapiObj
     rop_error_response(0x38, request.response_handle_index(), result)
 }
 
+pub(super) fn append_abort_response(
+    request: &RopRequest,
+    input_object: Option<&MapiObject>,
+    responses: &mut Vec<u8>,
+) {
+    responses.extend_from_slice(&abort_response(request, input_object));
+}
+
 pub(super) fn progress_response(
     request: &RopRequest,
     input_object: Option<&MapiObject>,
@@ -231,11 +239,53 @@ pub(super) fn progress_response(
     rop_error_response(0x50, request.response_handle_index(), result)
 }
 
+pub(super) fn append_progress_response(
+    request: &RopRequest,
+    input_object: Option<&MapiObject>,
+    responses: &mut Vec<u8>,
+) {
+    responses.extend_from_slice(&progress_response(request, input_object));
+}
+
 pub(super) fn reset_table_response(request: &RopRequest, reset_succeeded: bool) -> Vec<u8> {
     if reset_succeeded {
         rop_reset_table_response(request)
     } else {
         rop_error_response(0x81, request.response_handle_index(), 0x8004_0102)
+    }
+}
+
+pub(super) fn append_reset_table_response(
+    request: &RopRequest,
+    reset_succeeded: bool,
+    responses: &mut Vec<u8>,
+) {
+    responses.extend_from_slice(&reset_table_response(request, reset_succeeded));
+}
+
+pub(super) fn append_execute_status_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::Abort) => append_abort_response(
+            request,
+            input_object(session, handle_slots, request),
+            responses,
+        ),
+        Some(RopId::Progress) => append_progress_response(
+            request,
+            input_object(session, handle_slots, request),
+            responses,
+        ),
+        Some(RopId::ResetTable) => append_reset_table_response(
+            request,
+            input_object_mut(session, handle_slots, request).is_some_and(reset_table_state),
+            responses,
+        ),
+        _ => {}
     }
 }
 

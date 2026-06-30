@@ -13,10 +13,11 @@ use crate::mapi::identity::{
     CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,
 };
 use crate::store::{
-    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiFolderProfilePropertyValue,
-    MapiIdentityObjectKind, MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint,
-    UpsertMapiAssociatedConfigInput, UpsertMapiNavigationShortcutInput,
+    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
+    MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
+    UpsertMapiNavigationShortcutInput,
 };
+use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, PublicFolderPermissionInput, SearchFolderDefinition,
@@ -25,21 +26,24 @@ use lpe_storage::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{
-    cmp::Ordering,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::cmp::Ordering;
 
 mod associated_config;
 mod attachments;
 mod contacts;
+mod conversation_actions;
+mod custom_properties;
 mod default_folders;
 mod diagnostics;
 mod execute;
 mod folders;
 mod logon;
 mod messages;
+mod named_properties;
+mod notification_subscriptions;
 mod object_ids;
+mod permissions;
+mod properties;
 mod property_tags;
 mod public_folders;
 mod recipients;
@@ -49,19 +53,26 @@ mod search_folders;
 mod submission;
 mod sync_import;
 mod table_diagnostics;
+mod table_open;
 mod table_validation;
 mod tables;
 
 use associated_config::*;
 use attachments::*;
 use contacts::*;
+use conversation_actions::*;
+use custom_properties::*;
 use default_folders::*;
 pub(in crate::mapi) use diagnostics::*;
 pub(in crate::mapi) use execute::*;
 use folders::*;
 use logon::*;
 use messages::*;
+use named_properties::*;
+use notification_subscriptions::*;
 use object_ids::*;
+use permissions::*;
+use properties::*;
 use property_tags::*;
 use public_folders::*;
 use recipients::*;
@@ -71,10 +82,9 @@ use search_folders::*;
 use submission::*;
 use sync_import::*;
 use table_diagnostics::*;
+use table_open::*;
 use table_validation::*;
 use tables::*;
-
-const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
 const EC_SEARCH_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_SEARCH_NOT_FOUND: u32 = 0x8004_010F;
@@ -115,24 +125,6 @@ const PID_TAG_RULE_ACTIONS: u32 = 0x6680_00FE;
 const PID_TAG_RULE_NAME_W: u32 = 0x6682_001F;
 const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
 const ST_ENABLED: u32 = 0x0000_0001;
-
-fn current_mapi_filetime() -> u64 {
-    const FILETIME_UNIX_EPOCH_SECONDS: u64 = 11_644_473_600;
-    const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
-
-    let unix_ticks = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| {
-            duration
-                .as_secs()
-                .saturating_mul(FILETIME_TICKS_PER_SECOND)
-                .saturating_add(u64::from(duration.subsec_nanos() / 100))
-        })
-        .unwrap_or(0);
-    FILETIME_UNIX_EPOCH_SECONDS
-        .saturating_mul(FILETIME_TICKS_PER_SECOND)
-        .saturating_add(unix_ticks)
-}
 
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
@@ -507,1181 +499,6 @@ where
 }
 
 pub(in crate::mapi) const MAX_ROP_DEBUG_ENTRIES: usize = 32;
-
-fn apply_outlook_smart_input_variant_before_query_rows(
-    session: &mut MapiSession,
-    handle_slots: &[u32],
-    request: &RopRequest,
-    request_id: &str,
-    request_rop_names: &str,
-) -> Option<String> {
-    if session.outlook_smart_input_variant != "fai_cursor_reset_before_query_rows" {
-        return None;
-    }
-    let input_index = request.input_handle_index().unwrap_or(0);
-    let handle = input_handle(handle_slots, request);
-    let Some(handle_value) = handle else {
-        return None;
-    };
-    let Some(mut object) = session.handles.remove(&handle_value) else {
-        return None;
-    };
-    let applied = match &mut object {
-        MapiObject::ContentsTable {
-            folder_id,
-            associated,
-            position,
-            ..
-        } if *folder_id == INBOX_FOLDER_ID && *associated => {
-            let previous_position = *position;
-            *position = 0;
-            Some((*folder_id, previous_position))
-        }
-        _ => None,
-    };
-    session.handles.insert(handle_value, object);
-    let Some((folder_id, previous_position)) = applied else {
-        return None;
-    };
-    session.outlook_smart_input_variant_applied = true;
-    Some(format!(
-        "variant=fai_cursor_reset_before_query_rows;request_id={request_id};request_rops={request_rop_names};input_index={input_index};handle={};folder=0x{folder_id:016x};associated=true;previous_position={previous_position};new_position=0",
-        format_optional_debug_handle(handle)
-    ))
-}
-
-async fn apply_supported_object_property_values<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    object: &MapiObject,
-    values: Vec<(u32, MapiValue)>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let (canonical_values, custom_values) = split_object_property_values(object, values);
-    if let Some(folder_id) = object.folder_id() {
-        if !snapshot
-            .folder_access_for_principal(folder_id, principal.account_id)
-            .map(|access| access.may_write)
-            .unwrap_or(true)
-        {
-            return Err(anyhow!(
-                "MAPI object mutation denied by canonical folder rights"
-            ));
-        }
-    }
-    if !canonical_values.is_empty() {
-        match object {
-            MapiObject::Message {
-                folder_id,
-                message_id,
-                ..
-            } => {
-                apply_canonical_message_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *message_id,
-                    canonical_values,
-                    mailboxes,
-                    emails,
-                )
-                .await?;
-            }
-            MapiObject::Contact {
-                folder_id,
-                contact_id,
-            } => {
-                apply_canonical_contact_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *contact_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::Event {
-                folder_id,
-                event_id,
-            } => {
-                apply_canonical_event_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *event_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::Task { folder_id, task_id } => {
-                apply_canonical_task_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *task_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::Note { folder_id, note_id } => {
-                apply_canonical_note_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *note_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::JournalEntry {
-                folder_id,
-                journal_entry_id,
-            } => {
-                apply_canonical_journal_entry_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *journal_entry_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::ConversationAction {
-                folder_id,
-                conversation_action_id,
-            } => {
-                let Some(existing) = snapshot
-                    .conversation_action_message_for_id(*conversation_action_id)
-                    .filter(|message| message.folder_id == *folder_id)
-                else {
-                    return Err(anyhow!("canonical MAPI conversation action was not found"));
-                };
-                let mut properties = conversation_action_properties(&existing.action);
-                apply_mapi_property_values_to_map(&mut properties, canonical_values);
-                let action = conversation_action_from_mapi_properties(&properties);
-                let move_target_mailbox_id =
-                    conversation_action_target_mailbox_id(&action, mailboxes);
-                let input = lpe_storage::UpsertConversationActionInput {
-                    account_id: principal.account_id,
-                    conversation_id: action.conversation_id,
-                    subject: action.subject,
-                    categories_json: action.categories_json,
-                    move_folder_entry_id: action.move_folder_entry_id,
-                    move_store_entry_id: action.move_store_entry_id,
-                    move_target_mailbox_id,
-                    max_delivery_time: action.max_delivery_time,
-                    last_applied_time: action.last_applied_time,
-                    version: Some(action.version),
-                    processed: Some(action.processed),
-                };
-                let saved = store.upsert_conversation_action(input).await?;
-                apply_conversation_action_to_existing_messages(
-                    store, principal, &saved, mailboxes, emails,
-                )
-                .await?;
-            }
-            MapiObject::NavigationShortcut {
-                folder_id,
-                shortcut_id,
-            } => {
-                let Some(existing) = snapshot
-                    .navigation_shortcut_message_for_id(*shortcut_id)
-                    .filter(|message| message.folder_id == *folder_id)
-                else {
-                    return Err(anyhow!("canonical MAPI navigation shortcut was not found"));
-                };
-                let mut properties = HashMap::new();
-                for tag in [
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_WLINK_ENTRY_ID,
-                    PID_TAG_WLINK_SAVE_STAMP,
-                    PID_TAG_WLINK_TYPE,
-                    PID_TAG_WLINK_FLAGS,
-                    PID_TAG_WLINK_SECTION,
-                    PID_TAG_WLINK_ORDINAL,
-                ] {
-                    if let Some(value) =
-                        navigation_shortcut_property_value(&existing, principal.account_id, tag)
-                    {
-                        properties.insert(tag, value);
-                    }
-                }
-                apply_mapi_property_values_to_map(&mut properties, canonical_values);
-                let shortcut = navigation_shortcut_from_mapi_properties(
-                    principal.account_id,
-                    Some(existing.canonical_id),
-                    &properties,
-                );
-                store
-                    .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
-                        id: Some(shortcut.canonical_id),
-                        account_id: principal.account_id,
-                        subject: shortcut.subject,
-                        target_folder_id: shortcut.target_folder_id,
-                        shortcut_type: shortcut.shortcut_type,
-                        flags: shortcut.flags,
-                        save_stamp: shortcut.save_stamp,
-                        section: shortcut.section,
-                        ordinal: shortcut.ordinal,
-                        group_header_id: shortcut.group_header_id,
-                        group_name: shortcut.group_name,
-                    })
-                    .await?;
-            }
-            MapiObject::AssociatedConfig {
-                folder_id,
-                config_id,
-                saved_message,
-            } => {
-                let Some(existing) = associated_config_message_for_mutation(
-                    snapshot,
-                    *folder_id,
-                    *config_id,
-                    saved_message.as_ref(),
-                ) else {
-                    return Err(anyhow!("MAPI associated config message was not found"));
-                };
-                let mut properties = associated_config_mutation_base_properties(&existing);
-                apply_mapi_property_values_to_map(&mut properties, canonical_values);
-                let (message_class, subject) = associated_config_class_and_subject(&properties);
-                store
-                    .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-                        id: Some(existing.canonical_id),
-                        account_id: principal.account_id,
-                        folder_id: *folder_id,
-                        message_class,
-                        subject,
-                        properties_json: mapi_properties_to_json(&properties),
-                    })
-                    .await?;
-            }
-            MapiObject::PublicFolderItem {
-                folder_id, item_id, ..
-            } => {
-                apply_canonical_public_folder_item_property_values(
-                    store,
-                    principal,
-                    *folder_id,
-                    *item_id,
-                    canonical_values,
-                    snapshot,
-                )
-                .await?;
-            }
-            MapiObject::DelegateFreeBusyMessage { .. } | MapiObject::RecoverableItem { .. } => {}
-            _ => return Err(anyhow!("MAPI object does not support property mutation")),
-        }
-    }
-    if custom_values.is_empty() {
-        return Ok(());
-    }
-    let (object_kind, canonical_id) =
-        custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
-            .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
-    upsert_custom_property_values(store, principal, object_kind, canonical_id, custom_values).await
-}
-
-async fn apply_canonical_public_folder_item_property_values<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    folder_id: u64,
-    item_id: u64,
-    values: Vec<(u32, MapiValue)>,
-    snapshot: &MapiMailStoreSnapshot,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let Some(item) = snapshot.public_folder_item_for_id(folder_id, item_id) else {
-        return Err(anyhow!("canonical public-folder item was not found"));
-    };
-    let mut properties = HashMap::new();
-    properties.insert(
-        PID_TAG_MESSAGE_CLASS_W,
-        MapiValue::String(item.item.message_class.clone()),
-    );
-    properties.insert(
-        PID_TAG_SUBJECT_W,
-        MapiValue::String(item.item.subject.clone()),
-    );
-    properties.insert(
-        PID_TAG_NORMALIZED_SUBJECT_W,
-        MapiValue::String(item.item.subject.clone()),
-    );
-    properties.insert(
-        PID_TAG_BODY_W,
-        MapiValue::String(item.item.body_text.clone()),
-    );
-    if let Some(html) = &item.item.body_html_sanitized {
-        properties.insert(PID_TAG_BODY_HTML_W, MapiValue::String(html.clone()));
-        properties.insert(
-            PID_TAG_HTML_BINARY,
-            MapiValue::Binary(html.as_bytes().to_vec()),
-        );
-    }
-    apply_mapi_property_values_to_map(&mut properties, values);
-    store
-        .upsert_public_folder_item(
-            UpsertPublicFolderItemInput {
-                id: Some(item.item.id),
-                account_id: principal.account_id,
-                public_folder_id: item.item.public_folder_id,
-                item_kind: item.item.item_kind.clone(),
-                message_class: optional_pending_text_property(
-                    &properties,
-                    &[PID_TAG_MESSAGE_CLASS_W],
-                )
-                .unwrap_or_else(|| "IPM.Post".to_string()),
-                subject: pending_text_property(
-                    &properties,
-                    &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
-                ),
-                body_text: pending_text_property(&properties, &[PID_TAG_BODY_W]),
-                body_html_sanitized: pending_html_property(&properties),
-                source_payload_json: item.item.source_payload_json.clone(),
-            },
-            AuditEntryInput {
-                actor: principal.email.clone(),
-                action: "mapi-update-public-folder-item".to_string(),
-                subject: format!("public-folder-item:{}", item.item.id),
-            },
-        )
-        .await?;
-    Ok(())
-}
-
-async fn persist_profile_folder_property_values<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    folder_id: u64,
-    values: &[(u32, MapiValue)],
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let folder_profile_values = values
-        .iter()
-        .filter_map(|(tag, value)| {
-            let storage_tag = canonical_property_storage_tag(*tag);
-            if storage_tag != PID_TAG_EXTENDED_FOLDER_FLAGS {
-                return None;
-            }
-            let MapiValue::Binary(bytes) = value else {
-                return None;
-            };
-            Some(MapiFolderProfilePropertyValue {
-                folder_id,
-                property_tag: storage_tag,
-                property_type: (PID_TAG_EXTENDED_FOLDER_FLAGS & 0xffff) as u16,
-                property_value: bytes.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
-    if !folder_profile_values.is_empty() {
-        store
-            .upsert_mapi_folder_profile_property_values(
-                principal.account_id,
-                &folder_profile_values,
-            )
-            .await?;
-    }
-    if folder_id != IPM_SUBTREE_FOLDER_ID {
-        return Ok(());
-    }
-    for (tag, value) in values {
-        if canonical_property_storage_tag(*tag) == PID_TAG_OST_OSTID {
-            if let MapiValue::Binary(ost_id) = value {
-                store
-                    .store_mapi_ipm_subtree_ost_id(principal.account_id, ost_id)
-                    .await?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn split_custom_property_values(
-    values: Vec<(u32, MapiValue)>,
-) -> (Vec<(u32, MapiValue)>, Vec<(u32, MapiValue)>) {
-    values
-        .into_iter()
-        .partition(|(tag, _)| !is_custom_property_tag(*tag))
-}
-
-fn split_object_property_values(
-    object: &MapiObject,
-    values: Vec<(u32, MapiValue)>,
-) -> (Vec<(u32, MapiValue)>, Vec<(u32, MapiValue)>) {
-    if !matches!(object, MapiObject::AssociatedConfig { .. }) {
-        return split_custom_property_values(values);
-    }
-    (values, Vec::new())
-}
-
-fn apply_mapi_property_values_to_map(
-    properties: &mut HashMap<u32, MapiValue>,
-    values: Vec<(u32, MapiValue)>,
-) {
-    properties.extend(
-        values
-            .into_iter()
-            .map(|(tag, value)| (canonical_property_storage_tag(tag), value)),
-    );
-}
-
-fn conversation_action_properties(
-    action: &lpe_storage::ConversationAction,
-) -> HashMap<u32, MapiValue> {
-    let mut properties = HashMap::new();
-    properties.insert(
-        PID_TAG_CONVERSATION_INDEX,
-        MapiValue::Binary(conversation_index_for_uuid(action.conversation_id)),
-    );
-    properties.insert(
-        PID_TAG_SUBJECT_W,
-        MapiValue::String(conversation_action_subject(action)),
-    );
-    if let Some(value) = &action.move_folder_entry_id {
-        properties.insert(
-            PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG,
-            MapiValue::Binary(value.clone()),
-        );
-    }
-    if let Some(value) = &action.move_store_entry_id {
-        properties.insert(
-            PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG,
-            MapiValue::Binary(value.clone()),
-        );
-    }
-    if let Some(value) = &action.max_delivery_time {
-        properties.insert(
-            PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG,
-            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)),
-        );
-    }
-    if let Some(value) = &action.last_applied_time {
-        properties.insert(
-            PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG,
-            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)),
-        );
-    }
-    properties.insert(
-        PID_LID_CONVERSATION_ACTION_VERSION_TAG,
-        MapiValue::I32(action.version),
-    );
-    properties.insert(
-        PID_LID_CONVERSATION_PROCESSED_TAG,
-        MapiValue::I32(action.processed),
-    );
-    properties.insert(
-        PID_NAME_KEYWORDS_TAG,
-        MapiValue::MultiString(
-            serde_json::from_str::<Vec<String>>(&action.categories_json).unwrap_or_default(),
-        ),
-    );
-    properties
-}
-
-async fn apply_conversation_action_to_existing_messages<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    action: &lpe_storage::ConversationAction,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let categories = serde_json::from_str::<Vec<String>>(&action.categories_json)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|category| category.trim().to_string())
-        .filter(|category| !category.is_empty())
-        .collect::<Vec<_>>();
-    let target_mailbox = if action.move_store_entry_id.is_some() {
-        None
-    } else {
-        conversation_action_target_mailbox(action, mailboxes)
-    };
-    for email in emails
-        .iter()
-        .filter(|email| email.thread_id == action.conversation_id)
-        .filter(|email| email.mailbox_role != "sent")
-        .filter(|email| {
-            action
-                .max_delivery_time
-                .as_deref()
-                .map(|max_delivery| email.received_at.as_str() > max_delivery)
-                .unwrap_or(true)
-        })
-    {
-        if !categories.is_empty() && email.categories != categories {
-            store
-                .update_jmap_email_followup_flags(
-                    principal.account_id,
-                    email.id,
-                    lpe_storage::JmapEmailFollowupUpdate {
-                        categories: Some(categories.clone()),
-                        ..Default::default()
-                    },
-                    AuditEntryInput {
-                        actor: principal.email.clone(),
-                        action: "mapi-conversation-action-categorize".to_string(),
-                        subject: format!("message:{}", email.id),
-                    },
-                )
-                .await?;
-        }
-        let Some(target_mailbox) = target_mailbox else {
-            continue;
-        };
-        if email.mailbox_id == target_mailbox.id {
-            continue;
-        }
-        store
-            .move_jmap_email_from_mailbox(
-                principal.account_id,
-                email.mailbox_id,
-                email.id,
-                target_mailbox.id,
-                AuditEntryInput {
-                    actor: principal.email.clone(),
-                    action: "mapi-conversation-action-move".to_string(),
-                    subject: format!("message:{}->{}", email.id, target_mailbox.id),
-                },
-            )
-            .await?;
-    }
-    Ok(())
-}
-
-async fn apply_conversation_actions_to_new_message<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    mailboxes: &[JmapMailbox],
-    email: &JmapEmail,
-    snapshot: &MapiMailStoreSnapshot,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    for message in snapshot
-        .conversation_action_messages()
-        .iter()
-        .filter(|message| message.action.conversation_id == email.thread_id)
-    {
-        apply_conversation_action_to_existing_messages(
-            store,
-            principal,
-            &message.action,
-            mailboxes,
-            std::slice::from_ref(email),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-fn conversation_action_target_mailbox<'a>(
-    action: &lpe_storage::ConversationAction,
-    mailboxes: &'a [JmapMailbox],
-) -> Option<&'a JmapMailbox> {
-    if action.move_store_entry_id.is_some() {
-        return None;
-    }
-    if let Some(mailbox_id) = action.move_target_mailbox_id {
-        return mailboxes.iter().find(|mailbox| mailbox.id == mailbox_id);
-    }
-    match action.move_folder_entry_id.as_deref() {
-        Some([]) => mailboxes.iter().find(|mailbox| mailbox.role == "trash"),
-        Some(entry_id) => {
-            let folder_id = crate::mapi::identity::object_id_from_folder_entry_id(entry_id)?;
-            folder_row_for_id(folder_id, mailboxes)
-        }
-        None => None,
-    }
-}
-
-fn conversation_action_target_mailbox_id(
-    action: &lpe_storage::ConversationAction,
-    mailboxes: &[JmapMailbox],
-) -> Option<Uuid> {
-    conversation_action_target_mailbox(action, mailboxes).map(|mailbox| mailbox.id)
-}
-
-async fn delete_conversation_action_properties<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    folder_id: u64,
-    conversation_action_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-    property_tags: &[u32],
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let existing = snapshot
-        .conversation_action_message_for_id(conversation_action_id)
-        .filter(|message| message.folder_id == folder_id)
-        .ok_or_else(|| anyhow!("canonical MAPI conversation action was not found"))?;
-    let mut properties = conversation_action_properties(&existing.action);
-    for tag in property_tags {
-        properties.remove(tag);
-        properties.remove(&canonical_property_storage_tag(*tag));
-    }
-    let action = conversation_action_from_mapi_properties(&properties);
-    let move_target_mailbox_id = conversation_action_target_mailbox_id(&action, mailboxes);
-    let saved = store
-        .upsert_conversation_action(lpe_storage::UpsertConversationActionInput {
-            account_id: principal.account_id,
-            conversation_id: action.conversation_id,
-            subject: action.subject,
-            categories_json: action.categories_json,
-            move_folder_entry_id: action.move_folder_entry_id,
-            move_store_entry_id: action.move_store_entry_id,
-            move_target_mailbox_id,
-            max_delivery_time: action.max_delivery_time,
-            last_applied_time: action.last_applied_time,
-            version: Some(action.version),
-            processed: Some(action.processed),
-        })
-        .await?;
-    apply_conversation_action_to_existing_messages(store, principal, &saved, mailboxes, emails)
-        .await
-}
-
-fn stage_virtual_conversation_action_property_values(
-    session: &mut MapiSession,
-    handle_slots: &[u32],
-    request: &RopRequest,
-    snapshot: &MapiMailStoreSnapshot,
-    values: Vec<(u32, MapiValue)>,
-) -> Option<Result<()>> {
-    let object = input_object_mut(session, handle_slots, request)?;
-    let MapiObject::ConversationAction {
-        folder_id,
-        conversation_action_id,
-    } = object
-    else {
-        return None;
-    };
-    if !crate::mapi_store::is_outlook_default_conversation_action_id(*conversation_action_id) {
-        return None;
-    }
-    let Some(message) = snapshot
-        .conversation_action_table_message_for_id(*conversation_action_id)
-        .filter(|message| message.folder_id == *folder_id)
-    else {
-        return Some(Err(anyhow!(
-            "virtual MAPI conversation action was not found"
-        )));
-    };
-    let folder_id = *folder_id;
-    let mut properties = conversation_action_properties(&message.action);
-    apply_mapi_property_values_to_map(&mut properties, values);
-    *object = MapiObject::PendingConversationAction {
-        folder_id,
-        properties,
-    };
-    Some(Ok(()))
-}
-
-fn stage_virtual_conversation_action_property_delete(
-    session: &mut MapiSession,
-    handle_slots: &[u32],
-    request: &RopRequest,
-    snapshot: &MapiMailStoreSnapshot,
-    property_tags: &[u32],
-) -> Option<Result<()>> {
-    let object = input_object_mut(session, handle_slots, request)?;
-    let MapiObject::ConversationAction {
-        folder_id,
-        conversation_action_id,
-    } = object
-    else {
-        return None;
-    };
-    if !crate::mapi_store::is_outlook_default_conversation_action_id(*conversation_action_id) {
-        return None;
-    }
-    let Some(message) = snapshot
-        .conversation_action_table_message_for_id(*conversation_action_id)
-        .filter(|message| message.folder_id == *folder_id)
-    else {
-        return Some(Err(anyhow!(
-            "virtual MAPI conversation action was not found"
-        )));
-    };
-    let folder_id = *folder_id;
-    let mut properties = conversation_action_properties(&message.action);
-    for tag in property_tags {
-        properties.remove(tag);
-        properties.remove(&canonical_property_storage_tag(*tag));
-    }
-    *object = MapiObject::PendingConversationAction {
-        folder_id,
-        properties,
-    };
-    Some(Ok(()))
-}
-
-async fn upsert_custom_property_values<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    object_kind: MapiCustomPropertyObjectKind,
-    canonical_id: Uuid,
-    values: Vec<(u32, MapiValue)>,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    if values.is_empty() {
-        return Ok(());
-    }
-    let values = values
-        .into_iter()
-        .map(|(property_tag, value)| {
-            let mut property_value = Vec::new();
-            write_mapi_value(&mut property_value, property_tag, &value);
-            MapiCustomPropertyValue {
-                property_tag,
-                property_type: MapiPropertyTag::new(property_tag).property_type_code(),
-                property_value,
-            }
-        })
-        .collect::<Vec<_>>();
-    store
-        .upsert_mapi_custom_property_values(
-            principal.account_id,
-            object_kind,
-            canonical_id,
-            &values,
-        )
-        .await
-}
-
-async fn upsert_custom_property_values_from_map<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    object_kind: MapiCustomPropertyObjectKind,
-    canonical_id: Uuid,
-    properties: &HashMap<u32, MapiValue>,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let values = properties
-        .iter()
-        .filter(|(tag, _value)| is_custom_property_tag(**tag))
-        .map(|(tag, value)| (*tag, value.clone()))
-        .collect::<Vec<_>>();
-    upsert_custom_property_values(store, principal, object_kind, canonical_id, values).await
-}
-
-async fn fetch_custom_property_values_for_request<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    object: Option<&MapiObject>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-    property_tags: &[u32],
-) -> Result<HashMap<u32, Vec<u8>>>
-where
-    S: ExchangeStore,
-{
-    let tags = property_tags
-        .iter()
-        .copied()
-        .filter(|tag| is_custom_property_tag(*tag))
-        .collect::<Vec<_>>();
-    if tags.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let Some((object_kind, canonical_id)) =
-        custom_property_object_identity(object, mailboxes, emails, snapshot)
-    else {
-        return Ok(HashMap::new());
-    };
-    Ok(store
-        .fetch_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
-        .await?
-        .into_iter()
-        .map(|value| (value.property_tag, value.property_value))
-        .collect())
-}
-
-async fn copy_custom_property_values_for_request<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    source: Option<&MapiObject>,
-    destination: Option<&MapiObject>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-    property_tags: &[u32],
-) -> Result<Option<Vec<(usize, u32, u32)>>>
-where
-    S: ExchangeStore,
-{
-    if property_tags.is_empty() || !property_tags.iter().copied().all(is_custom_property_tag) {
-        return Ok(None);
-    }
-    let Some((source_kind, source_id)) =
-        custom_property_object_identity(source, mailboxes, emails, snapshot)
-    else {
-        return Ok(None);
-    };
-    let Some((destination_kind, destination_id)) =
-        custom_property_object_identity(destination, mailboxes, emails, snapshot)
-    else {
-        return Ok(None);
-    };
-    let source_values = store
-        .fetch_mapi_custom_property_values(
-            principal.account_id,
-            source_kind,
-            source_id,
-            property_tags,
-        )
-        .await?
-        .into_iter()
-        .map(|value| (value.property_tag, value))
-        .collect::<HashMap<_, _>>();
-    let mut copied_values = Vec::new();
-    let mut problems = Vec::new();
-    for (index, property_tag) in property_tags.iter().copied().enumerate() {
-        if let Some(value) = source_values.get(&property_tag) {
-            copied_values.push(MapiCustomPropertyValue {
-                property_tag,
-                property_type: value.property_type,
-                property_value: value.property_value.clone(),
-            });
-        } else {
-            problems.push((index, property_tag, 0x8004_010F));
-        }
-    }
-    if !copied_values.is_empty() {
-        store
-            .upsert_mapi_custom_property_values(
-                principal.account_id,
-                destination_kind,
-                destination_id,
-                &copied_values,
-            )
-            .await?;
-    }
-    Ok(Some(problems))
-}
-
-async fn copy_all_custom_property_values_for_request<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    source: Option<&MapiObject>,
-    destination: Option<&MapiObject>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-    excluded_property_tags: &[u32],
-) -> Result<bool>
-where
-    S: ExchangeStore,
-{
-    let Some((source_kind, source_id)) =
-        custom_property_object_identity(source, mailboxes, emails, snapshot)
-    else {
-        return Ok(false);
-    };
-    let Some((destination_kind, destination_id)) =
-        custom_property_object_identity(destination, mailboxes, emails, snapshot)
-    else {
-        return Ok(false);
-    };
-    let excluded = excluded_property_tags
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-    let values = store
-        .fetch_all_mapi_custom_property_values(principal.account_id, source_kind, source_id)
-        .await?
-        .into_iter()
-        .filter(|value| !excluded.contains(&value.property_tag))
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        return Ok(false);
-    }
-    store
-        .upsert_mapi_custom_property_values(
-            principal.account_id,
-            destination_kind,
-            destination_id,
-            &values,
-        )
-        .await?;
-    Ok(true)
-}
-
-async fn delete_custom_property_values<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    object: Option<&MapiObject>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-    property_tags: &[u32],
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let tags = property_tags
-        .iter()
-        .copied()
-        .filter(|tag| is_custom_property_tag(*tag))
-        .collect::<Vec<_>>();
-    if tags.is_empty() {
-        return Ok(());
-    }
-    let Some((object_kind, canonical_id)) =
-        custom_property_object_identity(object, mailboxes, emails, snapshot)
-    else {
-        return Ok(());
-    };
-    store
-        .delete_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
-        .await
-}
-
-fn custom_property_object_identity(
-    object: Option<&MapiObject>,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-) -> Option<(MapiCustomPropertyObjectKind, Uuid)> {
-    match object? {
-        MapiObject::Message {
-            folder_id,
-            message_id,
-            saved_email,
-            ..
-        } => message_for_id(*folder_id, *message_id, mailboxes, emails)
-            .or(saved_email.as_ref().map(|saved| &saved.email))
-            .map(|email| (MapiCustomPropertyObjectKind::Message, email.id)),
-        MapiObject::Contact {
-            folder_id,
-            contact_id,
-        } => snapshot
-            .contact_for_id(*folder_id, *contact_id)
-            .map(|contact| (MapiCustomPropertyObjectKind::Contact, contact.canonical_id)),
-        MapiObject::Event {
-            folder_id,
-            event_id,
-        } if !mapi_calendar_content_items_suppressed(*folder_id, snapshot) => {
-            snapshot.event_for_id(*folder_id, *event_id).map(|event| {
-                (
-                    MapiCustomPropertyObjectKind::CalendarEvent,
-                    event.canonical_id,
-                )
-            })
-        }
-        MapiObject::Task { folder_id, task_id } => snapshot
-            .task_for_id(*folder_id, *task_id)
-            .map(|task| (MapiCustomPropertyObjectKind::Task, task.canonical_id)),
-        MapiObject::Note { folder_id, note_id } => snapshot
-            .note_for_id(*folder_id, *note_id)
-            .map(|note| (MapiCustomPropertyObjectKind::Note, note.canonical_id)),
-        MapiObject::JournalEntry {
-            folder_id,
-            journal_entry_id,
-        } => snapshot
-            .journal_entry_for_id(*folder_id, *journal_entry_id)
-            .map(|entry| {
-                (
-                    MapiCustomPropertyObjectKind::JournalEntry,
-                    entry.canonical_id,
-                )
-            }),
-        MapiObject::Attachment {
-            folder_id,
-            message_id,
-            attach_num,
-        } => snapshot
-            .attachment_for_message(*folder_id, *message_id, *attach_num)
-            .map(|attachment| {
-                (
-                    MapiCustomPropertyObjectKind::Attachment,
-                    attachment.canonical_id,
-                )
-            }),
-        MapiObject::PublicFolderItem {
-            folder_id, item_id, ..
-        } => snapshot
-            .public_folder_item_for_id(*folder_id, *item_id)
-            .map(|item| (MapiCustomPropertyObjectKind::PublicFolderItem, item.item.id)),
-        _ => None,
-    }
-}
-
-fn is_custom_property_tag(property_tag: u32) -> bool {
-    let tag = MapiPropertyTag::new(property_tag);
-    tag.property_id() >= FIRST_NAMED_PROPERTY_ID
-        && tag.property_type().is_some()
-        && !is_canonical_named_property_tag(property_tag)
-}
-
-fn is_canonical_named_property_tag(property_tag: u32) -> bool {
-    matches!(
-        canonical_property_storage_tag(property_tag),
-        PID_LID_FLAG_REQUEST_W_TAG
-            | PID_LID_COMMON_START_TAG
-            | PID_LID_COMMON_END_TAG
-            | PID_LID_TASK_START_DATE_TAG
-            | PID_LID_TASK_DUE_DATE_TAG
-            | PID_LID_GLOBAL_OBJECT_ID_TAG
-            | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
-            | PID_LID_BUSY_STATUS_TAG
-            | PID_LID_LOCATION_W_TAG
-            | PID_LID_APPOINTMENT_START_WHOLE_TAG
-            | PID_LID_APPOINTMENT_END_WHOLE_TAG
-            | PID_LID_APPOINTMENT_DURATION_TAG
-            | PID_LID_APPOINTMENT_RECUR_TAG
-            | PID_LID_APPOINTMENT_SUB_TYPE_TAG
-            | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
-            | PID_LID_RECURRING_TAG
-            | PID_LID_ALL_ATTENDEES_STRING_W_TAG
-            | PID_LID_TO_ATTENDEES_STRING_W_TAG
-            | PID_LID_CC_ATTENDEES_STRING_W_TAG
-            | PID_LID_TIME_ZONE_STRUCT_TAG
-            | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
-            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
-            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG
-            | PID_LID_REMINDER_SET_TAG
-            | PID_LID_REMINDER_TIME_TAG
-            | PID_LID_REMINDER_SIGNAL_TIME_TAG
-            | PID_LID_NOTE_COLOR_TAG
-            | PID_LID_LOG_TYPE_W_TAG
-            | PID_LID_COMPANIES_TAG
-            | PID_LID_CONTACTS_TAG
-            | PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG
-            | PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG
-            | PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG
-            | PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG
-            | PID_LID_CONVERSATION_ACTION_VERSION_TAG
-            | PID_LID_CONVERSATION_PROCESSED_TAG
-            | PID_NAME_KEYWORDS_TAG
-    )
-}
-
-fn delegate_freebusy_message_for_open<'a>(
-    snapshot: &'a MapiMailStoreSnapshot,
-    folder_id: u64,
-    message_id: u64,
-) -> Option<&'a crate::mapi_store::MapiDelegateFreeBusyMessage> {
-    (folder_id == FREEBUSY_DATA_FOLDER_ID)
-        .then(|| snapshot.delegate_freebusy_message_for_id(message_id))
-        .flatten()
-        .filter(|message| message.folder_id == folder_id)
-}
-
-fn conversation_action_message_for_open(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-    message_id: u64,
-) -> Option<crate::mapi_store::MapiConversationActionMessage> {
-    (folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
-        .then(|| snapshot.conversation_action_table_message_for_id(message_id))
-        .flatten()
-        .filter(|message| message.folder_id == folder_id)
-}
-
-fn navigation_shortcut_message_for_open(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-    message_id: u64,
-) -> Option<crate::mapi_store::MapiNavigationShortcutMessage> {
-    (folder_id == COMMON_VIEWS_FOLDER_ID)
-        .then(|| snapshot.navigation_shortcut_table_message_for_id(message_id))
-        .flatten()
-        .filter(|message| message.folder_id == folder_id)
-}
-
-fn common_view_named_view_message_for_open(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-    message_id: u64,
-) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
-    if folder_id == COMMON_VIEWS_FOLDER_ID {
-        return snapshot
-            .common_view_named_view_message_for_id(message_id)
-            .filter(|message| message.folder_id == folder_id);
-    }
-    folder_local_default_named_view_is_supported(snapshot, folder_id, message_id)
-        .then(|| snapshot.default_folder_named_view_message(folder_id, message_id))
-        .flatten()
-}
-
-fn search_folder_definition_message_for_open(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-    message_id: u64,
-) -> Option<SearchFolderDefinition> {
-    (folder_id == COMMON_VIEWS_FOLDER_ID)
-        .then(|| {
-            snapshot.common_views_table_messages().find_map(|message| {
-                if let crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
-                    definition,
-                ) = message
-                {
-                    (crate::mapi::identity::mapped_mapi_object_id(&definition.id)
-                        == Some(message_id))
-                    .then_some(definition)
-                } else {
-                    None
-                }
-            })
-        })
-        .flatten()
-}
-
-fn contains_outlook_osc_contact_source_probe(properties: &[MapiNamedProperty]) -> bool {
-    properties.iter().any(|property| {
-        property.guid == PS_PUBLIC_STRINGS_GUID
-            && match &property.kind {
-                MapiNamedPropertyKind::Name(name) => name.eq_ignore_ascii_case("OscContactSources"),
-                MapiNamedPropertyKind::Lid(lid) => matches!(
-                    *lid,
-                    PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1
-                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA
-                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC
-                        | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED
-                ),
-            }
-    })
-}
-
-fn cache_named_property_mapping_and_return_property_id(
-    session: &mut MapiSession,
-    property_id: u16,
-    property: MapiNamedProperty,
-) -> u16 {
-    let property_for_lookup = property.clone();
-    session.cache_named_property(property_id, property);
-    session
-        .property_id_for_name(property_for_lookup, false)
-        .unwrap_or(property_id)
-}
 
 pub(in crate::mapi) async fn execute_rops<S, V>(
     store: &S,
@@ -3051,629 +1868,68 @@ where
                     ));
                 }
             }
-            Some(RopId::GetHierarchyTable) => {
-                if input_handle(&handle_slots, &request).is_none() {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                }
-                if !hierarchy_table_flags_are_valid(&request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x04,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let folder_id = input_object(session, &handle_slots, &request)
-                    .and_then(|object| object.folder_id())
-                    .unwrap_or(ROOT_FOLDER_ID);
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    hierarchy_table_object(
-                        folder_id,
-                        session.deleted_advertised_special_folders.clone(),
-                    ),
-                );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                let row_count = if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID
-                    && snapshot.public_folders().is_empty()
-                {
-                    store
-                        .fetch_public_folder_trees(principal.account_id)
-                        .await
-                        .map(|trees| {
-                            trees
-                                .iter()
-                                .filter(|tree| tree.root_folder_id.is_some())
-                                .count()
-                                .min(u32::MAX as usize) as u32
-                        })
-                        .unwrap_or(0)
-                } else {
-                    hierarchy_row_count_excluding_deleted(
-                        folder_id,
-                        mailboxes,
-                        snapshot,
-                        &session.deleted_advertised_special_folders,
-                    )
-                };
-                responses.extend_from_slice(&get_hierarchy_table_response(&request, row_count));
-                if folder_id == INBOX_FOLDER_ID {
-                    session.record_last_inbox_hierarchy_table_context(format!(
-                        "input_index={};output_index={};output_handle={};row_count={row_count};expected_subfolders=false",
-                        request.input_handle_index().unwrap_or(0),
-                        request.output_handle_index.unwrap_or(0),
-                        handle
-                    ));
-                    session.record_recent_probe_action(format!(
-                        "GetHierarchyTable(in={},out={},row_count={row_count})",
-                        request.input_handle_index().unwrap_or(0),
-                        handle
-                    ));
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x04",
-                        folder_id = %format!("0x{folder_id:016x}"),
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        output_handle_index = request.output_handle_index.unwrap_or(0),
-                        output_handle_value = handle,
-                        hierarchy_row_count = row_count,
-                        expected_subfolders = false,
-                        normal_contents_table_observed =
-                            session.post_hierarchy_actions.inbox_normal_contents_table_observed,
-                        associated_contents_table_observed =
-                            session.post_hierarchy_actions.inbox_associated_contents_table_observed,
-                        message = "rca debug mapi inbox hierarchy table opened"
-                    );
-                }
-                if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
-                    log_outlook_bootstrap_phase(
-                        principal,
-                        "hierarchy_table_opened",
-                        "0x04",
-                        Some(folder_id),
-                        false,
-                        Some(row_count),
-                        None,
-                        Some(handle),
-                        "",
-                    );
-                }
-                output_handles.push(handle);
-            }
-            Some(RopId::GetContentsTable) => {
-                if input_handle(&handle_slots, &request).is_none() {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                }
-                let Some(input_object) = input_object(session, &handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                };
-                let folder_id = match input_object {
-                    MapiObject::Folder { folder_id, .. } => *folder_id,
-                    _ => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x05,
-                            request.output_handle_index.unwrap_or(0),
-                            0x8004_0102,
-                        ));
-                        continue;
-                    }
-                };
-                let table_flags = request.payload.first().copied().unwrap_or(0);
-                if let Some(error) = contents_table_flags_error(
-                    table_flags,
-                    folder_id,
-                    snapshot.public_folder_for_id(folder_id).is_some(),
-                ) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x05,
-                        request.output_handle_index.unwrap_or(0),
-                        error,
-                    ));
-                    continue;
-                }
-                let associated = table_flags & 0x02 != 0;
-                let contents_folder_id = if table_flags & 0x80 != 0
-                    && folder_id == ROOT_FOLDER_ID
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                {
-                    CONVERSATION_MEMBERS_CONTENTS_TABLE_ID
-                } else {
-                    folder_id
-                };
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_read)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x05,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    contents_table_object(contents_folder_id, associated),
-                );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                let row_count = if associated {
-                    associated_folder_message_count(contents_folder_id, snapshot)
-                } else {
-                    folder_message_count(contents_folder_id, mailboxes, emails, snapshot)
-                };
-                log_outlook_contents_table_open(
-                    principal,
-                    request_id,
-                    &request,
-                    contents_folder_id,
-                    table_flags,
-                    associated,
-                    row_count,
-                    handle,
-                    snapshot,
-                );
-                session.record_last_table_context(format!(
-                    "phase=open;request_id={request_id};request_rops={request_rop_names};input_index={};output_index={};handle={};folder=0x{contents_folder_id:016x};role={};associated={associated};table_flags=0x{table_flags:02x};row_count={row_count}",
-                    request.input_handle_index().unwrap_or(0),
-                    request.output_handle_index.unwrap_or(0),
-                    handle,
-                    debug_role_for_folder_id(contents_folder_id)
-                ));
-                if contents_folder_id == CALENDAR_FOLDER_ID && !associated {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "calendar_normal_table_open:request_id={request_id};handle={handle};row_count={row_count};flags=0x{table_flags:02x}"
-                    ));
-                }
-                if folder_id == INBOX_FOLDER_ID {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "inbox_contents_table_open:request_id={request_id};handle={handle};associated={associated};row_count={row_count};flags=0x{table_flags:02x}"
-                    ));
-                    if associated {
-                        session.record_inbox_associated_contents_table();
-                    } else {
-                        session.record_inbox_normal_contents_table();
-                        record_mapi_outlook_view_inbox_normal_contents_opened();
-                    }
-                    session.record_last_inbox_contents_table_context(format!(
-                        "input_index={};output_index={};output_handle={};table_flags=0x{table_flags:02x};associated={associated};row_count={row_count}",
-                        request.input_handle_index().unwrap_or(0),
-                        request.output_handle_index.unwrap_or(0),
-                        handle
-                    ));
-                    if !associated {
-                        session.record_recent_probe_action(format!(
-                            "GetContentsTable(in={},out={},associated=false,row_count={row_count})",
-                            request.input_handle_index().unwrap_or(0),
-                            handle
-                        ));
-                    }
-                }
-                if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
-                    log_outlook_bootstrap_phase(
-                        principal,
-                        "common_views_associated_table_opened",
-                        "0x05",
-                        Some(folder_id),
-                        associated,
-                        Some(row_count),
-                        None,
-                        Some(handle),
-                        "",
-                    );
-                } else if associated && folder_id == INBOX_FOLDER_ID {
-                    log_outlook_bootstrap_phase(
-                        principal,
-                        "inbox_associated_table_opened",
-                        "0x05",
-                        Some(folder_id),
-                        associated,
-                        Some(row_count),
-                        None,
-                        Some(handle),
-                        "",
-                    );
-                } else if !associated && folder_id == INBOX_FOLDER_ID {
-                    log_outlook_bootstrap_phase(
-                        principal,
-                        "inbox_contents_table_opened",
-                        "0x05",
-                        Some(folder_id),
-                        associated,
-                        Some(row_count),
-                        None,
-                        Some(handle),
-                        "",
-                    );
-                }
-                responses.extend_from_slice(&get_contents_table_response(&request, row_count));
-                output_handles.push(handle);
-            }
-            Some(RopId::CreateMessage) => {
-                let folder_id = request.folder_id().unwrap_or_else(|| {
-                    input_object(session, &handle_slots, &request)
-                        .and_then(MapiObject::folder_id)
-                        .unwrap_or(INBOX_FOLDER_ID)
-                });
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_write)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x06,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-                if snapshot.collaboration_folder_for_id(folder_id).is_none()
-                    && folder_row_for_id(folder_id, mailboxes).is_none()
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                    && folder_id != CALENDAR_FOLDER_ID
-                    && !synthetic_folder_allows_create_message(folder_id)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x06,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-
-                let created_at = current_mapi_filetime();
-                let initial_message_properties = || {
-                    HashMap::from([
-                        (PID_TAG_CREATION_TIME, MapiValue::U64(created_at)),
-                        (PID_TAG_LAST_MODIFICATION_TIME, MapiValue::U64(created_at)),
-                    ])
-                };
-                let pending_object = if request.create_message_associated()
-                    && !matches!(
-                        folder_id,
-                        COMMON_VIEWS_FOLDER_ID | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
-                    ) {
-                    MapiObject::PendingAssociatedMessage {
-                        folder_id,
-                        properties: initial_message_properties(),
-                    }
-                } else {
-                    match snapshot
-                        .collaboration_folder_for_id(folder_id)
-                        .map(|folder| folder.kind)
-                    {
-                        Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
-                            folder_id,
-                            properties: initial_message_properties(),
-                        },
-                        _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
-                            MapiObject::PendingConversationAction {
-                                folder_id,
-                                properties: initial_message_properties(),
-                            }
-                        }
-                        _ if folder_id == FREEBUSY_DATA_FOLDER_ID => {
-                            MapiObject::PendingAssociatedMessage {
-                                folder_id,
-                                properties: initial_message_properties(),
-                            }
-                        }
-                        _ if folder_id == COMMON_VIEWS_FOLDER_ID => {
-                            MapiObject::PendingNavigationShortcut {
-                                folder_id,
-                                properties: initial_message_properties(),
-                            }
-                        }
-                        _ => MapiObject::PendingMessage {
-                            folder_id,
-                            properties: initial_message_properties(),
-                            recipients: Vec::new(),
-                        },
-                    }
-                };
-                let handle =
-                    session.allocate_output_handle(request.output_handle_index, pending_object);
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_create_message_response(&request));
-                output_handles.push(handle);
-            }
-            Some(RopId::GetPropertiesSpecific) => {
-                echo_input_handle_table = true;
-                let is_inbox_folder_type_probe = matches!(
-                    input_object(session, &handle_slots, &request),
-                    Some(MapiObject::Folder {
-                        folder_id: INBOX_FOLDER_ID,
-                        ..
-                    })
-                ) && request
-                    .property_tags()
-                    .iter()
-                    .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_FOLDER_TYPE);
-                if is_inbox_folder_type_probe {
-                    let input_handle_value = input_handle(&handle_slots, &request);
-                    session.record_inbox_folder_type_getprops_probe();
-                    session.record_recent_probe_action(format!(
-                        "GetPropertiesSpecific(in={},handle={},tags={})",
-                        request.input_handle_index().unwrap_or(0),
-                        format_optional_debug_handle(input_handle_value),
-                        format_debug_property_tags(&request.property_tags())
-                    ));
-                    if let Some(summary) =
-                        format_inbox_open_loop_summary(&session.post_hierarchy_actions)
-                    {
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x07",
-                            input_handle_index = request.input_handle_index().unwrap_or(0),
-                            input_handle_value = %format_optional_debug_handle(input_handle_value),
-                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
-                            loop_summary = %summary,
-                            "rca debug mapi repeated inbox open folder loop summary"
-                        );
-                    }
-                }
-                let object = input_object(session, &handle_slots, &request);
-                let visible_emails;
-                let emails_for_request = if created_emails.is_empty() {
-                    emails
-                } else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x07",
-                        object_kind = mapi_object_debug_kind(object),
-                        folder_id = %mapi_object_debug_folder_id(object),
-                        same_execute_created_email_count = created_emails.len(),
-                        base_snapshot_email_count = emails.len(),
-                        "rca debug mapi same execute created message visibility"
-                    );
-                    visible_emails = emails
-                        .iter()
-                        .chain(created_emails.iter())
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    &visible_emails
-                };
-                let custom_values = fetch_custom_property_values_for_request(
+            Some(RopId::GetHierarchyTable | RopId::GetContentsTable) => {
+                append_open_table_response(
                     store,
                     principal,
-                    object,
-                    mailboxes,
-                    emails_for_request,
-                    snapshot,
-                    &request.property_tags(),
-                )
-                .await
-                .unwrap_or_default();
-                let inbox_folder_type_getprops_context = if let (
-                    true,
-                    Some(MapiObject::Folder { properties, .. }),
-                ) = (is_inbox_folder_type_probe, object)
-                {
-                    Some(format!(
-                            "input_index={};input_handle={};requested_tags={};folder_type={};display_name={};container_class={};content_count={};unread_count={};associated_count={}",
-                            request.input_handle_index().unwrap_or(0),
-                            format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                            format_debug_property_tags(&request.property_tags()),
-                            mapi_value_debug_u32(properties, PID_TAG_FOLDER_TYPE),
-                            mapi_value_debug_string(properties, PID_TAG_DISPLAY_NAME_W),
-                            mapi_value_debug_string(properties, PID_TAG_CONTAINER_CLASS_W),
-                            mapi_value_debug_u32(properties, PID_TAG_CONTENT_COUNT),
-                            mapi_value_debug_u32(properties, PID_TAG_CONTENT_UNREAD_COUNT),
-                            mapi_value_debug_u32(properties, PID_TAG_ASSOCIATED_CONTENT_COUNT)
-                        ))
-                } else {
-                    None
-                };
-                let named_property_context =
-                    format_debug_named_property_context(session, &request.property_tags());
-                let inbox_config_getprops_trace = if let Some(MapiObject::AssociatedConfig {
-                    folder_id: INBOX_FOLDER_ID,
-                    config_id,
-                    saved_message,
-                }) = object
-                {
-                    let (message_class, subject) = saved_message
-                        .as_ref()
-                        .map(|message| (message.message_class.as_str(), message.subject.as_str()))
-                        .unwrap_or(("missing_saved_message", ""));
-                    Some(format!(
-                        "getprops_inbox_config:request_id={request_id};handle={};config=0x{config_id:016x};class={message_class};subject={subject};tags={};named_properties={}",
-                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                        format_debug_property_tags(&request.property_tags()),
-                        named_property_context
-                    ))
-                } else {
-                    None
-                };
-                if !named_property_context.is_empty() {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x07",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        response_handle_index = request.response_handle_index(),
-                        object_kind = mapi_object_debug_kind(object),
-                        folder_id = %mapi_object_debug_folder_id(object),
-                        requested_property_tags = %format_debug_property_tags(&request.property_tags()),
-                        named_property_context = %named_property_context,
-                        "rca debug mapi get properties named property context"
-                    );
-                }
-                let property_response = rop_get_properties_specific_response_with_custom(
-                    &request,
-                    object,
-                    principal,
-                    mailboxes,
-                    emails_for_request,
-                    snapshot,
-                    &custom_values,
-                );
-                log_message_getprops_response_debug(
-                    principal,
-                    &request,
-                    object,
-                    mailboxes,
-                    emails_for_request,
-                    snapshot,
-                    property_response.len(),
-                );
-                log_get_properties_specific_response_debug(
-                    principal,
                     request_id,
+                    request_rop_names,
+                    session,
+                    &mut handle_slots,
                     &request,
-                    object,
-                    &property_response,
-                );
-                log_get_properties_view_response_debug(
-                    principal,
-                    request_id,
-                    &request,
-                    object,
-                    &property_response,
-                );
-                log_get_properties_default_folder_response_debug(
-                    principal,
-                    request_id,
-                    &request,
-                    object,
-                    mailboxes,
-                    emails_for_request,
-                    snapshot,
-                    &property_response,
-                );
-                let post_hierarchy_contract =
-                    post_hierarchy_getprops_contract(&request, object, &property_response);
-                if should_log_outlook_surface_getprops_info(object) {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        mapi_request_id = request_id,
-                        request_rop_id = "0x07",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        response_handle_index = request.response_handle_index(),
-                        object_kind = mapi_object_debug_kind(object),
-                        folder_id = %mapi_object_debug_folder_id(object),
-                        getprops_contract = %post_hierarchy_contract,
-                        "rca debug mapi outlook surface getprops contract"
-                    );
-                }
-                session.record_post_hierarchy_getprops_contract(post_hierarchy_contract.clone());
-                session.record_post_hierarchy_request_contract(format!(
-                    "{post_hierarchy_contract}->ok"
-                ));
-                responses.extend_from_slice(&property_response);
-                if is_inbox_folder_type_probe {
-                    if let Some(context) = inbox_folder_type_getprops_context {
-                        session.record_last_inbox_folder_type_getprops_context(format!(
-                            "{};{}",
-                            context,
-                            format_inbox_folder_type_getprops_response_context(&property_response)
-                        ));
-                    }
-                    if let Some(context) = format_post_fai_folder_type_probe_loop_context(
-                        &session.post_hierarchy_actions,
-                    ) {
-                        record_mapi_outlook_view_bootstrap_stall(3);
-                        session.record_outlook_view_failure_trace_event(format!(
-                            "post_fai_folder_type_probe_loop:{context}"
-                        ));
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x07",
-                            mapi_request_id = request_id,
-                            input_handle_index = request.input_handle_index().unwrap_or(0),
-                            input_handle_value =
-                                %format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
-                            probe_loop_context = %context,
-                            "rca debug mapi post fai inbox folder type probe loop"
-                        );
-                        session.mark_post_inbox_fai_folder_type_probe_loop_logged();
-                    }
-                    if let Some(summary) =
-                        format_inbox_open_loop_summary(&session.post_hierarchy_actions)
-                    {
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x07",
-                            input_handle_index = request.input_handle_index().unwrap_or(0),
-                            input_handle_value =
-                                %format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
-                            loop_summary = %summary,
-                            "rca debug mapi repeated inbox open folder loop summary"
-                        );
-                    }
-                }
-                if let Some(trace) = inbox_config_getprops_trace {
-                    session.record_outlook_view_failure_trace_event(trace);
-                }
-            }
-            Some(RopId::GetPropertiesAll) => {
-                responses.extend_from_slice(&rop_get_properties_all_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    principal,
                     mailboxes,
                     emails,
                     snapshot,
-                ))
+                    &mut responses,
+                    &mut output_handles,
+                )
+                .await;
             }
-            Some(RopId::GetPropertiesList) => {
-                responses.extend_from_slice(&rop_get_properties_list_response(
+            Some(RopId::CreateMessage) => {
+                append_create_message_response(
+                    principal,
+                    session,
+                    &mut handle_slots,
                     &request,
-                    input_object(session, &handle_slots, &request),
-                ))
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
+                );
             }
+            Some(RopId::GetPropertiesSpecific) => {
+                echo_input_handle_table = true;
+                append_get_properties_specific_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    request_id,
+                    mailboxes,
+                    emails,
+                    &created_emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::GetPropertiesAll) => append_get_properties_all_response(
+                principal,
+                session,
+                &handle_slots,
+                &request,
+                mailboxes,
+                emails,
+                snapshot,
+                &mut responses,
+            ),
+            Some(RopId::GetPropertiesList) => append_get_properties_list_response(
+                session,
+                &handle_slots,
+                &request,
+                &mut responses,
+            ),
             Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate) => {
                 echo_input_handle_table = true;
                 let set_properties_object = input_object(session, &handle_slots, &request).cloned();
@@ -5534,369 +3790,61 @@ where
                 }
             }
             Some(RopId::RemoveAllRecipients) => {
-                let input_handle_value = input_handle(&handle_slots, &request);
-                match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::PendingMessage { recipients, .. }) => {
-                        recipients.clear();
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                    }
-                    Some(MapiObject::Message { .. }) => {
-                        if let Some(handle) = input_handle_value {
-                            session
-                                .pending_message_recipient_replacements
-                                .insert(handle, Vec::new());
-                            responses.extend_from_slice(&rop_simple_success_response(&request));
-                        } else {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0D,
-                                request.response_handle_index(),
-                                0x0000_04B9,
-                            ));
-                        }
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x0D,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    )),
-                }
+                append_remove_all_recipients_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    &mut responses,
+                );
             }
             Some(RopId::ModifyRecipients) => {
-                let input_handle_value = input_handle(&handle_slots, &request);
-                match input_object(session, &handle_slots, &request).cloned() {
-                    Some(MapiObject::PendingMessage {
-                        recipients: existing_recipients,
-                        ..
-                    }) => {
-                        let existing_recipient_count = existing_recipients.len();
-                        let address_book_entries = store
-                            .fetch_address_book_entries(principal)
-                            .await
-                            .unwrap_or_default();
-                        match request.modify_recipients(principal, &address_book_entries) {
-                            Ok(changes) => {
-                                let Some(MapiObject::PendingMessage { recipients, .. }) =
-                                    input_object_mut(session, &handle_slots, &request)
-                                else {
-                                    responses.extend_from_slice(&rop_error_response(
-                                        0x0E,
-                                        request.response_handle_index(),
-                                        0x0000_04B9,
-                                    ));
-                                    continue;
-                                };
-                                tracing::info!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    mailbox = %principal.email,
-                                    request_type = "Execute",
-                                    request_rop_id = "0x0e",
-                                    input_handle_index = request.input_handle_index.unwrap_or(0),
-                                    response_handle_index = request.response_handle_index(),
-                                    existing_recipient_count = recipients.len(),
-                                    recipient_change_count = changes.len(),
-                                    recipient_upsert_count = pending_recipient_upsert_count(&changes),
-                                    recipient_delete_count = pending_recipient_delete_count(&changes),
-                                    recipient_types = %pending_recipient_types_summary(&changes),
-                                    recipient_row_ids = %pending_recipient_row_ids_summary(&changes),
-                                    parse_error = "",
-                                    "rca debug mapi modify recipients"
-                                );
-                                apply_pending_recipient_changes(recipients, changes);
-                                responses.extend_from_slice(&rop_simple_success_response(&request));
-                            }
-                            Err(error) => {
-                                tracing::info!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    mailbox = %principal.email,
-                                    request_type = "Execute",
-                                    request_rop_id = "0x0e",
-                                    input_handle_index = request.input_handle_index.unwrap_or(0),
-                                    response_handle_index = request.response_handle_index(),
-                                    existing_recipient_count,
-                                    recipient_payload_bytes = request.payload.len(),
-                                    recipient_payload_preview = %hex_preview(&request.payload, 48),
-                                    parse_error = %error,
-                                    "rca debug mapi modify recipients"
-                                );
-                                responses.extend_from_slice(&rop_error_response(
-                                    0x0E,
-                                    request.response_handle_index(),
-                                    0x8004_0102,
-                                ));
-                            }
-                        }
-                    }
-                    Some(MapiObject::Message {
-                        folder_id,
-                        message_id,
-                        saved_email,
-                        ..
-                    }) => {
-                        let Some(handle) = input_handle_value else {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0E,
-                                request.response_handle_index(),
-                                0x0000_04B9,
-                            ));
-                            continue;
-                        };
-                        let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                            .or(saved_email.as_ref().map(|saved| &saved.email))
-                        else {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0E,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        };
-                        let mut recipients = session
-                            .pending_message_recipient_replacements
-                            .get(&handle)
-                            .cloned()
-                            .unwrap_or_else(|| pending_recipients_from_email(email));
-                        let address_book_entries = store
-                            .fetch_address_book_entries(principal)
-                            .await
-                            .unwrap_or_default();
-                        match request.modify_recipients(principal, &address_book_entries) {
-                            Ok(changes) => {
-                                tracing::info!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    mailbox = %principal.email,
-                                    request_type = "Execute",
-                                    request_rop_id = "0x0e",
-                                    input_handle_index = request.input_handle_index.unwrap_or(0),
-                                    response_handle_index = request.response_handle_index(),
-                                    existing_recipient_count = recipients.len(),
-                                    recipient_change_count = changes.len(),
-                                    recipient_upsert_count = pending_recipient_upsert_count(&changes),
-                                    recipient_delete_count = pending_recipient_delete_count(&changes),
-                                    recipient_types = %pending_recipient_types_summary(&changes),
-                                    recipient_row_ids = %pending_recipient_row_ids_summary(&changes),
-                                    parse_error = "",
-                                    "rca debug mapi modify recipients"
-                                );
-                                apply_pending_recipient_changes(&mut recipients, changes);
-                                session
-                                    .pending_message_recipient_replacements
-                                    .insert(handle, recipients);
-                                responses.extend_from_slice(&rop_simple_success_response(&request));
-                            }
-                            Err(error) => {
-                                tracing::info!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    mailbox = %principal.email,
-                                    request_type = "Execute",
-                                    request_rop_id = "0x0e",
-                                    input_handle_index = request.input_handle_index.unwrap_or(0),
-                                    response_handle_index = request.response_handle_index(),
-                                    existing_recipient_count = recipients.len(),
-                                    recipient_payload_bytes = request.payload.len(),
-                                    recipient_payload_preview = %hex_preview(&request.payload, 48),
-                                    parse_error = %error,
-                                    "rca debug mapi modify recipients"
-                                );
-                                responses.extend_from_slice(&rop_error_response(
-                                    0x0E,
-                                    request.response_handle_index(),
-                                    0x8004_0102,
-                                ));
-                            }
-                        }
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x0E,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    )),
-                }
+                append_modify_recipients_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::ReadRecipients) => {
-                if request.read_recipients_reserved() != Some(0) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x0F,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let input_handle_value = input_handle(&handle_slots, &request);
-                let pending_recipient_object;
-                let object = if let Some(recipients) = input_handle_value
-                    .and_then(|handle| session.pending_message_recipient_replacements.get(&handle))
-                {
-                    let folder_id = input_object(session, &handle_slots, &request)
-                        .and_then(MapiObject::folder_id)
-                        .unwrap_or(INBOX_FOLDER_ID);
-                    pending_recipient_object = MapiObject::PendingMessage {
-                        folder_id,
-                        properties: HashMap::new(),
-                        recipients: recipients.clone(),
-                    };
-                    Some(&pending_recipient_object)
-                } else {
-                    input_object(session, &handle_slots, &request)
-                };
-                responses.extend_from_slice(&rop_read_recipients_response(
-                    &request, object, mailboxes, emails, snapshot,
-                ))
-            }
-            Some(RopId::ReloadCachedInformation) => {
-                if request.reload_cached_information_reserved() != Some(0) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x10,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_reload_cached_information_response(
+                append_read_recipients_response(
+                    session,
+                    &handle_slots,
                     &request,
-                    input_object(session, &handle_slots, &request),
                     mailboxes,
                     emails,
                     snapshot,
-                ))
+                    &mut responses,
+                );
+            }
+            Some(RopId::ReloadCachedInformation) => {
+                append_reload_cached_information_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                );
             }
             Some(RopId::SetMessageReadFlag) => {
-                let Some(object) = input_object(session, &handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x11,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                if !read_flags_are_valid(request.read_flags(), false) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x11,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                if let MapiObject::PublicFolderItem {
-                    folder_id, item_id, ..
-                } = object
-                {
-                    let Some(item) = snapshot.public_folder_item_for_id(*folder_id, *item_id)
-                    else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x11,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        continue;
-                    };
-                    let unread = unread_from_read_flags(request.read_flags());
-                    let changed = unread.is_some_and(|unread| unread == item.item.is_read);
-                    if let Some(unread) = unread {
-                        let patch = lpe_storage::PublicFolderPerUserStatePatch {
-                            item_id: item.item.id,
-                            is_read: !unread,
-                            last_seen_change: Some(item.item.change_counter),
-                            private_json: None,
-                        };
-                        if store
-                            .patch_public_folder_per_user_state(
-                                principal.account_id,
-                                item.item.public_folder_id,
-                                &[patch],
-                            )
-                            .await
-                            .is_err()
-                        {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x11,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                    }
-                    if changed {
-                        session
-                            .record_notification(MapiNotificationEvent::content(*folder_id, None));
-                    }
-                    responses
-                        .extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
-                    continue;
-                }
-                let MapiObject::Message {
-                    folder_id,
-                    message_id,
-                    saved_email,
-                    ..
-                } = object
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x11,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails)
-                    .or(saved_email.as_ref().map(|saved| &saved.email))
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x11,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let unread = unread_from_read_flags(request.read_flags());
-                let changed = unread.is_some_and(|unread| unread != email.unread);
-                if let Some(unread) = unread {
-                    if !snapshot
-                        .folder_access_for_principal(*folder_id, principal.account_id)
-                        .map(|access| access.may_write)
-                        .unwrap_or(true)
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x11,
-                            request.response_handle_index(),
-                            0x8007_0005,
-                        ));
-                        continue;
-                    }
-                    if store
-                        .update_jmap_email_flags(
-                            principal.account_id,
-                            email.id,
-                            Some(unread),
-                            None,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-set-message-read-flag".to_string(),
-                                subject: format!("message:{}", email.id),
-                            },
-                        )
-                        .await
-                        .is_err()
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x11,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        continue;
-                    }
-                }
-                if changed {
-                    session.record_notification(MapiNotificationEvent::content(*folder_id, None));
-                }
-                responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
+                append_set_message_read_flag_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::SetColumns) => {
                 let requested_columns = request.property_tags();
@@ -6619,163 +4567,45 @@ where
                     ));
                 }
             }
-            Some(RopId::GetStatus) => responses.extend_from_slice(&get_status_response(
+            Some(
+                RopId::GetStatus
+                | RopId::QueryPosition
+                | RopId::SeekRow
+                | RopId::SeekRowBookmark
+                | RopId::SeekRowFractional
+                | RopId::CreateBookmark
+                | RopId::QueryColumnsAll
+                | RopId::CollapseRow
+                | RopId::GetCollapseState
+                | RopId::SetCollapseState,
+            ) => append_table_control_response(
+                principal,
+                request_id,
+                session,
+                &handle_slots,
                 &request,
-                input_object(session, &handle_slots, &request),
-            )),
-            Some(RopId::QueryPosition) => {
-                let calendar_normal_query_position_context = match input_object(
-                    session,
-                    &handle_slots,
-                    &request,
-                ) {
-                    Some(MapiObject::ContentsTable {
-                        folder_id,
-                        associated,
-                        columns,
-                        position,
-                        restriction,
-                        sort_orders,
-                        ..
-                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
-                        "handle={};input_index={};position_before={};columns={};sort={};restriction={}",
-                        format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                        request.input_handle_index().unwrap_or(0),
-                        position,
-                        format_debug_property_tags(columns),
-                        format_debug_sort_orders(sort_orders),
-                        format_debug_restriction_option(restriction.as_ref())
-                    )),
-                    _ => None,
-                };
-                let response = query_position_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    principal.account_id,
-                );
-                log_mapi_query_position_debug(
-                    principal,
-                    request_id,
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    &response,
-                    mailboxes,
-                    emails,
-                    snapshot,
-                );
-                if let Some(context) = calendar_normal_query_position_context {
-                    let position = response
-                        .get(6..10)
-                        .and_then(|bytes| bytes.try_into().ok())
-                        .map(u32::from_le_bytes)
-                        .unwrap_or(0);
-                    let row_count = response
-                        .get(10..14)
-                        .and_then(|bytes| bytes.try_into().ok())
-                        .map(u32::from_le_bytes)
-                        .unwrap_or(0);
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "calendar_normal_query_position:{context};response_position={position};response_row_count={row_count}"
-                    ));
-                }
-                responses.extend_from_slice(&response);
-            }
-            Some(RopId::SeekRow) => {
-                let before_position =
-                    input_object(session, &handle_slots, &request).and_then(table_position);
-                let selected_named_property_context = format_contents_table_named_property_context(
-                    session,
-                    input_object(session, &handle_slots, &request),
-                );
-                let response = seek_row_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    principal.account_id,
-                );
-                log_outlook_contents_table_seek_row(
-                    principal,
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    &selected_named_property_context,
-                    snapshot,
-                    before_position,
-                    &response,
-                );
-                responses.extend_from_slice(&response);
-            }
-            Some(RopId::SeekRowBookmark) => {
-                responses.extend_from_slice(&seek_row_bookmark_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    principal.account_id,
-                ))
-            }
-            Some(RopId::SeekRowFractional) => {
-                responses.extend_from_slice(&seek_row_fractional_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    principal.account_id,
-                ))
-            }
-            Some(RopId::CreateBookmark) => responses.extend_from_slice(&create_bookmark_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
                 mailboxes,
                 emails,
                 snapshot,
-                principal.account_id,
-            )),
-            Some(RopId::QueryColumnsAll) => {
-                responses.extend_from_slice(&query_columns_all_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                    snapshot,
-                ))
-            }
+                &mut responses,
+            ),
             Some(RopId::ExpandRow)
                 if !matches!(
                     input_object(session, &handle_slots, &request),
                     Some(MapiObject::Folder { .. })
                 ) =>
             {
-                responses.extend_from_slice(&expand_row_response(
+                append_table_control_response(
+                    principal,
+                    request_id,
+                    session,
+                    &handle_slots,
                     &request,
-                    input_object_mut(session, &handle_slots, &request),
                     mailboxes,
                     emails,
                     snapshot,
-                ))
-            }
-            Some(RopId::CollapseRow) => responses.extend_from_slice(&collapse_row_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-            )),
-            Some(RopId::GetCollapseState) => {
-                responses.extend_from_slice(&get_collapse_state_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                ))
-            }
-            Some(RopId::SetCollapseState) => {
-                responses.extend_from_slice(&set_collapse_state_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                ))
+                    &mut responses,
+                )
             }
             Some(RopId::CreateFolder) => {
                 let parent_folder_id = match input_object(session, &handle_slots, &request)
@@ -7364,871 +5194,55 @@ where
                 }
             }
             Some(RopId::DeleteFolder) => {
-                if request
-                    .delete_folder_flags()
-                    .is_none_or(|flags| flags & !0x15 != 0)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let Some(_parent_folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                let Some(folder_id) = request.delete_folder_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let mailbox = folder_row_for_id(folder_id, mailboxes);
-                if let Some(mailbox) = mailbox {
-                    if mailbox.role != "custom" {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x1D,
-                            request.response_handle_index(),
-                            0x8007_0005,
-                        ));
-                        continue;
-                    }
-                } else if is_advertised_special_folder(folder_id) {
-                    if !advertised_special_folder_delete_uses_session_tombstone(folder_id) {
-                        if advertised_special_folder_delete_is_noop(folder_id) {
-                            tracing::info!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                mailbox = principal.email.as_str(),
-                                request_type = "Execute",
-                                request_rop_id = "0x1d",
-                                parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                                folder_id = %format!("{folder_id:#018x}"),
-                                partial_completion = false,
-                                message = "rca debug mapi delete advertised special folder no-op acknowledged",
-                            );
-                            responses.extend_from_slice(&rop_partial_completion_response(
-                                0x1D,
-                                request.response_handle_index(),
-                                false,
-                            ));
-                            continue;
-                        }
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = principal.email.as_str(),
-                            request_type = "Execute",
-                            request_rop_id = "0x1d",
-                            parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                            folder_id = %format!("{folder_id:#018x}"),
-                            response_error = "0x80070005",
-                            message = "rca debug mapi delete advertised special folder denied",
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            0x1D,
-                            request.response_handle_index(),
-                            0x8007_0005,
-                        ));
-                        continue;
-                    }
-                    session.record_deleted_advertised_special_folder(folder_id);
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = principal.email.as_str(),
-                        request_type = "Execute",
-                        request_rop_id = "0x1d",
-                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                        folder_id = %format!("{folder_id:#018x}"),
-                        partial_completion = false,
-                        message = "rca debug mapi delete advertised special folder acknowledged",
-                    );
-                    session.record_notification(MapiNotificationEvent::hierarchy(
-                        _parent_folder_id,
-                        Some(folder_id),
-                    ));
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        false,
-                    ));
-                    continue;
-                }
-                if let Some(public_folder) = snapshot.public_folder_for_id(folder_id) {
-                    let partial_completion = store
-                        .delete_public_folder(
-                            principal.account_id,
-                            public_folder.folder.id,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-delete-public-folder".to_string(),
-                                subject: format!("public-folder:{}", public_folder.folder.id),
-                            },
-                        )
-                        .await
-                        .is_err();
-                    if !partial_completion {
-                        session.record_notification(MapiNotificationEvent::hierarchy(
-                            _parent_folder_id,
-                            Some(folder_id),
-                        ));
-                    }
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                let persisted_search_definition = snapshot
-                    .search_folder_definition_for_folder_id(folder_id)
-                    .cloned();
-                let staged_search_definition = if persisted_search_definition.is_none() {
-                    session.forget_search_folder_definition(folder_id)
-                } else {
-                    None
-                };
-                if let Some(definition) = persisted_search_definition
-                    .as_ref()
-                    .or(staged_search_definition.as_ref())
-                {
-                    if definition.is_builtin {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x1D,
-                            request.response_handle_index(),
-                            0x8007_0005,
-                        ));
-                        continue;
-                    }
-                    let partial_completion = if persisted_search_definition.is_some() {
-                        store
-                            .delete_search_folder(principal.account_id, definition.id)
-                            .await
-                            .is_err()
-                    } else {
-                        false
-                    };
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        tenant_id = %principal.tenant_id,
-                        account_id = %principal.account_id,
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x1d",
-                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                        folder_id = %format!("{folder_id:#018x}"),
-                        search_folder_id = %definition.id,
-                        display_name = %definition.display_name,
-                        partial_completion = partial_completion,
-                        message = "rca debug mapi delete search folder",
-                    );
-                    if !partial_completion {
-                        session.record_notification(MapiNotificationEvent::hierarchy(
-                            _parent_folder_id,
-                            Some(folder_id),
-                        ));
-                    }
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                if session.search_folder_definition_was_deleted(folder_id) {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        tenant_id = %principal.tenant_id,
-                        account_id = %principal.account_id,
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x1d",
-                        parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                        folder_id = %format!("{folder_id:#018x}"),
-                        partial_completion = false,
-                        message = "rca debug mapi delete search folder retry acknowledged",
-                    );
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        false,
-                    ));
-                    continue;
-                }
-                let Some(mailbox) = mailbox else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x1D,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-
-                let partial_completion = store
-                    .destroy_jmap_mailbox(
-                        principal.account_id,
-                        mailbox.id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "mapi-delete-folder".to_string(),
-                            subject: format!("folder:{}", mailbox.id),
-                        },
-                    )
-                    .await
-                    .is_err();
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    tenant_id = %principal.tenant_id,
-                    account_id = %principal.account_id,
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x1d",
-                    parent_folder_id = %format!("{_parent_folder_id:#018x}"),
-                    folder_id = %format!("{folder_id:#018x}"),
-                    jmap_mailbox_id = %mailbox.id,
-                    display_name = %mailbox.name,
-                    role = %mailbox.role,
-                    partial_completion = partial_completion,
-                    message = "rca debug mapi delete real folder",
-                );
-                if !partial_completion {
-                    session.record_notification(MapiNotificationEvent::hierarchy(
-                        _parent_folder_id,
-                        Some(folder_id),
-                    ));
-                }
-                responses.extend_from_slice(&rop_partial_completion_response(
-                    0x1D,
-                    request.response_handle_index(),
-                    partial_completion,
-                ));
+                append_delete_folder_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::MoveFolder | RopId::CopyFolder) => {
-                let rop_id = request.rop_id;
-                let response_handle_index = request.response_handle_index();
-                if request.folder_move_copy_want_asynchronous().is_none()
-                    || request.folder_move_copy_use_unicode().is_none()
-                    || (rop_id == RopId::CopyFolder.as_u8()
-                        && request.folder_move_copy_want_recursive().is_none())
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let Some(source_parent_folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                let Some(target_folder_id) = request
-                    .move_copy_target_handle(&handle_slots)
-                    .and_then(|handle| {
-                        session
-                            .handles
-                            .get(&handle)
-                            .and_then(|object| object.folder_id())
-                    })
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let Some(folder_id) = request.folder_move_copy_folder_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let display_name = request.folder_move_copy_display_name();
-                let display_name = display_name.trim();
-                if display_name.is_empty() {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-
-                if rop_id == RopId::CopyFolder.as_u8() {
-                    if let (Some(source_public_folder), Some(target_public_folder)) = (
-                        snapshot.public_folder_for_id(folder_id),
-                        snapshot.public_folder_for_id(target_folder_id),
-                    ) {
-                        let partial_completion = match copy_public_folder_tree_for_mapi(
-                            store,
-                            principal,
-                            source_public_folder.folder.id,
-                            target_public_folder.folder.id,
-                            display_name,
-                        )
-                        .await
-                        {
-                            Ok(copied_folder) => {
-                                if let Ok(copied_folder_id) = remember_created_mapi_identity(
-                                    store,
-                                    principal,
-                                    MapiIdentityObjectKind::PublicFolder,
-                                    copied_folder.id,
-                                    None,
-                                    None,
-                                )
-                                .await
-                                {
-                                    session.record_notification(MapiNotificationEvent::hierarchy(
-                                        target_folder_id,
-                                        Some(copied_folder_id),
-                                    ));
-                                }
-                                false
-                            }
-                            Err(_) => true,
-                        };
-                        responses.extend_from_slice(&rop_partial_completion_response(
-                            rop_id,
-                            response_handle_index,
-                            partial_completion,
-                        ));
-                        continue;
-                    }
-                }
-                if rop_id == RopId::MoveFolder.as_u8() {
-                    if let (Some(source_public_folder), Some(target_public_folder)) = (
-                        snapshot.public_folder_for_id(folder_id),
-                        snapshot.public_folder_for_id(target_folder_id),
-                    ) {
-                        let source_parent_matches = snapshot
-                            .public_folder_for_id(source_parent_folder_id)
-                            .map(|parent| {
-                                source_public_folder.folder.parent_folder_id
-                                    == Some(parent.folder.id)
-                            })
-                            .unwrap_or(false);
-                        if !source_parent_matches {
-                            responses.extend_from_slice(&rop_error_response(
-                                rop_id,
-                                response_handle_index,
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                        let partial_completion = store
-                            .update_public_folder(
-                                UpdatePublicFolderInput {
-                                    account_id: principal.account_id,
-                                    folder_id: source_public_folder.folder.id,
-                                    parent_folder_id: Some(target_public_folder.folder.id),
-                                    display_name: Some(display_name.to_string()),
-                                    folder_class: None,
-                                    sort_order: None,
-                                },
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-move-public-folder".to_string(),
-                                    subject: format!(
-                                        "public-folder:{}->{}",
-                                        source_public_folder.folder.id,
-                                        target_public_folder.folder.id
-                                    ),
-                                },
-                            )
-                            .await
-                            .is_err();
-                        if !partial_completion {
-                            session.record_notification(MapiNotificationEvent::hierarchy(
-                                source_parent_folder_id,
-                                Some(folder_id),
-                            ));
-                            session.record_notification(MapiNotificationEvent::hierarchy(
-                                target_folder_id,
-                                Some(folder_id),
-                            ));
-                        }
-                        responses.extend_from_slice(&rop_partial_completion_response(
-                            rop_id,
-                            response_handle_index,
-                            partial_completion,
-                        ));
-                        continue;
-                    }
-                }
-
-                let target_parent_id = match target_folder_id {
-                    IPM_SUBTREE_FOLDER_ID => None,
-                    folder_id => match folder_row_for_id(folder_id, mailboxes) {
-                        Some(mailbox) if mailbox.role == "custom" => Some(mailbox.id),
-                        _ => {
-                            responses.extend_from_slice(&rop_error_response(
-                                rop_id,
-                                response_handle_index,
-                                0x8007_0005,
-                            ));
-                            continue;
-                        }
-                    },
-                };
-                let Some(source_mailbox) = folder_row_for_id(folder_id, mailboxes) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                if source_mailbox.role != "custom" {
-                    responses.extend_from_slice(&rop_error_response(
-                        rop_id,
-                        response_handle_index,
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-
-                let result = if request.rop_id == RopId::CopyFolder.as_u8() {
-                    match store
-                        .create_jmap_mailbox(
-                            JmapMailboxCreateInput {
-                                account_id: principal.account_id,
-                                name: display_name.to_string(),
-                                parent_id: target_parent_id,
-                                sort_order: None,
-                                is_subscribed: source_mailbox.is_subscribed,
-                            },
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-copy-folder".to_string(),
-                                subject: format!("folder:{}->{}", source_mailbox.id, display_name),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(mailbox) => {
-                            match remember_created_mapi_identity(
-                                store,
-                                principal,
-                                MapiIdentityObjectKind::Mailbox,
-                                mailbox.id,
-                                None,
-                                None,
-                            )
-                            .await
-                            {
-                                Ok(copied_folder_id) => Ok((mailbox.id, copied_folder_id)),
-                                Err(error) => Err(error),
-                            }
-                        }
-                        Err(error) => Err(error),
-                    }
-                } else {
-                    store
-                        .update_jmap_mailbox(
-                            JmapMailboxUpdateInput {
-                                account_id: principal.account_id,
-                                mailbox_id: source_mailbox.id,
-                                name: Some(display_name.to_string()),
-                                parent_id: Some(target_parent_id),
-                                sort_order: None,
-                                is_subscribed: None,
-                            },
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-move-folder".to_string(),
-                                subject: format!("folder:{}", source_mailbox.id),
-                            },
-                        )
-                        .await
-                        .map(|mailbox| (mailbox.id, folder_id))
-                };
-
-                if let Ok((_changed_mailbox_id, changed_folder_id)) = result.as_ref() {
-                    let old_parent_folder_id =
-                        mailbox_parent_folder_id_for_dispatch(source_mailbox, mailboxes);
-                    let new_parent_folder_id = target_parent_id
-                        .and_then(|parent_id| {
-                            mailboxes
-                                .iter()
-                                .find(|mailbox| mailbox.id == parent_id)
-                                .map(mapi_folder_id)
-                        })
-                        .unwrap_or(IPM_SUBTREE_FOLDER_ID);
-                    if request.rop_id == RopId::MoveFolder.as_u8() {
-                        session.record_notification(MapiNotificationEvent::hierarchy(
-                            old_parent_folder_id,
-                            Some(*changed_folder_id),
-                        ));
-                    }
-                    session.record_notification(MapiNotificationEvent::hierarchy(
-                        new_parent_folder_id,
-                        Some(*changed_folder_id),
-                    ));
-                }
-                let partial_completion = result.is_err();
-                responses.extend_from_slice(&rop_partial_completion_response(
-                    rop_id,
-                    response_handle_index,
-                    partial_completion,
-                ));
+                append_folder_move_copy_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::DeleteMessages | RopId::HardDeleteMessages) => {
-                if request.delete_messages_want_asynchronous().is_none()
-                    || request.delete_messages_notify_non_read().is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
-                        responses.extend_from_slice(&unsupported_rop_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                        ));
-                        continue;
-                    }
-                    _ => {
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x0000_04B9,
-                        ));
-                        continue;
-                    }
-                };
-                let mut partial_completion = false;
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_delete)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-                if folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                for message_id in request.message_ids() {
-                    if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
-                        if request.rop_id == RopId::DeleteMessages.as_u8() {
-                            partial_completion = true;
-                            continue;
-                        }
-                        let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id)
-                        else {
-                            partial_completion = true;
-                            continue;
-                        };
-                        if store
-                            .purge_recoverable_item(
-                                principal.account_id,
-                                item.canonical_id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-purge-recoverable-message".to_string(),
-                                    subject: format!("recoverable:{}", item.canonical_id),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                        continue;
-                    }
-                    if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
-                        if store
-                            .delete_accessible_contact(principal.account_id, contact.canonical_id)
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                        continue;
-                    }
-                    if !mapi_calendar_content_items_suppressed(folder_id, snapshot) {
-                        if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
-                            if store
-                                .delete_accessible_event(principal.account_id, event.canonical_id)
-                                .await
-                                .is_err()
-                            {
-                                partial_completion = true;
-                            }
-                            continue;
-                        }
-                    }
-                    if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
-                        if store
-                            .delete_accessible_task(principal.account_id, task.canonical_id)
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                        continue;
-                    }
-                    if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
-                        if store
-                            .delete_mapi_note(principal.account_id, note.canonical_id)
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        } else {
-                            record_sync_upload_content_checkpoint(session, folder_id);
-                        }
-                        continue;
-                    }
-                    if let Some(entry) = snapshot.journal_entry_for_id(folder_id, message_id) {
-                        if store
-                            .delete_mapi_journal_entry(principal.account_id, entry.canonical_id)
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        } else {
-                            record_sync_upload_content_checkpoint(session, folder_id);
-                        }
-                        continue;
-                    }
-                    if let Some(message) = snapshot
-                        .conversation_action_message_for_id(message_id)
-                        .filter(|message| message.folder_id == folder_id)
-                    {
-                        if store
-                            .delete_conversation_action(principal.account_id, message.canonical_id)
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                        continue;
-                    }
-                    if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
-                        if let Some(message) = snapshot
-                            .navigation_shortcut_message_for_id(message_id)
-                            .filter(|message| message.folder_id == folder_id)
-                        {
-                            if store
-                                .delete_mapi_navigation_shortcut(
-                                    principal.account_id,
-                                    message.canonical_id,
-                                )
-                                .await
-                                .is_err()
-                            {
-                                partial_completion = true;
-                            }
-                            continue;
-                        }
-                    }
-                    if let Some(message) = snapshot
-                        .associated_config_message_for_id(message_id)
-                        .filter(|message| message.folder_id == folder_id)
-                        .or_else(|| {
-                            snapshot.associated_config_message_for_folder_and_source_key_id(
-                                folder_id, message_id,
-                            )
-                        })
-                    {
-                        if store
-                            .delete_mapi_associated_config(
-                                principal.account_id,
-                                message.canonical_id,
-                            )
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        } else {
-                            record_sync_upload_content_checkpoint(session, folder_id);
-                        }
-                        continue;
-                    }
-                    if folder_local_default_named_view_is_supported(snapshot, folder_id, message_id)
-                    {
-                        continue;
-                    }
-                    if let Some(item) = snapshot.public_folder_item_for_id(folder_id, message_id) {
-                        if store
-                            .delete_public_folder_item(
-                                principal.account_id,
-                                item.item.public_folder_id,
-                                item.item.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-delete-public-folder-item".to_string(),
-                                    subject: format!("public-folder-item:{}", item.item.id),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                        continue;
-                    }
-                    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                    else {
-                        partial_completion = true;
-                        continue;
-                    };
-                    let result = if request.rop_id == 0x91
-                        || email.mailbox_role == "trash"
-                        || mailbox_is_trash_or_descendant(email.mailbox_id, mailboxes)
-                    {
-                        store
-                            .delete_jmap_email_from_mailbox(
-                                principal.account_id,
-                                email.mailbox_id,
-                                email.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-delete-message".to_string(),
-                                    subject: format!("message:{}", email.id),
-                                },
-                            )
-                            .await
-                            .map(|_| ())
-                    } else if let Some(trash_mailbox) =
-                        mailboxes.iter().find(|mailbox| mailbox.role == "trash")
-                    {
-                        store
-                            .move_jmap_email_from_mailbox(
-                                principal.account_id,
-                                email.mailbox_id,
-                                email.id,
-                                trash_mailbox.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-move-message-to-trash".to_string(),
-                                    subject: format!("message:{}->{}", email.id, trash_mailbox.id),
-                                },
-                            )
-                            .await
-                            .map(|_| ())
-                    } else {
-                        store
-                            .delete_jmap_email_from_mailbox(
-                                principal.account_id,
-                                email.mailbox_id,
-                                email.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-delete-message-without-trash".to_string(),
-                                    subject: format!("message:{}", email.id),
-                                },
-                            )
-                            .await
-                            .map(|_| ())
-                    };
-                    if result.is_err() {
-                        partial_completion = true;
-                    } else {
-                        record_sync_upload_content_checkpoint(session, folder_id);
-                    }
-                }
-                if !partial_completion {
-                    session.record_notification(MapiNotificationEvent::content(folder_id, None));
-                }
-                responses.extend_from_slice(&rop_partial_completion_response(
-                    request.rop_id,
-                    request.response_handle_index(),
-                    partial_completion,
-                ));
+                append_delete_messages_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetMessageStatus | RopId::SetMessageStatus) => {
-                let response_rop_id = RopId::SetMessageStatus.as_u8();
-                let folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    Some(_) | None => {
-                        responses.extend_from_slice(&rop_error_response(
-                            response_rop_id,
-                            request.response_handle_index(),
-                            0x0000_04B9,
-                        ));
-                        continue;
-                    }
-                };
-                let message_id = request.status_message_id().unwrap_or(0);
-                let item_exists = message_for_id(folder_id, message_id, mailboxes, emails)
-                    .or_else(|| {
-                        emails
-                            .iter()
-                            .find(|email| mapi_item_id_matches(&email.id, message_id))
-                    })
-                    .is_some()
-                    || snapshot
-                        .public_folder_item_for_id(folder_id, message_id)
-                        .is_some()
-                    || snapshot.contact_for_id(folder_id, message_id).is_some()
-                    || snapshot.event_for_id(folder_id, message_id).is_some()
-                    || snapshot.task_for_id(folder_id, message_id).is_some();
-                if !item_exists {
-                    responses.extend_from_slice(&rop_error_response(
-                        response_rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                let key = (folder_id, message_id);
-                let old_status = session.message_statuses.get(&key).copied().unwrap_or(0);
-                if request.rop_id == 0x20 {
-                    let mask = request.message_status_mask();
-                    let new_status = (old_status & !mask) | (request.message_status_flags() & mask);
-                    if new_status == 0 {
-                        session.message_statuses.remove(&key);
-                    } else {
-                        session.message_statuses.insert(key, new_status);
-                    }
-                }
-                responses.extend_from_slice(&rop_message_status_response(&request, old_status));
+                append_message_status_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                );
             }
             Some(RopId::FindRow) => {
                 let find_trace = match input_object(session, &handle_slots, &request) {
@@ -8291,2153 +5305,259 @@ where
                 responses.extend_from_slice(&response);
             }
             Some(RopId::GetValidAttachments) => {
-                responses.extend_from_slice(&rop_get_valid_attachments_response(
+                append_get_valid_attachments_response(
+                    session,
+                    &handle_slots,
                     &request,
-                    input_object(session, &handle_slots, &request),
                     snapshot,
-                    &session.pending_attachment_deletions,
-                ))
+                    &mut responses,
+                );
             }
             Some(RopId::GetAttachmentTable) => {
-                if !get_attachment_table_flags_are_valid(&request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x21,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let (folder_id, message_id, is_calendar_event) =
-                    match input_object(session, &handle_slots, &request) {
-                        Some(MapiObject::PendingMessage { folder_id, .. }) => {
-                            (*folder_id, 0, false)
-                        }
-                        Some(MapiObject::Message {
-                            folder_id,
-                            message_id,
-                            ..
-                        }) => (*folder_id, *message_id, false),
-                        Some(MapiObject::Event {
-                            folder_id,
-                            event_id: message_id,
-                        }) => (*folder_id, *message_id, true),
-                        _ => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x21,
-                                request.output_handle_index.unwrap_or(0),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                    };
-                if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x21,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    attachment_table_object(folder_id, message_id),
+                append_get_attachment_table_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&get_attachment_table_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::OpenAttachment) => {
-                if !open_attachment_flags_are_valid(&request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x22,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let (folder_id, message_id, is_calendar_event) =
-                    match input_object(session, &handle_slots, &request) {
-                        Some(MapiObject::Message {
-                            folder_id,
-                            message_id,
-                            ..
-                        }) => (*folder_id, *message_id, false),
-                        Some(MapiObject::Event {
-                            folder_id,
-                            event_id: message_id,
-                        }) => (*folder_id, *message_id, true),
-                        _ => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x22,
-                                request.output_handle_index.unwrap_or(0),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                    };
-                if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x22,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                let attach_num = request.attach_num().unwrap_or(u32::MAX);
-                if session
-                    .pending_attachment_deletions
-                    .contains(&(folder_id, message_id, attach_num))
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x22,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                if snapshot
-                    .attachment_for_message(folder_id, message_id, attach_num)
-                    .is_some()
-                {
-                    let handle = session.allocate_output_handle(
-                        request.output_handle_index,
-                        MapiObject::Attachment {
-                            folder_id,
-                            message_id,
-                            attach_num,
-                        },
-                    );
-                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_attachment_response(&request));
-                    output_handles.push(handle);
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x22,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                }
+                append_open_attachment_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
+                );
             }
             Some(RopId::CreateAttachment) => {
-                let parent_message_handle =
-                    input_handle(&handle_slots, &request).filter(|handle| {
-                        matches!(
-                            session.handles.get(handle),
-                            Some(MapiObject::PendingMessage { .. })
-                        )
-                    });
-                let (folder_id, message_id, is_calendar_event, is_pending_message) =
-                    match input_object(session, &handle_slots, &request) {
-                        Some(MapiObject::Event { folder_id, .. })
-                            if mapi_calendar_content_items_suppressed(*folder_id, snapshot) =>
-                        {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x23,
-                                request.output_handle_index.unwrap_or(0),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                        Some(MapiObject::Message {
-                            folder_id,
-                            message_id,
-                            ..
-                        }) => (*folder_id, *message_id, false, false),
-                        Some(MapiObject::PendingMessage { folder_id, .. }) => {
-                            (*folder_id, 0, false, true)
-                        }
-                        Some(MapiObject::Event {
-                            folder_id,
-                            event_id,
-                        }) => (*folder_id, *event_id, true, false),
-                        _ => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x23,
-                                request.output_handle_index.unwrap_or(0),
-                                0x0000_04B9,
-                            ));
-                            continue;
-                        }
-                    };
-                if !is_calendar_event
-                    && !is_pending_message
-                    && message_for_id(folder_id, message_id, mailboxes, emails).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x23,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x23,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_write)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x23,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-
-                let attach_num = if let Some(parent_handle) = parent_message_handle {
-                    session
-                        .pending_message_attachments
-                        .get(&parent_handle)
-                        .and_then(|attachments| {
-                            attachments.iter().map(|(attach_num, _)| *attach_num).max()
-                        })
-                        .unwrap_or(u32::MAX)
-                        .saturating_add(1)
-                } else {
-                    next_pending_attachment_num(session, folder_id, message_id, snapshot)
-                };
-                let created_at = current_mapi_filetime();
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::PendingAttachment {
-                        folder_id,
-                        message_id,
-                        attach_num,
-                        properties: HashMap::from([
-                            (PID_TAG_ATTACH_SIZE, MapiValue::U32(0)),
-                            (PID_TAG_ACCESS_LEVEL, MapiValue::U32(0)),
-                            (PID_TAG_CREATION_TIME, MapiValue::U64(created_at)),
-                            (PID_TAG_LAST_MODIFICATION_TIME, MapiValue::U64(created_at)),
-                        ]),
-                        data: Vec::new(),
-                    },
+                append_create_attachment_response(
+                    principal,
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                if let Some(parent_handle) = parent_message_handle {
-                    session
-                        .pending_attachment_parent_messages
-                        .insert(handle, parent_handle);
-                }
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_create_attachment_response(&request, attach_num));
-                output_handles.push(handle);
             }
             Some(RopId::DeleteAttachment) => {
-                let (folder_id, message_id, is_calendar_event) =
-                    match input_object(session, &handle_slots, &request) {
-                        Some(MapiObject::Event { folder_id, .. })
-                            if mapi_calendar_content_items_suppressed(*folder_id, snapshot) =>
-                        {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x24,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        }
-                        Some(MapiObject::Message {
-                            folder_id,
-                            message_id,
-                            ..
-                        }) => (*folder_id, *message_id, false),
-                        Some(MapiObject::Event {
-                            folder_id,
-                            event_id,
-                        }) => (*folder_id, *event_id, true),
-                        _ => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x24,
-                                request.response_handle_index(),
-                                0x0000_04B9,
-                            ));
-                            continue;
-                        }
-                    };
-                let attach_num = request.attach_num().unwrap_or(u32::MAX);
-                let Some(attachment) =
-                    snapshot.attachment_for_message(folder_id, message_id, attach_num)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x24,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_write)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x24,
-                        request.response_handle_index(),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-                let _ = is_calendar_event;
-                let _ = attachment;
-                session
-                    .pending_attachment_deletions
-                    .insert((folder_id, message_id, attach_num));
-                responses.extend_from_slice(&rop_simple_success_response(&request));
+                append_delete_attachment_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                );
             }
             Some(RopId::OpenEmbeddedMessage) => {
-                let Some(handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x46,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                let open_mode = request.payload.get(2).copied().unwrap_or(0);
-                if open_mode > 0x02 {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x46,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let Some((folder_id, message_id, attach_num, embedded_properties)) =
-                    open_embedded_message_source(
-                        store, principal, session, snapshot, handle, open_mode,
-                    )
-                    .await
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x46,
-                        request.response_handle_index(),
-                        if open_mode == 0 {
-                            0x8004_010F
-                        } else {
-                            0x8007_0005
-                        },
-                    ));
-                    continue;
-                };
-                let embedded_message_id =
-                    transient_embedded_message_id(folder_id, message_id, attach_num);
-                let embedded_subject = embedded_message_open_subject(&embedded_properties);
-                let embedded_handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::PendingMessage {
-                        folder_id,
-                        properties: embedded_properties,
-                        recipients: Vec::new(),
-                    },
-                );
-                session
-                    .pending_embedded_message_ids
-                    .insert(embedded_handle, embedded_message_id);
-                session
-                    .pending_embedded_message_attachments
-                    .insert(embedded_handle, (folder_id, message_id, attach_num));
-                set_handle_slot(
+                append_open_embedded_message_response(
+                    store,
+                    principal,
+                    session,
                     &mut handle_slots,
-                    request.output_handle_index,
-                    embedded_handle,
-                );
-                responses.extend_from_slice(&rop_open_embedded_message_response(
                     &request,
-                    embedded_message_id,
-                    &embedded_subject,
-                    0,
-                ));
-                output_handles.push(embedded_handle);
-            }
-            Some(RopId::SaveChangesAttachment) => {
-                let Some(handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                if !save_flags_are_supported(&request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let save_attachment_object = session.handles.get(&handle).cloned();
-                session.record_recent_probe_action(format!(
-                    "SaveChangesAttachment(in={},handle={},kind={},folder={})",
-                    request.input_handle_index().unwrap_or(0),
-                    handle,
-                    mapi_object_debug_kind(save_attachment_object.as_ref()),
-                    mapi_object_debug_folder_id(save_attachment_object.as_ref())
-                ));
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x25",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = handle,
-                    object_kind = mapi_object_debug_kind(save_attachment_object.as_ref()),
-                    folder_id = %mapi_object_debug_folder_id(save_attachment_object.as_ref()),
-                    "rca debug mapi save changes before inbox probe"
-                );
-                let Some(MapiObject::PendingAttachment {
-                    folder_id,
-                    message_id,
-                    attach_num,
-                    properties,
-                    data,
-                }) = session.handles.get(&handle).cloned()
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                if !snapshot
-                    .folder_access_for_principal(folder_id, principal.account_id)
-                    .map(|access| access.may_write)
-                    .unwrap_or(true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8007_0005,
-                    ));
-                    continue;
-                }
-                let mut attachment = pending_attachment_upload(attach_num, &properties, data);
-                let attach_method = properties
-                    .get(&PID_TAG_ATTACH_METHOD)
-                    .and_then(MapiValue::as_i64)
-                    .unwrap_or(1);
-                let mut generated_embedded_attachment = false;
-                if attach_method == 5 {
-                    if let Some(embedded_properties) = session
-                        .saved_embedded_messages
-                        .get(&(folder_id, message_id, attach_num))
-                    {
-                        attachment = pending_embedded_message_attachment_upload(
-                            attach_num,
-                            &properties,
-                            embedded_properties,
-                        );
-                        generated_embedded_attachment = true;
-                    }
-                }
-                let mut attachment = attachment;
-                if !generated_embedded_attachment {
-                    let validation = validator.validate_bytes(
-                        ValidationRequest {
-                            ingress_context: IngressContext::ExchangeAttachment,
-                            declared_mime: Some(attachment.media_type.clone()),
-                            filename: Some(attachment.file_name.clone()),
-                            expected_kind: mapi_expected_attachment_kind(
-                                &attachment.media_type,
-                                &attachment.file_name,
-                            ),
-                        },
-                        &attachment.blob_bytes,
-                    );
-                    let Ok(outcome) = validation else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x25,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        continue;
-                    };
-                    if outcome.policy_decision != PolicyDecision::Accept {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x25,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        continue;
-                    }
-                    if attachment.media_type == "application/octet-stream"
-                        && !outcome.detected_mime.trim().is_empty()
-                    {
-                        attachment.media_type = outcome.detected_mime;
-                    }
-                }
-                if let Some(parent_handle) = session
-                    .pending_attachment_parent_messages
-                    .get(&handle)
-                    .copied()
-                {
-                    session
-                        .pending_message_attachments
-                        .entry(parent_handle)
-                        .or_default()
-                        .retain(|(existing_attach_num, _)| *existing_attach_num != attach_num);
-                    session
-                        .pending_message_attachments
-                        .entry(parent_handle)
-                        .or_default()
-                        .push((attach_num, attachment.clone()));
-                    session.handles.insert(
-                        handle,
-                        MapiObject::SavedAttachment {
-                            folder_id,
-                            message_id,
-                            attach_num,
-                            file_reference: format!("pending-message:{parent_handle}:{attach_num}"),
-                            file_name: attachment.file_name,
-                            media_type: attachment.media_type,
-                            disposition: attachment.disposition,
-                            content_id: attachment.content_id,
-                            size_octets: attachment.blob_bytes.len() as u64,
-                        },
-                    );
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                    continue;
-                }
-                if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
-                    match store
-                        .add_message_attachment(
-                            principal.account_id,
-                            email.id,
-                            attachment,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-save-attachment".to_string(),
-                                subject: format!("message:{}", email.id),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(Some((_email, stored))) => {
-                            if upsert_custom_property_values_from_map(
-                                store,
-                                principal,
-                                MapiCustomPropertyObjectKind::Attachment,
-                                stored.id,
-                                &properties,
-                            )
-                            .await
-                            .is_err()
-                            {
-                                responses.extend_from_slice(&rop_error_response(
-                                    0x25,
-                                    request.response_handle_index(),
-                                    0x8004_010F,
-                                ));
-                                continue;
-                            }
-                            session.handles.insert(
-                                handle,
-                                MapiObject::SavedAttachment {
-                                    folder_id,
-                                    message_id,
-                                    attach_num,
-                                    file_reference: stored.file_reference,
-                                    file_name: stored.file_name,
-                                    media_type: stored.media_type,
-                                    disposition: stored.disposition,
-                                    content_id: stored.content_id,
-                                    size_octets: stored.size_octets,
-                                },
-                            );
-                            responses.extend_from_slice(&rop_simple_success_response(&request));
-                        }
-                        _ => responses.extend_from_slice(&rop_error_response(
-                            0x25,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        )),
-                    }
-                } else if !mapi_calendar_content_items_suppressed(folder_id, snapshot) {
-                    if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
-                        match store
-                            .add_calendar_event_attachment(
-                                principal.account_id,
-                                event.canonical_id,
-                                attachment,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-save-calendar-attachment".to_string(),
-                                    subject: format!("calendar-event:{}", event.canonical_id),
-                                },
-                            )
-                            .await
-                        {
-                            Ok(Some(stored)) => {
-                                if upsert_custom_property_values_from_map(
-                                    store,
-                                    principal,
-                                    MapiCustomPropertyObjectKind::Attachment,
-                                    stored.id,
-                                    &properties,
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    responses.extend_from_slice(&rop_error_response(
-                                        0x25,
-                                        request.response_handle_index(),
-                                        0x8004_010F,
-                                    ));
-                                    continue;
-                                }
-                                session.handles.insert(
-                                    handle,
-                                    MapiObject::SavedAttachment {
-                                        folder_id,
-                                        message_id,
-                                        attach_num,
-                                        file_reference: stored.file_reference,
-                                        file_name: stored.file_name,
-                                        media_type: stored.media_type,
-                                        disposition: None,
-                                        content_id: None,
-                                        size_octets: stored.size_octets,
-                                    },
-                                );
-                                responses.extend_from_slice(&rop_simple_success_response(&request));
-                            }
-                            _ => responses.extend_from_slice(&rop_error_response(
-                                0x25,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            )),
-                        }
-                    } else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x25,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                    }
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x25,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                }
-            }
-            Some(RopId::OpenStream) => {
-                let Some(input_handle) = input_handle(&handle_slots, &request) else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x2b",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        input_handle_value = "missing",
-                        response_handle_index = request.response_handle_index(),
-                        output_handle_index = request.output_handle_index.unwrap_or(0),
-                        stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
-                        stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
-                        stream_open_result = "missing_input_handle",
-                        message = "rca debug mapi open stream"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2B,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let input_object_kind = mapi_object_debug_kind(session.handles.get(&input_handle));
-                let input_folder_id =
-                    mapi_object_debug_folder_id(session.handles.get(&input_handle));
-                let (associated_config_id, associated_config_class, associated_config_subject) =
-                    associated_config_debug_fields(session, snapshot, input_handle);
-                let is_inbox_associated_config_stream = matches!(
-                    session.handles.get(&input_handle),
-                    Some(MapiObject::AssociatedConfig {
-                        folder_id: INBOX_FOLDER_ID,
-                        ..
-                    })
-                );
-                let is_inbox_rule_organizer_stream = is_inbox_associated_config_stream
-                    && associated_config_class
-                        == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
-                    && request.stream_property_tag().unwrap_or(0)
-                        == OUTLOOK_RULE_ORGANIZER_BINARY_6802;
-                if is_inbox_associated_config_stream {
-                    session.record_inbox_associated_config_stream_open();
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "open_inbox_config_stream:request_id={request_id};input_handle={input_handle};tag=0x{:08x};mode=0x{:02x};class={associated_config_class};subject={associated_config_subject}",
-                        request.stream_property_tag().unwrap_or(0),
-                        request.stream_open_mode().unwrap_or(0)
-                    ));
-                    session.record_recent_probe_action(format!(
-                        "OpenAssociatedConfigStream(in={},tag=0x{:08x},mode=0x{:02x})",
-                        input_handle,
-                        request.stream_property_tag().unwrap_or(0),
-                        request.stream_open_mode().unwrap_or(0)
-                    ));
-                }
-                let Some((stream_data, writable_target)) = open_stream_data(
-                    store,
-                    principal,
-                    session,
-                    input_handle,
-                    request.stream_property_tag().unwrap_or(0),
-                    request.stream_open_mode().unwrap_or(0),
-                    mailboxes,
-                    emails,
                     snapshot,
-                )
-                .await
-                else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x2b",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        input_handle_value = input_handle,
-                        response_handle_index = request.response_handle_index(),
-                        output_handle_index = request.output_handle_index.unwrap_or(0),
-                        object_kind = input_object_kind,
-                        folder_id = %input_folder_id,
-                        associated_config_id = %associated_config_id,
-                        associated_config_class = %associated_config_class,
-                        associated_config_subject = %associated_config_subject,
-                        stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
-                        stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
-                        stream_open_result = "missing_stream_data",
-                        inbox_associated_config_stream = is_inbox_associated_config_stream,
-                        message = "rca debug mapi open stream"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2B,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let stream_size = stream_data.len();
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::AttachmentStream {
-                        data: stream_data,
-                        position: 0,
-                        writable_target,
-                    },
-                );
-                if is_inbox_associated_config_stream {
-                    session.record_inbox_associated_config_stream_handle(handle);
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "open_inbox_config_stream_result:request_id={request_id};input_handle={input_handle};output_handle={handle};size={stream_size};writable={}",
-                        writable_target.is_some()
-                    ));
-                }
-                if is_inbox_rule_organizer_stream {
-                    session.record_inbox_rule_organizer_stream_handle(handle);
-                    session.record_recent_probe_action(format!(
-                        "OpenRuleOrganizerStream(in={},out={},size={})",
-                        input_handle, handle, stream_size
-                    ));
-                }
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x2b",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = input_handle,
-                    response_handle_index = request.response_handle_index(),
-                    output_handle_index = request.output_handle_index.unwrap_or(0),
-                    output_handle_value = handle,
-                    object_kind = input_object_kind,
-                    folder_id = %input_folder_id,
-                    associated_config_id = %associated_config_id,
-                    associated_config_class = %associated_config_class,
-                    associated_config_subject = %associated_config_subject,
-                    stream_property_tag = %format!("0x{:08x}", request.stream_property_tag().unwrap_or(0)),
-                    stream_open_mode = %format!("0x{:02x}", request.stream_open_mode().unwrap_or(0)),
-                    stream_size,
-                    stream_empty = stream_size == 0,
-                    stream_preview = %hex_preview(
-                        match session.handles.get(&handle) {
-                            Some(MapiObject::AttachmentStream { data, .. }) => data.as_slice(),
-                            _ => &[],
-                        },
-                        32
-                    ),
-                    stream_open_result = "success",
-                    inbox_associated_config_stream = is_inbox_associated_config_stream,
-                    inbox_rule_organizer_stream = is_inbox_rule_organizer_stream,
-                    message = "rca debug mapi open stream"
-                );
-                responses.extend_from_slice(&rop_open_stream_response(&request, stream_size));
-                output_handles.push(handle);
-            }
-            Some(RopId::ReadStream) => {
-                let read_input_handle = input_handle(&handle_slots, &request);
-                let resolved_stream_handle = read_input_handle
-                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
-                let is_rule_organizer_stream_read = resolved_stream_handle
-                    .is_some_and(|handle| session.is_inbox_rule_organizer_stream_handle(handle));
-                if let Some(stream_handle) = resolved_stream_handle {
-                    if session.is_inbox_associated_config_stream_handle(stream_handle) {
-                        session.record_inbox_associated_config_stream_read();
-                        session.record_outlook_view_failure_trace_event(format!(
-                            "read_inbox_config_stream:request_id={request_id};handle={stream_handle};requested_bytes={}",
-                            request.read_byte_count().unwrap_or(0)
-                        ));
-                        session.record_recent_probe_action(format!(
-                            "ReadAssociatedConfigStream(in={},max={})",
-                            stream_handle,
-                            request.read_byte_count().unwrap_or(0)
-                        ));
-                    }
-                }
-                let Some(stream) =
-                    resolved_stream_handle.and_then(|handle| session.handles.get_mut(&handle))
-                else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x2c",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        input_handle_value = read_input_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "missing".to_string()),
-                        resolved_stream_handle = resolved_stream_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "none".to_string()),
-                        response_handle_index = request.response_handle_index(),
-                        requested_byte_count = request.read_byte_count().unwrap_or(0),
-                        stream_read_result = "missing_input_object",
-                        message = "rca debug mapi read stream"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2C,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let (before_position, stream_len) = match stream {
-                    MapiObject::AttachmentStream { data, position, .. } => (*position, data.len()),
-                    _ => (0, 0),
-                };
-                let response = rop_read_stream_response(&request, stream);
-                let after_position = match stream {
-                    MapiObject::AttachmentStream { position, .. } => *position,
-                    _ => 0,
-                };
-                let returned_byte_count = after_position.saturating_sub(before_position);
-                let end_of_stream = after_position >= stream_len;
-                if is_rule_organizer_stream_read {
-                    let context = format!(
-                        "input_handle={};requested_byte_count={};stream_size={};position_before={};position_after={};returned_byte_count={};end_of_stream={};response_bytes={};response_preview={}",
-                        read_input_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "missing".to_string()),
-                        request.read_byte_count().unwrap_or(0),
-                        stream_len,
-                        before_position,
-                        after_position,
-                        returned_byte_count,
-                        end_of_stream,
-                        response.len(),
-                        hex_preview(&response, 48)
-                    );
-                    session.record_inbox_rule_organizer_stream_read(context.clone());
-                    session.record_recent_probe_action(format!(
-                        "ReadRuleOrganizerStream(in={},returned={},eos={})",
-                        read_input_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "missing".to_string()),
-                        returned_byte_count,
-                        end_of_stream
-                    ));
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x2c",
-                        rule_organizer_stream_context = %context,
-                        inbox_loop_summary =
-                            %format_inbox_open_loop_summary(
-                                &session.post_hierarchy_actions
-                            )
-                            .unwrap_or_else(|| "none".to_string()),
-                        "rca debug outlook rule organizer stream read checkpoint"
-                    );
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x2c",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = read_input_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "missing".to_string()),
-                    resolved_stream_handle = resolved_stream_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    response_handle_index = request.response_handle_index(),
-                    requested_byte_count = request.read_byte_count().unwrap_or(0),
-                    stream_position_before = before_position,
-                    stream_position_after = after_position,
-                    returned_byte_count,
-                    end_of_stream,
-                    response_bytes = response.len(),
-                    response_preview = %hex_preview(&response, 48),
-                    stream_read_result = "success",
-                    inbox_rule_organizer_stream = is_rule_organizer_stream_read,
-                    message = "rca debug mapi read stream"
-                );
-                responses.extend_from_slice(&response);
-            }
-            Some(RopId::SeekStream) => {
-                let requested_handle = input_handle(&handle_slots, &request);
-                let stream_handle = requested_handle
-                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
-                let Some(stream) =
-                    stream_handle.and_then(|handle| session.handles.get_mut(&handle))
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2E,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x2e",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    requested_handle = requested_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "missing".to_string()),
-                    resolved_stream_handle = stream_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    message = "rca debug mapi seek stream"
-                );
-                responses.extend_from_slice(&rop_seek_stream_response(&request, stream));
-            }
-            Some(RopId::SetStreamSize) => {
-                let Some(requested_handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2F,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let stream_handle = resolve_writable_stream_handle(session, requested_handle);
-                if stream_handle
-                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
-                {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "set_inbox_config_stream_size:request_id={request_id};requested_handle={requested_handle};resolved_handle={};size={}",
-                        stream_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "none".to_string()),
-                        request.stream_size().unwrap_or(u64::MAX)
-                    ));
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x2f",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    requested_handle,
-                    resolved_stream_handle = stream_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    requested_stream_size = request.stream_size().unwrap_or(u64::MAX),
-                    requested_object_kind = mapi_object_debug_kind(session.handles.get(&requested_handle)),
-                    resolved_object_kind = stream_handle
-                        .and_then(|handle| session.handles.get(&handle))
-                        .map(|object| mapi_object_debug_kind(Some(object)))
-                        .unwrap_or("none"),
-                    message = "rca debug mapi set stream size"
-                );
-                match set_attachment_stream_size(
-                    session,
-                    stream_handle.unwrap_or(requested_handle),
-                    request.stream_size().unwrap_or(u64::MAX),
-                ) {
-                    Some(()) => responses.extend_from_slice(&rop_simple_success_response(&request)),
-                    None => responses.extend_from_slice(&rop_error_response(
-                        0x2F,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
-                }
-            }
-            Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
-                let Some(requested_handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let stream_handle = resolve_writable_stream_handle(session, requested_handle);
-                if stream_handle
-                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
-                {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "write_inbox_config_stream:request_id={request_id};requested_handle={requested_handle};resolved_handle={};bytes={}",
-                        stream_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "none".to_string()),
-                        request.stream_write_data().len()
-                    ));
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = %format!("0x{:02x}", request.rop_id),
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    requested_handle,
-                    resolved_stream_handle = stream_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    write_byte_count = request.stream_write_data().len(),
-                    requested_object_kind = mapi_object_debug_kind(session.handles.get(&requested_handle)),
-                    resolved_object_kind = stream_handle
-                        .and_then(|handle| session.handles.get(&handle))
-                        .map(|object| mapi_object_debug_kind(Some(object)))
-                        .unwrap_or("none"),
-                    message = "rca debug mapi write stream"
-                );
-                let stream_handle = stream_handle.unwrap_or(requested_handle);
-                match write_stream(session, stream_handle, request.stream_write_data()) {
-                    Some(written) => {
-                        responses.extend_from_slice(&rop_write_stream_response(&request, written))
-                    }
-                    None => {
-                        let error_code = stream_write_error_code(
-                            stream_write_error(session, stream_handle)
-                                .unwrap_or(StreamWriteError::NotFound),
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            error_code,
-                        ))
-                    }
-                }
-            }
-            Some(RopId::CopyToStream) => {
-                let Some(source_handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x3A,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let source_handle =
-                    resolve_writable_stream_handle(session, source_handle).unwrap_or(source_handle);
-                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x3A,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let destination_handle =
-                    resolve_writable_stream_handle(session, destination_handle)
-                        .unwrap_or(destination_handle);
-                match copy_stream(
-                    session,
-                    source_handle,
-                    destination_handle,
-                    request.stream_size().unwrap_or(u64::MAX),
-                ) {
-                    Some((read, written)) => responses
-                        .extend_from_slice(&rop_copy_to_stream_response(&request, read, written)),
-                    None => responses.extend_from_slice(&rop_error_response(
-                        0x3A,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
-                }
-            }
-            Some(RopId::CopyTo) => {
-                if !matches!(request.copy_to_want_asynchronous(), Some(0x00 | 0x01))
-                    || !matches!(request.copy_to_want_subobjects(), Some(0x00 | 0x01))
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x39,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
-                else {
-                    responses.extend_from_slice(&rop_copy_to_null_destination_response(&request));
-                    continue;
-                };
-                let destination_object = session.handles.get(&destination_handle).cloned();
-                if destination_object.is_none() {
-                    responses.extend_from_slice(&rop_copy_to_null_destination_response(&request));
-                    continue;
-                }
-                let source_object = input_object(session, &handle_slots, &request).cloned();
-                if source_object.is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x39,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                if copy_all_custom_property_values_for_request(
-                    store,
-                    principal,
-                    source_object.as_ref(),
-                    destination_object.as_ref(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &request.copy_to_excluded_property_tags(),
-                )
-                .await
-                .unwrap_or(false)
-                {
-                    responses.extend_from_slice(&rop_set_properties_response(&request));
-                    continue;
-                }
-                if copy_all_message_followup_property_values_for_request(
-                    store,
-                    principal,
-                    source_object.as_ref(),
-                    destination_object.as_ref(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &request.copy_to_excluded_property_tags(),
-                )
-                .await
-                .unwrap_or(false)
-                {
-                    responses.extend_from_slice(&rop_set_properties_response(&request));
-                    continue;
-                }
-                responses.extend_from_slice(&unsupported_rop_response(
-                    0x39,
-                    request.response_handle_index(),
-                ));
-            }
-            Some(RopId::CopyProperties) => {
-                if !matches!(
-                    request.copy_properties_want_asynchronous(),
-                    Some(0x00 | 0x01)
-                ) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x67,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                if input_handle(&handle_slots, &request).is_none() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x67,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
-                else {
-                    responses.extend_from_slice(&rop_copy_properties_null_destination_response(
-                        &request,
-                    ));
-                    continue;
-                };
-                if !session.handles.contains_key(&destination_handle) {
-                    responses.extend_from_slice(&rop_copy_properties_null_destination_response(
-                        &request,
-                    ));
-                    continue;
-                }
-                if request.copy_properties_property_tags().is_empty() {
-                    responses.extend_from_slice(&rop_copy_properties_success_response(&request));
-                    continue;
-                }
-                let source_object = input_object(session, &handle_slots, &request).cloned();
-                let destination_object = session.handles.get(&destination_handle).cloned();
-                if let Some(problems) = copy_message_followup_property_values_for_request(
-                    store,
-                    principal,
-                    source_object.as_ref(),
-                    destination_object.as_ref(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &request.copy_properties_property_tags(),
-                )
-                .await
-                .unwrap_or_default()
-                {
-                    if problems.is_empty() {
-                        responses
-                            .extend_from_slice(&rop_copy_properties_success_response(&request));
-                    } else {
-                        responses.extend_from_slice(&rop_set_properties_problem_response(
-                            &request, &problems,
-                        ));
-                    }
-                    continue;
-                }
-                if let Some(problems) = copy_custom_property_values_for_request(
-                    store,
-                    principal,
-                    source_object.as_ref(),
-                    destination_object.as_ref(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &request.copy_properties_property_tags(),
-                )
-                .await
-                .unwrap_or_default()
-                {
-                    if problems.is_empty() {
-                        responses
-                            .extend_from_slice(&rop_copy_properties_success_response(&request));
-                    } else {
-                        responses.extend_from_slice(&rop_set_properties_problem_response(
-                            &request, &problems,
-                        ));
-                    }
-                    continue;
-                }
-                responses.extend_from_slice(&unsupported_rop_response(
-                    0x67,
-                    request.response_handle_index(),
-                ));
-            }
-            Some(RopId::GetStreamSize) => {
-                let requested_handle = input_handle(&handle_slots, &request);
-                let stream_handle = requested_handle
-                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
-                match stream_handle.and_then(|handle| session.handles.get(&handle)) {
-                    Some(MapiObject::AttachmentStream { data, .. }) => responses
-                        .extend_from_slice(&rop_get_stream_size_response(&request, data.len())),
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x5E,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
-                }
-            }
-            Some(RopId::CloneStream) => {
-                let requested_handle = input_handle(&handle_slots, &request);
-                let stream_handle = requested_handle
-                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
-                match stream_handle
-                    .and_then(|handle| session.handles.get(&handle))
-                    .cloned()
-                {
-                    Some(MapiObject::AttachmentStream {
-                        data,
-                        position,
-                        writable_target: None,
-                    }) => {
-                        let handle = session.allocate_output_handle(
-                            request.output_handle_index,
-                            MapiObject::AttachmentStream {
-                                data,
-                                position,
-                                writable_target: None,
-                            },
-                        );
-                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                        output_handles.push(handle);
-                    }
-                    Some(MapiObject::AttachmentStream { .. }) => responses.extend_from_slice(
-                        &rop_error_response(0x3B, request.response_handle_index(), 0x8004_0102),
-                    ),
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x3B,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
-                }
-            }
-            Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => {
-                let requested_handle = input_handle(&handle_slots, &request);
-                match requested_handle.and_then(|handle| session.handles.get(&handle)) {
-                    Some(MapiObject::AttachmentStream { .. }) => {
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
-                }
-            }
-            Some(RopId::SetSpooler) => {
-                responses.extend_from_slice(&spooler_advisory_response(
-                    &request,
-                    input_handle(&handle_slots, &request).is_some(),
-                ));
-            }
-            Some(RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
-                responses.extend_from_slice(&spooler_advisory_response(
-                    &request,
-                    input_handle(&handle_slots, &request).is_some(),
-                ));
-            }
-            Some(RopId::UpdateDeferredActionMessages) => {
-                responses.extend_from_slice(&deferred_action_messages_response(
-                    &request,
-                    input_handle(&handle_slots, &request).is_some(),
-                ));
-            }
-            Some(RopId::CommitStream) => {
-                let requested_handle = input_handle(&handle_slots, &request);
-                let stream_handle = requested_handle
-                    .and_then(|handle| resolve_writable_stream_handle(session, handle));
-                if stream_handle
-                    .is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
-                {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "commit_inbox_config_stream:request_id={request_id};requested_handle={};resolved_handle={}",
-                        requested_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "missing".to_string()),
-                        stream_handle
-                            .map(|handle| handle.to_string())
-                            .unwrap_or_else(|| "none".to_string())
-                    ));
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x5d",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    requested_handle = requested_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "missing".to_string()),
-                    resolved_stream_handle = stream_handle
-                        .map(|handle| handle.to_string())
-                        .unwrap_or_else(|| "none".to_string()),
-                    message = "rca debug mapi commit stream"
-                );
-                let commit_object = stream_handle
-                    .and_then(|handle| session.handles.get(&handle))
-                    .or_else(|| input_object(session, &handle_slots, &request))
-                    .cloned();
-                let commit_result = match commit_object {
-                    Some(MapiObject::AttachmentStream {
-                        writable_target:
-                            Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
-                        ..
-                    }) => {
-                        let message = match session.handles.get(&handle) {
-                            Some(MapiObject::AssociatedConfig {
-                                folder_id,
-                                saved_message: Some(message),
-                                ..
-                            }) => Some((*folder_id, message.clone())),
-                            _ => None,
-                        };
-                        match message {
-                            Some((folder_id, message)) => {
-                                persist_associated_config_stream_message(
-                                    store, principal, folder_id, &message,
-                                )
-                                .await
-                            }
-                            None => Err(anyhow!(
-                                "MAPI associated config stream commit target was not found"
-                            )),
-                        }
-                    }
-                    Some(MapiObject::AttachmentStream { .. }) => Ok(()),
-                    _ => Err(anyhow!("MAPI stream commit target was not found")),
-                };
-                match commit_result {
-                    Ok(()) => responses.extend_from_slice(&rop_simple_success_response(&request)),
-                    Err(_) => responses.extend_from_slice(&rop_error_response(
-                        0x5D,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
-                }
-            }
-            Some(RopId::SubmitMessage | RopId::TransportSend) => {
-                let Some(handle) = input_handle(&handle_slots, &request) else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = %format!("{:#04x}", request.rop_id),
-                        response_handle_index = request.response_handle_index(),
-                        failure_reason = "missing_input_handle",
-                        "rca debug mapi submit message"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let Some(object) = session.handles.get(&handle).cloned() else {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = %format!("{:#04x}", request.rop_id),
-                        input_handle = handle,
-                        response_handle_index = request.response_handle_index(),
-                        failure_reason = "session_handle_not_found",
-                        "rca debug mapi submit message"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-                let input = match object {
-                    MapiObject::PendingMessage {
-                        properties,
-                        recipients,
-                        ..
-                    } => mapi_submit_from_pending_message(principal, &properties, &recipients),
-                    MapiObject::Message {
-                        folder_id,
-                        message_id,
-                        saved_email,
-                        ..
-                    } => {
-                        let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                            .or(saved_email.as_ref().map(|saved| &saved.email))
-                        else {
-                            tracing::info!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                mailbox = %principal.email,
-                                request_type = "Execute",
-                                request_rop_id = %format!("{:#04x}", request.rop_id),
-                                input_handle = handle,
-                                object_kind = "message",
-                                folder_id = %format!("{folder_id:#018x}"),
-                                message_id = %format!("{message_id:#018x}"),
-                                failure_reason = "message_identity_not_found",
-                                "rca debug mapi submit message"
-                            );
-                            responses.extend_from_slice(&rop_error_response(
-                                request.rop_id,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            continue;
-                        };
-                        if !submit_source_is_outgoing(email) {
-                            tracing::info!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                mailbox = %principal.email,
-                                request_type = "Execute",
-                                request_rop_id = %format!("{:#04x}", request.rop_id),
-                                input_handle = handle,
-                                object_kind = "message",
-                                folder_id = %format!("{folder_id:#018x}"),
-                                message_id = %format!("{message_id:#018x}"),
-                                mailbox_role = %email.mailbox_role,
-                                failure_reason = "message_not_in_outgoing_folder",
-                                "rca debug mapi submit message"
-                            );
-                            responses.extend_from_slice(&rop_error_response(
-                                request.rop_id,
-                                request.response_handle_index(),
-                                0x8004_0102,
-                            ));
-                            continue;
-                        }
-                        match mapi_submit_from_existing_email(store, principal, email).await {
-                            Ok(input) => input,
-                            Err(error) => {
-                                warn!(
-                                    error = %error,
-                                    "failed to build canonical input for MAPI draft submit"
-                                );
-                                responses.extend_from_slice(&rop_error_response(
-                                    request.rop_id,
-                                    request.response_handle_index(),
-                                    0x8004_010F,
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-                    _ => {
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = %format!("{:#04x}", request.rop_id),
-                            input_handle = handle,
-                            failure_reason = "unsupported_object_for_submit",
-                            "rca debug mapi submit message"
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x0000_04B9,
-                        ));
-                        continue;
-                    }
-                };
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = %format!("{:#04x}", request.rop_id),
-                    input_handle = handle,
-                    subject = %input.subject,
-                    to_count = input.to.len(),
-                    cc_count = input.cc.len(),
-                    bcc_count = input.bcc.len(),
-                    attachment_count = input.attachments.len(),
-                    body_text_bytes = input.body_text.len(),
-                    body_html_bytes = input
-                        .body_html_sanitized
-                        .as_deref()
-                        .map(str::len)
-                        .unwrap_or(0),
-                    draft_message_id = %input.draft_message_id.map(|id| id.to_string()).unwrap_or_default(),
-                    source = %input.source,
-                    "rca debug mapi submit message"
-                );
-                match store
-                    .submit_message(input, submit_audit_entry(principal, handle))
-                    .await
-                {
-                    Ok(submitted) => {
-                        let message_id = match remember_created_mapi_identity(
-                            store,
-                            principal,
-                            MapiIdentityObjectKind::Message,
-                            submitted.message_id,
-                            None,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(message_id) => message_id,
-                            Err(_) => {
-                                responses.extend_from_slice(&rop_error_response(
-                                    request.rop_id,
-                                    request.response_handle_index(),
-                                    0x8004_010F,
-                                ));
-                                continue;
-                            }
-                        };
-                        session.handles.insert(
-                            handle,
-                            submitted_message_handle_object(&submitted, mailboxes, message_id),
-                        );
-                        match store
-                            .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
-                            .await
-                        {
-                            Ok(mut emails) => created_emails.append(&mut emails),
-                            Err(error) => tracing::info!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                mailbox = %principal.email,
-                                request_type = "Execute",
-                                request_rop_id = %format!("{:#04x}", request.rop_id),
-                                input_handle = handle,
-                                submitted_message_id = %submitted.message_id,
-                                load_error = %error,
-                                failure_reason = "submitted_message_same_execute_load_failed",
-                                "rca debug mapi submit message"
-                            ),
-                        }
-                        responses.extend_from_slice(&submit_success_response(&request));
-                    }
-                    Err(error) => {
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = %format!("{:#04x}", request.rop_id),
-                            input_handle = handle,
-                            submit_error = %error,
-                            failure_reason = "canonical_submit_failed",
-                            "rca debug mapi submit message"
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                    }
-                }
-            }
-            Some(RopId::AbortSubmit) => {
-                let Some(folder_id) = request.abort_submit_folder_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x34,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                let Some(message_id) = request.abort_submit_message_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x34,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                let canonical_message_id = abort_submit_canonical_message_id(
-                    store,
-                    principal.account_id,
-                    folder_id,
-                    message_id,
-                    mailboxes,
-                    emails,
+                    &mut responses,
+                    &mut output_handles,
                 )
                 .await;
-                if canonical_message_id.is_none()
-                    && message_for_id(folder_id, message_id, mailboxes, emails)
-                        .is_some_and(|email| !abort_submit_source_is_sent(email))
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x34,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let Some(canonical_message_id) = canonical_message_id else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x34,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let cancel_result = store
-                    .cancel_queued_submission(
-                        principal.account_id,
-                        canonical_message_id,
-                        abort_submit_audit_entry(principal, canonical_message_id),
-                    )
-                    .await;
-                responses.extend_from_slice(&abort_submit_cancel_response(&request, cancel_result));
+            }
+            Some(RopId::SaveChangesAttachment) => {
+                append_save_changes_attachment_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    validator,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::OpenStream) => {
+                append_open_stream_response(
+                    store,
+                    principal,
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    request_id,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
+                )
+                .await;
+            }
+            Some(RopId::ReadStream) => {
+                append_read_stream_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    request_id,
+                    &mut responses,
+                );
+            }
+            Some(RopId::SeekStream) => {
+                append_seek_stream_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    &mut responses,
+                );
+            }
+            Some(RopId::SetStreamSize) => {
+                append_set_stream_size_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    request_id,
+                    &mut responses,
+                );
+            }
+            Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
+                append_write_stream_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    request_id,
+                    &mut responses,
+                );
+            }
+            Some(RopId::CopyToStream) => {
+                append_copy_to_stream_response(session, &handle_slots, &request, &mut responses);
+            }
+            Some(RopId::CopyTo) => {
+                append_copy_to_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::CopyProperties) => {
+                append_copy_properties_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::GetStreamSize) => {
+                append_get_stream_size_response(session, &handle_slots, &request, &mut responses);
+            }
+            Some(RopId::CloneStream) => {
+                append_clone_stream_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    &mut responses,
+                    &mut output_handles,
+                );
+            }
+            Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => {
+                append_stream_region_response(session, &handle_slots, &request, &mut responses);
+            }
+            Some(RopId::SetSpooler | RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
+                append_spooler_advisory_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                    &mut responses,
+                );
+            }
+            Some(RopId::UpdateDeferredActionMessages) => {
+                append_deferred_action_messages_response(
+                    &request,
+                    input_handle(&handle_slots, &request).is_some(),
+                    &mut responses,
+                );
+            }
+            Some(RopId::CommitStream) => {
+                append_commit_stream_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    request_id,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::SubmitMessage | RopId::TransportSend) => {
+                append_submit_message_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    &mut created_emails,
+                    &mut responses,
+                )
+                .await;
+            }
+            Some(RopId::AbortSubmit) => {
+                append_abort_submit_response(
+                    store,
+                    principal,
+                    &request,
+                    mailboxes,
+                    emails,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::MoveCopyMessages) => {
-                if request.move_copy_want_asynchronous().is_none()
-                    || request.move_copy_want_copy_raw().is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x33,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let source_folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    _ => {
-                        tracing::info!(
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x33",
-                            input_handle_index = request.input_handle_index().unwrap_or(0),
-                            message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
-                            want_copy = request.move_copy_want_copy(),
-                            failure = "source_handle_not_folder",
-                            "rca debug mapi move copy messages failure"
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            0x33,
-                            request.response_handle_index(),
-                            0x0000_04B9,
-                        ));
-                        continue;
-                    }
-                };
-                let target_folder_id = match request
-                    .move_copy_target_handle(&handle_slots)
-                    .and_then(|handle| {
-                        session
-                            .handles
-                            .get(&handle)
-                            .and_then(|object| object.folder_id())
-                    }) {
-                    Some(folder_id) => folder_id,
-                    None => {
-                        tracing::info!(
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x33",
-                            source_folder_id = format_args!("0x{source_folder_id:016x}"),
-                            message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
-                            want_copy = request.move_copy_want_copy(),
-                            failure = "target_handle_not_folder",
-                            "rca debug mapi move copy messages failure"
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            0x33,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        continue;
-                    }
-                };
-                if source_folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
-                    tracing::info!(
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x33",
-                        source_folder_id = format_args!("0x{source_folder_id:016x}"),
-                        target_folder_id = format_args!("0x{target_folder_id:016x}"),
-                        message_ids = %format_debug_object_ids(&request.move_copy_message_ids()),
-                        want_copy = request.move_copy_want_copy(),
-                        failure = "recoverable_items_root_source",
-                        "rca debug mapi move copy messages failure"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x33,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                if matches!(source_folder_id, NOTES_FOLDER_ID | JOURNAL_FOLDER_ID) {
-                    let mut partial_completion = false;
-                    for message_id in request.move_copy_message_ids() {
-                        if source_folder_id == NOTES_FOLDER_ID {
-                            let Some(note) = snapshot.note_for_id(source_folder_id, message_id)
-                            else {
-                                partial_completion = true;
-                                continue;
-                            };
-                            if target_folder_id != NOTES_FOLDER_ID {
-                                partial_completion = true;
-                                continue;
-                            }
-                            if request.move_copy_want_copy() {
-                                match store
-                                    .upsert_mapi_note(UpsertClientNoteInput {
-                                        id: None,
-                                        account_id: principal.account_id,
-                                        title: note.note.title.clone(),
-                                        body_text: note.note.body_text.clone(),
-                                        color: note.note.color.clone(),
-                                        categories_json: note.note.categories_json.clone(),
-                                    })
-                                    .await
-                                {
-                                    Ok(copied) => {
-                                        if remember_created_mapi_identity(
-                                            store,
-                                            principal,
-                                            MapiIdentityObjectKind::Note,
-                                            copied.id,
-                                            None,
-                                            None,
-                                        )
-                                        .await
-                                        .is_err()
-                                        {
-                                            partial_completion = true;
-                                        }
-                                    }
-                                    Err(_) => partial_completion = true,
-                                }
-                            }
-                            continue;
-                        }
-                        let Some(entry) =
-                            snapshot.journal_entry_for_id(source_folder_id, message_id)
-                        else {
-                            partial_completion = true;
-                            continue;
-                        };
-                        if target_folder_id != JOURNAL_FOLDER_ID {
-                            partial_completion = true;
-                            continue;
-                        }
-                        if request.move_copy_want_copy() {
-                            match store
-                                .upsert_mapi_journal_entry(UpsertJournalEntryInput {
-                                    id: None,
-                                    account_id: principal.account_id,
-                                    subject: entry.entry.subject.clone(),
-                                    body_text: entry.entry.body_text.clone(),
-                                    entry_type: entry.entry.entry_type.clone(),
-                                    message_class: entry.entry.message_class.clone(),
-                                    starts_at: entry.entry.starts_at.clone(),
-                                    ends_at: entry.entry.ends_at.clone(),
-                                    occurred_at: entry.entry.occurred_at.clone(),
-                                    companies_json: entry.entry.companies_json.clone(),
-                                    contacts_json: entry.entry.contacts_json.clone(),
-                                })
-                                .await
-                            {
-                                Ok(copied) => {
-                                    if remember_created_mapi_identity(
-                                        store,
-                                        principal,
-                                        MapiIdentityObjectKind::JournalEntry,
-                                        copied.id,
-                                        None,
-                                        None,
-                                    )
-                                    .await
-                                    .is_err()
-                                    {
-                                        partial_completion = true;
-                                    }
-                                }
-                                Err(_) => partial_completion = true,
-                            }
-                        }
-                    }
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x33,
-                        request.response_handle_index(),
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                if crate::mapi_store::recoverable_storage_folder(source_folder_id).is_some() {
-                    if request.move_copy_want_copy() {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x33,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        continue;
-                    }
-                    let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes)
-                    else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x33,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        continue;
-                    };
-                    let mut partial_completion = false;
-                    for message_id in request.move_copy_message_ids() {
-                        let Some(item) =
-                            snapshot.recoverable_item_for_id(source_folder_id, message_id)
-                        else {
-                            partial_completion = true;
-                            continue;
-                        };
-                        if store
-                            .restore_recoverable_item(
-                                principal.account_id,
-                                item.canonical_id,
-                                Some(target_mailbox.id),
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-restore-recoverable-message".to_string(),
-                                    subject: format!(
-                                        "recoverable:{}->{}",
-                                        item.canonical_id, target_mailbox.id
-                                    ),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                    }
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x33,
-                        request.response_handle_index(),
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                if snapshot.public_folder_for_id(source_folder_id).is_some() {
-                    let Some(target_folder) = snapshot.public_folder_for_id(target_folder_id)
-                    else {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x33,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        continue;
-                    };
-                    let mut partial_completion = false;
-                    for message_id in request.move_copy_message_ids() {
-                        let Some(item) =
-                            snapshot.public_folder_item_for_id(source_folder_id, message_id)
-                        else {
-                            partial_completion = true;
-                            continue;
-                        };
-                        let copied = store
-                            .upsert_public_folder_item(
-                                UpsertPublicFolderItemInput {
-                                    id: None,
-                                    account_id: principal.account_id,
-                                    public_folder_id: target_folder.folder.id,
-                                    item_kind: item.item.item_kind.clone(),
-                                    message_class: item.item.message_class.clone(),
-                                    subject: item.item.subject.clone(),
-                                    body_text: item.item.body_text.clone(),
-                                    body_html_sanitized: item.item.body_html_sanitized.clone(),
-                                    source_payload_json: item.item.source_payload_json.clone(),
-                                },
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: if request.move_copy_want_copy() {
-                                        "mapi-copy-public-folder-item".to_string()
-                                    } else {
-                                        "mapi-move-public-folder-item-copy".to_string()
-                                    },
-                                    subject: format!(
-                                        "{}->{}",
-                                        item.item.id, target_folder.folder.id
-                                    ),
-                                },
-                            )
-                            .await;
-                        let Ok(copied) = copied else {
-                            partial_completion = true;
-                            continue;
-                        };
-                        if remember_created_mapi_identity(
-                            store,
-                            principal,
-                            MapiIdentityObjectKind::PublicFolderItem,
-                            copied.id,
-                            None,
-                            None,
-                        )
-                        .await
-                        .is_err()
-                        {
-                            partial_completion = true;
-                            continue;
-                        }
-                        if !request.move_copy_want_copy()
-                            && store
-                                .delete_public_folder_item(
-                                    principal.account_id,
-                                    item.item.public_folder_id,
-                                    item.item.id,
-                                    AuditEntryInput {
-                                        actor: principal.email.clone(),
-                                        action: "mapi-move-public-folder-item-delete".to_string(),
-                                        subject: item.item.id.to_string(),
-                                    },
-                                )
-                                .await
-                                .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                    }
-                    if !partial_completion {
-                        session.record_notification(MapiNotificationEvent::content(
-                            source_folder_id,
-                            None,
-                        ));
-                        session.record_notification(MapiNotificationEvent::content(
-                            target_folder_id,
-                            None,
-                        ));
-                    }
-                    responses.extend_from_slice(&rop_partial_completion_response(
-                        0x33,
-                        request.response_handle_index(),
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x33,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let mut partial_completion = false;
-                for message_id in request.move_copy_message_ids() {
-                    let Some(email) =
-                        message_for_id(source_folder_id, message_id, mailboxes, emails)
-                    else {
-                        partial_completion = true;
-                        continue;
-                    };
-                    let result = if request.move_copy_want_copy() {
-                        store
-                            .copy_jmap_email(
-                                principal.account_id,
-                                email.id,
-                                target_mailbox.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-copy-message".to_string(),
-                                    subject: format!("message:{}->{}", email.id, target_mailbox.id),
-                                },
-                            )
-                            .await
-                            .map(|_| ())
-                    } else {
-                        store
-                            .move_jmap_email(
-                                principal.account_id,
-                                email.id,
-                                target_mailbox.id,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-move-message".to_string(),
-                                    subject: format!("message:{}->{}", email.id, target_mailbox.id),
-                                },
-                            )
-                            .await
-                            .map(|_| ())
-                    };
-                    if result.is_err() {
-                        partial_completion = true;
-                    }
-                }
-                responses.extend_from_slice(&rop_partial_completion_response(
-                    0x33,
-                    request.response_handle_index(),
-                    partial_completion,
-                ));
+                append_move_copy_messages_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::SetReceiveFolder) => {
-                if !private_logon_request_handle(session, &handle_slots, &request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x26,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let Some(folder_id) = request.set_receive_folder_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x26,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                let Some(message_class) = request.set_receive_folder_message_class() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x26,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                if !valid_receive_folder_message_class(message_class) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x26,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let canonical_folder_id = receive_folder_id_for_message_class(message_class);
-                if folder_id != canonical_folder_id {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x26,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    account_id = %principal.account_id,
-                    mailbox = %principal.email,
-                    requested_message_class = %message_class,
-                    canonical_message_class =
-                        %explicit_receive_folder_message_class(message_class),
-                    canonical_folder_id = %format!("0x{canonical_folder_id:016x}"),
-                    "rca debug mapi canonical set receive folder accepted"
+                append_set_receive_folder_response(
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    &mut responses,
                 );
-                responses.extend_from_slice(&rop_simple_success_response(&request));
             }
             Some(RopId::SetSearchCriteria) => {
                 let Some(MapiObject::Folder { folder_id, .. }) =
@@ -10615,155 +5735,27 @@ where
             }
             Some(RopId::GetReceiveFolder) => {
                 echo_input_handle_table = true;
-                if !private_logon_request_handle(session, &handle_slots, &request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x27,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let Some(message_class) = request.receive_folder_message_class() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x27,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                if !valid_receive_folder_message_class(message_class) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x27,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let response_folder_id = receive_folder_id_for_message_class(message_class);
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    account_id = %principal.account_id,
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x27",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    response_handle_index = request.response_handle_index(),
-                    hierarchy_sync_completed = session.hierarchy_sync_completed(),
-                    requested_message_class = %message_class,
-                    response_message_class =
-                        %explicit_receive_folder_message_class(message_class),
-                    response_folder_id = %format!("0x{response_folder_id:016x}"),
-                    response_folder_is_calendar =
-                        response_folder_id == CALENDAR_FOLDER_ID,
-                    expected_calendar_folder_id = "0x0000000000100001",
-                    "rca debug mapi get receive folder resolution"
-                );
-                responses.extend_from_slice(&rop_get_receive_folder_response(
+                append_get_receive_folder_response(
+                    principal,
+                    session,
+                    &handle_slots,
                     &request,
-                    response_folder_id,
-                    explicit_receive_folder_message_class(message_class),
-                ));
-                session.record_receive_folder_verification_passed();
-                session.record_post_hierarchy_request_contract(
-                    post_hierarchy_get_receive_folder_contract(message_class, response_folder_id),
+                    &mut responses,
                 );
             }
             Some(RopId::SetReadFlags) => {
-                let folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    _ => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x66,
-                            request.response_handle_index(),
-                            0x0000_04B9,
-                        ));
-                        continue;
-                    }
-                };
-                if request.want_asynchronous().is_none()
-                    || !read_flags_are_valid(request.read_flags(), true)
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x66,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let unread = unread_from_read_flags(request.read_flags());
-                let mut partial_completion = false;
-                let message_ids = request.message_ids();
-                if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
-                    if let Some(unread) = unread {
-                        let mut patches = Vec::new();
-                        for message_id in message_ids {
-                            let Some(item) =
-                                snapshot.public_folder_item_for_id(folder_id, message_id)
-                            else {
-                                partial_completion = true;
-                                continue;
-                            };
-                            patches.push(lpe_storage::PublicFolderPerUserStatePatch {
-                                item_id: item.item.id,
-                                is_read: !unread,
-                                last_seen_change: Some(item.item.change_counter),
-                                private_json: None,
-                            });
-                        }
-                        if !patches.is_empty()
-                            && store
-                                .patch_public_folder_per_user_state(
-                                    principal.account_id,
-                                    folder.folder.id,
-                                    &patches,
-                                )
-                                .await
-                                .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                    }
-                    responses.extend_from_slice(&rop_set_read_flags_response(
-                        &request,
-                        partial_completion,
-                    ));
-                    continue;
-                }
-                for message_id in message_ids {
-                    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                        .or_else(|| {
-                            emails
-                                .iter()
-                                .find(|email| mapi_item_id_matches(&email.id, message_id))
-                        })
-                    else {
-                        partial_completion = true;
-                        continue;
-                    };
-                    if let Some(unread) = unread {
-                        if store
-                            .update_jmap_email_flags(
-                                principal.account_id,
-                                email.id,
-                                Some(unread),
-                                None,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-set-read-flags".to_string(),
-                                    subject: format!("message:{}", email.id),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            partial_completion = true;
-                        }
-                    }
-                }
-                responses
-                    .extend_from_slice(&rop_set_read_flags_response(&request, partial_completion));
+                append_set_read_flags_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::SynchronizationConfigure) => {
                 let Some(folder_id) =
@@ -11338,204 +6330,55 @@ where
                 content_sync_configure_observed = sync_type == 0x01;
             }
             Some(RopId::FastTransferSourceCopyMessages) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x4B,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let requested_ids = request.fast_transfer_message_ids();
-                let mut selected = emails_for_folder(folder_id, mailboxes, emails)
-                    .into_iter()
-                    .filter(|email| requested_ids.contains(&mapi_message_id(email)))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                selected.sort_by(|left, right| left.id.cmp(&right.id));
-                let sync_attachment_facts =
-                    sync_attachment_facts_for(folder_id, &selected, snapshot);
-                let transfer_buffer =
-                    mapi_mailstore::fast_transfer_message_list_buffer_with_attachments(
-                        &selected,
-                        &sync_attachment_facts,
-                    );
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::SynchronizationSource {
-                        folder_id,
-                        mailbox_id: None,
-                        checkpoint_kind: MapiCheckpointKind::Content,
-                        checkpoint_change_sequence: 0,
-                        checkpoint_modseq: 1,
-                        checkpoint_store_allowed: true,
-                        checkpoint_skip_reason: "",
-                        checkpoint_zero_delta: false,
-                        sync_type: 0,
-                        initial_state: Vec::new(),
-                        state: Vec::new(),
-                        state_upload_property_tag: None,
-                        state_upload_buffer: Vec::new(),
-                        client_state_uploaded_bytes: 0,
-                        client_state_uploaded_marker_mask: 0,
-                        incremental_transfer_buffer: None,
-                        transfer_buffer,
-                        transfer_position: 0,
-                    },
+                append_fast_transfer_source_copy_messages_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::FastTransferDestinationConfigure) => {
-                let Some(target_handle) = input_handle(&handle_slots, &request) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x53,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let Some(folder_id) = session
-                    .handles
-                    .get(&target_handle)
-                    .and_then(fast_transfer_destination_target_folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x53,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::FastTransferDestination {
-                        folder_id,
-                        target_handle,
-                        buffer: Vec::new(),
-                    },
+                append_fast_transfer_destination_configure_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_simple_success_response(&request));
-                output_handles.push(handle);
             }
             Some(
                 RopId::FastTransferDestinationPutBuffer
                 | RopId::FastTransferDestinationPutBufferExtended,
             ) => {
-                if first_fast_transfer_marker(&request).is_some() {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    break;
-                }
-                let upload_data = request.fast_transfer_upload_data().to_vec();
-                let Some((target_handle, full_buffer)) =
-                    staged_fast_transfer_destination_buffer(session, &handle_slots, &request)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let property_values = match fast_transfer_property_values(&full_buffer) {
-                    Ok(values) => values,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        break;
-                    }
-                };
-                if !property_values.is_empty()
-                    && apply_fast_transfer_destination_properties(
-                        session,
-                        target_handle,
-                        property_values,
-                    )
-                    .is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                commit_fast_transfer_destination_buffer(
+                if append_fast_transfer_destination_put_buffer_response(
                     session,
                     &handle_slots,
                     &request,
-                    full_buffer,
-                );
-                responses.extend_from_slice(&rop_fast_transfer_put_buffer_response(
-                    &request,
-                    upload_data.len(),
-                ));
+                    &mut responses,
+                ) {
+                    break;
+                }
             }
             Some(
                 RopId::FastTransferSourceCopyFolder
                 | RopId::FastTransferSourceCopyTo
                 | RopId::FastTransferSourceCopyProperties,
             ) => {
-                let Some(object) = input_object(session, &handle_slots, &request).cloned() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
-                    request.rop_id,
-                    &object,
+                append_fast_transfer_source_copy_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
                     principal.account_id,
                     mailboxes,
                     emails,
                     snapshot,
-                ) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::SynchronizationSource {
-                        folder_id,
-                        mailbox_id: None,
-                        checkpoint_kind: MapiCheckpointKind::Content,
-                        checkpoint_change_sequence: 0,
-                        checkpoint_modseq: 1,
-                        checkpoint_store_allowed: true,
-                        checkpoint_skip_reason: "",
-                        checkpoint_zero_delta: false,
-                        sync_type: 0,
-                        initial_state: Vec::new(),
-                        state: Vec::new(),
-                        state_upload_property_tag: None,
-                        state_upload_buffer: Vec::new(),
-                        client_state_uploaded_bytes: 0,
-                        client_state_uploaded_marker_mask: 0,
-                        incremental_transfer_buffer: None,
-                        transfer_buffer,
-                        transfer_position: 0,
-                    },
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::FastTransferSourceGetBuffer) => {
                 match input_object_mut(session, &handle_slots, &request) {
@@ -11918,191 +6761,28 @@ where
                     )),
                 }
             }
-            Some(RopId::TellVersion) => match input_object(session, &handle_slots, &request) {
-                Some(MapiObject::SynchronizationSource { .. })
-                | Some(MapiObject::SynchronizationCollector { .. })
-                | Some(MapiObject::FastTransferDestination { .. }) => {
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x86,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
+            Some(RopId::TellVersion) => {
+                append_tell_version_response(session, &handle_slots, &request, &mut responses);
+            }
             Some(RopId::SynchronizationUploadStateStreamBegin) => {
-                match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::SynchronizationSource {
-                        folder_id,
-                        mailbox_id,
-                        checkpoint_kind,
-                        sync_type,
-                        state_upload_property_tag,
-                        state_upload_buffer,
-                        ..
-                    }) => {
-                        let property_tag = request.upload_state_property_tag().unwrap_or_default();
-                        let declared_bytes =
-                            request.upload_state_transfer_size().unwrap_or_default();
-                        *state_upload_property_tag = Some(property_tag);
-                        state_upload_buffer.clear();
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            mapi_request_id = request_id,
-                            request_rop_id = "0x75",
-                            sync_context_kind = "source",
-                            folder_id = format_args!("0x{:016x}", *folder_id),
-                            folder_role = debug_role_for_folder_id(*folder_id),
-                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                            sync_type = format_args!("0x{:02x}", *sync_type),
-                            checkpoint_kind = checkpoint_kind.as_str(),
-                            checkpoint_mailbox_id = (*mailbox_id)
-                                .map(|id| id.to_string())
-                                .unwrap_or_default(),
-                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
-                            upload_state_property_name = upload_state_property_name(property_tag),
-                            upload_state_declared_bytes = declared_bytes,
-                            upload_state_empty_declared = declared_bytes == 0,
-                            "rca debug mapi sync upload state begin"
-                        );
-                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
-                    }
-                    Some(MapiObject::SynchronizationCollector {
-                        folder_id,
-                        mailbox_id,
-                        checkpoint_kind,
-                        sync_type,
-                        state_upload_property_tag,
-                        state_upload_buffer,
-                        client_state_uploaded_bytes,
-                        client_state_uploaded_marker_mask,
-                        ..
-                    }) => {
-                        let property_tag = request.upload_state_property_tag().unwrap_or_default();
-                        let declared_bytes =
-                            request.upload_state_transfer_size().unwrap_or_default();
-                        *state_upload_property_tag = Some(property_tag);
-                        state_upload_buffer.clear();
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            mapi_request_id = request_id,
-                            request_rop_id = "0x75",
-                            sync_context_kind = "collector",
-                            folder_id = format_args!("0x{:016x}", *folder_id),
-                            folder_role = debug_role_for_folder_id(*folder_id),
-                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                            sync_type = format_args!("0x{:02x}", *sync_type),
-                            checkpoint_kind = checkpoint_kind.as_str(),
-                            checkpoint_mailbox_id = (*mailbox_id)
-                                .map(|id| id.to_string())
-                                .unwrap_or_default(),
-                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
-                            upload_state_property_name = upload_state_property_name(property_tag),
-                            upload_state_declared_bytes = declared_bytes,
-                            upload_state_empty_declared = declared_bytes == 0,
-                            upload_state_client_bytes = *client_state_uploaded_bytes,
-                            upload_state_marker_mask =
-                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
-                            "rca debug mapi sync upload state begin"
-                        );
-                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x75,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
-                }
+                append_upload_state_stream_begin_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    &principal.email,
+                    request_id,
+                    &mut responses,
+                );
             }
             Some(RopId::SynchronizationUploadStateStreamContinue) => {
-                match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::SynchronizationSource {
-                        folder_id,
-                        mailbox_id,
-                        checkpoint_kind,
-                        sync_type,
-                        state_upload_buffer,
-                        ..
-                    }) => {
-                        let stream_data = request.stream_data();
-                        state_upload_buffer.extend_from_slice(stream_data);
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            mapi_request_id = request_id,
-                            request_rop_id = "0x76",
-                            sync_context_kind = "source",
-                            folder_id = format_args!("0x{:016x}", *folder_id),
-                            folder_role = debug_role_for_folder_id(*folder_id),
-                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                            sync_type = format_args!("0x{:02x}", *sync_type),
-                            checkpoint_kind = checkpoint_kind.as_str(),
-                            checkpoint_mailbox_id = (*mailbox_id)
-                                .map(|id| id.to_string())
-                                .unwrap_or_default(),
-                            upload_state_chunk_bytes = stream_data.len(),
-                            upload_state_chunk_preview = %hex_preview(stream_data, 16),
-                            upload_state_buffer_bytes = state_upload_buffer.len(),
-                            "rca debug mapi sync upload state continue"
-                        );
-                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
-                    }
-                    Some(MapiObject::SynchronizationCollector {
-                        folder_id,
-                        mailbox_id,
-                        checkpoint_kind,
-                        sync_type,
-                        state_upload_buffer,
-                        client_state_uploaded_bytes,
-                        client_state_uploaded_marker_mask,
-                        ..
-                    }) => {
-                        let stream_data = request.stream_data();
-                        state_upload_buffer.extend_from_slice(stream_data);
-                        tracing::info!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            mapi_request_id = request_id,
-                            request_rop_id = "0x76",
-                            sync_context_kind = "collector",
-                            folder_id = format_args!("0x{:016x}", *folder_id),
-                            folder_role = debug_role_for_folder_id(*folder_id),
-                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                            sync_type = format_args!("0x{:02x}", *sync_type),
-                            checkpoint_kind = checkpoint_kind.as_str(),
-                            checkpoint_mailbox_id = (*mailbox_id)
-                                .map(|id| id.to_string())
-                                .unwrap_or_default(),
-                            upload_state_chunk_bytes = stream_data.len(),
-                            upload_state_chunk_preview = %hex_preview(stream_data, 16),
-                            upload_state_buffer_bytes = state_upload_buffer.len(),
-                            upload_state_client_bytes = *client_state_uploaded_bytes,
-                            upload_state_marker_mask =
-                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
-                            "rca debug mapi sync upload state continue"
-                        );
-                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x76,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
-                }
+                append_upload_state_stream_continue_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    &principal.email,
+                    request_id,
+                    &mut responses,
+                );
             }
             Some(RopId::SynchronizationUploadStateStreamEnd) => {
                 match input_object_mut(session, &handle_slots, &request) {
@@ -12289,142 +6969,26 @@ where
                 }
             }
             Some(RopId::SynchronizationOpenCollector) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x7E,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::SynchronizationCollector {
-                        folder_id,
-                        mailbox_id: sync_checkpoint_mailbox_id(
-                            folder_id,
-                            request.sync_type(),
-                            mailboxes,
-                        ),
-                        checkpoint_kind: sync_checkpoint_kind(request.sync_type()),
-                        sync_type: request.sync_type(),
-                        state: Vec::new(),
-                        state_upload_property_tag: None,
-                        state_upload_buffer: Vec::new(),
-                        client_state_uploaded_bytes: 0,
-                        client_state_uploaded_marker_mask: 0,
-                        uploaded_object_ids: Vec::new(),
-                        uploaded_normal_change_numbers: Vec::new(),
-                        uploaded_fai_change_numbers: Vec::new(),
-                        uploaded_read_change_numbers: Vec::new(),
-                    },
+                append_synchronization_open_collector_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_simple_success_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::SynchronizationGetTransferState) => {
-                let source_object = input_object(session, &handle_slots, &request);
-                let Some((
-                    folder_id,
-                    mailbox_id,
-                    checkpoint_kind,
-                    checkpoint_change_sequence,
-                    checkpoint_modseq,
-                    checkpoint_store_allowed,
-                    checkpoint_skip_reason,
-                    sync_type,
-                    state,
-                )) = synchronization_context_state(source_object)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x82,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let transfer_buffer = if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
-                    let sync_mailboxes = sync_mailboxes_for_excluding_deleted(
-                        folder_id,
-                        sync_type,
-                        mailboxes,
-                        &session.deleted_advertised_special_folders,
-                    );
-                    let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
-                    let sync_attachment_facts =
-                        sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
-                    mapi_mailstore::sync_state_token_with_attachments(
-                        sync_type,
-                        folder_id,
-                        &sync_mailboxes,
-                        &sync_emails,
-                        &sync_attachment_facts,
-                    )
-                } else {
-                    state
-                };
-                let (
-                    checkpoint_store_allowed,
-                    checkpoint_skip_reason,
-                    client_state_uploaded_bytes,
-                    client_state_uploaded_marker_mask,
-                ) = match source_object {
-                    Some(MapiObject::SynchronizationCollector {
-                        client_state_uploaded_bytes,
-                        client_state_uploaded_marker_mask,
-                        ..
-                    }) if *client_state_uploaded_bytes > 0
-                        && !uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask) =>
-                    {
-                        (
-                            false,
-                            "uploaded_client_state_transfer",
-                            *client_state_uploaded_bytes,
-                            *client_state_uploaded_marker_mask,
-                        )
-                    }
-                    Some(MapiObject::SynchronizationCollector {
-                        client_state_uploaded_bytes,
-                        client_state_uploaded_marker_mask,
-                        ..
-                    }) => (
-                        checkpoint_store_allowed,
-                        checkpoint_skip_reason,
-                        *client_state_uploaded_bytes,
-                        *client_state_uploaded_marker_mask,
-                    ),
-                    _ => (checkpoint_store_allowed, checkpoint_skip_reason, 0, 0),
-                };
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::SynchronizationSource {
-                        folder_id,
-                        mailbox_id,
-                        checkpoint_kind,
-                        checkpoint_change_sequence,
-                        checkpoint_modseq,
-                        checkpoint_store_allowed,
-                        checkpoint_skip_reason,
-                        checkpoint_zero_delta: false,
-                        sync_type,
-                        initial_state: transfer_buffer.clone(),
-                        state: transfer_buffer.clone(),
-                        state_upload_property_tag: None,
-                        state_upload_buffer: Vec::new(),
-                        client_state_uploaded_bytes,
-                        client_state_uploaded_marker_mask,
-                        incremental_transfer_buffer: None,
-                        transfer_buffer,
-                        transfer_position: 0,
-                    },
+                append_synchronization_get_transfer_state_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses
-                    .extend_from_slice(&rop_synchronization_get_transfer_state_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::SynchronizationImportMessageChange) => {
                 let Some(folder_id) =
@@ -13258,1319 +7822,241 @@ where
                 ));
             }
             Some(RopId::SetLocalReplicaMidsetDeleted) => {
-                match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::SynchronizationSource {
-                        initial_state,
-                        state,
-                        ..
-                    }) => {
-                        initial_state.extend_from_slice(request.local_replica_midset_deleted());
-                        state.extend_from_slice(request.local_replica_midset_deleted());
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                    }
-                    Some(MapiObject::SynchronizationCollector { state, .. }) => {
-                        state.extend_from_slice(request.local_replica_midset_deleted());
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x93,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
-                }
+                append_set_local_replica_midset_deleted_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    &mut responses,
+                );
             }
             Some(RopId::GetLocalReplicaIds) => {
                 echo_input_handle_table = true;
-                let (first_global_counter, _) = mapi_mailstore::local_replica_id_range(
-                    principal.account_id,
-                    request.local_replica_id_count(),
-                    session.next_local_replica_sequence,
-                );
-                session.next_local_replica_sequence =
-                    session.next_local_replica_sequence.saturating_add(1).max(1);
-                responses.extend_from_slice(&rop_get_local_replica_ids_response(
-                    &request,
-                    first_global_counter,
-                ));
+                append_get_local_replica_ids_response(principal, session, &request, &mut responses);
             }
             Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders) => {
-                if request.empty_folder_want_asynchronous().is_none()
-                    || request.empty_folder_want_delete_associated().is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
-
-                if folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
-                    responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let result = if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
-                    hard_delete_recoverable_folder_contents(store, principal, folder_id, snapshot)
-                        .await
-                } else if snapshot.public_folder_for_id(folder_id).is_some() {
-                    hard_delete_public_folder_contents(store, principal, folder_id, snapshot).await
-                } else if request.rop_id == RopId::HardDeleteMessagesAndSubfolders.as_u8() {
-                    hard_delete_mailbox_tree_contents(
-                        store, principal, folder_id, mailboxes, emails, snapshot,
-                    )
-                    .await
-                } else {
-                    hard_delete_folder_contents(
-                        store, principal, folder_id, mailboxes, emails, snapshot,
-                    )
-                    .await
-                };
-
-                match result {
-                    Ok((changed_folder_ids, partial_completion)) => {
-                        for changed_folder_id in changed_folder_ids {
-                            session.record_notification(MapiNotificationEvent::content(
-                                changed_folder_id,
-                                None,
-                            ));
-                        }
-                        responses.extend_from_slice(&rop_partial_completion_response(
-                            request.rop_id,
-                            request.response_handle_index(),
-                            partial_completion,
-                        ));
-                    }
-                    Err(error) => responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        error,
-                    )),
-                }
+                append_empty_folder_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetTransportFolder) => {
-                responses.extend_from_slice(&transport_folder_response(
-                    &request,
-                    input_object(session, &handle_slots, &request).is_some(),
-                ));
+                append_transport_folder_response(session, &handle_slots, &request, &mut responses);
             }
             Some(RopId::OptionsData) => {
-                responses.extend_from_slice(&options_data_response(
-                    &request,
-                    input_object(session, &handle_slots, &request).is_some(),
-                ));
+                append_options_data_response(session, &handle_slots, &request, &mut responses);
             }
             Some(RopId::GetReceiveFolderTable) => {
-                if !private_logon_request_handle(session, &handle_slots, &request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x68,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x68",
-                    row_count = 3u32,
-                    first_message_class = "IPM.Appointment",
-                    first_folder_id = format!("0x{CALENDAR_FOLDER_ID:016x}"),
-                    calendar_row_present = true,
-                    message_class_wire_type = "String8",
-                    property_row_wire_shape =
-                        "PidTagFolderId,PidTagMessageClass,PidTagLastModificationTime",
-                    message = "rca debug mapi receive folder table"
+                append_receive_folder_table_response(
+                    principal,
+                    session,
+                    private_logon_request_handle(session, &handle_slots, &request),
+                    &request,
+                    &mut responses,
                 );
-                responses.extend_from_slice(&get_receive_folder_table_response(&request));
-                session.record_receive_folder_verification_passed();
             }
             Some(RopId::LongTermIdFromId) => {
-                let source_id_bytes = request
-                    .long_term_source_id_bytes()
-                    .map(bytes_to_hex)
-                    .unwrap_or_default();
-                let decoded_object_id = request.long_term_source_object_id();
-                let decoded_object_scope =
-                    debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
-                let response = rop_long_term_id_from_id_response_for_scope(
+                append_long_term_id_from_id_response(
+                    principal,
                     &request,
-                    decoded_object_id,
-                    decoded_object_scope,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
                 );
-                let response_status = if response.len() > 6 {
-                    "ok"
-                } else {
-                    "ecNotFound"
-                };
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x43",
-                    source_id_bytes = %source_id_bytes,
-                    decoded_object_id = decoded_object_id
-                        .map(|object_id| format!("{object_id:#018x}"))
-                        .unwrap_or_default(),
-                    decoded_advertised_special_folder = decoded_object_id
-                        .map(is_advertised_special_folder)
-                        .unwrap_or(false),
-                    decoded_object_scope,
-                    response_status,
-                    message = "rca debug mapi long term id from id",
-                );
-                responses.extend_from_slice(&response)
             }
             Some(RopId::IdFromLongTermId) => {
-                let replica_guid_aliases = [
-                    *principal.account_id.as_bytes(),
-                    principal.account_id.to_bytes_le(),
-                ];
-                let long_term_id = request.long_term_id();
-                let decoded_object_id = long_term_id
-                    .and_then(crate::mapi::identity::object_id_from_folder_identifier_bytes);
-                let decoded_object_scope =
-                    debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
-                let response = rop_id_from_long_term_id_response(&request, &replica_guid_aliases);
-                let response_status = if response.len() > 6 {
-                    "ok"
-                } else {
-                    "ecNotFound"
-                };
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x44",
-                    microsoft_special_folder_open_rule =
-                        "MS-OXOSFLD special-folder EntryIDs can be converted to FIDs by RopIdFromLongTermId before RopOpenFolder",
-                    long_term_id_bytes = long_term_id.map(|bytes| bytes.len()).unwrap_or_default(),
-                    long_term_id_preview = %long_term_id
-                        .map(|bytes| hex_preview(bytes, 24))
-                        .unwrap_or_default(),
-                    decoded_object_id = decoded_object_id
-                        .map(|object_id| format!("{object_id:#018x}"))
-                        .unwrap_or_default(),
-                    decoded_object_is_calendar = decoded_object_id == Some(CALENDAR_FOLDER_ID),
-                    decoded_advertised_special_folder = decoded_object_id
-                        .map(is_advertised_special_folder)
-                        .unwrap_or(false),
-                    decoded_object_scope,
-                    response_status,
-                    message = "rca debug mapi id from long term id",
+                append_id_from_long_term_id_response(
+                    principal,
+                    &request,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &mut responses,
                 );
-                responses.extend_from_slice(&response)
             }
             Some(RopId::GetPerUserLongTermIds) => {
-                if !matches!(
-                    input_object(session, &handle_slots, &request),
-                    Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
-                ) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x60,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let mut long_term_ids = snapshot
-                    .public_folders()
-                    .iter()
-                    .filter_map(|folder| {
-                        crate::mapi::identity::long_term_id_from_object_id(folder.id)
-                    })
-                    .collect::<Vec<_>>();
-                if long_term_ids.is_empty() {
-                    let mut canonical_folder_ids = Vec::new();
-                    if let Ok(trees) = store.fetch_public_folder_trees(principal.account_id).await {
-                        let mut pending_folder_ids = trees
-                            .into_iter()
-                            .filter_map(|tree| tree.root_folder_id)
-                            .collect::<Vec<_>>();
-                        let mut seen_folder_ids = HashSet::new();
-                        while let Some(folder_id) = pending_folder_ids.pop() {
-                            if !seen_folder_ids.insert(folder_id) {
-                                continue;
-                            }
-                            if let Ok(folder) = store
-                                .fetch_public_folder(principal.account_id, folder_id)
-                                .await
-                            {
-                                canonical_folder_ids.push(folder.id);
-                            }
-                            if let Ok(children) = store
-                                .fetch_public_folder_children(principal.account_id, folder_id)
-                                .await
-                            {
-                                pending_folder_ids
-                                    .extend(children.into_iter().map(|child| child.id));
-                            }
-                        }
-                    }
-                    let requests = canonical_folder_ids
-                        .into_iter()
-                        .map(|canonical_id| MapiIdentityRequest {
-                            object_kind: MapiIdentityObjectKind::PublicFolder,
-                            canonical_id,
-                            reserved_global_counter: None,
-                            source_key: None,
-                        })
-                        .collect::<Vec<_>>();
-                    if let Ok(records) = store
-                        .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
-                        .await
-                    {
-                        for record in records {
-                            crate::mapi::identity::remember_mapi_identity_with_source_key(
-                                record.canonical_id,
-                                record.object_id,
-                                Some(record.source_key),
-                            );
-                            if let Some(long_term_id) =
-                                crate::mapi::identity::long_term_id_from_object_id(record.object_id)
-                            {
-                                long_term_ids.push(long_term_id);
-                            }
-                        }
-                    }
-                }
-                responses.extend_from_slice(&rop_get_per_user_long_term_ids_response(
+                append_get_per_user_long_term_ids_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
                     &request,
-                    &long_term_ids,
-                ));
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetPerUserGuid) => {
-                if !matches!(
-                    input_object(session, &handle_slots, &request),
-                    Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
-                ) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x61,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                };
-                let Some(folder_id) = request
-                    .long_term_id()
-                    .and_then(crate::mapi::identity::object_id_from_long_term_id)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x61,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let mut public_folder_found = snapshot.public_folder_for_id(folder_id).is_some();
-                if !public_folder_found {
-                    if let Ok(records) = store
-                        .fetch_mapi_identities_by_object_ids(principal.account_id, &[folder_id])
-                        .await
-                    {
-                        for record in records {
-                            if record.object_kind == MapiIdentityObjectKind::PublicFolder
-                                && store
-                                    .fetch_public_folder(principal.account_id, record.canonical_id)
-                                    .await
-                                    .is_ok()
-                            {
-                                public_folder_found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if !public_folder_found {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x61,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_get_per_user_guid_response(
+                append_get_per_user_guid_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
                     &request,
-                    &crate::mapi::identity::STORE_REPLICA_GUID,
-                ));
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::ReadPerUserInformation) => {
-                let Some(folder_id) = request.per_user_folder_object_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x63,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x63,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                let states = match store
-                    .fetch_public_folder_per_user_state(
-                        principal.account_id,
-                        public_folder.folder.id,
-                    )
-                    .await
-                {
-                    Ok(states) => states,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x63,
-                            request.response_handle_index(),
-                            EC_RULE_NOT_FOUND,
-                        ));
-                        continue;
-                    }
-                };
-                let stream = public_folder_per_user_stream(&states);
-                responses
-                    .extend_from_slice(&rop_read_per_user_information_response(&request, &stream));
+                append_read_per_user_information_response(
+                    store,
+                    principal,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::WritePerUserInformation) => {
-                let Some(folder_id) = request.per_user_folder_object_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x64,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x64,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                if request.per_user_data_offset() != 0 || !request.per_user_has_finished() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x64,
-                        request.response_handle_index(),
-                        EC_RULE_INVALID_PARAMETER,
-                    ));
-                    continue;
-                }
-                let patches = match public_folder_per_user_patches(request.per_user_write_data()) {
-                    Some(patches) => patches,
-                    None => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x64,
-                            request.response_handle_index(),
-                            EC_RULE_INVALID_PARAMETER,
-                        ));
-                        continue;
-                    }
-                };
-                if !patches.is_empty()
-                    && store
-                        .patch_public_folder_per_user_state(
-                            principal.account_id,
-                            public_folder.folder.id,
-                            &patches,
-                        )
-                        .await
-                        .is_err()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x64,
-                        request.response_handle_index(),
-                        EC_RULE_INVALID_PARAMETER,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_write_per_user_information_response(&request));
+                append_write_per_user_information_response(
+                    store,
+                    principal,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetOwningServers) => {
-                if !logon_request_handle(session, &handle_slots, &request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x42,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let Some(folder_id) = request.public_folder_probe_object_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x42,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x42,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                }
-                let servers = snapshot.public_folder_replica_server_names(folder_id);
-                responses.extend_from_slice(&rop_get_owning_servers_response(&request, &servers))
+                append_get_owning_servers_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                );
             }
             Some(RopId::PublicFolderIsGhosted) => {
-                if !logon_request_handle(session, &handle_slots, &request) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x45,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
-                let Some(folder_id) = request.public_folder_probe_object_id() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x45,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x45,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                }
-                let is_ghosted = folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
-                    && snapshot
-                        .public_folder_replica_server_names(folder_id)
-                        .is_empty();
-                responses
-                    .extend_from_slice(&rop_public_folder_is_ghosted_response(&request, is_ghosted))
+                append_public_folder_is_ghosted_response(
+                    session,
+                    &handle_slots,
+                    &request,
+                    snapshot,
+                    &mut responses,
+                );
             }
             Some(RopId::GetAddressTypes) => {
                 echo_input_handle_table = true;
-                let object = input_object(session, &handle_slots, &request);
-                if object.is_none() {
-                    responses.extend_from_slice(&address_types_response(&request, false));
-                    continue;
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x49",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    response_handle_index = request.response_handle_index(),
-                    object_kind = mapi_object_debug_kind(object),
-                    address_type_count = 2,
-                    address_types = "EX,SMTP",
-                    message = "rca debug mapi get address types",
+                append_address_types_response(
+                    principal,
+                    input_object(session, &handle_slots, &request),
+                    &request,
+                    &mut responses,
                 );
-                responses.extend_from_slice(&address_types_response(&request, true));
             }
             Some(RopId::GetNamesFromPropertyIds) => {
-                let property_ids = request.property_ids();
-                let missing_property_ids = property_ids
-                    .iter()
-                    .copied()
-                    .filter(|property_id| !session.named_property_ids.contains_key(property_id))
-                    .collect::<Vec<_>>();
-                if !missing_property_ids.is_empty() {
-                    if let Ok(mappings) = store
-                        .fetch_mapi_named_properties_by_ids(
-                            principal.account_id,
-                            &missing_property_ids,
-                        )
-                        .await
-                    {
-                        for mapping in mappings {
-                            session.cache_named_property(mapping.property_id, mapping.property);
-                        }
-                    }
-                }
-                responses.extend_from_slice(&rop_get_names_from_property_ids_response(
-                    &request, session,
-                ));
+                append_get_names_from_property_ids_response(
+                    store,
+                    principal,
+                    session,
+                    &request,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetPropertyIdsFromNames) => {
                 echo_input_handle_table = true;
-                let properties = match request.named_property_names() {
-                    Ok(properties) => properties,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x56,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        continue;
-                    }
-                };
-                if properties.is_empty()
-                    && matches!(
-                        input_object(session, &handle_slots, &request),
-                        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
-                    )
-                {
-                    if let Ok(mappings) = store
-                        .fetch_mapi_named_properties(principal.account_id, None)
-                        .await
-                    {
-                        for mapping in mappings {
-                            session.cache_named_property(mapping.property_id, mapping.property);
-                        }
-                    }
-                    let property_ids = session
-                        .named_properties_for_query(None)
-                        .into_iter()
-                        .map(|(property_id, _property)| property_id)
-                        .collect::<Vec<_>>();
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x56",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        response_handle_index = request.response_handle_index(),
-                        object_kind = "logon",
-                        create_missing = request.named_property_create(),
-                        requested_named_property_count = 0,
-                        requested_named_properties = "",
-                        missing_named_property_count = 0,
-                        missing_named_properties = "",
-                        returned_property_id_count = property_ids.len(),
-                        returned_property_ids = %format_debug_property_ids(&property_ids),
-                        message = "rca debug mapi get property ids from names",
-                    );
-                    responses.extend_from_slice(&rop_get_property_ids_from_names_response(
-                        &request,
-                        &property_ids,
-                    ));
-                    continue;
-                }
-                let requested_named_properties = format_debug_named_properties(&properties);
-                let mut property_ids = Vec::with_capacity(properties.len());
-                let mut missing = Vec::new();
-                for (index, property) in properties.iter().cloned().enumerate() {
-                    match session.property_id_for_name(property.clone(), false) {
-                        Some(property_id) => property_ids.push(property_id),
-                        None => {
-                            property_ids.push(0);
-                            missing.push((index, property));
-                        }
-                    }
-                }
-                let missing_properties = missing
-                    .iter()
-                    .map(|(_index, property)| property.clone())
-                    .collect::<Vec<_>>();
-                if !missing.is_empty() {
-                    match store
-                        .fetch_or_allocate_mapi_named_property_ids(
-                            principal.account_id,
-                            &missing_properties,
-                            request.named_property_create(),
-                        )
-                        .await
-                    {
-                        Ok(mappings) => {
-                            for (missing_index, (index, property)) in
-                                missing.into_iter().enumerate()
-                            {
-                                let mapping = mappings.get(missing_index).cloned().flatten();
-                                let property_id = mapping
-                                    .map(|mapping| {
-                                        cache_named_property_mapping_and_return_property_id(
-                                            session,
-                                            mapping.property_id,
-                                            mapping.property,
-                                        )
-                                    })
-                                    .or_else(|| {
-                                        session.property_id_for_name(
-                                            property,
-                                            request.named_property_create(),
-                                        )
-                                    });
-                                property_ids[index] = property_id.unwrap_or(0);
-                            }
-                        }
-                        Err(_) if request.named_property_create() => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x56,
-                                request.response_handle_index(),
-                                0x8007_000E,
-                            ));
-                            continue;
-                        }
-                        Err(_) => {}
-                    }
-                }
-                if !request.named_property_create() && property_ids.iter().any(|id| *id == 0) {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x56",
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        response_handle_index = request.response_handle_index(),
-                        object_kind = mapi_object_debug_kind(input_object(
-                            session,
-                            &handle_slots,
-                            &request,
-                        )),
-                        create_missing = request.named_property_create(),
-                        requested_named_property_count = properties.len(),
-                        requested_named_properties = %requested_named_properties,
-                        missing_named_property_count = missing_properties.len(),
-                        missing_named_properties = %format_debug_named_properties(&missing_properties),
-                        returned_property_id_count = property_ids.len(),
-                        returned_property_ids = %format_debug_property_ids(&property_ids),
-                        rop_return_value = "0x8004010f",
-                        message = "rca debug mapi get property ids from names",
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x56,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    request_rop_id = "0x56",
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    response_handle_index = request.response_handle_index(),
-                    object_kind = mapi_object_debug_kind(input_object(
-                        session,
-                        &handle_slots,
-                        &request,
-                    )),
-                    create_missing = request.named_property_create(),
-                    requested_named_property_count = properties.len(),
-                    requested_named_properties = %requested_named_properties,
-                    missing_named_property_count = missing_properties.len(),
-                    missing_named_properties = %format_debug_named_properties(&missing_properties),
-                    returned_property_id_count = property_ids.len(),
-                    returned_property_ids = %format_debug_property_ids(&property_ids),
-                    message = "rca debug mapi get property ids from names",
-                );
-                if contains_outlook_osc_contact_source_probe(&properties) {
-                    session.record_outlook_view_failure_trace_event(format!(
-                        "resolve_osc_contact_sources:request_id={request_id};object={};create_missing={};requested={};returned={}",
-                        mapi_object_debug_kind(input_object(session, &handle_slots, &request)),
-                        request.named_property_create(),
-                        requested_named_properties,
-                        format_debug_property_ids(&property_ids)
-                    ));
-                }
-                responses.extend_from_slice(&rop_get_property_ids_from_names_response(
+                append_get_property_ids_from_names_response(
+                    store,
+                    principal,
+                    request_id,
+                    session,
+                    &handle_slots,
                     &request,
-                    &property_ids,
-                ));
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::QueryNamedProperties) => {
-                if let Ok(mappings) = store
-                    .fetch_mapi_named_properties(
-                        principal.account_id,
-                        request.named_property_query_guid(),
-                    )
-                    .await
-                {
-                    for mapping in mappings {
-                        session.cache_named_property(mapping.property_id, mapping.property);
-                    }
-                }
-                responses.extend_from_slice(&rop_query_named_properties_response(&request, session))
+                append_query_named_properties_response(
+                    store,
+                    principal,
+                    session,
+                    &request,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::RegisterNotification) => {
-                let registration = notification_registration_from_request(&request);
-                let input_handle_value = input_handle(&handle_slots, &request);
-                let input_object = input_object(session, &handle_slots, &request);
-                let input_object_kind = mapi_object_debug_kind(input_object);
-                let input_folder_id = mapi_object_debug_folder_id(input_object);
-                let input_context = format_handle_lineage_context(input_object);
-                let notification_types = registration.notification_types;
-                let notification_folder_id = registration.folder_id;
-                if session.notification_cursor.is_none() {
-                    session.notification_cursor = store
-                        .fetch_mapi_notification_cursor(principal.account_id)
-                        .await
-                        .ok()
-                        .flatten();
-                }
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::NotificationSubscription { registration },
-                );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_register_notification_response(&request));
-                output_handles.push(handle);
-                tracing::info!(
-                    rca_debug = true,
-                    adapter = "mapi",
-                    endpoint = "emsmdb",
-                    mailbox = %principal.email,
-                    request_type = "Execute",
-                    mapi_request_id = request_id,
-                    request_rop_id = "0x29",
-                    request_rop_names = %request_rop_names,
-                    input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = %format_optional_debug_handle(input_handle_value),
-                    input_object_kind = input_object_kind,
-                    input_folder_id = %input_folder_id,
-                    input_context = %input_context,
-                    output_handle_index = request.output_handle_index.unwrap_or(0),
-                    output_handle_value = handle,
-                    notification_types = %format!("0x{notification_types:04x}"),
-                    want_whole_store = notification_folder_id.is_none(),
-                    notification_folder_id = %notification_folder_id
-                        .map(|folder_id| format!("0x{folder_id:016x}"))
-                        .unwrap_or_else(|| "none".to_string()),
-                    notification_cursor_loaded = session.notification_cursor.is_some(),
-                    inbox_normal_contents_table_observed =
-                        session.post_hierarchy_actions.inbox_normal_contents_table_observed,
-                    inbox_normal_setcolumns_observed =
-                        session
-                            .post_hierarchy_actions
-                            .inbox_normal_contents_table_setcolumns_observed,
-                    inbox_normal_query_rows_observed =
-                        session
-                            .post_hierarchy_actions
-                            .inbox_normal_contents_table_query_rows_observed,
-                    last_normal_setcolumns_handle =
-                        %format_optional_debug_handle(session
-                            .post_hierarchy_actions
-                            .last_inbox_normal_contents_table_setcolumns_handle),
-                    last_normal_query_rows_handle =
-                        %format_optional_debug_handle(session
-                            .post_hierarchy_actions
-                            .last_inbox_normal_contents_table_query_rows_handle),
-                    recent_actions =
-                        %session.post_hierarchy_actions.recent_probe_actions.join(">"),
-                    "rca debug mapi register notification"
-                );
+                append_register_notification_response(
+                    store,
+                    principal,
+                    request_id,
+                    &request_rop_names,
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    &mut responses,
+                    &mut output_handles,
+                )
+                .await;
             }
             Some(RopId::GetPermissionsTable) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                };
-                if folder_row_for_id(folder_id, mailboxes).is_none()
-                    && role_for_folder_id(folder_id).is_none()
-                    && !is_advertised_special_folder(folder_id)
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x3E,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    permission_table_object(folder_id),
+                append_get_permissions_table_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&get_permissions_table_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::GetRulesTable) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                };
-                if folder_row_for_id(folder_id, mailboxes).is_none()
-                    && role_for_folder_id(folder_id).is_none()
-                    && snapshot.public_folder_for_id(folder_id).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x3F,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    rule_table_object(folder_id),
+                append_get_rules_table_response(
+                    session,
+                    &mut handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                    &mut output_handles,
                 );
-                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&get_rules_table_response(&request));
-                output_handles.push(handle);
             }
             Some(RopId::ModifyPermissions) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                };
-                let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
-                let public_folder = snapshot.public_folder_for_id(folder_id);
-                let calendar_collection_folder = snapshot
-                    .collaboration_folder_for_id(folder_id)
-                    .filter(|folder| folder.kind == MapiCollaborationFolderKind::Calendar);
-                let default_calendar_folder = role_for_folder_id(folder_id) == Some("calendar");
-                if mailbox_folder.is_none()
-                    && public_folder.is_none()
-                    && calendar_collection_folder.is_none()
-                    && !default_calendar_folder
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x40,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                };
-                let can_share = if default_calendar_folder {
-                    true
-                } else if let Some(folder) = calendar_collection_folder {
-                    folder.collection.rights.may_share
-                } else if let Some(public_folder) = public_folder {
-                    public_folder.folder.rights.may_share
-                } else {
-                    snapshot
-                        .permissions_for_folder(folder_id)
-                        .iter()
-                        .find(|permission| {
-                            permission.member_account_id == Some(principal.account_id)
-                        })
-                        .is_some_and(|permission| may_share_from_rights(permission.rights))
-                };
-                if !can_share {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x40,
-                        request.response_handle_index(),
-                        EC_SEARCH_ACCESS_DENIED,
-                    ));
-                    continue;
-                }
-
-                let rows = match request.modify_permissions_rows() {
-                    Ok(rows) => rows,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x40,
-                            request.response_handle_index(),
-                            EC_RULE_INVALID_PARAMETER,
-                        ));
-                        continue;
-                    }
-                };
-                let mut actions = Vec::new();
-                let mut failed = None;
-                for row in rows {
-                    let row_kind = row.flags & (ROW_ADD | ROW_MODIFY | ROW_REMOVE);
-                    if !matches!(row_kind, ROW_ADD | ROW_MODIFY | ROW_REMOVE) {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    }
-                    let Some(member_id) = row
-                        .properties
-                        .get(&PID_TAG_MEMBER_ID)
-                        .and_then(MapiValue::as_i64)
-                        .and_then(|value| u64::try_from(value).ok())
-                    else {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    };
-                    if member_id == MEMBER_ID_DEFAULT || member_id == MEMBER_ID_ANONYMOUS {
-                        continue;
-                    }
-                    let member_ids = [member_id];
-                    let identity = match store
-                        .fetch_mapi_identities_by_object_ids(principal.account_id, &member_ids)
-                        .await
-                    {
-                        Ok(mut identities) => identities.pop(),
-                        Err(_) => None,
-                    };
-                    let Some(identity) = identity
-                        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Account)
-                    else {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    };
-                    if identity.canonical_id == principal.account_id {
-                        continue;
-                    }
-                    let (may_read, may_write, may_delete, may_share) = if row_kind == ROW_REMOVE {
-                        (false, false, false, false)
-                    } else {
-                        let Some(rights) = row
-                            .properties
-                            .get(&PID_TAG_MEMBER_RIGHTS)
-                            .and_then(MapiValue::as_i64)
-                            .and_then(|value| u32::try_from(value).ok())
-                        else {
-                            failed = Some(EC_RULE_INVALID_PARAMETER);
-                            break;
-                        };
-                        let access = access_from_rights(rights);
-                        (
-                            access.may_read,
-                            access.may_write,
-                            access.may_delete,
-                            may_share_from_rights(rights),
-                        )
-                    };
-                    if !may_read && (may_write || may_delete || may_share) {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    }
-                    if may_delete && !may_write {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    }
-                    if may_share && !may_write {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    }
-                    actions.push((
-                        row_kind,
-                        identity.canonical_id,
-                        may_read,
-                        may_write,
-                        may_delete,
-                        may_share,
-                    ));
-                }
-                if let Some(error_code) = failed {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x40,
-                        request.response_handle_index(),
-                        error_code,
-                    ));
-                    continue;
-                }
-                let mut failed = false;
-                if default_calendar_folder {
-                    for (
-                        _row_kind,
-                        grantee_account_id,
-                        may_read,
-                        may_write,
-                        may_delete,
-                        may_share,
-                    ) in actions
-                    {
-                        if store
-                            .set_mapi_calendar_permission(
-                                principal.account_id,
-                                grantee_account_id,
-                                may_read,
-                                may_write,
-                                may_delete,
-                                may_share,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-modify-calendar-permissions".to_string(),
-                                    subject: format!("calendar {grantee_account_id}"),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            failed = true;
-                            break;
-                        }
-                    }
-                } else if let Some(folder) = calendar_collection_folder {
-                    for (
-                        _row_kind,
-                        grantee_account_id,
-                        may_read,
-                        may_write,
-                        may_delete,
-                        may_share,
-                    ) in actions
-                    {
-                        if store
-                            .set_mapi_calendar_collection_permission(
-                                folder.collection.owner_account_id,
-                                &folder.collection.id,
-                                grantee_account_id,
-                                may_read,
-                                may_write,
-                                may_delete,
-                                may_share,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-modify-calendar-permissions".to_string(),
-                                    subject: format!(
-                                        "calendar {} {}",
-                                        folder.collection.id, grantee_account_id
-                                    ),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            failed = true;
-                            break;
-                        }
-                    }
-                } else if let Some(folder) = mailbox_folder {
-                    for (
-                        _row_kind,
-                        grantee_account_id,
-                        may_read,
-                        may_write,
-                        may_delete,
-                        may_share,
-                    ) in actions
-                    {
-                        if store
-                            .set_mapi_folder_permission(
-                                principal.account_id,
-                                folder.id,
-                                grantee_account_id,
-                                may_read,
-                                may_write,
-                                may_delete,
-                                may_share,
-                                AuditEntryInput {
-                                    actor: principal.email.clone(),
-                                    action: "mapi-modify-permissions".to_string(),
-                                    subject: format!(
-                                        "folder {} {}",
-                                        folder.name, grantee_account_id
-                                    ),
-                                },
-                            )
-                            .await
-                            .is_err()
-                        {
-                            failed = true;
-                            break;
-                        }
-                    }
-                } else if let Some(folder) = public_folder {
-                    for (
-                        row_kind,
-                        grantee_account_id,
-                        may_read,
-                        may_write,
-                        may_delete,
-                        may_share,
-                    ) in actions
-                    {
-                        let audit = AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "mapi-modify-public-folder-permissions".to_string(),
-                            subject: format!(
-                                "public folder {} {}",
-                                folder.folder.display_name, grantee_account_id
-                            ),
-                        };
-                        let result = if row_kind == ROW_REMOVE {
-                            store
-                                .delete_public_folder_permission(
-                                    principal.account_id,
-                                    folder.folder.id,
-                                    grantee_account_id,
-                                    audit,
-                                )
-                                .await
-                                .map(|_| ())
-                        } else {
-                            store
-                                .upsert_public_folder_permission(
-                                    PublicFolderPermissionInput {
-                                        account_id: principal.account_id,
-                                        public_folder_id: folder.folder.id,
-                                        principal_account_id: grantee_account_id,
-                                        may_read,
-                                        may_write,
-                                        may_delete,
-                                        may_share,
-                                    },
-                                    audit,
-                                )
-                                .await
-                                .map(|_| ())
-                        };
-                        if result.is_err() {
-                            failed = true;
-                            break;
-                        }
-                    }
-                }
-                if failed {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x40,
-                        request.response_handle_index(),
-                        EC_RULE_INVALID_PARAMETER,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_modify_permissions_response(&request))
+                append_modify_permissions_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::ModifyRules) => {
-                let Some(folder_id) =
-                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
-                else {
-                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
-                    continue;
-                };
-                if folder_row_for_id(folder_id, mailboxes).is_none()
-                    && role_for_folder_id(folder_id).is_none()
-                {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x41,
-                        request.response_handle_index(),
-                        EC_RULE_NOT_FOUND,
-                    ));
-                    continue;
-                }
-                let rows = match request.modify_rules_rows() {
-                    Ok(rows) => rows,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x41,
-                            request.response_handle_index(),
-                            EC_RULE_INVALID_PARAMETER,
-                        ));
-                        continue;
-                    }
-                };
-                let mut failed = None;
-                for row in rows {
-                    let row_kind = row.flags & (ROW_ADD | ROW_MODIFY | ROW_REMOVE);
-                    if row_kind == ROW_REMOVE {
-                        let Some(rule_id) = row
-                            .properties
-                            .get(&PID_TAG_RULE_ID)
-                            .and_then(MapiValue::as_i64)
-                            .map(|value| value.max(0) as u64)
-                        else {
-                            failed = Some(EC_RULE_INVALID_PARAMETER);
-                            break;
-                        };
-                        let Some(rule) = snapshot.rules().iter().find(|rule| rule.id == rule_id)
-                        else {
-                            failed = Some(EC_RULE_NOT_FOUND);
-                            break;
-                        };
-                        if store
-                            .delete_sieve_script(
-                                principal.account_id,
-                                &rule.name,
-                                rule_audit(principal, "mapi.rule.delete", &rule.name),
-                            )
-                            .await
-                            .is_err()
-                        {
-                            failed = Some(EC_RULE_NOT_FOUND);
-                            break;
-                        }
-                        continue;
-                    }
-                    if row_kind != ROW_ADD && row_kind != ROW_MODIFY {
-                        failed = Some(EC_RULE_UNSUPPORTED);
-                        break;
-                    }
-                    let mutation = match bounded_rule_mutation_from_row(&row) {
-                        Ok(mutation) => mutation,
-                        Err(error) => {
-                            failed = Some(error);
-                            break;
-                        }
-                    };
-                    if store
-                        .put_sieve_script(
-                            principal.account_id,
-                            &mutation.name,
-                            &mutation.content,
-                            mutation.active,
-                            rule_audit(principal, "mapi.rule.upsert", &mutation.name),
-                        )
-                        .await
-                        .is_err()
-                    {
-                        failed = Some(EC_RULE_INVALID_PARAMETER);
-                        break;
-                    }
-                }
-                if let Some(error) = failed {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x41,
-                        request.response_handle_index(),
-                        error,
-                    ));
-                } else {
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                }
+                append_modify_rules_response(
+                    store,
+                    principal,
+                    session,
+                    &handle_slots,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                    &mut responses,
+                )
+                .await;
             }
             Some(RopId::GetStoreState) => {
-                responses.extend_from_slice(&store_state_response(
-                    &request,
-                    input_handle(&handle_slots, &request).is_some(),
-                ));
+                append_store_state_response(&handle_slots, &request, &mut responses);
             }
-            Some(RopId::Abort) => {
-                responses.extend_from_slice(&abort_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                ));
+            Some(RopId::Abort | RopId::Progress | RopId::ResetTable) => {
+                append_execute_status_response(session, &handle_slots, &request, &mut responses);
             }
-            Some(RopId::Progress) => {
-                responses.extend_from_slice(&progress_response(
-                    &request,
-                    input_object(session, &handle_slots, &request),
-                ));
+            Some(RopId::FreeBookmark) => {
+                append_free_bookmark_response(session, &handle_slots, &request, &mut responses);
             }
-            Some(RopId::ResetTable) => {
-                responses.extend_from_slice(&reset_table_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request)
-                        .is_some_and(reset_table_state),
-                ));
-            }
-            Some(RopId::FreeBookmark) => responses.extend_from_slice(&free_bookmark_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-            )),
             Some(RopId::Logon) => {
                 if let TypedRopRequest::Logon(logon_request) = &typed_request {
                     log_rop_logon_request_identity(principal, request_id, logon_request);
@@ -14765,130 +8251,6 @@ where
         rpc_header_ext_rop_buffer(response)
     } else {
         response
-    }
-}
-
-fn imported_message_source_key(properties: &HashMap<u32, MapiValue>) -> Option<Vec<u8>> {
-    let source_key = match properties.get(&PID_TAG_SOURCE_KEY)? {
-        MapiValue::Binary(bytes) => bytes,
-        _ => return None,
-    };
-    (source_key.len() == 22 && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
-        .then(|| source_key.clone())
-}
-
-fn pending_message_is_sync_metadata_only(
-    properties: &HashMap<u32, MapiValue>,
-    recipients: &[PendingRecipient],
-) -> bool {
-    !properties.is_empty()
-        && recipients.is_empty()
-        && properties.keys().all(|tag| {
-            matches!(
-                *tag,
-                PID_TAG_SOURCE_KEY
-                    | PID_TAG_LAST_MODIFICATION_TIME
-                    | PID_TAG_CHANGE_KEY
-                    | PID_TAG_PREDECESSOR_CHANGE_LIST
-            )
-        })
-}
-
-fn pending_message_is_trash_sync_artifact(
-    folder_id: u64,
-    properties: &HashMap<u32, MapiValue>,
-    recipients: &[PendingRecipient],
-) -> bool {
-    folder_id == TRASH_FOLDER_ID
-        && !properties.is_empty()
-        && recipients.is_empty()
-        && properties.keys().any(|tag| {
-            matches!(
-                *tag,
-                PID_TAG_LAST_MODIFICATION_TIME
-                    | PID_TAG_CHANGE_KEY
-                    | PID_TAG_PREDECESSOR_CHANGE_LIST
-            )
-        })
-        && imported_message_source_key(properties)
-            .as_deref()
-            .and_then(source_key_global_counter)
-            .is_some_and(|counter| {
-                import_source_key_identity_scope(counter) == "out_of_lpe_persisted_range"
-            })
-}
-
-fn imported_hierarchy_parent_mailbox_id(
-    hierarchy_values: &[(u32, MapiValue)],
-    collector_folder_id: u64,
-    mailboxes: &[JmapMailbox],
-) -> Option<Uuid> {
-    hierarchy_values
-        .iter()
-        .find_map(|(tag, value)| match (tag, value) {
-            (tag, MapiValue::Binary(bytes)) if *tag == PID_TAG_PARENT_SOURCE_KEY => {
-                Some(bytes.as_slice())
-            }
-            _ => None,
-        })
-        .and_then(|parent_source_key| {
-            mailboxes
-                .iter()
-                .find(|mailbox| {
-                    mapi_mailstore::source_key_for_mailbox_folder(mailbox) == parent_source_key
-                })
-                .map(|mailbox| mailbox.id)
-        })
-        .or_else(|| {
-            mailboxes
-                .iter()
-                .find(|mailbox| mapi_folder_id(mailbox) == collector_folder_id)
-                .map(|mailbox| mailbox.id)
-        })
-}
-
-fn hierarchy_checkpoint_status(
-    checkpoint_kind: MapiCheckpointKind,
-    folder_id: u64,
-    checkpoint: &MapiSyncCheckpoint,
-) -> &'static str {
-    if checkpoint_kind != MapiCheckpointKind::Hierarchy {
-        return "usable";
-    }
-    if checkpoint
-        .cursor_json
-        .get("source")
-        .and_then(serde_json::Value::as_str)
-        != Some("emsmdb-ics-download")
-    {
-        return "stale-source";
-    }
-    if checkpoint
-        .cursor_json
-        .get("hierarchySyncVersion")
-        .and_then(serde_json::Value::as_u64)
-        != Some(HIERARCHY_SYNC_CURSOR_VERSION)
-    {
-        return "stale-version";
-    }
-    if checkpoint
-        .cursor_json
-        .get("syncRootFolderId")
-        .and_then(serde_json::Value::as_u64)
-        != Some(folder_id)
-    {
-        return "stale-root";
-    }
-    "usable"
-}
-
-fn sync_property_filter_mode(sync_flags: u16, requested_property_tags: &[u32]) -> &'static str {
-    if requested_property_tags.is_empty() {
-        "none"
-    } else if sync_flags & 0x0080 == 0 {
-        "exclude"
-    } else {
-        "only-specified"
     }
 }
 

@@ -56,6 +56,77 @@ pub(super) fn associated_config_message_for_mutation(
         .filter(|message| message.folder_id == folder_id)
 }
 
+pub(super) fn delegate_freebusy_message_for_open<'a>(
+    snapshot: &'a MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<&'a crate::mapi_store::MapiDelegateFreeBusyMessage> {
+    (folder_id == FREEBUSY_DATA_FOLDER_ID)
+        .then(|| snapshot.delegate_freebusy_message_for_id(message_id))
+        .flatten()
+        .filter(|message| message.folder_id == folder_id)
+}
+
+pub(super) fn conversation_action_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<crate::mapi_store::MapiConversationActionMessage> {
+    (folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
+        .then(|| snapshot.conversation_action_table_message_for_id(message_id))
+        .flatten()
+        .filter(|message| message.folder_id == folder_id)
+}
+
+pub(super) fn navigation_shortcut_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<crate::mapi_store::MapiNavigationShortcutMessage> {
+    (folder_id == COMMON_VIEWS_FOLDER_ID)
+        .then(|| snapshot.navigation_shortcut_table_message_for_id(message_id))
+        .flatten()
+        .filter(|message| message.folder_id == folder_id)
+}
+
+pub(super) fn common_view_named_view_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        return snapshot
+            .common_view_named_view_message_for_id(message_id)
+            .filter(|message| message.folder_id == folder_id);
+    }
+    folder_local_default_named_view_is_supported(snapshot, folder_id, message_id)
+        .then(|| snapshot.default_folder_named_view_message(folder_id, message_id))
+        .flatten()
+}
+
+pub(super) fn search_folder_definition_message_for_open(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<SearchFolderDefinition> {
+    (folder_id == COMMON_VIEWS_FOLDER_ID)
+        .then(|| {
+            snapshot.common_views_table_messages().find_map(|message| {
+                if let crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
+                    definition,
+                ) = message
+                {
+                    (crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+                        == Some(message_id))
+                    .then_some(definition)
+                } else {
+                    None
+                }
+            })
+        })
+        .flatten()
+}
+
 pub(super) fn associated_config_mutation_base_properties(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
 ) -> HashMap<u32, MapiValue> {

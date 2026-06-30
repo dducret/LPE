@@ -1,9 +1,148 @@
 use super::*;
 
+pub(super) fn append_get_rules_table_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    let Some(folder_id) =
+        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    else {
+        responses.extend_from_slice(&rop_handle_index_error_response(request));
+        return;
+    };
+    if folder_row_for_id(folder_id, mailboxes).is_none()
+        && role_for_folder_id(folder_id).is_none()
+        && snapshot.public_folder_for_id(folder_id).is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x3F,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    }
+    let handle =
+        session.allocate_output_handle(request.output_handle_index, rule_table_object(folder_id));
+    set_handle_slot(handle_slots, request.output_handle_index, handle);
+    responses.extend_from_slice(&get_rules_table_response(request));
+    output_handles.push(handle);
+}
+
 pub(super) struct BoundedRuleMutation {
     pub(super) name: String,
     pub(super) content: String,
     pub(super) active: bool,
+}
+
+pub(super) async fn append_modify_rules_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) where
+    S: ExchangeStore,
+{
+    let Some(folder_id) =
+        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    else {
+        responses.extend_from_slice(&rop_handle_index_error_response(request));
+        return;
+    };
+    if folder_row_for_id(folder_id, mailboxes).is_none() && role_for_folder_id(folder_id).is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x41,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    }
+    let rows = match request.modify_rules_rows() {
+        Ok(rows) => rows,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x41,
+                request.response_handle_index(),
+                EC_RULE_INVALID_PARAMETER,
+            ));
+            return;
+        }
+    };
+    let mut failed = None;
+    for row in rows {
+        let row_kind = row.flags & (ROW_ADD | ROW_MODIFY | ROW_REMOVE);
+        if row_kind == ROW_REMOVE {
+            let Some(rule_id) = row
+                .properties
+                .get(&PID_TAG_RULE_ID)
+                .and_then(MapiValue::as_i64)
+                .map(|value| value.max(0) as u64)
+            else {
+                failed = Some(EC_RULE_INVALID_PARAMETER);
+                break;
+            };
+            let Some(rule) = snapshot.rules().iter().find(|rule| rule.id == rule_id) else {
+                failed = Some(EC_RULE_NOT_FOUND);
+                break;
+            };
+            if store
+                .delete_sieve_script(
+                    principal.account_id,
+                    &rule.name,
+                    rule_audit(principal, "mapi.rule.delete", &rule.name),
+                )
+                .await
+                .is_err()
+            {
+                failed = Some(EC_RULE_NOT_FOUND);
+                break;
+            }
+            continue;
+        }
+        if row_kind != ROW_ADD && row_kind != ROW_MODIFY {
+            failed = Some(EC_RULE_UNSUPPORTED);
+            break;
+        }
+        let mutation = match bounded_rule_mutation_from_row(&row) {
+            Ok(mutation) => mutation,
+            Err(error) => {
+                failed = Some(error);
+                break;
+            }
+        };
+        if store
+            .put_sieve_script(
+                principal.account_id,
+                &mutation.name,
+                &mutation.content,
+                mutation.active,
+                rule_audit(principal, "mapi.rule.upsert", &mutation.name),
+            )
+            .await
+            .is_err()
+        {
+            failed = Some(EC_RULE_INVALID_PARAMETER);
+            break;
+        }
+    }
+    if let Some(error) = failed {
+        responses.extend_from_slice(&rop_error_response(
+            0x41,
+            request.response_handle_index(),
+            error,
+        ));
+    } else {
+        responses.extend_from_slice(&rop_simple_success_response(request));
+    }
 }
 
 pub(super) fn bounded_rule_mutation_from_row(

@@ -17,8 +17,10 @@ pub use crate::bridge_auth::{
     INTEGRATION_TIMESTAMP_HEADER,
 };
 pub use crate::civil_time::{
-    civil_from_days, days_from_civil, month_abbrev, utc_from_unix_seconds,
-    weekday_abbrev_from_unix_days, UtcDateTime,
+    civil_from_days, current_windows_filetime, days_from_civil, month_abbrev,
+    unix_seconds_from_windows_filetime, utc_from_unix_seconds, weekday_abbrev_from_unix_days,
+    windows_filetime_from_signed_unix_seconds, windows_filetime_from_unix_seconds, UtcDateTime,
+    WINDOWS_FILETIME_TICKS_PER_SECOND, WINDOWS_UNIX_EPOCH_OFFSET_SECONDS,
 };
 pub use crate::document::{
     AccessScope, DocumentAnnotation, DocumentChunk, DocumentKind, DocumentProjection,

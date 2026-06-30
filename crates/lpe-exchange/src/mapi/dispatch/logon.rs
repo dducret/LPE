@@ -75,10 +75,46 @@ pub(super) fn address_types_response(request: &RopRequest, has_input_object: boo
     }
 }
 
+pub(super) fn append_address_types_response(
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    if object.is_none() {
+        responses.extend_from_slice(&address_types_response(request, false));
+        return;
+    }
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x49",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        address_type_count = 2,
+        address_types = "EX,SMTP",
+        message = "rca debug mapi get address types",
+    );
+    responses.extend_from_slice(&address_types_response(request, true));
+}
+
 pub(super) fn store_state_response(request: &RopRequest, has_input_handle: bool) -> Vec<u8> {
     if has_input_handle {
         rop_get_store_state_response(request)
     } else {
         rop_error_response(0x7B, request.response_handle_index(), 0x8004_0102)
     }
+}
+
+pub(super) fn append_store_state_response(
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    let has_input_handle = input_handle(handle_slots, request).is_some();
+    responses.extend_from_slice(&store_state_response(request, has_input_handle));
 }

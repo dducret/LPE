@@ -1,6 +1,7 @@
 const PUBLIC_FOLDER_PER_USER_STREAM_MAGIC: &[u8; 8] = b"LPEPFU1\0";
 
 use super::*;
+use crate::store::MapiIdentityRequest;
 
 pub(super) async fn hard_delete_public_folder_contents<S: ExchangeStore>(
     store: &S,
@@ -140,6 +141,75 @@ pub(super) async fn copy_public_folder_tree_for_mapi<S: ExchangeStore>(
     root.ok_or_else(|| anyhow::anyhow!("public folder not found"))
 }
 
+pub(super) async fn apply_canonical_public_folder_item_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    item_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let Some(item) = snapshot.public_folder_item_for_id(folder_id, item_id) else {
+        return Err(anyhow!("canonical public-folder item was not found"));
+    };
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String(item.item.message_class.clone()),
+    );
+    properties.insert(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String(item.item.subject.clone()),
+    );
+    properties.insert(
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        MapiValue::String(item.item.subject.clone()),
+    );
+    properties.insert(
+        PID_TAG_BODY_W,
+        MapiValue::String(item.item.body_text.clone()),
+    );
+    if let Some(html) = &item.item.body_html_sanitized {
+        properties.insert(PID_TAG_BODY_HTML_W, MapiValue::String(html.clone()));
+        properties.insert(
+            PID_TAG_HTML_BINARY,
+            MapiValue::Binary(html.as_bytes().to_vec()),
+        );
+    }
+    apply_mapi_property_values_to_map(&mut properties, values);
+    store
+        .upsert_public_folder_item(
+            UpsertPublicFolderItemInput {
+                id: Some(item.item.id),
+                account_id: principal.account_id,
+                public_folder_id: item.item.public_folder_id,
+                item_kind: item.item.item_kind.clone(),
+                message_class: optional_pending_text_property(
+                    &properties,
+                    &[PID_TAG_MESSAGE_CLASS_W],
+                )
+                .unwrap_or_else(|| "IPM.Post".to_string()),
+                subject: pending_text_property(
+                    &properties,
+                    &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+                ),
+                body_text: pending_text_property(&properties, &[PID_TAG_BODY_W]),
+                body_html_sanitized: pending_html_property(&properties),
+                source_payload_json: item.item.source_payload_json.clone(),
+            },
+            AuditEntryInput {
+                actor: principal.email.clone(),
+                action: "mapi-update-public-folder-item".to_string(),
+                subject: format!("public-folder-item:{}", item.item.id),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
 pub(super) fn public_folder_handle_properties(
     folder: &lpe_storage::PublicFolder,
     folder_id: u64,
@@ -225,4 +295,332 @@ pub(super) fn public_folder_per_user_patches(
         });
     }
     (offset == data.len()).then_some(patches)
+}
+
+pub(super) async fn append_get_per_user_long_term_ids_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    if !matches!(
+        input_object(session, handle_slots, request),
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
+        responses.extend_from_slice(&rop_error_response(
+            0x60,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let mut long_term_ids = snapshot
+        .public_folders()
+        .iter()
+        .filter_map(|folder| crate::mapi::identity::long_term_id_from_object_id(folder.id))
+        .collect::<Vec<_>>();
+    if long_term_ids.is_empty() {
+        let mut canonical_folder_ids = Vec::new();
+        if let Ok(trees) = store.fetch_public_folder_trees(principal.account_id).await {
+            let mut pending_folder_ids = trees
+                .into_iter()
+                .filter_map(|tree| tree.root_folder_id)
+                .collect::<Vec<_>>();
+            let mut seen_folder_ids = HashSet::new();
+            while let Some(folder_id) = pending_folder_ids.pop() {
+                if !seen_folder_ids.insert(folder_id) {
+                    continue;
+                }
+                if let Ok(folder) = store
+                    .fetch_public_folder(principal.account_id, folder_id)
+                    .await
+                {
+                    canonical_folder_ids.push(folder.id);
+                }
+                if let Ok(children) = store
+                    .fetch_public_folder_children(principal.account_id, folder_id)
+                    .await
+                {
+                    pending_folder_ids.extend(children.into_iter().map(|child| child.id));
+                }
+            }
+        }
+        let requests = canonical_folder_ids
+            .into_iter()
+            .map(|canonical_id| MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::PublicFolder,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            })
+            .collect::<Vec<_>>();
+        if let Ok(records) = store
+            .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
+            .await
+        {
+            for record in records {
+                crate::mapi::identity::remember_mapi_identity_with_source_key(
+                    record.canonical_id,
+                    record.object_id,
+                    Some(record.source_key),
+                );
+                if let Some(long_term_id) =
+                    crate::mapi::identity::long_term_id_from_object_id(record.object_id)
+                {
+                    long_term_ids.push(long_term_id);
+                }
+            }
+        }
+    }
+    responses.extend_from_slice(&rop_get_per_user_long_term_ids_response(
+        request,
+        &long_term_ids,
+    ));
+}
+
+pub(super) async fn append_get_per_user_guid_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    if !matches!(
+        input_object(session, handle_slots, request),
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
+        responses.extend_from_slice(&rop_error_response(
+            0x61,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let Some(folder_id) = request
+        .long_term_id()
+        .and_then(crate::mapi::identity::object_id_from_long_term_id)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x61,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let mut public_folder_found = snapshot.public_folder_for_id(folder_id).is_some();
+    if !public_folder_found {
+        if let Ok(records) = store
+            .fetch_mapi_identities_by_object_ids(principal.account_id, &[folder_id])
+            .await
+        {
+            for record in records {
+                if record.object_kind == MapiIdentityObjectKind::PublicFolder
+                    && store
+                        .fetch_public_folder(principal.account_id, record.canonical_id)
+                        .await
+                        .is_ok()
+                {
+                    public_folder_found = true;
+                    break;
+                }
+            }
+        }
+    }
+    if !public_folder_found {
+        responses.extend_from_slice(&rop_error_response(
+            0x61,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    }
+    responses.extend_from_slice(&rop_get_per_user_guid_response(
+        request,
+        &crate::mapi::identity::STORE_REPLICA_GUID,
+    ));
+}
+
+pub(super) async fn append_read_per_user_information_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    let Some(folder_id) = request.per_user_folder_object_id() else {
+        responses.extend_from_slice(&rop_error_response(
+            0x63,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x63,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    let states = match store
+        .fetch_public_folder_per_user_state(principal.account_id, public_folder.folder.id)
+        .await
+    {
+        Ok(states) => states,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x63,
+                request.response_handle_index(),
+                EC_RULE_NOT_FOUND,
+            ));
+            return;
+        }
+    };
+    let stream = public_folder_per_user_stream(&states);
+    responses.extend_from_slice(&rop_read_per_user_information_response(request, &stream));
+}
+
+pub(super) async fn append_write_per_user_information_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    let Some(folder_id) = request.per_user_folder_object_id() else {
+        responses.extend_from_slice(&rop_error_response(
+            0x64,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x64,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    if request.per_user_data_offset() != 0 || !request.per_user_has_finished() {
+        responses.extend_from_slice(&rop_error_response(
+            0x64,
+            request.response_handle_index(),
+            EC_RULE_INVALID_PARAMETER,
+        ));
+        return;
+    }
+    let patches = match public_folder_per_user_patches(request.per_user_write_data()) {
+        Some(patches) => patches,
+        None => {
+            responses.extend_from_slice(&rop_error_response(
+                0x64,
+                request.response_handle_index(),
+                EC_RULE_INVALID_PARAMETER,
+            ));
+            return;
+        }
+    };
+    if !patches.is_empty()
+        && store
+            .patch_public_folder_per_user_state(
+                principal.account_id,
+                public_folder.folder.id,
+                &patches,
+            )
+            .await
+            .is_err()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x64,
+            request.response_handle_index(),
+            EC_RULE_INVALID_PARAMETER,
+        ));
+        return;
+    }
+    responses.extend_from_slice(&rop_write_per_user_information_response(request));
+}
+
+pub(super) fn append_get_owning_servers_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    if !logon_request_handle(session, handle_slots, request) {
+        responses.extend_from_slice(&rop_error_response(
+            0x42,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
+    let Some(folder_id) = request.public_folder_probe_object_id() else {
+        responses.extend_from_slice(&rop_error_response(
+            0x42,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+        && snapshot.public_folder_for_id(folder_id).is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x42,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    }
+    let servers = snapshot.public_folder_replica_server_names(folder_id);
+    responses.extend_from_slice(&rop_get_owning_servers_response(request, &servers))
+}
+
+pub(super) fn append_public_folder_is_ghosted_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    if !logon_request_handle(session, handle_slots, request) {
+        responses.extend_from_slice(&rop_error_response(
+            0x45,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
+    let Some(folder_id) = request.public_folder_probe_object_id() else {
+        responses.extend_from_slice(&rop_error_response(
+            0x45,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    };
+    if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+        && snapshot.public_folder_for_id(folder_id).is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x45,
+            request.response_handle_index(),
+            EC_RULE_NOT_FOUND,
+        ));
+        return;
+    }
+    let is_ghosted = folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+        && snapshot
+            .public_folder_replica_server_names(folder_id)
+            .is_empty();
+    responses.extend_from_slice(&rop_public_folder_is_ghosted_response(request, is_ghosted))
 }

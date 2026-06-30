@@ -17,7 +17,9 @@ use super::rop::*;
 use super::session::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
-use lpe_domain::{month_abbrev, utc_from_unix_seconds, weekday_abbrev_from_unix_days};
+use lpe_domain::{
+    crypto::hex_lower, month_abbrev, utc_from_unix_seconds, weekday_abbrev_from_unix_days,
+};
 
 pub(in crate::mapi) const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 pub(in crate::mapi) const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
@@ -2604,12 +2606,7 @@ pub(in crate::mapi) fn debug_payload_preview_limit() -> usize {
 }
 
 pub(crate) fn hex_preview(bytes: &[u8], limit: usize) -> String {
-    bytes
-        .iter()
-        .take(limit)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    hex_lower(&bytes[..bytes.len().min(limit)])
 }
 
 pub(in crate::mapi) fn execute_success_body(

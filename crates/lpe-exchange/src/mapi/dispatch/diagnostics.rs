@@ -1,5 +1,6 @@
 use anyhow::Result;
 use axum::http::HeaderMap;
+use lpe_domain::crypto::hex_lower;
 use lpe_mail_auth::AccountPrincipal;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -257,11 +258,7 @@ pub(super) fn expected_special_folder_container_class(folder_id: u64) -> &'stati
 }
 
 pub(in crate::mapi) fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    hex_lower(bytes)
 }
 
 pub(in crate::mapi) fn rop_ids_csv(rop_ids: &[u8]) -> String {

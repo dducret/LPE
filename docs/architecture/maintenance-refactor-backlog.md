@@ -68,7 +68,7 @@ working tree proves, not the desired end state.
 | MR-006 | Pending | No completed `ExchangeStore` split is recorded in this backlog. | Split `crates/lpe-exchange/src/store.rs` by storage family while preserving trait semantics. |
 | MR-007 | Pending | Earlier table helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `tables.rs` and prove table row output is unchanged. |
 | MR-008 | Pending | Earlier property helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
-| MR-009 | Pending | Earlier ROP helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `rop.rs` and preserve unsupported/reserved ROP behavior. |
+| MR-009 | Complete for hub split | `mapi/rop.rs` is now below the 1,500-line production target, with parser, request-reader, response, restriction, recipient, property-row, debug, error, object-id, receive-folder, logon, named-property, attachment, and buffer helpers in focused modules. | Keep future ROP behavior additions in focused modules; preserve unsupported/reserved ROP behavior. |
 | MR-010 | Pending | No completed MAPI mailstore/store projection split is recorded in this backlog. | Split projection and Outlook metadata boundaries while preserving IDs, source keys, change keys, and sync facts. |
 | MR-011 | Pending | No completed storage protocol projection split is recorded. | Split `crates/lpe-storage/src/protocols.rs` while preserving exports and serialized output. |
 | MR-012 | Pending | No completed blob-store split is recorded. | Split `blob_store.rs` and verify placement, migration, cleanup, and hash behavior. |
@@ -77,7 +77,7 @@ working tree proves, not the desired end state.
 | MR-015 | Pending | No completed NSPI split is recorded. | Split NSPI parsing/responses/properties/lookup while keeping Microsoft-specific matching local. |
 | MR-016 | Pending | The audit records prior SMTP reductions, but this backlog does not record a completed current slice. | Continue splitting `LPE-CT/src/smtp.rs` and verify SMTP semantics. |
 | MR-017 | Pending | No completed `LPE-CT/src/main.rs` split is recorded. | Split main wiring without CLI/env/routes/auth/startup changes. |
-| MR-018 | Pending | Primitive crypto helpers are centralized, but broad MAPI diagnostic hex/preview duplication remains. | Centralize only identical diagnostic helpers and preserve debug output/protocol bytes. |
+| MR-018 | Partial | Primitive crypto helpers are centralized, MAPI diagnostic lowerhex wrappers delegate to `lpe_domain::crypto::hex_lower`, and ROP debug hex rendering lives in `mapi/rop/debug.rs`. NSPI/test parsers and validation helpers remain local. | Continue centralizing only identical diagnostic helpers and preserve debug output/protocol bytes. |
 | MR-019 | Complete for documentation | `docs/architecture/exchange-rule-deferred-action-canonical-model.md` exists and is referenced in progress notes. | Implementation of wider rule/deferred-action semantics remains future work. |
 | MR-020 | Complete for documentation | `docs/architecture/mapi-receive-folder-routing.md` exists and stale broad unsupported wording was updated. | Arbitrary receive-folder routing still needs a canonical model before implementation. |
 | MR-021 | Complete for documentation | `docs/architecture/mapi-spooler-advisory-model.md` exists and is referenced in progress notes. | Advisory ROP support remains gated on canonical advisory state and Outlook evidence. |
@@ -960,6 +960,25 @@ of silently losing them.
   mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift`;
   `cargo test -p lpe-exchange`. Current line counts: `dispatch.rs` 29,277
   lines and `dispatch/submission.rs` 134 lines.
+- 2026-06-30: Advanced MR-003 by moving the remaining input-object validation
+  for `RopGetTransportFolder` and `RopOptionsData` into
+  `dispatch/submission.rs`. The dispatcher is now reduced to thin calls for
+  both transport-information ROPs, while the helpers preserve Outbox transport
+  folder projection, empty transport options data, missing-input-handle error
+  bytes, and batch alignment.
+- 2026-06-30 verification for the transport-information validation cleanup:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange transport`
+  passed 63 focused transport/submission tests, including transport info ROPs,
+  `RopGetTransportFolder`, `RopOptionsData`, spooler advisory no-mutation
+  behavior, and canonical transport send coverage; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,530 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 13,127 lines and
+  `mapi/dispatch/submission.rs` at 473 lines. `rg` confirmed
+  `append_transport_folder_response`, `append_options_data_response`, and their
+  input-object validation now live in the focused submission module, with
+  dispatch reduced to thin calls for both ROPs.
 - 2026-06-28: Extended the MR-002/MR-003 logon and transport-info helper
   cleanup by moving `RopGetAddressTypes` response policy into
   `dispatch/logon.rs`. The dispatcher still owns handle-table echoing and RCA
@@ -985,6 +1004,23 @@ of silently losing them.
   mapi_over_http_execute_returns_receive_folder_and_store_state`; `cargo test
   -p lpe-exchange`. Current line counts: `dispatch.rs` 29,268 lines and
   `dispatch/logon.rs` 37 lines.
+- 2026-06-30: Advanced MR-002 by moving the remaining `RopGetStoreState`
+  input-handle validation into `dispatch/logon.rs`. The dispatcher is now a
+  thin call for the ROP, while `append_store_state_response` preserves the
+  existing live-handle success response, missing-input-handle error bytes, and
+  batch alignment.
+- 2026-06-30 verification for the store-state validation cleanup: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange store_state` passed 2
+  focused store-state tests; `cargo test -p lpe-exchange logon_profile` passed
+  13 broader logon/profile tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,526 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 13,123 lines and
+  `mapi/dispatch/logon.rs` at 112 lines. `rg` confirmed
+  `append_store_state_response`, input-handle validation, and
+  `rop_get_store_state_response` now live in the focused logon module, with
+  dispatch reduced to a thin call for the ROP.
 - 2026-06-28: Extended the MR-002 generic execute helper slice by moving
   `RopAbort` and `RopProgress` response-code selection into
   `dispatch/execute.rs`. The dispatcher still owns input-object lookup; the
@@ -3442,3 +3478,2276 @@ of silently losing them.
   production-check lines; `git diff --check` exited 0 with CRLF warnings only.
   Current physical line counts: `service.rs` 10,971 lines,
   `service/ews/request_ids.rs` 42 lines, and `service/ews/ucs.rs` 260 lines.
+- 2026-06-29: Moved the EWS compliance and message-tracking request text
+  parsers into their object-family modules: `discovery_query_text` now lives
+  in `service/ews/compliance.rs`, and `message_tracking_query_text` plus
+  `requested_message_tracking_report_id` now live in
+  `service/ews/message_tracking.rs`. This is a behavior-preserving parser
+  split: canonical discovery-search, hold, and message-tracking store calls,
+  tenant scoping, Bcc-safe search behavior, report ID fallback order, response
+  XML, and operation errors remain unchanged.
+- 2026-06-29 verification for the EWS compliance/message-tracking parser
+  split: `cargo fmt --package lpe-exchange`; `rg` confirmed the moved parser
+  definitions now live in `service/ews/compliance.rs` and
+  `service/ews/message_tracking.rs`; `cargo test -p lpe-exchange
+  search_mailboxes_records_canonical_discovery_search_results_without_bcc`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  message_tracking_reports_project_canonical_trace_state` passed 1 focused
+  test; `cargo test -p lpe-exchange ews` passed 215 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reported `service.rs` at 11,577
+  production-check lines; `git diff --check` exited 0. Current physical line
+  counts: `service.rs` 10,938 lines, `service/ews/compliance.rs` 276 lines,
+  and `service/ews/message_tracking.rs` 120 lines.
+- 2026-06-29: Advanced the shared date/time primitive cleanup by moving
+  Windows FILETIME epoch/tick arithmetic into `lpe-domain::civil_time`.
+  `crates/lpe-domain/src/civil_time.rs` now owns
+  `WINDOWS_UNIX_EPOCH_OFFSET_SECONDS`, `WINDOWS_FILETIME_TICKS_PER_SECOND`,
+  `windows_filetime_from_unix_seconds`,
+  `windows_filetime_from_signed_unix_seconds`, and
+  `unix_seconds_from_windows_filetime`. `mapi_mailstore.rs` and
+  `mapi/tables.rs` delegate to those primitives. MAPI-specific behavior stays
+  local: RFC3339 parsing, calendar event date/time parsing, event duration
+  rules, and synthetic change-number-to-FILETIME mapping remain unchanged.
+- 2026-06-29 verification for the FILETIME primitive cleanup: `cargo fmt
+  --package lpe-domain --package lpe-exchange`; `rg` confirmed the raw Windows
+  epoch/tick constants are centralized in `lpe-domain` for the touched MAPI
+  paths; `cargo test -p lpe-domain` passed 34 tests and doc tests; `cargo test
+  -p lpe-exchange calendar_projection_backs_outlook_table_identity_and_status_columns`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  reminder_named_properties_project_from_canonical_reminder_links` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_set_properties_updates_canonical_mail_reminder_state` passed
+  1 focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing.
+- 2026-06-29: Advanced MR-018 by delegating identical MAPI lowerhex debug
+  wrappers to `lpe_domain::crypto::hex_lower`. The touched wrappers are
+  `dispatch/diagnostics.rs::bytes_to_hex`,
+  `mapi_mailstore.rs::format_debug_hex`, `mapi/transport.rs::hex_preview`,
+  `mapi/tables.rs::format_bytes_hex`,
+  `mapi/tables.rs::format_debug_binary`, and
+  `mapi/properties/values.rs::bytes_to_hex`. Hex parsers and validation
+  helpers such as `hex_to_bytes`, `hex_digit`, and test-only hex helpers remain
+  local because they are not primitive rendering wrappers. ROP-specific debug
+  previews remain future MR-018 work.
+- 2026-06-29 verification for the MAPI diagnostic lowerhex wrapper cleanup:
+  `cargo fmt --package lpe-exchange`; `rg` confirmed the touched files no
+  longer contain inline `format!("{byte:02x}")` rendering loops in those
+  wrappers; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  inbox_folder_type_getprops_response_context_includes_wire_preview` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_transport_echoes_request_id_and_client_info` passed 1 focused
+  test; `cargo test -p lpe-domain` passed 34 tests and doc tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and still reports oversized production files, led by
+  `mapi/dispatch.rs` at 19,829 lines; `git diff --check` exited 0 with CRLF
+  warnings only.
+- 2026-06-29: Advanced the same MR-018/MR-009 cleanup by adding
+  `mapi/rop/debug.rs` and moving the ROP debug hex helpers
+  `hex_preview_for_debug` and `format_bytes_hex` out of `mapi/rop.rs`. Both
+  helpers now delegate to `lpe_domain::crypto::hex_lower`; preview truncation
+  and ellipsis behavior are unchanged. No ROP parser, response serialization,
+  unsupported ROP handling, or wire bytes changed.
+- 2026-06-29 verification for the ROP debug hex helper split: `rg` confirmed
+  no production lowercase MAPI `format!("{byte:02x}")` rendering loops remain
+  under `crates/lpe-exchange/src`; the remaining production hex loop is an
+  uppercase EWS formatter and the remaining lowercase loops are test fixtures.
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug_decodes_default_view_entry_id` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,941 lines; `git diff --check` exited 0 with CRLF
+  warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `view_descriptor_value_shape_for_debug`, `mapi_value_shape_for_debug`, and
+  `text_preview_for_debug` into `mapi/rop/debug.rs`. This is still
+  debug-output-only: ROP request parsing, response serialization,
+  unsupported/reserved ROP handling, property IDs, and wire bytes remain
+  unchanged.
+- 2026-06-29 verification for the ROP debug value-shape split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  common_views_wlink_contract_distinguishes_expected_link_defaults` passed 1
+  focused test; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug_decodes_default_view_entry_id` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,875 lines; `rg` confirmed no production lowercase MAPI
+  hex rendering loops remain; `git diff --check` exited 0 with CRLF warnings
+  only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `mapi_object_debug_fields` into `mapi/rop/debug.rs`. This keeps the object
+  kind labels and folder/item debug identifiers unchanged while moving another
+  diagnostics-only helper out of `mapi/rop.rs`.
+- 2026-06-29 verification for the ROP object debug formatter split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 7,633 lines; `rg`
+  confirmed no production lowercase MAPI hex rendering loops remain; `git diff
+  --check` exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `property_row_kind_for_debug`, `format_returned_property_tags_for_debug`,
+  `format_property_tags_for_debug`, and `format_property_names_for_debug` into
+  `mapi/rop/debug.rs`. The property-name map remains local in `mapi/rop.rs`
+  for now because moving the full constant-heavy map is a larger slice. This
+  change preserves the exact diagnostic tag-list strings and row-kind
+  classification.
+- 2026-06-29 verification for the ROP property tag-list formatter split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 7,593 lines; `rg`
+  confirmed no production lowercase MAPI hex rendering loops remain; `git diff
+  --check` exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `default_folder_property_mappings_for_debug` and its private
+  default-folder mapping helper into `mapi/rop/debug.rs`. The mapping preserves
+  the exact special-folder labels, folder IDs, source-key formatting, and
+  canonical property storage-tag normalization.
+- 2026-06-29 verification for the ROP default-folder debug mapping split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug_decodes_default_view_entry_id` passed 1
+  focused test; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 7,561 lines; `rg`
+  confirmed no production lowercase MAPI hex rendering loops remain; `git diff
+  --check` exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `format_property_errors_for_debug` into `mapi/rop/debug.rs`. This keeps the
+  flagged property-error diagnostic string format, property names, and error
+  codes unchanged while moving another debug-output-only helper out of
+  `mapi/rop.rs`.
+- 2026-06-29 verification for the ROP property-error debug formatter split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 7,541 lines; `rg`
+  confirmed `format_property_errors_for_debug` now lives in `mapi/rop/debug.rs`
+  and the only remaining production hex loop under `crates/lpe-exchange/src`
+  is the uppercase EWS formatter, with lowercase loops limited to test
+  fixtures; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `expected_folder_type_for_debug`, `advertised_special_search_folder_for_debug`,
+  and `folder_type_kind_for_debug` into `mapi/rop/debug.rs`. This preserves the
+  folder-type debug labels, advertised special search-folder classification,
+  and root/generic/search/invalid value names while moving another
+  diagnostics-only helper group out of `mapi/rop.rs`.
+- 2026-06-29 verification for the ROP folder-type debug classifier split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  folder_type_getprops` passed 8 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and now
+  reports `mapi/rop.rs` at 7,497 lines; `rg` confirmed the moved folder-type
+  debug helper definitions now live in `mapi/rop/debug.rs`; `git diff --check`
+  exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `format_property_value_shapes_for_debug` and its private
+  `semantic_property_shape_for_debug` helper into `mapi/rop/debug.rs`. The
+  formatter still calls the existing property serializers/default writers and
+  preserves row-byte length, semantic-shape, hex preview, and default-kind
+  diagnostic strings.
+- 2026-06-29 verification for the ROP property value-shape debug formatter
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  common_views_wlink_contract_distinguishes_expected_link_defaults` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,413 lines; `rg` confirmed the moved property value-shape
+  helper definitions now live in `mapi/rop/debug.rs`; the MAPI lowerhex scan
+  still finds only test fixtures plus the uppercase EWS formatter; `git diff
+  --check` exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `format_associated_config_0e0b_debug` into `mapi/rop/debug.rs`. This keeps
+  the associated-configuration `0x0E0B` diagnostic string unchanged while
+  moving stored/semantic shape inspection for that Outlook compatibility
+  property out of `mapi/rop.rs`.
+- 2026-06-29 verification for the associated-config `0x0E0B` debug formatter
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  ipm_configuration_contract_summary_reports_required_columns_and_streams`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,383 lines; `rg` confirmed the moved `0x0E0B` debug
+  formatter definition now lives in `mapi/rop/debug.rs`; `git diff --check`
+  exited 0 with CRLF warnings only.
+- 2026-06-29: Extended the ROP debug extraction by moving
+  `common_view_descriptor_property_requested` and
+  `format_requested_view_descriptor_contract` into `mapi/rop/debug.rs`. This
+  preserves the Common Views descriptor request classifier and
+  version/name/binary/strings diagnostic contract string while moving another
+  descriptor-debug helper pair out of `mapi/rop.rs`.
+- 2026-06-29 verification for the Common Views descriptor request debug split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  view_descriptor` passed 6 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,330 lines; `rg` confirmed the moved descriptor request
+  helper definitions now live in `mapi/rop/debug.rs`; `git diff --check`
+  exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `view_descriptor_debug_property_tags` and
+  `default_view_message_entry_id_target` into `mapi/rop/debug.rs`. This is a
+  diagnostics-only split: Common Views descriptor tag extraction and
+  default-view message EntryID target decoding remain unchanged, and no ROP
+  parser, response serialization, unsupported/reserved ROP behavior, property
+  IDs, or wire bytes changed.
+- 2026-06-30 verification for the Common Views default-view debug split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  view_descriptor` passed 6 focused tests; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug_decodes_default_view_entry_id` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,309 lines; `rg` confirmed the moved default-view debug
+  helper definitions now live in `mapi/rop/debug.rs`; `git diff --check`
+  exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving the Common Views
+  descriptor logging/contract cluster into `mapi/rop/debug.rs`:
+  `log_common_view_descriptor_getprops_summary`,
+  `format_common_view_descriptor_getprops_contract`,
+  `format_common_view_descriptor_response_values`, and
+  `format_default_view_entry_id_decoding`. This keeps descriptor hashing,
+  descriptor response-shape text, default-view EntryID decoding, and RCA debug
+  fields unchanged while moving another diagnostics-only block out of
+  `mapi/rop.rs`.
+- 2026-06-30 verification for the Common Views descriptor logging split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  view_descriptor` passed 6 focused tests; `cargo test -p lpe-exchange
+  default_folder_entry_id_values_debug_decodes_default_view_entry_id` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 7,103 lines; `rg` confirmed the moved descriptor logging
+  and default-view debug helper definitions now live in `mapi/rop/debug.rs`;
+  `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `format_message_body_getprops_contract` and its private
+  `is_message_body_debug_tag` classifier into `mapi/rop/debug.rs`. This keeps
+  the GetProps message-body RCA contract string, mailbox/search-folder/saved
+  handle source selection, native-body projection, body length accounting, and
+  requested body-tag formatting unchanged.
+- 2026-06-30 verification for the message-body GetProps debug split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 7,011 lines; `rg`
+  confirmed the moved message-body debug helper definitions now live in
+  `mapi/rop/debug.rs`; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `format_folder_type_getprops_contract` into `mapi/rop/debug.rs`. This keeps
+  the folder-type GetProps RCA contract string, source preference order
+  (`search_folder_definition`, opened handle, mailbox, collaboration folder,
+  public folder, special-folder fallback), expected type classification, and
+  issue labels unchanged.
+- 2026-06-30 verification for the folder-type GetProps debug split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  folder_type_getprops` passed 8 focused tests; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 6,897 lines; `rg`
+  confirmed the moved folder-type debug helper definition now lives in
+  `mapi/rop/debug.rs`; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `format_ipm_configuration_getprops_contract` into `mapi/rop/debug.rs`.
+  This keeps associated-config lookup, `IPM.Configuration.*` filtering,
+  roaming datatype reporting, requested/missing stream-tag lists, fallback
+  tag reporting, and the undocumented `0x0E0B` diagnostic string unchanged.
+- 2026-06-30 verification for the IPM.Configuration GetProps debug split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  ipm_configuration_contract_summary_reports_required_columns_and_streams`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 6,840 lines; `rg` confirmed the moved IPM.Configuration
+  debug helper definition now lives in `mapi/rop/debug.rs`; `git diff
+  --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `log_calendar_default_folder_lookup_debug` into `mapi/rop/debug.rs`. This
+  keeps the calendar default-folder RCA trace fields, Inbox/root lookup labels,
+  entry-id previews, decoded folder IDs, calendar collection projection fields,
+  and returned property-shape diagnostic string unchanged.
+- 2026-06-30 verification for the calendar default-folder debug split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  calendar_projection_backs_outlook_table_identity_and_status_columns` passed
+  1 focused test; `cargo test -p lpe-exchange
+  mapi_over_http_set_properties_updates_canonical_mail_reminder_state` passed
+  1 focused test; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 6,730 lines; `rg`
+  confirmed the moved calendar default-folder debug logger now lives in
+  `mapi/rop/debug.rs`; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving the Outlook logon
+  bootstrap GetProps debug cluster into `mapi/rop/debug.rs`:
+  `OutlookLogonBootstrapRowShape`, `outlook_logon_bootstrap_row_shape`,
+  `is_outlook_logon_bootstrap_getprops`,
+  `format_outlook_logon_bootstrap_property_details`, and the private mailbox
+  owner EntryID and icon-header detail formatters. This keeps logon row
+  serialization, logon property values, request parsing, response bytes, and
+  unsupported/reserved ROP behavior unchanged.
+- 2026-06-30 verification for the Outlook logon bootstrap debug split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  logon_response_debug_summary_decodes_private_mailbox_fields` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 6,538 lines; `rg`
+  confirmed the moved Outlook logon bootstrap debug helper definitions now live
+  in `mapi/rop/debug.rs`; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `log_get_properties_specific_debug` into `mapi/rop/debug.rs`. The underlying
+  unsupported/default-property classifiers, row serialization, property value
+  selection, request parsing, response bytes, and unsupported/reserved ROP
+  behavior remain unchanged; `property_is_unsupported_for_object` is only
+  widened to `pub(in crate::mapi)` so the debug module can call it.
+- 2026-06-30 verification for the GetProps RCA logger split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  logon_response_debug_summary_decodes_private_mailbox_fields` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 6,400 lines; `rg`
+  confirmed the GetProps RCA logger definition now lives in
+  `mapi/rop/debug.rs`; `git diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Extended the ROP debug extraction by moving
+  `property_tag_debug_name` and its private `debug_property_id_matches` helper
+  into `mapi/rop/debug.rs`. This is a diagnostic-name map move only; property
+  IDs, named-property allocation, property value selection, request parsing,
+  response bytes, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the property debug-name map split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  property_debug_names_cover_recent_outlook_folder_probes` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  getprops_contract_response_summary_includes_access_value` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  execute_rop_debug_summary_decodes_ids_and_return_codes` passed 1 focused
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 6,120 lines; `rg`
+  confirmed the property debug-name map now lives in `mapi/rop/debug.rs`; `git
+  diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/restrictions.rs` and moving
+  `parse_mapi_restriction` plus the recursive `parse_mapi_restriction_from`
+  parser into it. The shared tagged-property and named-property parsers remain
+  in `mapi/rop.rs` because they are used by several non-restriction ROP
+  parsers. Restriction parse errors, unsupported restriction handling, request
+  parsing, response bytes, and unsupported/reserved ROP behavior remain
+  unchanged.
+- 2026-06-30 verification for the restriction parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange restriction_parser`
+  passed 2 focused tests; `cargo test -p lpe-exchange
+  mapi_over_http_unknown_restriction_type_terminates_current_buffer` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_set_search_criteria_rejects_unsupported_restriction` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,992 lines; `rg` confirmed the restriction parser
+  definitions now live in `mapi/rop/restrictions.rs`; `git diff --check`
+  exited 0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/parse.rs` and moving the
+  shared tagged-property, named-property, UTF-16Z, and property-value parsing
+  helpers into it. The larger `read_rop_request` parser remains in `rop.rs`.
+  This is a module-boundary change only; property value decoding, named-property
+  parsing errors, request parsing, response bytes, and unsupported/reserved ROP
+  behavior remain unchanged.
+- 2026-06-30 verification for the ROP parse helper split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange restriction_parser` passed 2
+  focused tests; `cargo test -p lpe-exchange
+  malformed_supported_rop_buffer_fails_without_partial_request` passed 1
+  focused test; `cargo test -p lpe-exchange
+  saved_associated_config_getprops_uses_same_batch_saved_message` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,949 lines; `rg` confirmed the moved parse helper
+  definitions now live in `mapi/rop/parse.rs`; `git diff --check` exited 0
+  with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/recipients.rs` and moving
+  the free `RopModifyRecipients` row parsers into it:
+  `parse_pending_recipient_row`, the simple and wrapped recipient row parsers,
+  recipient-type normalization, legacy-DN recipient address resolution, and the
+  recipient string reader. The `RopRequest::modify_recipients` method remains
+  in `rop.rs`; request framing, recipient row decoding, canonical address
+  normalization, X500 legacy-DN lookup, response bytes, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP recipient parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  modify_recipients_accepts_microsoft_message_example_columns` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically`
+  passed 1 focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,735 lines; `rg` confirmed the moved recipient parser
+  definitions now live in `mapi/rop/recipients.rs`; `git diff --check` exited
+  0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/property_rows.rs` and moving
+  the `RopModifyRules` and `RopModifyPermissions` property-row count and row
+  parser methods into it. The row type remains unchanged, and the parser still
+  reads tagged properties through the shared ROP property parser. Rule and
+  permission dispatch, canonical mutation behavior, request framing, response
+  bytes, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP property-row split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,680 lines; `rg` confirmed the moved row parser methods
+  now live in `mapi/rop/property_rows.rs`; `git diff --check` exited 0 with
+  CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/responses.rs` and moving the
+  simple response byte builders for open-folder, open-message,
+  open-embedded-message, message-status, create-folder, table-open,
+  attachment-open/create, and open-stream responses into it. Stateful response
+  builders such as reload-cached-information and GetProps remain in `rop.rs`.
+  Response opcodes, handle indexes, typed string encoding, object-id encoding,
+  row counts, attachment numbers, stream sizes, response bytes, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP simple response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  open_message_response_does_not_advertise_missing_recipient_rows` passed 1
+  focused test; `cargo test -p lpe-exchange
+  private_create_folder_response_never_sets_existing_folder_flag` passed 1
+  focused test; `cargo test -p lpe-exchange
+  microsoft_get_message_status_response_uses_set_status_opcode` passed 1
+  focused test; `cargo test -p lpe-exchange
+  microsoft_open_embedded_message_response_includes_message_id` passed 1
+  focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,559 lines; `rg` confirmed the moved response builders now
+  live in `mapi/rop/responses.rs`; `git diff --check` exited 0 with CRLF
+  warnings only.
+- 2026-06-30: Advanced MR-009 by moving the stream response builders
+  `rop_read_stream_response`, `rop_seek_stream_response`,
+  `rop_write_stream_response`, `rop_copy_to_stream_response`, and
+  `rop_get_stream_size_response` from `mapi/rop.rs` into the existing
+  `mapi/rop/responses.rs` module. Dispatch call sites still use the same
+  exported helper names, and stream read/seek position updates, write-count
+  encoding, copy counts, size encoding, response opcodes, handle indexes, error
+  codes, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP stream response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_copy_to_stream_saves_canonical_message_body` passed 1 focused
+  test after formatting; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed after formatting with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/rop.rs` at 5,471 lines in the tracked-file scan; direct binary line
+  count reports the new untracked `mapi/rop/responses.rs` at 214 lines; `rg`
+  confirmed the moved stream response builders now have single definitions in
+  `mapi/rop/responses.rs`; `git diff --check` exited 0 with CRLF warnings
+  only.
+- 2026-06-30: Advanced MR-009 by moving another response-builder cluster from
+  `mapi/rop.rs` into `mapi/rop/responses.rs`: address-type, transport-send,
+  options-data, partial-completion, SetColumns, SortTable, ExpandRow,
+  CollapseRow, collapse-state, Restrict, CreateMessage, SetProperties,
+  SetProperties problem, DeleteProperties, and generic simple-success
+  responses. Dispatch validation, canonical mutations, table state,
+  restriction handling, property application, response opcodes, handle indexes,
+  problem-array encoding, row serialization, and unsupported/reserved ROP
+  behavior remain unchanged.
+- 2026-06-30 verification for the ROP response-builder cluster split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  message_create_and_save_responses_match_microsoft_message_examples` passed 1
+  focused test; `cargo test -p lpe-exchange
+  contents_table_responses_match_microsoft_table_examples` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  expand_row_response_matches_microsoft_category_example` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_empty_transport_options_data` passed 1
+  scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_transport_send_uses_canonical_submission` passed 1 scenario
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/rop.rs` at 5,315 lines; direct
+  binary line count reports `mapi/rop/responses.rs` at 374 lines; `rg`
+  confirmed the moved response builders now have single definitions in
+  `mapi/rop/responses.rs`; `git diff --check` exited 0 with CRLF warnings
+  only.
+- 2026-06-30: Advanced MR-009 by moving the pure SearchCriteria,
+  upload-state, FastTransfer put-buffer, and SaveChangesMessage response
+  serializers from `mapi/rop.rs` into `mapi/rop/responses.rs`. The
+  object-family default property list response intentionally remains in
+  `mapi/rop.rs` because it selects property tags from MAPI object shape rather
+  than only serializing a response. Search criteria flags, folder-id encoding,
+  upload-state handle selection, FastTransfer extended/non-extended used-size
+  encoding, SaveChangesMessage response handle/input handle behavior, object-id
+  encoding, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP SearchCriteria/upload/FastTransfer/save
+  response split: `cargo fmt --package lpe-exchange`; `cargo test -p
+  lpe-exchange message_create_and_save_responses_match_microsoft_message_examples`
+  passed 1 focused test; `cargo test -p lpe-exchange
+  upload_state_success_response_uses_input_handle_index` passed 1 focused test;
+  `cargo test -p lpe-exchange
+  mapi_over_http_fast_transfer_destination_put_buffer` passed 1 focused
+  scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_clauses`
+  passed 1 focused scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/rop.rs` at 5,255 lines; direct binary line count reports
+  `mapi/rop/responses.rs` at 434 lines; `rg` confirmed the moved response
+  serializers now have single definitions in `mapi/rop/responses.rs`; `git
+  diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by moving the pure SetReadFlags and public-folder
+  per-user response serializers from `mapi/rop.rs` into
+  `mapi/rop/responses.rs`: `rop_set_read_flags_response`,
+  `rop_get_per_user_long_term_ids_response`, `rop_get_per_user_guid_response`,
+  `rop_read_per_user_information_response`, and
+  `rop_write_per_user_information_response`. Long-term ID conversion responses
+  intentionally remain in `mapi/rop.rs` because they perform identity
+  conversion and stale-special-folder fallback logic rather than only response
+  serialization. Read-flag partial-completion encoding, per-user long-term ID
+  count truncation, database GUID bytes, per-user stream offset/max-size
+  handling, error codes, and unsupported/reserved ROP behavior remain
+  unchanged.
+- 2026-06-30 verification for the ROP read-flag/per-user response split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_set_read_flags_updates_canonical_message_state` passed 1
+  scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_public_folder_per_user_information_round_trips_canonical_read_state`
+  passed 1 scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_public_folder_per_user_lookup_returns_canonical_folder_identity`
+  passed 1 scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/rop.rs` at 5,192 lines; direct binary line count reports
+  `mapi/rop/responses.rs` at 497 lines; `rg` confirmed the moved response
+  serializers now have single definitions in `mapi/rop/responses.rs`; `git
+  diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by moving the pure store/public-folder response
+  serializers from `mapi/rop.rs` into `mapi/rop/responses.rs`:
+  `rop_get_transport_folder_response`, `rop_get_store_state_response`,
+  `rop_get_owning_servers_response`, `rop_public_folder_is_ghosted_response`,
+  and `rop_reset_table_response`. The receive-folder table response remains in
+  `mapi/rop.rs` because it builds rows from the receive-folder compatibility
+  map rather than only serializing a response. Outbox object-id encoding, store
+  state flags, owning-server counters and string termination, ghosted replica
+  counters, reset-table success bytes, and unsupported/reserved ROP behavior
+  remain unchanged.
+- 2026-06-30 verification for the ROP store/public-folder response split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  public_folder_replica_responses_match_microsoft_counter_shape` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state`
+  passed 1 scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_get_store_state_accepts_live_handle_without_batch_drift`
+  passed 1 scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_reset_table_requires_new_set_columns` passed 1
+  scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/rop.rs` at 5,142 lines; direct binary line count reports
+  `mapi/rop/responses.rs` at 548 lines; `rg` confirmed the moved response
+  serializers now have single definitions in `mapi/rop/responses.rs`; `git
+  diff --check` exited 0 with CRLF warnings only.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/object_ids.rs` and moving
+  long-term object ID conversion response helpers plus stale special-folder
+  short-ID fallback conversion helpers out of `mapi/rop.rs`. The two
+  `RopRequest` long-term source accessors moved with the conversion helpers so
+  the fallback parsing remains local to the object-ID module. Long-term ID
+  bytes, replica-GUID alias handling, stale special-folder normalization,
+  dynamic object fallback handling, error codes, response opcodes, handle
+  indexes, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP object-ID helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange long_term_id` passed 8
+  focused tests covering ROP conversion, dispatch scope validation,
+  store-adapter preload planning, identity round-trip, and MAPI-over-HTTP
+  round-trip behavior; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 5,026 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,810 lines and `mapi/rop/object_ids.rs` at 114 lines;
+  `rg` confirmed the moved long-term ID response and stale special-folder
+  conversion helpers now have single definitions in `mapi/rop/object_ids.rs`.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/receive_folders.rs` and
+  moving receive-folder compatibility mapping, message-class validation,
+  `RopGetReceiveFolder`, and `RopGetReceiveFolderTable` response builders out
+  of `mapi/rop.rs`. This isolates the fixed canonical receive-folder map from
+  generic ROP code; arbitrary configurable receive-folder routing remains
+  unsupported until a canonical model exists. Receive-folder row columns,
+  message-class matching, canonical Inbox/Calendar folder mapping,
+  last-modification change-number derivation, error handling in dispatch, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP receive-folder split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange receive_folder` passed
+  12 focused MAPI-over-HTTP scenarios covering receive-folder table access,
+  private-logon handle requirements, message-class matching, calendar mapping,
+  canonical SetReceiveFolder acknowledgements, and noncanonical rejection;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 4,917 lines; direct
+  physical line count reports `mapi/rop.rs` at 4,710 lines and
+  `mapi/rop/receive_folders.rs` at 109 lines; `rg` confirmed the moved
+  receive-folder helpers now have single definitions in
+  `mapi/rop/receive_folders.rs`.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/logon.rs` and moving private
+  mailbox logon response serialization, public-folder logon response
+  serialization, GWART timestamp encoding, and logon calendar byte encoding
+  out of `mapi/rop.rs`. Logon response opcodes, handle indexes, special-folder
+  ordering, private/public logon flags, mailbox and public-store GUID/replid
+  bytes, timestamp behavior, and unsupported/reserved ROP behavior remain
+  unchanged.
+- 2026-06-30 verification for the ROP logon split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange logon` passed 34 focused tests
+  covering logon time bytes, GWART timestamp behavior, private logon folder
+  placement, logon property projection, MAPI-over-HTTP private/public logon
+  scenarios, and RPC proxy logon carrier behavior; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing;
+  `python tools/check_oversized_sources.py` passed in warning mode and now
+  reports `mapi/rop.rs` at 4,823 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,621 lines and `mapi/rop/logon.rs` at 97 lines; `rg`
+  confirmed the moved logon helpers now have single definitions in
+  `mapi/rop/logon.rs`.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/named_properties.rs` and
+  moving the named-property response serializers for `RopGetPropertyIdsFromNames`,
+  `RopGetNamesFromPropertyIds`, and `RopQueryNamedProperties` out of
+  `mapi/rop.rs`. Request parsing, named-property allocation, session registry
+  behavior, property ID ordering, property name wire encoding, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP named-property response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange named_property` passed
+  20 focused tests covering session property-id caches, stale alias
+  normalization, named-property bootstrap, no-create missing behavior,
+  restart-style mapping persistence, custom named-property round trips, and
+  public-folder item custom properties; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,781 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,582 lines and `mapi/rop/named_properties.rs` at 44
+  lines; `rg` confirmed the moved named-property response serializers now have
+  single definitions in `mapi/rop/named_properties.rs`.
+- 2026-06-30: Advanced MR-009 by adding `mapi/rop/attachments.rs` and moving
+  the `RopGetValidAttachments` response builder out of `mapi/rop.rs`. Message
+  and calendar-event handle validation, canonical attachment-number projection,
+  pending attachment deletion filtering, response opcode/error codes, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP attachment response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange valid_attachments`
+  passed 3 focused tests covering missing calendar-event handle rejection,
+  existing calendar-event attachment projection, and canonical message
+  attachment-number projection; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,741 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,543 lines and `mapi/rop/attachments.rs` at 45 lines;
+  `rg` confirmed the moved attachment response builder now has a single
+  definition in `mapi/rop/attachments.rs`.
+- 2026-06-30: Advanced MR-009 by moving the primitive ROP buffer helpers into
+  `mapi/rop/buffer.rs`: integer writers, object-id writing, UTF-16 string
+  writing, typed string writing, and the u16-prefixed string reader. Request
+  parsing, response serialization, handle indexes, object-id bytes, string
+  terminators, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the ROP buffer helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  open_message_response_does_not_advertise_missing_recipient_rows` passed 1
+  focused test; `cargo test -p lpe-exchange
+  parse_execute_request_keeps_max_rop_out` passed 1 focused test; `cargo test
+  -p lpe-exchange
+  mapi_over_http_transport_maps_response_code_to_header_and_envelope` passed 1
+  focused transport test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,693 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,503 lines and `mapi/rop/buffer.rs` at 115 lines; `rg`
+  confirmed the moved primitive buffer helper definitions now live in
+  `mapi/rop/buffer.rs`.
+- 2026-06-30: Advanced MR-009 by moving the pure reserved-ROP classifier
+  `rop_id_is_reserved` into `mapi/rop/errors.rs` alongside
+  `unsupported_rop_response` and parse/error response helpers. Unknown and
+  reserved ROP terminal-buffer handling, common unsupported response bytes,
+  request parsing, and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the reserved-ROP classifier split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  reserved_rop_is_terminal_and_uses_common_unsupported_response` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_unknown_and_reserved_rops_terminate_current_buffer` passed 1
+  scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,689 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,500 lines and `mapi/rop/errors.rs` at 138 lines; `rg`
+  confirmed the reserved-ROP classifier now has a single definition in
+  `mapi/rop/errors.rs`.
+- 2026-06-30: Advanced MR-009 by moving the recipient-row text extraction
+  helper `optional_mapi_value_text` from the `mapi/rop.rs` hub into
+  `mapi/rop/recipients.rs`. The helper is private to recipient row parsing,
+  and wrapped/simple `RopModifyRecipients` address and display-name selection,
+  X500 fallback resolution, canonical address normalization, request parsing,
+  and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the recipient helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row`
+  passed 1 focused parser test; `cargo test -p lpe-exchange
+  mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically`
+  passed 1 scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,679 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,491 lines and `mapi/rop/recipients.rs` at 222 lines;
+  `rg` confirmed `optional_mapi_value_text` is now defined only in
+  `mapi/rop/recipients.rs`.
+- 2026-06-30: Advanced MR-009 by moving the ROP byte `Cursor` reader from
+  `mapi/rop.rs` into `mapi/rop/buffer.rs`, alongside the primitive buffer
+  read/write helpers. Request parser code still uses the same `Cursor` type
+  through the existing module re-export; cursor field visibility remains
+  scoped to MAPI code for the existing parser checkpoint/slice logic. Request
+  parsing, truncation errors, string decoding, restriction parsing, recipient
+  row parsing, response framing, and unsupported/reserved ROP behavior remain
+  unchanged.
+- 2026-06-30 verification for the ROP cursor split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  malformed_supported_rop_buffer_fails_without_partial_request` passed 1
+  focused parser test; `cargo test -p lpe-exchange restriction_parser` passed
+  2 focused tests; `cargo test -p lpe-exchange
+  microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row`
+  passed 1 focused parser test; `cargo test -p lpe-exchange
+  parse_execute_request_keeps_max_rop_out` passed 1 focused dispatch parser
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing; `python tools/check_oversized_sources.py`
+  passed in warning mode and now reports `mapi/rop.rs` at 4,590 lines; direct
+  physical line count reports `mapi/rop.rs` at 4,415 lines and
+  `mapi/rop/buffer.rs` at 192 lines; `rg` confirmed the `Cursor` definition
+  and primitive reader methods now live in `mapi/rop/buffer.rs`.
+- 2026-06-30: Advanced MR-009 by moving the typed ROP request projection into
+  `mapi/rop/parse.rs`: `TypedRopRequest`, the typed request view structs,
+  `TypedRopRequest::rop_id`, `TypedRopRequest::unsupported_is_terminal`, and
+  `RopRequest::typed`. Raw `RopRequest` storage remains in `mapi/rop.rs` for
+  the existing payload accessors. Typed view construction, request
+  serialization, dispatch terminal-unsupported handling, logon diagnostics,
+  and unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the typed request projection split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  golden_open_folder_rop_round_trips_through_typed_parser` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  microsoft_oxctabl_sort_and_query_rows_examples_parse_through_typed_parser`
+  passed 1 focused typed-parser test; `cargo test -p lpe-exchange
+  reserved_rop_is_terminal_and_uses_common_unsupported_response` passed 1
+  focused unsupported-terminal test; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,337 lines; direct physical line count reports
+  `mapi/rop.rs` at 4,179 lines and `mapi/rop/parse.rs` at 285 lines; `rg`
+  confirmed the typed request projection definitions now live in
+  `mapi/rop/parse.rs`.
+- 2026-06-30: Advanced MR-009 by moving the raw `RopRequest` storage type into
+  `mapi/rop/parse.rs` beside the typed request projection. Existing payload
+  accessors and `read_rop_request` remain in `mapi/rop.rs` for this slice.
+  Request storage shape, typed view construction, parser boundaries, response
+  serialization, dispatch terminal-unsupported handling, and
+  unsupported/reserved ROP behavior remain unchanged.
+- 2026-06-30 verification for the raw request storage split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  golden_open_folder_rop_round_trips_through_typed_parser` passed 1 focused
+  parser test; `cargo test -p lpe-exchange
+  malformed_supported_rop_buffer_fails_without_partial_request` passed 1
+  focused parse-error test; `cargo test -p lpe-exchange
+  reserved_rop_is_terminal_and_uses_common_unsupported_response` passed 1
+  focused unsupported-terminal test; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 4,329 tracked-source lines; direct physical line count
+  reports `mapi/rop.rs` at 4,172 lines and `mapi/rop/parse.rs` at 292 lines;
+  `rg` confirmed `RopRequest`, `TypedRopRequest`, and `RopRequest::typed`
+  now live in `mapi/rop/parse.rs`.
+- 2026-06-30: Advanced MR-009 by moving the pure `RopRequest` payload accessor
+  methods from `mapi/rop.rs` into `mapi/rop/parse.rs`, while deliberately
+  leaving recipient row construction (`modify_recipients`) in the hub for this
+  slice because it depends on address-book recipient resolution rather than
+  primitive request decoding. Previously extracted typed request projection,
+  long-term ID conversion, and rule/permission row helpers remain in their
+  focused modules. Request payload offsets, property value parsing,
+  restriction parsing, search-criteria decoding, stream/upload decoding,
+  handle-index behavior, response serialization, and unsupported/reserved ROP
+  behavior remain unchanged.
+- 2026-06-30 verification for the request accessor split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  golden_open_folder_rop_round_trips_through_typed_parser` passed 1 focused
+  parser test; `cargo test -p lpe-exchange
+  malformed_supported_rop_buffer_fails_without_partial_request` passed 1
+  focused parse-error test; `cargo test -p lpe-exchange
+  microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row`
+  passed 1 focused recipient parser test; `cargo test -p lpe-exchange
+  microsoft_oxctabl_sort_and_query_rows_examples_parse_through_typed_parser`
+  passed 1 focused table parser test; `cargo test -p lpe-exchange
+  mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_clauses`
+  passed 1 scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 3,126 tracked-source lines; direct physical line count
+  reports `mapi/rop.rs` at 3,086 lines and `mapi/rop/parse.rs` at 1,380
+  lines; `rg` confirmed `input_handle_index` through `property_values` now
+  live in `mapi/rop/parse.rs`, while `modify_recipients` and
+  `read_rop_request` remain in `mapi/rop.rs`.
+- 2026-06-30: Advanced MR-009 by moving `RopRequest::modify_recipients` from
+  the `mapi/rop.rs` hub into `mapi/rop/recipients.rs`, beside the recipient
+  row parser and X500/address-book fallback logic. The recipient parser helper
+  re-export is now limited to tests because production code uses the inherent
+  request method directly. Recipient column decoding, delete/upsert row
+  handling, wrapped/simple row parsing, X500 fallback resolution, canonical
+  address normalization, request parsing, and unsupported/reserved ROP
+  behavior remain unchanged.
+- 2026-06-30 verification for the recipient request split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row`
+  passed 1 focused parser test; `cargo test -p lpe-exchange
+  mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically`
+  passed 1 focused scenario test; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_modify_recipients_example_saves_canonically` passed
+  1 focused scenario test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing; `python
+  tools/check_oversized_sources.py` passed in warning mode and now reports
+  `mapi/rop.rs` at 3,076 tracked-source lines; direct physical line count
+  reports `mapi/rop.rs` at 3,037 lines, `mapi/rop/recipients.rs` at 273 lines,
+  and `mapi/rop/parse.rs` at 1,380 lines; `rg` confirmed
+  `modify_recipients` and `parse_pending_recipient_row` now live in
+  `mapi/rop/recipients.rs`.
+- 2026-06-30: Completed the MR-009 hub split by moving the raw ROP request
+  reader from `mapi/rop.rs` into `mapi/rop/request_reader.rs` and moving the
+  `RopReloadCachedInformation` and `RopGetPropertiesList` response builders
+  into `mapi/rop/responses.rs`. The request reader keeps the same primitive
+  cursor parsing, request truncation behavior, unsupported/reserved ROP
+  handling, string decoding, and property-value decoding. The response move
+  preserves default property tag selection, message/folder/table projection,
+  response opcodes, handle indexes, and response bytes.
+- 2026-06-30 verification for the final MR-009 ROP hub split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  parse_execute_request_keeps_max_rop_out` passed 1 focused dispatch parser
+  test; `cargo test -p lpe-exchange
+  malformed_supported_rop_buffer_fails_without_partial_request` passed 1
+  focused parse-error test; `cargo test -p lpe-exchange
+  open_message_response_does_not_advertise_missing_recipient_rows` passed 1
+  focused response-shape test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer
+  reports `crates/lpe-exchange/src/mapi/rop.rs` as oversized; direct physical
+  line counts report `mapi/rop.rs` at 1,440 lines,
+  `mapi/rop/request_reader.rs` at 1,460 lines, `mapi/rop/parse.rs` at 1,380
+  lines, and `mapi/rop/responses.rs` at 660 lines. `rg` confirmed
+  `read_rop_request` now lives in `mapi/rop/request_reader.rs`, while
+  `rop_reload_cached_information_response` and
+  `rop_get_properties_list_response` now live in `mapi/rop/responses.rs`.
+- 2026-06-30: Advanced MR-002 by moving the pure ICS/sync-import helper
+  cluster from `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs`:
+  `HIERARCHY_SYNC_CURSOR_VERSION`, `imported_message_source_key`,
+  `pending_message_is_sync_metadata_only`,
+  `pending_message_is_trash_sync_artifact`,
+  `imported_hierarchy_parent_mailbox_id`, `hierarchy_checkpoint_status`, and
+  `sync_property_filter_mode`. Source-key recognition, transient trash-artifact
+  suppression, metadata-only import acknowledgement, hierarchy checkpoint
+  staleness classification, and sync property filter labels remain unchanged.
+- 2026-06-30 verification for the dispatch sync-import helper split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange sync_import`
+  passed 17 focused tests; `cargo test -p lpe-exchange content_sync` passed
+  43 focused tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 19,703 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 19,258 lines and
+  `mapi/dispatch/sync_import.rs` at 815 lines. `rg` confirmed the moved helper
+  definitions now live in `mapi/dispatch/sync_import.rs`.
+- 2026-06-30: Advanced MR-002 by adding
+  `mapi/dispatch/custom_properties.rs` and moving the custom-property helper
+  cluster out of `mapi/dispatch.rs`: custom property splitting, canonical map
+  application, fetch/upsert/delete/copy helpers, canonical object identity
+  resolution, and the custom-versus-canonical named-property classifier.
+  Custom property persistence, copy/copy-to behavior, guarded calendar-event
+  behavior, attachment/public-folder custom values, and store-independent
+  custom-property probe rejection remain unchanged.
+- 2026-06-30 verification for the dispatch custom-property helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  custom_named_property` passed 3 focused tests; `cargo test -p lpe-exchange
+  custom_propert` passed 5 focused tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 19,330 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,897 lines and
+  `mapi/dispatch/custom_properties.rs` at 364 lines. `rg` confirmed the moved
+  helper definitions now live in `mapi/dispatch/custom_properties.rs`.
+- 2026-06-30: Advanced MR-002 by moving associated-configuration open selector
+  helpers from `mapi/dispatch.rs` into `mapi/dispatch/associated_config.rs`:
+  delegate free/busy message lookup, conversation-action lookup, navigation
+  shortcut lookup, Common Views named-view lookup, and Search Folder definition
+  lookup. The move preserves folder scoping, stale identity rejection,
+  folder-local default named view behavior, Common Views search-definition
+  identity matching, and open-message dispatch behavior.
+- 2026-06-30 verification for the associated-config open selector split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  common_views_open` passed 3 focused tests; `cargo test -p lpe-exchange
+  freebusy_open` passed 1 focused test; `cargo test -p lpe-exchange
+  conversation_action_open` passed 2 focused tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 19,259
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 18,831 lines and `mapi/dispatch/associated_config.rs` at 365 lines. `rg`
+  confirmed the moved selector definitions now live in
+  `mapi/dispatch/associated_config.rs`.
+- 2026-06-30: Advanced MR-002 by adding
+  `mapi/dispatch/conversation_actions.rs` and moving the conversation-action
+  helper cluster out of `mapi/dispatch.rs`: conversation-action property
+  projection, applying actions to existing and future messages, target mailbox
+  resolution, conversation-action property deletion, and virtual default
+  conversation-action staging/deletion. Conversation-action FAI persistence,
+  cross-store no-op move behavior, category application, max-delivery-time
+  filtering, and virtual default action behavior remain unchanged.
+- 2026-06-30 verification for the dispatch conversation-action helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  conversation_action` passed 22 focused tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,963 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,543 lines and
+  `mapi/dispatch/conversation_actions.rs` at 291 lines. `rg` confirmed the
+  moved conversation-action helper definitions now live in
+  `mapi/dispatch/conversation_actions.rs`.
+- 2026-06-30: Advanced MR-002 by adding
+  `mapi/dispatch/named_properties.rs` and moving the small named-property
+  dispatch helper cluster out of `mapi/dispatch.rs`: Outlook OSC contact-source
+  probe recognition and session named-property cache/lookup reconciliation.
+  Microsoft-specific OSC probe matching, stale alias normalization,
+  well-known property ID resolution, and named-property cache behavior remain
+  unchanged.
+- 2026-06-30 verification for the dispatch named-property helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  named_property` passed 20 focused tests; `cargo test -p lpe-exchange
+  get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_mapping`
+  passed 1 focused dispatch test; `cargo test -p lpe-exchange
+  outlook_contact_source_probe_named_properties_map_to_stable_ids` passed 1
+  focused property test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,937 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,519 lines and
+  `mapi/dispatch/named_properties.rs` at 27 lines. `rg` confirmed the moved
+  named-property helper definitions now live in
+  `mapi/dispatch/named_properties.rs`.
+- 2026-06-30: Advanced MR-002 by moving the table smart-input helper
+  `apply_outlook_smart_input_variant_before_query_rows` from `mapi/dispatch.rs`
+  into `mapi/dispatch/tables.rs`. The move preserves the Outlook
+  `fai_cursor_reset_before_query_rows` session variant, inbox associated
+  contents-table cursor reset behavior, handle-table lookup, diagnostic context
+  string, and session applied flag.
+- 2026-06-30 verification for the dispatch table smart-input helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  smart_input_variant_resets_inbox_fai_cursor_before_query_rows` passed 1
+  focused dispatch test; `cargo test -p lpe-exchange mapi_over_http::tables`
+  passed 48 focused table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,895 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,478 lines and
+  `mapi/dispatch/tables.rs` at 1,059 lines. `rg` confirmed the moved helper
+  definition now lives in `mapi/dispatch/tables.rs`.
+- 2026-06-30: Advanced MR-002 and the shared time-helper cleanup by replacing
+  the local `current_mapi_filetime` helper in `mapi/dispatch.rs` with
+  `lpe_domain::current_windows_filetime`. The shared helper preserves the prior
+  Windows FILETIME epoch offset, 100-nanosecond tick conversion, subsecond tick
+  handling, and saturating fallback behavior used for MAPI creation timestamps.
+- 2026-06-30 verification for the shared current FILETIME helper cleanup:
+  `cargo fmt --package lpe-domain --package lpe-exchange`; `cargo test -p
+  lpe-domain` passed 34 tests and doc tests; `cargo test -p lpe-exchange
+  quick_step_synthetic_folder_allows_associated_message_creation` passed 1
+  focused creation test; `cargo test -p lpe-exchange
+  empty_inbox_message_list_settings_save_gets_persistable_stream_defaults`
+  passed 1 focused associated-config save test; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,875 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,460 lines and
+  `lpe-domain/src/civil_time.rs` at 136 lines. `rg` confirmed
+  `current_mapi_filetime` is gone and `current_windows_filetime` is defined in
+  `lpe-domain`.
+- 2026-06-30: Advanced MR-002 by moving
+  `apply_canonical_public_folder_item_property_values` from `mapi/dispatch.rs`
+  into `mapi/dispatch/public_folders.rs`. Public-folder item property mutation
+  remains unchanged: existing canonical item lookup, base property projection,
+  pending property overlay, HTML/body preservation, canonical
+  `upsert_public_folder_item` input construction, and audit action strings are
+  preserved.
+- 2026-06-30 verification for the dispatch public-folder item property helper
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  public_folder_item` passed 11 focused public-folder item tests; `cargo test
+  -p lpe-exchange mapi_over_http::public_folders` passed 44 focused MAPI
+  public-folder tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,806 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,392 lines and
+  `mapi/dispatch/public_folders.rs` at 288 lines. `rg` confirmed the moved
+  helper definition now lives in `mapi/dispatch/public_folders.rs`.
+- 2026-06-30: Advanced MR-002 by moving
+  `persist_profile_folder_property_values` from `mapi/dispatch.rs` into
+  `mapi/dispatch/folders.rs`. Folder profile persistence remains unchanged:
+  `PidTagExtendedFolderFlags` binary values are persisted through the folder
+  profile table, IPM subtree `PidTagOSTOSTID` binary writes are retained
+  through the dedicated OST identity store, non-binary values are ignored by
+  this helper, and non-IPM-subtree folders continue to skip OST identity
+  persistence.
+- 2026-06-30 verification for the dispatch folder-profile helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob` passed 1
+  focused test; `cargo test -p lpe-exchange
+  mapi_over_http_ipm_subtree_ost_identity_survives_reconnect` passed 1 focused
+  test; `cargo test -p lpe-exchange
+  mapi_over_http_ipm_subtree_ost_identity_write_survives_store_failure` passed
+  1 focused test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,756 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 18,343 lines and
+  `mapi/dispatch/folders.rs` at 573 lines. `rg` confirmed the moved helper
+  definition and folder-profile/OST persistence calls now live in
+  `mapi/dispatch/folders.rs`.
+- 2026-06-30: Advanced MR-002 by adding `mapi/dispatch/properties.rs` and
+  moving the property-mutation coordinator
+  `apply_supported_object_property_values` out of `mapi/dispatch.rs`. The move
+  preserves the existing dispatch into message, contact, event, task, note,
+  journal, conversation-action, navigation-shortcut, associated-config, public
+  folder item, and custom-property persistence helpers. Folder write-rights
+  enforcement, unsupported mutation errors, custom property identity lookup,
+  and canonical object mutation behavior remain unchanged.
+- 2026-06-30 verification for the dispatch property-coordinator split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange custom_propert`
+  passed 5 focused custom-property tests; `cargo test -p lpe-exchange
+  named_property` passed 20 focused named-property tests; `cargo test -p
+  lpe-exchange property_values` passed 4 focused property-value tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 18,516
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 18,104 lines and `mapi/dispatch/properties.rs` at 242 lines. `rg`
+  confirmed the coordinator definition now lives in `mapi/dispatch/properties.rs`,
+  while the existing call sites remain in `mapi/dispatch.rs` and
+  `mapi/dispatch/messages.rs`. A top-level function scan of `mapi/dispatch.rs`
+  now shows only constants plus `execute_response` and `execute_rops`.
+- 2026-06-30: Advanced MR-002 by moving the table-control ROP response
+  cluster from `mapi/dispatch.rs` into `mapi/dispatch/tables.rs` as
+  `append_table_control_response`. The move covers `RopGetStatus`,
+  `RopQueryPosition`, `RopSeekRow`, bookmark creation/seeking, fractional seek,
+  `RopQueryColumnsAll`, `RopExpandRow`, collapse-row, and collapse-state
+  response handling. Existing query-position diagnostics, calendar view trace
+  recording, seek-row diagnostics, table handle mutation, and the folder-handle
+  `RopExpandRow` fallthrough to the existing unsupported/error path remain
+  unchanged.
+- 2026-06-30 verification for the dispatch table-control split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange mapi_over_http::tables`
+  passed 48 focused MAPI table tests, including query-position, seek-row,
+  expand-row, and invalid table-control coverage; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,398 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 17,986 lines and
+  `mapi/dispatch/tables.rs` at 1,218 lines. `rg` confirmed the table-control
+  helper definition now lives in `mapi/dispatch/tables.rs`, with the
+  `RopExpandRow` folder-object guard still local in `mapi/dispatch.rs` so the
+  previous fallthrough behavior is preserved.
+- 2026-06-30: Advanced MR-002 by moving the `RopGetHierarchyTable` and
+  `RopGetContentsTable` open-table branch logic from `mapi/dispatch.rs` into
+  new `mapi/dispatch/table_open.rs` as `append_open_table_response`. The move
+  preserves hierarchy-table handle validation, hierarchy flag errors,
+  public-folder root row-count fallback, contents-table handle/object/flag
+  validation, canonical folder read-right checks, conversation-members table
+  remapping, row-count calculation, inbox/calendar/bootstrap diagnostics,
+  table handle allocation, response bytes, and output handle tracking.
+- 2026-06-30 verification for the dispatch open-table split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange mapi_over_http::tables`
+  passed 48 focused MAPI table tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 18,172 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 17,760 lines,
+  `mapi/dispatch/tables.rs` at 1,215 lines, and
+  `mapi/dispatch/table_open.rs` at 267 lines. `rg` confirmed
+  `append_open_table_response` now lives in `mapi/dispatch/table_open.rs`,
+  with the dispatch match reduced to the combined `RopGetHierarchyTable |
+  RopGetContentsTable` call.
+- 2026-06-30: Advanced MR-003 by moving the `RopSubmitMessage`,
+  `RopTransportSend`, and `RopAbortSubmit` execution bodies from
+  `mapi/dispatch.rs` into `mapi/dispatch/submission.rs` as
+  `append_submit_message_response` and `append_abort_submit_response`. The move
+  preserves missing-handle and stale-handle errors, pending-message submission,
+  opened-draft/outbox submission, protected Bcc reloads, canonical submission,
+  same-execute submitted-message loading, submitted handle replacement,
+  duplicate execute behavior, abort-submit source validation, cancellation
+  result mapping, and RCA trace fields. The `RopSetSpooler`,
+  `RopSpoolerLockMessage`, `RopTransportNewMail`, and
+  `RopUpdateDeferredActionMessages` compatibility response routing also now
+  lives in `mapi/dispatch/submission.rs`; those parseable advisory/deferred
+  responses were not widened.
+- 2026-06-30 verification for the dispatch submission execution split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http::submission` passed 23 focused MAPI submission tests,
+  including transport spooler alignment, abort-submit, replay, Bcc, draft, and
+  canonical submission coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 17,910 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 17,498 lines and
+  `mapi/dispatch/submission.rs` at 455 lines. `rg` confirmed
+  `append_submit_message_response`, `append_abort_submit_response`,
+  `append_spooler_advisory_response`, and
+  `append_deferred_action_messages_response` now live in
+  `mapi/dispatch/submission.rs`, with the dispatch match reduced to calls for
+  `RopSetSpooler | RopSpoolerLockMessage | RopTransportNewMail`,
+  `RopUpdateDeferredActionMessages`, `RopSubmitMessage | RopTransportSend`,
+  and `RopAbortSubmit`.
+- 2026-06-30: Advanced MR-002/MR-003 by moving the small
+  `RopGetTransportFolder`, `RopOptionsData`, and `RopGetReceiveFolderTable`
+  routing logic out of `mapi/dispatch.rs`. Transport-folder and options-data
+  response routing now lives in `mapi/dispatch/submission.rs` as
+  `append_transport_folder_response` and `append_options_data_response`.
+  Receive-folder table routing, private-logon validation, RCA trace fields,
+  canonical row-shape response, and receive-folder verification marker now live
+  in `mapi/dispatch/tables.rs` as `append_receive_folder_table_response`.
+- 2026-06-30 verification for the transport/options/receive-folder-table split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state`
+  passed 1 focused transport-folder test; `cargo test -p lpe-exchange
+  mapi_over_http_get_receive_folder_table_requires_private_logon_handle` passed
+  1 focused table validation test; `cargo test -p lpe-exchange
+  mapi_over_http::logon_profile` passed 13 focused logon/profile tests,
+  including options-data and receive-folder bootstrap coverage;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 17,893
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 17,481 lines, `mapi/dispatch/submission.rs` at 469 lines, and
+  `mapi/dispatch/tables.rs` at 1,249 lines. `rg` confirmed the new append
+  helpers now live outside `mapi/dispatch.rs`, with the dispatch match reduced
+  to thin calls for all three ROPs.
+- 2026-06-30: Advanced MR-002 by moving small status/control response routing
+  out of `mapi/dispatch.rs`: `RopGetStoreState` now delegates to
+  `append_store_state_response` in `mapi/dispatch/logon.rs`; `RopAbort`,
+  `RopProgress`, and `RopResetTable` now share `append_execute_status_response`
+  in `mapi/dispatch/execute.rs`; and `RopFreeBookmark` now delegates to
+  `append_free_bookmark_response` in `mapi/dispatch/tables.rs`. Response error
+  codes, progress payload validation, table reset state mutation, bookmark
+  removal, and store-state handle validation remain unchanged.
+- 2026-06-30 verification for the status/control response routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_receive_folder_and_store_state` passed 1
+  focused store-state test; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_reset_table_requires_new_set_columns` passed 1
+  focused reset-table test; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_free`
+  passed 1 focused bookmark test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 17,879 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 17,467 lines,
+  `mapi/dispatch/execute.rs` at 303 lines, `mapi/dispatch/logon.rs` at 85
+  lines, and `mapi/dispatch/tables.rs` at 1,256 lines. `rg` confirmed the new
+  append helpers now live in their focused modules, with the dispatch match
+  reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-007 by moving the remaining mutable input
+  object lookup for `RopFreeBookmark` into `mapi/dispatch/tables.rs`. The
+  dispatcher is now a thin call for the ROP, while
+  `append_free_bookmark_response` preserves bookmark removal, table cursor
+  state mutation, missing-handle behavior, and response bytes.
+- 2026-06-30 verification for the FreeBookmark validation cleanup: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange bookmark` passed 8
+  focused bookmark tests, including Microsoft table bookmark/free behavior;
+  `cargo test -p lpe-exchange tables` passed 194 broader table projection and
+  table-control tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,524 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 13,121 lines and
+  `mapi/dispatch/tables.rs` at 1,258 lines. `rg` confirmed
+  `append_free_bookmark_response`, `free_bookmark_response`, and
+  `rop_free_bookmark_response` now live in the focused tables module, with
+  dispatch reduced to a thin call for the ROP.
+- 2026-06-30: Advanced MR-002 by moving address-type and named-property
+  response routing out of `mapi/dispatch.rs`. `RopGetAddressTypes` now
+  delegates to `append_address_types_response` in `mapi/dispatch/logon.rs`;
+  `RopGetNamesFromPropertyIds`, `RopGetPropertyIdsFromNames`, and
+  `RopQueryNamedProperties` now delegate to focused async helpers in
+  `mapi/dispatch/named_properties.rs`. The move preserves address-type RCA
+  tracing, echo-handle behavior, named-property cache hydration, empty logon
+  enumeration, dynamic allocation, no-create missing errors, allocation failure
+  errors, OSC contact-source tracing, query-by-GUID behavior, and response
+  bytes.
+- 2026-06-30 verification for the address-type/named-property routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http_execute_returns_empty_transport_options_data` passed 1
+  focused logon/profile test; `cargo test -p lpe-exchange named_property`
+  passed 20 focused named-property tests; `cargo test -p lpe-exchange
+  get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_mapping`
+  passed 1 focused stale-mapping test; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing. `rg`
+  confirmed the new append helpers live in their focused modules, with the
+  dispatch match reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-024 by moving `RopRegisterNotification`
+  response routing from `mapi/dispatch.rs` into
+  `mapi/dispatch/notification_subscriptions.rs` as
+  `append_register_notification_response`. The move preserves request parsing,
+  notification cursor hydration, output handle allocation, subscription object
+  storage, response bytes, post-hierarchy diagnostic fields, and RCA trace
+  output.
+- 2026-06-30 verification for the register-notification routing split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange notification`
+  passed 13 focused notification tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 17,624 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 17,212 lines and
+  `mapi/dispatch/notification_subscriptions.rs` at 81 lines. `rg` confirmed
+  `append_register_notification_response` now lives in the focused notification
+  module, with the dispatch match reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-007 by adding
+  `mapi/dispatch/permissions.rs` and moving `RopGetPermissionsTable` response
+  routing out of `mapi/dispatch.rs` as
+  `append_get_permissions_table_response`. The move preserves input handle
+  validation, folder existence checks across mailbox, advertised special, role,
+  and public-folder scopes, permission-table handle allocation, response bytes,
+  and output handle tracking. `RopModifyPermissions` remains local for a later
+  mutation-focused extraction.
+- 2026-06-30 verification for the permissions-table routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http::permissions` passed 15 focused permission/delegation tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 17,610
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 17,198 lines and `mapi/dispatch/permissions.rs` at 36 lines. `rg`
+  confirmed `append_get_permissions_table_response` now lives in the focused
+  permissions module, with the dispatch match reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-007/MR-019 by moving `RopGetRulesTable`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/rules.rs` as
+  `append_get_rules_table_response`. The move preserves input handle
+  validation, mailbox/role/public-folder scope checks, rule-table handle
+  allocation, response bytes, and output handle tracking. `RopModifyRules`
+  remains local for a later mutation-focused extraction so rule writes and
+  unsupported Exchange rule/deferred-action behavior stay isolated.
+- 2026-06-30 verification for the rules-table routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange mapi_over_http::tables`
+  passed 48 focused MAPI table tests, including
+  `mapi_over_http_get_rules_table_projects_canonical_sieve_rules`;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 17,595
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 17,183 lines and `mapi/dispatch/rules.rs` at 201 lines. `rg` confirmed
+  `append_get_rules_table_response` now lives in the focused rules module, with
+  the dispatch match reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-019 by moving `RopModifyRules` response
+  routing and bounded mutation execution out of `mapi/dispatch.rs` into
+  `mapi/dispatch/rules.rs` as `append_modify_rules_response`. The move
+  preserves input handle validation, mailbox/role scope checks, row parsing,
+  remove/upsert branching, bounded JSON-to-Sieve conversion, canonical
+  `delete_sieve_script` and `put_sieve_script` calls, unsupported Exchange rule
+  blob rejection, provider/delegate/deferred-action rejection, error codes, and
+  response bytes.
+- 2026-06-30 verification for the modify-rules extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange rule` passed 23 focused
+  rule tests, including bounded modify-rules writes, bounded action acceptance,
+  Exchange rule blob rejection, EWS inbox-rule behavior, and rule-table
+  projection; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 17,512
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 17,100 lines and `mapi/dispatch/rules.rs` at 306 lines. `rg` confirmed
+  `append_modify_rules_response` and bounded rule mutation execution now live
+  in the focused rules module, with the dispatch match reduced to a thin async
+  call.
+- 2026-06-30: Advanced MR-002/MR-006 by moving `RopModifyPermissions`
+  response routing and permission mutation execution out of `mapi/dispatch.rs`
+  into `mapi/dispatch/permissions.rs` as
+  `append_modify_permissions_response`. The move preserves input handle
+  validation, mailbox/calendar/public-folder target selection, share-right
+  enforcement, ACL row parsing, member identity lookup, invalid rights
+  rejection, self/default/anonymous skipping, calendar permission writes,
+  calendar-collection permission writes, mailbox-folder permission writes,
+  public-folder grant upsert/delete behavior, audit action strings, error
+  codes, and response bytes.
+- 2026-06-30 verification for the modify-permissions extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http::permissions` passed 15 focused permission/delegation tests;
+  `cargo test -p lpe-exchange mapi_over_http::public_folders` passed 44
+  focused public-folder tests, including public-folder permission grants and
+  rejection cases; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 17,216 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,805 lines and
+  `mapi/dispatch/permissions.rs` at 318 lines. `rg` confirmed
+  `append_modify_permissions_response` and canonical permission write calls now
+  live in the focused permissions module, with the dispatch match reduced to a
+  thin async call.
+- 2026-06-30: Advanced MR-002/MR-010 by moving `RopLongTermIdFromId` and
+  `RopIdFromLongTermId` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/object_ids.rs` as `append_long_term_id_from_id_response` and
+  `append_id_from_long_term_id_response`. The move preserves object-scope
+  classification, advertised-special-folder handling, dynamic object-id
+  acceptance, mailbox GUID alias handling, special-folder conversion
+  diagnostics, response bytes, and RCA trace fields.
+- 2026-06-30 verification for the object-id conversion routing split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange long_term_id`
+  passed 8 focused object-id tests; `cargo test -p lpe-exchange
+  id_from_long_term_id` passed 1 focused conversion test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 17,156
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 16,745 lines and `mapi/dispatch/object_ids.rs` at 190 lines. `rg`
+  confirmed the new append helpers and RCA trace strings now live in the
+  focused object-id module, with dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-014 by moving public-folder per-user and
+  replica probe ROP response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/public_folders.rs`. The extracted helpers now own
+  `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`,
+  `RopReadPerUserInformation`, `RopWritePerUserInformation`,
+  `RopGetOwningServers`, and `RopPublicFolderIsGhosted` routing. The move
+  preserves logon-handle validation, canonical public-folder identity
+  allocation, per-user read-state stream shape, invalid Exchange blob
+  rejection, canonical per-user state patching, replica server ordering,
+  ghosting checks, response bytes, and error codes.
+- 2026-06-30 verification for the public-folder per-user/probe routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_over_http::public_folders` passed 44 focused public-folder tests,
+  including per-user lookup/state and replica probe coverage;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,928
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 16,517 lines and
+  `mapi/dispatch/public_folders.rs` at 611 lines. `rg` confirmed the six new
+  append helpers now live in the focused public-folder module, with dispatch
+  reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-004 by moving the small `RopTellVersion`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_import.rs` as `append_tell_version_response`. The move
+  preserves the existing accepted handle kinds for synchronization sources,
+  synchronization collectors, and FastTransfer destinations, and preserves the
+  exact success/error response behavior for unsupported handles.
+- 2026-06-30 verification for the `RopTellVersion` routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tell_version` passed
+  the focused `mapi_over_http_tell_version_accepts_fast_transfer_sync_context`
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,919
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 16,508 lines and `mapi/dispatch/sync_import.rs` at
+  834 lines. `rg` confirmed `append_tell_version_response` now lives in the
+  sync-import module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-004 by moving local-replica sync response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs` as
+  `append_set_local_replica_midset_deleted_response` and
+  `append_get_local_replica_ids_response`. The move preserves sync
+  source/collector state mutation for deleted midsets, unsupported-handle error
+  behavior, local replica ID range allocation, `next_local_replica_sequence`
+  advancement, and the dispatch-level response handle-table echo for
+  `RopGetLocalReplicaIds`.
+- 2026-06-30 verification for the local-replica routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange local_replica` passed
+  2 focused tests covering local replica ID allocation and deleted-midset
+  round trip; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,895
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 16,484 lines and `mapi/dispatch/sync_import.rs` at
+  879 lines. `rg` confirmed both local-replica append helpers now live in the
+  sync-import module, with dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-005 by moving stream-region response routing
+  for `RopLockRegionStream` and `RopUnlockRegionStream` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_stream_region_response`. The move preserves the current bounded
+  behavior: attachment-stream handles receive simple success, and all other
+  handles receive the same not-found error with the original ROP ID.
+- 2026-06-30 verification for the stream-region routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream_region` passed
+  the focused `mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles`
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,885
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 16,474 lines and `mapi/dispatch/properties.rs` at 260
+  lines. `rg` confirmed `append_stream_region_response` now lives in the
+  focused properties module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCloneStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_clone_stream_response`. The move preserves writable-stream handle
+  resolution, read-only attachment-stream cloning, output handle allocation,
+  response handle-slot updates, output handle tracking, and the existing
+  unsupported/not-found error split for writable or missing stream handles.
+- 2026-06-30 verification for the clone-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream_region` passed
+  the focused stream test that covers `RopCloneStream`, `RopLockRegionStream`,
+  and `RopUnlockRegionStream`; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,859 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,448 lines and
+  `mapi/dispatch/properties.rs` at 301 lines. `rg` confirmed
+  `append_clone_stream_response` now lives in the focused properties module,
+  with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopGetStreamSize` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_get_stream_size_response`. The move preserves writable-stream handle
+  resolution, attachment-stream length reporting, and the existing not-found
+  error for missing or non-stream handles.
+- 2026-06-30 verification for the get-stream-size routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream/property tests, including GetStreamSize and stream-region
+  coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,848 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,437 lines and
+  `mapi/dispatch/properties.rs` at 321 lines. `rg` confirmed
+  `append_get_stream_size_response` now lives in the focused properties
+  module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCommitStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_commit_stream_response`. The move preserves writable-stream handle
+  resolution, inbox associated-config commit diagnostics, associated-config
+  stream persistence, simple success for attachment streams, and the existing
+  not-found error for missing commit targets.
+- 2026-06-30 verification for the commit-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream/property tests, including associated-config stream persistence
+  and stream-region coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,785 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,374 lines and
+  `mapi/dispatch/properties.rs` at 402 lines. `rg` confirmed
+  `append_commit_stream_response` and the commit-stream RCA trace strings now
+  live in the focused properties module, with dispatch reduced to a thin async
+  call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopSeekStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_seek_stream_response`. The move preserves writable-stream handle
+  resolution, mutable stream-position updates through the existing seek
+  response builder, RCA diagnostics, and the existing not-found error for
+  missing stream handles.
+- 2026-06-30 verification for the seek-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream/property tests, including MAPI stream seek/write coverage;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,762
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 16,351 lines and `mapi/dispatch/properties.rs` at 438 lines. `rg`
+  confirmed `append_seek_stream_response` and the seek-stream RCA trace string
+  now live in the focused properties module, with dispatch reduced to a thin
+  call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopSetStreamSize` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_set_stream_size_response`. The move preserves missing-handle errors,
+  writable-stream handle resolution, inbox associated-config stream-size
+  diagnostics, RCA object-kind fields, attachment-stream resizing, and the
+  existing write-fault error for unsupported resize targets.
+- 2026-06-30 verification for the set-stream-size routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream/property tests, including SetStreamSize, write, commit, and
+  associated-stream coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,718 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,307 lines and
+  `mapi/dispatch/properties.rs` at 498 lines. `rg` confirmed
+  `append_set_stream_size_response`, the associated-config stream-size trace,
+  and the resize helper call now live in the focused properties module, with
+  dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving the `RopWriteStream`,
+  `RopWriteAndCommitStream`, and `RopWriteStreamExtended` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_write_stream_response`. The move preserves missing-handle errors,
+  writable-stream handle resolution, inbox associated-config write diagnostics,
+  RCA object-kind fields, stream write execution, written-byte response bytes,
+  and the existing stream-write error mapping for unsupported targets.
+- 2026-06-30 verification for the write-stream routing split: the first
+  `cargo test -p lpe-exchange stream` attempt failed at compile time because
+  the helper was duplicated during extraction; the duplicate definition was
+  removed. After correction, `cargo fmt --package lpe-exchange`; `cargo test
+  -p lpe-exchange stream` passed 38 focused stream/property tests, including
+  write-stream and associated-stream coverage; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,669 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,258 lines and
+  `mapi/dispatch/properties.rs` at 560 lines. `rg` confirmed
+  `append_write_stream_response`, the associated-config write trace, and the
+  write response builder call now live in the focused properties module, with
+  dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCopyToStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_copy_to_stream_response`. The move preserves missing source and
+  destination handle errors, writable-stream handle resolution for both ends,
+  bounded stream copy execution, read/written response bytes, and the existing
+  write-fault error for unsupported copy targets.
+- 2026-06-30 verification for the copy-to-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream/property tests, including CopyToStream canonical message-body
+  and attachment save coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,634 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,223 lines and
+  `mapi/dispatch/properties.rs` at 602 lines. `rg` confirmed
+  `append_copy_to_stream_response`, the copy helper call, and the copy response
+  builder call now live in the focused properties module, with dispatch reduced
+  to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCopyTo` response routing
+  out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_copy_to_response`. The move preserves asynchronous/subobject flag
+  validation, null-destination response alignment, source-handle error
+  behavior, custom-property copy delegation, message follow-up property copy
+  delegation, excluded-property tag handling, and the existing unsupported
+  fallback when no bounded copy path applies.
+- 2026-06-30 verification for the copy-to routing split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange copy_to` passed 6 focused tests,
+  including null-destination alignment, custom-value copy exclusion, stream
+  copy, and FastTransfer copy-to coverage; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,581 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,170 lines and
+  `mapi/dispatch/properties.rs` at 680 lines. `rg` confirmed
+  `append_copy_to_response`, null-destination response handling, custom-property
+  copy delegation, and message follow-up copy delegation now live in the
+  focused properties module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCopyProperties` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_copy_properties_response`. The move preserves asynchronous flag
+  validation, source-handle validation, null-destination response alignment,
+  empty property-tag success, message follow-up property copy delegation,
+  custom-property copy delegation, problem-row response handling, and the
+  existing unsupported fallback when no bounded copy path applies.
+- 2026-06-30 verification for the copy-properties routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange copy_properties` passed
+  5 focused tests covering null-destination alignment, empty tag-list no-op,
+  custom-property copy, message follow-up copy, and FastTransfer copy-properties
+  manifest behavior; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,505 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 16,094 lines and
+  `mapi/dispatch/properties.rs` at 771 lines. `rg` confirmed
+  `append_copy_properties_response`, null-destination response handling,
+  follow-up copy delegation, custom-property copy delegation, and copy-properties
+  response builders now live in the focused properties module, with dispatch
+  reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopSetReadFlags` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/messages.rs` as
+  `append_set_read_flags_response`. The move preserves folder-handle
+  validation, Microsoft read-flag validation, read/unread mapping, public-folder
+  per-user read-state patches, canonical JMAP message flag updates, partial
+  completion handling, and response bytes.
+- 2026-06-30 verification for the set-read-flags routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange set_read_flags` passed
+  3 focused tests covering canonical message read state, public-folder
+  per-user read state, and invalid Microsoft parameters; `$env:RUST_TEST_THREADS
+  ='1'; cargo test -p lpe-exchange` passed with 1593 tests and doc tests
+  passing. `python tools/check_oversized_sources.py` passed in warning mode and
+  reports `mapi/dispatch.rs` at 16,424 tracked-source lines. Direct physical
+  line counts report `mapi/dispatch.rs` at 16,013 lines and
+  `mapi/dispatch/messages.rs` at 451 lines. `rg` confirmed
+  `append_set_read_flags_response`, public-folder per-user patches,
+  `mapi-set-read-flags` auditing, and `rop_set_read_flags_response` now live in
+  the focused messages module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopSetMessageReadFlag` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/messages.rs` as
+  `append_set_message_read_flag_response`. The move preserves input-object
+  validation, Microsoft read-flag validation, public-folder per-user read-state
+  patches, canonical JMAP message flag updates, folder write-right checks,
+  content notification recording, changed-status response bytes, and the
+  existing not-found/error mappings.
+- 2026-06-30 verification for the set-message-read-flag routing split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  set_message_read_flag` passed 3 focused tests covering canonical open-message
+  read state, public-folder per-user read state, and default-flag rejection;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,307
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 15,896 lines and `mapi/dispatch/messages.rs` at 591 lines. `rg` confirmed
+  `append_set_message_read_flag_response`, public-folder per-user patches,
+  `mapi-set-message-read-flag` auditing, and
+  `rop_set_message_read_flag_response` now live in the focused messages module,
+  with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopReloadCachedInformation`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/messages.rs`
+  as `append_reload_cached_information_response`. The move preserves reserved
+  field validation, invalid-parameter response mapping, input object lookup,
+  and the existing cached-information response builder behavior for pending and
+  persisted message-like objects.
+- 2026-06-30 verification for the reload-cached-information routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  reload_cached_information` passed 3 focused tests covering the ROP response
+  shape, pending-message summary output, and nonzero reserved-field rejection;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,301
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 15,890 lines and `mapi/dispatch/messages.rs` at 616 lines. `rg` confirmed
+  `append_reload_cached_information_response`, reserved-field validation, and
+  the reload response builder call now live in the focused messages module,
+  with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopReadRecipients` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/recipients.rs` as
+  `append_read_recipients_response`. The move preserves reserved-field
+  validation, invalid-parameter response mapping, pending recipient replacement
+  lookup by input handle, fallback to the current input object, and the existing
+  recipient row response builder behavior.
+- 2026-06-30 verification for the read-recipients routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange read_recipients` passed
+  6 focused tests covering response row counts, row-id handling, empty-message
+  not-found behavior, canonical message recipients, Bcc hiding, and nonzero
+  reserved-field rejection; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,282 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 15,871 lines and
+  `mapi/dispatch/recipients.rs` at 73 lines. `rg` confirmed
+  `append_read_recipients_response`, reserved-field validation, pending
+  recipient replacement lookup, and the recipient response builder call now live
+  in the focused recipients module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopModifyRecipients` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/recipients.rs` as
+  `append_modify_recipients_response`. The move preserves pending-message
+  recipient staging, persisted/open-message recipient replacement staging,
+  address-book-backed recipient parsing, Microsoft recipient row diagnostics,
+  invalid-object/not-found/parse-error mappings, and existing success response
+  bytes.
+- 2026-06-30 verification for the modify-recipients routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange modify_recipients`
+  passed 9 focused tests covering Microsoft row parsing, type-flag validation,
+  string8/wrapped/X500 canonical saves, opened-message staging, and sync import
+  of pending recipients; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 16,136 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 15,725 lines and
+  `mapi/dispatch/recipients.rs` at 243 lines. `rg` confirmed
+  `append_modify_recipients_response` and the ModifyRecipients RCA diagnostic
+  string now live in the focused recipients module, with dispatch reduced to a
+  thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopRemoveAllRecipients`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/recipients.rs` as `append_remove_all_recipients_response`.
+  The move preserves pending-message recipient clearing, persisted/open-message
+  empty replacement staging, missing-handle error mapping, invalid-object error
+  mapping, and existing success response bytes.
+- 2026-06-30 verification for the remove-all-recipients routing split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  remove_all_recipients` passed 2 focused tests covering pending-message
+  recipient clearing and opened-message staging until save;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 16,116
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 15,705 lines and `mapi/dispatch/recipients.rs` at 276 lines. `rg`
+  confirmed `append_remove_all_recipients_response` now lives in the focused
+  recipients module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopMoveCopyMessages`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/messages.rs`
+  as `append_move_copy_messages_response`. The move preserves Microsoft
+  boolean-field validation, source/target folder-handle errors, recoverable
+  item restore/reject behavior, public-folder item copy/move notifications,
+  note and journal copy handling, canonical JMAP message move/copy calls,
+  partial-completion response bytes, and existing RCA failure diagnostics.
+- 2026-06-30 verification for the move-copy-messages routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange move_copy_messages`
+  passed 2 focused tests covering canonical mailbox move/copy and nonzero
+  Microsoft boolean fields; `cargo test -p lpe-exchange recoverable_item`
+  passed 14 focused recoverable-item tests; `cargo test -p lpe-exchange
+  public_folder` passed 74 focused public-folder tests, including public-folder
+  message copy and move; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 15,741 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 15,330 lines and
+  `mapi/dispatch/messages.rs` at 998 lines. `rg` confirmed
+  `append_move_copy_messages_response` and the MoveCopyMessages RCA failure
+  diagnostic strings now live in the focused messages module, with dispatch
+  reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopDeleteMessages` and
+  `RopHardDeleteMessages` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/messages.rs` as `append_delete_messages_response`. The move
+  preserves Microsoft boolean-field validation, hard-delete unsupported-handle
+  behavior, canonical folder delete-right checks, recoverable-item purge and
+  bounded rejection behavior, contact/event/task/note/journal delete paths,
+  Common Views shortcut and associated-config deletion, public-folder item
+  deletion, canonical JMAP trash/hard-delete behavior, notification recording,
+  sync-upload checkpoint recording, and partial-completion response bytes.
+- 2026-06-30 verification for the delete-messages routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange delete_messages`
+  passed 10 focused tests covering trash/hard-delete behavior, retention
+  partial completion, Common Views shortcut deletion, nonzero Microsoft boolean
+  fields, and recoverable/hierarchy delete cases; `cargo test -p lpe-exchange
+  public_folder` passed 74 focused public-folder tests, including public-folder
+  message delete and hard-delete; `cargo test -p lpe-exchange calendar` passed
+  145 focused calendar/task tests; `cargo test -p lpe-exchange contacts`
+  passed 39 focused contact tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 15,475 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 15,064 lines and
+  `mapi/dispatch/messages.rs` at 1,279 lines. `rg` confirmed
+  `append_delete_messages_response` and the delete/purge/trash audit action
+  strings now live in the focused messages module, with dispatch reduced to a
+  thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopGetMessageStatus` and
+  `RopSetMessageStatus` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/messages.rs` as `append_message_status_response`. The move
+  preserves folder-handle validation, Microsoft `SetMessageStatus` response
+  opcode behavior for both ROPs, item-existence checks across canonical mail,
+  public-folder, contact, event, and task projections, session-local status
+  storage, mask/flag updates, zero-status cleanup, and existing response
+  bytes.
+- 2026-06-30 verification for the message-status routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange message_status` passed
+  4 focused tests covering session-local private/public-folder status and
+  Microsoft response opcode/folder-handle behavior; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 15,438 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 15,027 lines and
+  `mapi/dispatch/messages.rs` at 1,335 lines. `rg` confirmed
+  `append_message_status_response`, session-local status storage, and the
+  message-status response builder call now live in the focused messages
+  module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopGetValidAttachments` and
+  `RopGetAttachmentTable` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/attachments.rs` as `append_get_valid_attachments_response`
+  and `append_get_attachment_table_response`. The move preserves valid
+  attachment-number projection, pending attachment deletion filtering,
+  Microsoft attachment-table flag validation, message/pending-message/event
+  handle handling, missing calendar-event rejection, attachment-table handle
+  allocation, output handle slot updates, and existing response bytes.
+- 2026-06-30 verification for the attachment table routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange get_attachment_table`
+  passed 3 focused tests covering Microsoft flag validation and canonical
+  attachment table projection; `cargo test -p lpe-exchange
+  get_valid_attachments` passed 3 focused tests covering canonical message
+  attachment numbers, calendar event projection, and missing event-handle
+  rejection; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 15,401 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 14,990 lines and
+  `mapi/dispatch/attachments.rs` at 326 lines. `rg` confirmed
+  `append_get_valid_attachments_response`, `append_get_attachment_table_response`,
+  pending deletion filtering, and attachment-table object allocation now live
+  in the focused attachments module, with dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopOpenAttachment` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/attachments.rs` as
+  `append_open_attachment_response`. The move preserves Microsoft
+  OpenAttachment flag validation, message/event handle validation, missing
+  calendar-event rejection, pending attachment deletion filtering, canonical
+  attachment existence checks, attachment object handle allocation, output
+  handle slot updates, and existing response bytes.
+- 2026-06-30 verification for the open-attachment routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange open_attachment`
+  passed 4 focused tests covering Microsoft flag validation, canonical
+  attachment property projection, calendar-event attachment projection, and
+  invalid flag batch stability; `cargo test -p lpe-exchange attachment`
+  passed 47 broader attachment tests covering table rows, open/create/delete,
+  save, EWS attachments, embedded-message reopening, and sync attachment facts;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 15,339
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,928 lines and `mapi/dispatch/attachments.rs` at 405 lines. `rg`
+  confirmed `append_open_attachment_response`, OpenAttachment flag validation,
+  pending deletion filtering, attachment object allocation, and the open
+  attachment response builder call now live in the focused attachments module,
+  with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopDeleteAttachment` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/attachments.rs` as
+  `append_delete_attachment_response`. The move preserves message/event handle
+  validation, guarded-calendar attachment hiding, canonical attachment
+  existence checks, canonical folder write-right checks, pending session-local
+  attachment deletion staging, and existing success/error response bytes. The
+  actual canonical deletion still happens through the existing save-message
+  path.
+- 2026-06-30 verification for the delete-attachment routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange delete_attachment`
+  passed 4 focused tests covering EWS canonical attachment deletion, unknown
+  attachment rejection, MAPI staged deletion committed by save-message, and
+  guarded calendar attachment hiding; `cargo test -p lpe-exchange attachment`
+  passed 47 broader attachment tests covering table rows, open/create/delete,
+  save, EWS attachments, embedded-message reopening, and sync attachment facts;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 15,288
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,877 lines and `mapi/dispatch/attachments.rs` at 472 lines. `rg`
+  confirmed `append_delete_attachment_response`, guarded-calendar filtering,
+  pending deletion staging, and the simple success response now live in the
+  focused attachments module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopCreateAttachment` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/attachments.rs` as
+  `append_create_attachment_response`. The move preserves pending-message
+  parent-handle detection, message/pending-message/event handle validation,
+  guarded-calendar attachment hiding, canonical message/event existence
+  checks, canonical folder write-right checks, pending attachment number
+  allocation, documented initial attachment properties, parent pending-message
+  attachment linkage, output handle slot updates, and existing response bytes.
+  Attachment persistence still happens through the existing stream/save paths.
+- 2026-06-30 verification for the create-attachment routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange create_attachment`
+  passed 5 focused tests covering EWS attachment create/reject paths and MAPI
+  documented-property initialization plus canonical save; `cargo test -p
+  lpe-exchange attachment` passed 47 broader attachment tests covering table
+  rows, open/create/delete, save, EWS attachments, embedded-message reopening,
+  and sync attachment facts; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 15,191 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 14,781 lines and
+  `mapi/dispatch/attachments.rs` at 586 lines. `rg` confirmed
+  `append_create_attachment_response`, pending attachment number allocation,
+  timestamp initialization, documented initial property seeding, parent
+  pending-message linkage, and the create attachment response builder call now
+  live in the focused attachments module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopOpenEmbeddedMessage`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/attachments.rs` as `append_open_embedded_message_response`.
+  The move preserves missing-handle and open-mode validation, embedded-message
+  source lookup for pending, saved, and persisted attachments, generated
+  transient embedded-message IDs, subject projection, pending-message handle
+  allocation, session mappings for embedded message IDs and attachment parents,
+  output handle slot updates, and existing response bytes.
+- 2026-06-30 verification for the open-embedded-message routing split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange embedded_message`
+  passed 4 focused tests covering the response shape, content-sync embedded
+  markers, saved embedded-message reopening, and read-only OpenEmbeddedMessage
+  behavior; `cargo test -p lpe-exchange attachment` passed 47 broader
+  attachment tests covering table rows, open/create/delete, save, EWS
+  attachments, embedded-message reopening, and sync attachment facts;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 15,139
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,729 lines and `mapi/dispatch/attachments.rs` at 654 lines. `rg`
+  confirmed `append_open_embedded_message_response`, embedded source lookup,
+  transient embedded-message ID generation, session mapping updates, and the
+  OpenEmbeddedMessage response builder call now live in the focused
+  attachments module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving
+  `RopSaveChangesAttachment` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/attachments.rs` as
+  `append_save_changes_attachment_response`. The move preserves input-handle
+  and save-flag validation, RCA probe diagnostics, pending-attachment handle
+  validation, canonical folder write-right checks, Magika attachment
+  validation and MIME correction, embedded-message attachment generation,
+  pending-message attachment staging, canonical message and calendar-event
+  attachment saves, custom attachment property persistence, saved-attachment
+  handle replacement, and existing success/error response bytes.
+- 2026-06-30 verification for the save-changes-attachment routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  save_changes_attachment` passed 1 focused test covering Microsoft
+  conflicting save-flag rejection without batch drift; `cargo test -p
+  lpe-exchange attachment` passed 47 broader attachment tests covering table
+  rows, open/create/delete, save, EWS attachments, embedded-message reopening,
+  and sync attachment facts; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 14,878 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 14,468 lines and
+  `mapi/dispatch/attachments.rs` at 944 lines. `rg` confirmed
+  `append_save_changes_attachment_response`, pending-message staging,
+  `mapi-save-attachment`, `mapi-save-calendar-attachment`, validation, and
+  custom-property persistence now live in the focused attachments module, with
+  dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-008 by moving `RopReadStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_read_stream_response`. The move preserves writable-stream handle
+  resolution, associated-configuration stream read counters, Outlook view
+  failure trace events, rule-organizer stream diagnostics, stream position
+  advancement, returned byte counts, end-of-stream detection, response preview
+  logging, missing-stream error mapping, and existing read response bytes.
+- 2026-06-30 verification for the read-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange read_stream` compiled
+  the crate with 0 matching tests; `cargo test -p lpe-exchange stream` passed
+  38 focused stream tests covering message body streams, attachment streams,
+  associated configuration streams, stream region ROPs, and FastTransfer stream
+  shapes; `cargo test -p lpe-exchange properties` passed 247 broader property
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 14,760
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,350 lines and `mapi/dispatch/properties.rs` at 903 lines. `rg`
+  confirmed `append_read_stream_response`, associated-configuration read
+  diagnostics, rule-organizer read diagnostics, and `rop_read_stream_response`
+  now live in the focused properties module, with dispatch reduced to a thin
+  call.
+- 2026-06-30: Advanced MR-002/MR-008 by moving `RopOpenStream` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_open_stream_response`. The move preserves missing-input-handle
+  diagnostics, input object/folder debug metadata, associated-configuration
+  stream open counters, Outlook view failure trace events, rule-organizer
+  stream detection, stream data lookup, writable target preservation, output
+  handle allocation, stream preview logging, response handle-slot updates, and
+  existing open-stream response bytes.
+- 2026-06-30 verification for the open-stream routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange stream` passed 38
+  focused stream tests covering message body streams, attachment streams,
+  associated configuration streams, stream region ROPs, and FastTransfer stream
+  shapes; `cargo test -p lpe-exchange properties` passed 247 broader property
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 14,618
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,208 lines and `mapi/dispatch/properties.rs` at 1,072 lines. `rg`
+  confirmed `append_open_stream_response`, associated-configuration open
+  diagnostics, rule-organizer open diagnostics, and `rop_open_stream_response`
+  now live in the focused properties module, with dispatch reduced to a thin
+  async call.
+- 2026-06-30: Advanced MR-002/MR-020 by moving `RopSetReceiveFolder`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/folders.rs`
+  as `append_set_receive_folder_response`. The move preserves private-logon
+  handle validation, missing folder/message-class invalid-parameter mapping,
+  supported message-class validation, canonical fixed receive-folder mapping
+  checks, RCA diagnostics for accepted canonical mappings, and existing
+  success/error response bytes. Arbitrary configurable receive-folder routing
+  remains unsupported until it has a canonical model.
+- 2026-06-30 verification for the set-receive-folder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange receive_folder` passed
+  12 focused tests covering Get/SetReceiveFolder private-logon validation,
+  message-class matching, canonical calendar mapping acceptance, custom
+  calendar mapping acceptance, and noncanonical mapping rejection; `cargo test
+  -p lpe-exchange calendar` passed 145 broader calendar tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 14,571
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,161 lines and `mapi/dispatch/folders.rs` at 635 lines. `rg`
+  confirmed `append_set_receive_folder_response`, canonical mapping checks,
+  and accepted-mapping diagnostics now live in the focused folders module, with
+  dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-020 by moving `RopGetReceiveFolder`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/folders.rs`
+  as `append_get_receive_folder_response`. The move preserves input handle
+  table echoing in the dispatcher, private-logon handle validation, missing
+  and invalid message-class error mapping, canonical fixed receive-folder
+  resolution, RCA diagnostics, explicit response message-class projection,
+  receive-folder verification state, post-hierarchy contract recording, and
+  existing response bytes.
+- 2026-06-30 verification for the get-receive-folder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange receive_folder` passed
+  12 focused tests covering Get/SetReceiveFolder private-logon validation,
+  message-class matching, canonical calendar mapping, custom calendar mapping,
+  noncanonical mapping rejection, and receive-folder table handling; `cargo
+  test -p lpe-exchange calendar` passed 145 broader calendar tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 14,524
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 14,114 lines and `mapi/dispatch/folders.rs` at 698 lines. `rg`
+  confirmed `append_get_receive_folder_response`, canonical receive-folder
+  resolution, receive-folder verification state, post-hierarchy contract
+  recording, and the response builder now live in the focused folders module,
+  with dispatch reduced to input-handle-table echo plus a thin call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopEmptyFolder` and
+  `RopHardDeleteMessagesAndSubfolders` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/folders.rs` as
+  `append_empty_folder_response`. The move preserves Microsoft boolean-field
+  validation, missing-handle error mapping, Recoverable Items Root rejection,
+  recoverable-folder purge delegation, public-folder purge delegation,
+  mailbox-tree hard-delete behavior, folder content hard-delete behavior,
+  content notifications for changed folders, partial-completion response
+  bytes, and existing error mapping.
+- 2026-06-30 verification for the empty-folder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange empty_folder` passed 15
+  focused tests covering canonical EWS empty-folder behavior, MAPI
+  EmptyFolder/HardDeleteMessagesAndSubfolders boolean handling, retention
+  partial completion, replay idempotency, child-folder preservation,
+  recoverable-folder rejection and purge, public-folder item deletion,
+  permission-denied behavior, notifications, and content-sync convergence;
+  `cargo test -p lpe-exchange hierarchy` passed 157 broader hierarchy tests;
+  `cargo test -p lpe-exchange recoverable_item` passed 14 broader
+  recoverable-item tests; `cargo test -p lpe-exchange public_folder` passed 74
+  broader public-folder tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 14,470 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 14,062 lines and
+  `mapi/dispatch/folders.rs` at 766 lines. `rg` confirmed
+  `append_empty_folder_response`, recoverable-folder purge delegation,
+  public-folder purge delegation, mailbox-tree hard-delete delegation, folder
+  hard-delete delegation, and content notification recording now live in the
+  focused folders module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopDeleteFolder` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/folders.rs` as
+  `append_delete_folder_response`. The move preserves DeleteFolder flag
+  validation, missing-handle and missing-target error mapping, system-mailbox
+  rejection, advertised special-folder no-op/denied/tombstone behavior,
+  public-folder deletion through the canonical store, persisted and staged
+  search-folder deletion, retry acknowledgement for deleted search folders,
+  custom mailbox destruction, hierarchy notifications, partial-completion
+  response bytes, and RCA diagnostics.
+- 2026-06-30 verification for the delete-folder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange delete_folder` passed
+  11 focused tests covering EWS public-folder and mailbox delete behavior,
+  MAPI custom mailbox deletion, system-mailbox rejection, local default named
+  view no-op behavior, Microsoft reserved-flag rejection, and public-folder
+  delete through the canonical store; `cargo test -p lpe-exchange hierarchy`
+  passed 157 broader hierarchy tests; `cargo test -p lpe-exchange
+  public_folder` passed 74 broader public-folder tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 14,223
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,816 lines and `mapi/dispatch/folders.rs` at 1,034 lines. `rg`
+  confirmed `append_delete_folder_response`, advertised special-folder delete
+  diagnostics, public-folder delete audit action, search-folder deletion,
+  search-folder retry acknowledgement, and custom mailbox destruction now live
+  in the focused folders module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002/MR-005 by moving `RopMoveFolder` and
+  `RopCopyFolder` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/folders.rs` as `append_folder_move_copy_response`. The move
+  preserves Microsoft boolean-field validation, source/target/folder handle
+  error mapping, blank display-name rejection, public-folder copy delegation,
+  public-folder move parent validation and canonical update, mailbox target
+  parent validation, system-folder source rejection, canonical mailbox copy and
+  move calls, MAPI identity allocation for copied folders, hierarchy
+  notifications for old and new parents, partial-completion response bytes,
+  and audit action strings.
+- 2026-06-30 verification for the folder move/copy routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange folder_move_copy`
+  passed 3 focused parser and MAPI behavior tests covering Microsoft
+  MoveFolder/CopyFolder request parsing, nonzero boolean handling, and
+  system-folder source rejection; `cargo test -p lpe-exchange hierarchy`
+  passed 157 broader hierarchy tests; `cargo test -p lpe-exchange sync` passed
+  218 broader sync tests, including custom mailbox move and hierarchy-sync
+  convergence; `cargo test -p lpe-exchange public_folder` passed 74 broader
+  public-folder tests, including public-folder copy and move through the
+  canonical store; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,957 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 13,554 lines and
+  `mapi/dispatch/folders.rs` at 1,313 lines. `rg` confirmed
+  `append_folder_move_copy_response`, public-folder copy delegation,
+  public-folder move audit action, canonical mailbox create/copy, canonical
+  mailbox update/move, and hierarchy notification recording now live in the
+  focused folders module, with dispatch reduced to a thin async call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopFastTransferSourceCopyMessages` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs` as
+  `append_fast_transfer_source_copy_messages_response`. The move preserves
+  folder-handle validation, requested message-id filtering, deterministic
+  selected-message ordering, attachment fact collection, FastTransfer message
+  list buffer generation, synchronization-source handle allocation, handle
+  slot updates, response bytes, and output handle tracking.
+- 2026-06-30 verification for the FastTransfer source copy-messages routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  fast_transfer_copy_messages` passed 2 focused tests covering Microsoft
+  FastTransfer copy-message markers and requested canonical message filtering;
+  `cargo test -p lpe-exchange sync` passed 218 broader sync/FastTransfer
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,917
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,514 lines and `mapi/dispatch/sync_import.rs` at 938 lines. `rg`
+  confirmed `append_fast_transfer_source_copy_messages_response`,
+  message-list buffer generation, attachment fact collection,
+  `SynchronizationSource` handle allocation, and the response builder now live
+  in the focused sync/import module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving the `RopFastTransferSourceCopyFolder`,
+  `RopFastTransferSourceCopyTo`, and `RopFastTransferSourceCopyProperties`
+  response routing out of `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs`
+  as `append_fast_transfer_source_copy_response`. The move preserves missing
+  input-handle error mapping, unsupported manifest error mapping, canonical
+  FastTransfer manifest selection, `SynchronizationSource` handle allocation,
+  output handle slot updates, response bytes, and output handle tracking.
+- 2026-06-30 verification for the FastTransfer source copy routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  fast_transfer_copy` passed 9 focused tests covering folder, FAI, message,
+  copy-to, copy-properties, and requested-message FastTransfer copy behavior;
+  `cargo test -p lpe-exchange sync` passed 218 broader sync/FastTransfer
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,879
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,476 lines and `mapi/dispatch/sync_import.rs` at 999 lines. `rg`
+  confirmed `append_fast_transfer_source_copy_response`, manifest selection,
+  `SynchronizationSource` handle allocation, and the response builder now live
+  in the focused sync/import module, with dispatch reduced to a thin call for
+  the three source-copy ROPs.
+- 2026-06-30: Advanced MR-002 by moving `RopFastTransferDestinationConfigure`
+  and the `RopFastTransferDestinationPutBuffer` /
+  `RopFastTransferDestinationPutBufferExtended` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs` as
+  `append_fast_transfer_destination_configure_response` and
+  `append_fast_transfer_destination_put_buffer_response`. The move preserves
+  target-handle validation, destination target folder validation,
+  destination-handle allocation, marker/subobject rejection that terminates
+  the current buffer, missing destination-handle error mapping, partial
+  property-buffer termination, unsupported property-target error mapping,
+  staged buffer commit behavior, uploaded byte counts, and response bytes.
+- 2026-06-30 verification for the FastTransfer destination routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  fast_transfer_destination` passed 6 focused tests covering wrong target
+  handles, PutBufferExtended parsing, canonical email upload, unsupported
+  property types, partial property buffers, and marker/subobject rejection;
+  `cargo test -p lpe-exchange sync` passed 218 broader sync/FastTransfer
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,808
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,405 lines and `mapi/dispatch/sync_import.rs` at 1,092 lines. `rg`
+  confirmed destination configure routing, destination put-buffer routing,
+  marker checks, staged destination buffer handling, buffer commit, and
+  response generation now live in the focused sync/import module, with
+  dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002 by moving `RopSynchronizationUploadStateStreamBegin`
+  and `RopSynchronizationUploadStateStreamContinue` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs` as
+  `append_upload_state_stream_begin_response` and
+  `append_upload_state_stream_continue_response`. The move preserves source
+  and collector sync-context validation, upload-state property tag staging,
+  upload buffer reset, stream-data append behavior, RCA diagnostic fields,
+  success responses, and invalid-context error mapping. The larger
+  `RopSynchronizationUploadStateStreamEnd` branch deliberately remains local
+  because it owns checkpoint gating and transfer-buffer selection.
+- 2026-06-30 verification for the upload-state begin/continue routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_upload_state` passed 2 focused tests covering server transfer-state
+  return behavior and multiple uploaded state streams; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync/FastTransfer tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,654
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,251 lines and `mapi/dispatch/sync_import.rs` at 1,278 lines. `rg`
+  confirmed upload-state begin and continue routing, property-tag staging,
+  buffer clearing, chunk preview diagnostics, and success response generation
+  now live in the focused sync/import module, with dispatch reduced to thin
+  calls for the two ROPs.
+- 2026-06-30: Advanced MR-002 by moving `RopSynchronizationGetTransferState`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_import.rs` as
+  `append_synchronization_get_transfer_state_response`. The move preserves
+  source/collector sync-context validation, dynamic state-token construction
+  for empty content and hierarchy states, deleted-advertised special-folder
+  exclusion, attachment-aware sync-state token generation, uploaded client
+  state checkpoint blocking, output handle allocation, success response bytes,
+  and invalid-context error mapping. `RopSynchronizationUploadStateStreamEnd`
+  remains local because it still owns the upload-state checkpoint gate and
+  transfer-buffer selection.
+- 2026-06-30 verification for the transfer-state routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange transfer_state` passed
+  10 focused tests covering transfer-state handles, Microsoft examples, and
+  uploaded-client-state regression cases; `cargo test -p lpe-exchange sync`
+  passed 218 broader sync/FastTransfer tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,565 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 13,162 lines and
+  `mapi/dispatch/sync_import.rs` at 1,386 lines. `rg` confirmed
+  `append_synchronization_get_transfer_state_response`,
+  `rop_synchronization_get_transfer_state_response`, and uploaded-state delta
+  anchor gating now live in the focused sync/import module, with dispatch
+  reduced to a thin call for the ROP.
+- 2026-06-30: Advanced MR-002 by moving `RopSynchronizationOpenCollector`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_import.rs` as
+  `append_synchronization_open_collector_response`. The move preserves input
+  folder validation, invalid-context error mapping, synchronization collector
+  handle allocation, mailbox checkpoint identity selection, checkpoint-kind
+  selection, upload/import state initialization, output handle slot updates,
+  success response bytes, and output handle tracking.
+- 2026-06-30 verification for the open-collector routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync_import` passed 17
+  focused sync-import tests covering collector-backed upload/import behavior;
+  `cargo test -p lpe-exchange sync` passed 218 broader sync/FastTransfer
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1593 tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,538
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 13,135 lines and `mapi/dispatch/sync_import.rs` at 1,426 lines. `rg`
+  confirmed `append_synchronization_open_collector_response`, collector handle
+  allocation, `sync_checkpoint_mailbox_id`, and `sync_checkpoint_kind` now live
+  in the focused sync/import module, with dispatch reduced to a thin call for
+  the ROP.
+- 2026-06-30: Advanced MR-002 by moving `RopGetPropertiesSpecific` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/properties.rs` as
+  `append_get_properties_specific_response`. The move preserves same-batch
+  created-message visibility, custom property lookup, inbox folder-type probe
+  diagnostics, named-property debug context, Outlook surface contract logging,
+  post-hierarchy session tracking, response bytes, and the dispatch-level
+  input-handle echo behavior.
+- 2026-06-30 verification for the get-properties-specific routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_properties` passed 26 focused property tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,287 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,884 lines and
+  `mapi/dispatch/properties.rs` at 1,333 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopGetPropertiesAll` and
+  `RopGetPropertiesList` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/properties.rs` as `append_get_properties_all_response` and
+  `append_get_properties_list_response`. The move preserves input-object
+  lookup, property-list response bytes, all-properties response bytes, and the
+  existing canonical snapshot inputs.
+- 2026-06-30: Advanced MR-002 by moving `RopCreateMessage` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/messages.rs` as
+  `append_create_message_response`. The move preserves folder-id resolution,
+  folder access checks, missing-folder error mapping, synthetic folder
+  allowances, initial creation/modification timestamp properties, pending object
+  selection for messages, contacts, events, tasks, notes, journal entries,
+  associated messages, conversation actions, navigation shortcuts, handle slot
+  updates, success response bytes, and output handle tracking.
+- 2026-06-30 verification for the property wrapper and create-message routing
+  splits: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_properties` passed 26 focused property tests; `cargo test -p
+  lpe-exchange create_message` passed 3 focused create-message tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 13,191
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 12,789 lines, `mapi/dispatch/messages.rs` at 1,446 lines, and
+  `mapi/dispatch/properties.rs` at 1,363 lines.

@@ -31,6 +31,10 @@ pub(in crate::mapi) fn unsupported_rop_response(rop_id: u8, handle_index: u8) ->
     rop_error_response(rop_id, handle_index, ROP_ERROR_NOT_SUPPORTED)
 }
 
+pub(in crate::mapi) fn rop_id_is_reserved(rop_id: u8) -> bool {
+    RopId::is_reserved(rop_id)
+}
+
 pub(in crate::mapi) fn rop_copy_to_null_destination_response(request: &RopRequest) -> Vec<u8> {
     rop_property_copy_null_destination_response(0x39, request)
 }

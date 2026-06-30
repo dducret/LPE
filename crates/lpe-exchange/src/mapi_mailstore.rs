@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 
-use lpe_domain::days_from_civil;
+use lpe_domain::{
+    crypto::hex_lower, days_from_civil, windows_filetime_from_signed_unix_seconds,
+    WINDOWS_FILETIME_TICKS_PER_SECOND, WINDOWS_UNIX_EPOCH_OFFSET_SECONDS,
+};
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
@@ -113,10 +116,8 @@ const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_BITMASK_COMMAND: u8 = 0x42;
 const GLOBSET_POP_COMMAND: u8 = 0x50;
 const GLOBSET_END_COMMAND: u8 = 0x00;
-const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
-const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
 const FILETIME_2026_01_01: u64 =
-    (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS as u64 + 1_767_225_600) * FILETIME_TICKS_PER_SECOND;
+    (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS + 1_767_225_600) * WINDOWS_FILETIME_TICKS_PER_SECOND;
 const VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX: u128 = 0x4c50455f_4d415049_0000_0000_0000_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,14 +295,12 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
 
 pub(crate) fn filetime_from_rfc3339_utc(value: &str) -> u64 {
     parse_rfc3339_utc_seconds(value)
-        .map(|seconds| {
-            (seconds + WINDOWS_UNIX_EPOCH_OFFSET_SECONDS).max(0) as u64 * FILETIME_TICKS_PER_SECOND
-        })
+        .map(windows_filetime_from_signed_unix_seconds)
         .unwrap_or_default()
 }
 
 pub(crate) fn filetime_from_change_number(change_number: u64) -> u64 {
-    FILETIME_2026_01_01 + (change_number % 31_536_000) * FILETIME_TICKS_PER_SECOND
+    FILETIME_2026_01_01 + (change_number % 31_536_000) * WINDOWS_FILETIME_TICKS_PER_SECOND
 }
 
 fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
@@ -3179,11 +3178,7 @@ fn decode_debug_string8z(bytes: &[u8]) -> Option<String> {
 }
 
 fn format_debug_hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    hex_lower(bytes)
 }
 
 fn format_debug_hex_preview(bytes: &[u8], max_len: usize) -> String {

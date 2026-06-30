@@ -15,7 +15,10 @@ use crate::mapi_store::{
     MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage,
     MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
-use lpe_domain::days_from_civil;
+use lpe_domain::{
+    crypto::hex_lower, days_from_civil, unix_seconds_from_windows_filetime,
+    windows_filetime_from_unix_seconds, WINDOWS_FILETIME_TICKS_PER_SECOND,
+};
 use lpe_storage::SearchFolderDefinition;
 
 mod attachments;
@@ -596,11 +599,7 @@ fn category_value_to_string(value: &MapiValue) -> String {
 }
 
 fn format_bytes_hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    hex_lower(bytes)
 }
 
 fn categorized_email_rows(
@@ -2813,18 +2812,8 @@ fn debug_expected_container_class(folder_id: u64) -> Option<&'static str> {
 fn format_debug_binary(value: Option<&[u8]>) -> String {
     match value {
         Some(bytes) => {
-            let head = bytes
-                .iter()
-                .take(12)
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<Vec<_>>()
-                .join("");
-            let tail = bytes
-                .iter()
-                .skip(bytes.len().saturating_sub(6))
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<Vec<_>>()
-                .join("");
+            let head = hex_lower(&bytes[..bytes.len().min(12)]);
+            let tail = hex_lower(&bytes[bytes.len().saturating_sub(6)..]);
             format!("present:{}:{}..{}", bytes.len(), head, tail)
         }
         None => "missing".to_string(),
@@ -8410,7 +8399,7 @@ pub(in crate::mapi) fn event_start_filetime(event: &AccessibleEvent) -> u64 {
 
 pub(in crate::mapi) fn event_end_filetime(event: &AccessibleEvent) -> u64 {
     let start = event_start_filetime(event);
-    let duration = event.duration_minutes.max(1) as u64 * 60 * 10_000_000;
+    let duration = event.duration_minutes.max(1) as u64 * 60 * WINDOWS_FILETIME_TICKS_PER_SECOND;
     start.saturating_add(duration)
 }
 
@@ -8458,15 +8447,11 @@ pub(in crate::mapi) fn filetime_to_date_time(filetime: i64) -> Option<(String, S
 }
 
 pub(in crate::mapi) fn unix_seconds_to_filetime(unix_seconds: u64) -> u64 {
-    unix_seconds
-        .saturating_add(11_644_473_600)
-        .saturating_mul(10_000_000)
+    windows_filetime_from_unix_seconds(unix_seconds)
 }
 
 pub(in crate::mapi) fn filetime_to_unix_seconds(filetime: u64) -> Option<u64> {
-    filetime
-        .checked_div(10_000_000)?
-        .checked_sub(11_644_473_600)
+    unix_seconds_from_windows_filetime(filetime)
 }
 
 pub(in crate::mapi) fn unread_from_read_flags(read_flags: Option<u8>) -> Option<bool> {
