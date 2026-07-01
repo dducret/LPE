@@ -65,14 +65,14 @@ working tree proves, not the desired end state.
 | MR-003 | Partial | Spooler/advisory behavior is documented in `docs/architecture/mapi-spooler-advisory-model.md`, and `dispatch/submission.rs` now owns submission response-policy helpers. | Full submission ROP execution extraction into `dispatch/submission.rs` is not yet complete. |
 | MR-004 | Partial | `service/http_routes.rs` now owns endpoint path constants, RPC proxy path list, and top-level route assembly, with focused route/RPC/MAPI verification recorded in progress notes. | Extract EWS SOAP operation dispatch without endpoint, auth, or response changes. |
 | MR-005 | Partial | EWS mail, contact, calendar recurrence, task, reminder, room, rules, attachment, OOF, user-configuration, MailTips, Mail Apps, and ConvertId parser/helper slices are recorded in progress notes. | Continue extracting EWS item-family parsers and handlers while preserving canonical mutations and SOAP responses. |
-| MR-006 | Pending | No completed `ExchangeStore` split is recorded in this backlog. | Split `crates/lpe-exchange/src/store.rs` by storage family while preserving trait semantics. |
+| MR-006 | Complete for threshold split | `crates/lpe-exchange/src/store.rs` is below the 1,500-line production-source threshold. `store/types.rs` owns Exchange/MAPI/EWS store DTOs, `store/implementation.rs` keeps the `Storage` trait implementation wiring, and `store/storage_impl/` contains focused method/helper fragments split at existing method boundaries. Canonical mutation calls still delegate to the same `lpe-storage` APIs; no trait method semantics changed. | Keep future Exchange storage behavior additions in focused store implementation fragments; a future semantic pass can replace the compile-in fragments with narrower storage-family traits only if fake stores and protocol adapters stay aligned. |
 | MR-007 | Partial | `mapi/tables/columns.rs` now owns pure default table column/property-tag lists, while row serialization and table behavior remain in `mapi/tables.rs`. Focused table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `tables.rs` by row families and prove table row output is unchanged. |
 | MR-008 | Partial | `mapi/properties/named.rs` owns named-property data shapes and well-known ID mapping, `folder.rs` owns folder/logon bootstrap property helpers, `values.rs` owns `MapiValue`, and `restrictions.rs` owns `MapiSortOrder`/`MapiRestriction`. Focused property/restriction/table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
 | MR-009 | Complete for hub split | `mapi/rop.rs` and `mapi/rop/parse.rs` are now below the 1,500-line production target, with parser, typed request, request-reader, response, restriction, recipient, property-row, debug, error, object-id, receive-folder, logon, named-property, attachment, and buffer helpers in focused modules. | Keep future ROP behavior additions in focused modules; preserve unsupported/reserved ROP behavior. |
 | MR-010 | Pending | No completed MAPI mailstore/store projection split is recorded in this backlog. | Split projection and Outlook metadata boundaries while preserving IDs, source keys, change keys, and sync facts. |
-| MR-011 | Partial | IMAP flag, IMAP expunge, and JMAP/EWS/MAPI/ActiveSync hard-delete membership mutation SQL now lives in `crates/lpe-storage/src/mail_items.rs`; message attachment add/delete mutation SQL now lives in `crates/lpe-storage/src/attachments.rs`. This preserves IMAP `Deleted`, CONDSTORE, tombstones, recoverable items, attachment metadata changes, modseq allocation, count recalculation, mail change-log, audit, and change emission behavior while moving canonical mutations out of protocol projection code. | Continue splitting `crates/lpe-storage/src/protocols.rs` while preserving exports and serialized output. |
-| MR-012 | Pending | No completed blob-store split is recorded. | Split `blob_store.rs` and verify placement, migration, cleanup, and hash behavior. |
-| MR-013 | Pending | No completed ActiveSync service split is recorded. | Split ActiveSync service without WBXML/status/auth/sync-key changes. |
+| MR-011 | Complete for threshold split | IMAP flag, IMAP expunge, and JMAP/EWS/MAPI/ActiveSync hard-delete membership mutation SQL now lives in `crates/lpe-storage/src/mail_items.rs`; message attachment add/delete mutation SQL now lives in `crates/lpe-storage/src/attachments.rs`; canonical Outlook search-folder definitions and CRUD now live in `crates/lpe-storage/src/search_folders.rs`; mailbox hierarchy, subscription, system-folder bootstrap, create/update/rename/delete, and retention-folder storage now live in `crates/lpe-storage/src/mailboxes.rs`; ActiveSync device state, sync cursor state, item fingerprint projections, and attachment read helpers now live in `crates/lpe-storage/src/activesync.rs`; IMAP message projection DTOs and visible-message fetch SQL now live in `crates/lpe-storage/src/imap.rs`; JMAP stored-query state and Email/Thread ID query projection now live in `crates/lpe-storage/src/jmap_queries.rs`; JMAP quota/blob projection, protected Bcc raw-message stripping, and temporary upload blob storage now live in `crates/lpe-storage/src/jmap_blobs.rs`. This preserves IMAP `Deleted`, CONDSTORE, tombstones, recoverable items, attachment metadata changes, search-folder change-log rows, mailbox change-log rows, modseq allocation, count recalculation, mail change-log, audit, change emission behavior, ActiveSync cursor/projection semantics, IMAP visible-message ordering, JMAP query-state/hash semantics, quota accounting SQL, protected Bcc projection behavior, and temporary upload blob behavior while moving canonical mutations out of protocol projection code and separating adapter session/projection state. `crates/lpe-storage/src/protocols.rs` is now below the 1,500-line production-source threshold. | Keep future storage protocol projection additions in focused modules; preserve public exports and serialized output. |
+| MR-012 | Complete for threshold split | `crates/lpe-storage/src/blob_store.rs` is below the 1,500-line production-source threshold. `blob_store/types.rs` owns blob-store data shapes and small conversion helpers; `blob_store/io.rs` owns durable read/stat/verify and placement byte I/O helpers; `blob_store/tests.rs` owns the focused blob-store tests. Placement routing, migration state transitions, cleanup guards, quota accounting, rollback windows, and hash semantics are preserved. | Keep future blob lifecycle behavior additions in focused modules; deeper metadata, placement, migration, cleanup, and verification splits remain useful but are no longer required for the production line-count threshold. |
+| MR-013 | Complete for threshold split | `crates/lpe-activesync/src/service.rs` is no longer reported by the oversized-source check. Focused modules now own Ping, Search, MoveItems, ItemOperations, GetItemEstimate, SendMail/SmartReply/SmartForward, FolderSync/Create/Delete/Update, Provision, application-data parsing, body-preference parsing, MIME validation, and shared sync-state helpers. Canonical mutation calls remain in shared storage paths, including `move_jmap_email_from_mailbox`, `submit_message`, mailbox create/update/delete APIs, contact/calendar upsert APIs, draft APIs, read-state updates, and delete/trash APIs. | Keep future ActiveSync behavior additions in focused modules; a future semantic pass can still split the remaining Sync mutation methods further if needed. |
 | MR-014 | Complete for threshold split | `mapi/transport.rs` is below the 1,500-line production target. `mapi/transport/headers.rs` owns pure request/header helpers, `mapi/transport/cookies.rs` owns cookie and sequence-cookie helpers, `mapi/transport/diagnostics.rs` owns Connect, post-hierarchy/bootstrap, and disconnect diagnostics, and `mapi/transport/tests.rs` owns the transport unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep future session, replay, request-validation, and response-envelope behavior in focused modules instead of growing the hub again. |
 | MR-015 | Complete for threshold split | `mapi/nspi.rs` is below the 1,500-line production target. `mapi/nspi/special_tables.rs` owns GetSpecialTable/GetHierarchyInfo row projection, `mapi/nspi/diagnostics.rs` owns RCA/debug summaries, `mapi/nspi/property_values.rs` owns property tags/value encoding and NSPI identity projection helpers, and `mapi/nspi/tests.rs` owns the NSPI unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep Microsoft-specific lookup and matching local unless a future split can preserve those rules exactly. |
 | MR-016 | Pending | The audit records prior SMTP reductions, but this backlog does not record a completed current slice. | Continue splitting `LPE-CT/src/smtp.rs` and verify SMTP semantics. |
@@ -122,27 +122,194 @@ of silently losing them.
 | --- | ---: | --- |
 | `LPE-CT/web/app.js` | 5,593 | Not covered by MR-001 through MR-027. Needs a future LPE-CT admin UI module split plan. |
 | `crates/lpe-storage/sql/schema.sql` | 3,455 | Not covered. Likely acceptable only if treated as dense schema source; otherwise needs schema documentation or split policy. |
-| `crates/lpe-jmap/src/service.rs` | 3,389 | Not covered. Needs a future JMAP service routing/operation-family split. |
-| `crates/lpe-exchange/src/mapi/store_adapter.rs` | 3,338 | Partially related to MR-006/MR-010, but not explicitly covered. Needs a dedicated Exchange store-adapter split if it remains oversized. |
-| `crates/lpe-admin-api/src/workspace.rs` | 3,085 | Not covered. Needs a future admin workspace API split. |
-| `crates/lpe-exchange/src/mapi/sync.rs` | 2,989 | Partially related to MR-010/MR-014, but not explicitly covered. Needs a dedicated ICS/sync split if it remains oversized. |
-| `crates/lpe-storage/src/collaboration.rs` | 2,966 | Not covered. Needs a future canonical collaboration storage split. |
 | `LPE-CT/web/styles.css` | 2,765 | Not covered. Needs a future LPE-CT admin UI stylesheet/design-system split. |
-| `crates/lpe-storage/src/submission.rs` | 2,663 | Partially related to MR-003, but storage submission itself is not explicitly covered. |
-| `crates/lpe-storage/src/admin.rs` | 2,385 | Not covered. Needs a future storage admin split. |
 | `web/client/src/styles.css` | 2,348 | Not covered. Needs a future web client stylesheet/design-system split. |
-| `crates/lpe-exchange/src/mapi/session.rs` | 2,289 | Partially related to MR-014 transport/session work, but not explicitly covered. |
-| `crates/lpe-jmap/src/mail.rs` | 2,220 | Not covered. Needs a future JMAP mail operation split. |
-| `crates/lpe-admin-api/src/client_config.rs` | 2,166 | Not covered. Needs a future admin client-config split. |
 | `LPE-CT/web/modules/i18n/messages.js` | 2,115 | Not covered. May be acceptable as dense message data if documented; otherwise split by locale/domain. |
-| `crates/lpe-storage/src/public_folders.rs` | 1,872 | Partially related to MR-022 public-folder parity docs, but no storage split is assigned. |
 | `installation/debian-trixie/update-lpe.sh` | 1,847 | Not covered. Needs a future installer/update script split or documented exception. |
 | `tools/rca_outlook_connectivity_check.py` | 1,844 | Not covered. Needs a future RCA tooling split or documented exception. |
-| `crates/lpe-imap/src/render.rs` | 1,654 | Not covered. Needs a future IMAP rendering split. |
-| `crates/lpe-storage/src/tasks.rs` | 1,646 | Not covered. Needs a future storage task split. |
-| `LPE-CT/src/reporting.rs` | 1,618 | Not covered. Needs a future reporting split. |
-| `crates/lpe-storage/src/storage_visibility.rs` | 1,559 | Not covered. Needs a future visibility/query split. |
-| `crates/lpe-jmap/src/store.rs` | 1,529 | Not covered. Needs a future JMAP store facade split. |
+
+Resolved coverage-gap notes:
+
+- 2026-07-01: `crates/lpe-exchange/src/mapi/store_adapter.rs` no longer
+  appears in `python tools/check_oversized_sources.py` after moving primitive
+  MAPI access-plan simulation and selective content-query helpers to
+  `mapi/store_adapter/access_plan.rs` and inline tests to
+  `mapi/store_adapter/tests.rs`. Canonical snapshot loading, mailbox/message
+  fetching, associated config reads, and Outlook compatibility metadata reads
+  remain in `store_adapter.rs`; no canonical state mutation path changed.
+- 2026-07-01 verification for the MAPI store-adapter split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange store_adapter --quiet`
+  passed 44 focused tests; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_empty_folder_rops_accept_nonzero_boolean_fields
+  --quiet` passed; `cargo test -p lpe-exchange --quiet` passed 1,594 tests and
+  doc tests. `python tools/check_oversized_sources.py` passed in warning mode
+  and no longer lists `crates/lpe-exchange/src/mapi/store_adapter.rs`; the
+  remaining oversized offender list starts with
+  `crates/lpe-exchange/src/mapi_mailstore.rs`.
+- 2026-07-01: `crates/lpe-exchange/src/store.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving Exchange/MAPI/EWS
+  store DTOs to `store/types.rs`, keeping the trait implementation hub in
+  `store/implementation.rs`, and splitting the existing `Storage`
+  implementation body into focused compile-in fragments under
+  `store/storage_impl/`. The split preserves the `ExchangeStore` trait surface
+  and keeps canonical mutations delegated to the same storage APIs for
+  submission, drafts, moves, deletes, flags, contacts, calendar, tasks, public
+  folders, rules, recoverable items, and Outlook metadata persistence.
+- 2026-07-01 verification for the Exchange store threshold split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange store --quiet` passed
+  201 focused store tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests and doc tests. `python tools/check_oversized_sources.py` passed in
+  warning mode and no longer lists `crates/lpe-exchange/src/store.rs`; an
+  include-untracked production-source scan also leaves the new store fragments
+  below 1,500 lines. Current direct line counts: `store.rs` 965,
+  `store/types.rs` 568, `store/implementation.rs` 12, and the largest
+  `store/storage_impl/` fragment is `mapi_metadata.rs` at 1,446 lines.
+- 2026-07-01: `crates/lpe-exchange/src/mapi/sync.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after extracting MAPI sync wire
+  response builders to `mapi/sync/responses.rs`, hierarchy/sync-scope helper
+  logic to `mapi/sync/scope.rs`, and inline sync tests to
+  `mapi/sync/tests.rs`. The split preserves the existing `sync` module exports
+  used by dispatch, tables, properties, and tests. FastTransfer/ICS manifest
+  construction, canonical object projection, checkpoint selection, upload-state
+  handling, and canonical mailbox/public-folder/calendar/contact/task mapping
+  remain behavior-preserving; no MAPI-local mailbox truth was introduced.
+- 2026-07-01 verification for the MAPI sync threshold split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync --quiet` passed
+  218 focused sync tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests. The previous unused `long_term_id_from_object_id` import warning in
+  `mapi/sync.rs` was removed as fallout from moving the tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer lists
+  `crates/lpe-exchange/src/mapi/sync.rs`. Direct physical line counts after
+  extraction: `crates/lpe-exchange/src/mapi/sync.rs` 1,248 lines,
+  `crates/lpe-exchange/src/mapi/sync/responses.rs` 87 lines,
+  `crates/lpe-exchange/src/mapi/sync/scope.rs` 260 lines, and
+  `crates/lpe-exchange/src/mapi/sync/tests.rs` 1,244 lines.
+- 2026-07-01: `crates/lpe-exchange/src/mapi/session.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after extracting session-only
+  declarations to `mapi/session/types.rs`, in-memory session lifecycle,
+  reconnect, replay-cache, and RPC/HTTP context helpers to
+  `mapi/session/lifecycle.rs`, and inline session tests to
+  `mapi/session/tests.rs`. The split preserves the existing `session` module
+  exports used by MAPI transport, NSPI, dispatch, RPC proxy endpoints, and
+  tests. It does not move mailbox, submission, folder, calendar, contact, or
+  public-folder canonical state; the extracted code remains bounded
+  authenticated MAPI transport/session state.
+- 2026-07-01 verification for the MAPI session threshold split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange session --quiet`
+  passed 52 focused session tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests. At the time of this split, the only warning was the
+  pre-existing unused `long_term_id_from_object_id` import in `mapi/sync.rs`;
+  that warning was removed by the later MAPI sync split recorded above. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer lists
+  `crates/lpe-exchange/src/mapi/session.rs`. Direct physical line counts after
+  extraction: `crates/lpe-exchange/src/mapi/session.rs` 942 lines,
+  `crates/lpe-exchange/src/mapi/session/lifecycle.rs` 347 lines,
+  `crates/lpe-exchange/src/mapi/session/types.rs` 411 lines, and
+  `crates/lpe-exchange/src/mapi/session/tests.rs` 418 lines.
+- 2026-07-01: `crates/lpe-jmap/src/service.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after extracting behavior-preserving
+  JMAP service modules: `service/helpers.rs` for primitive request/projection
+  helpers and state fingerprints, `service/state_objects.rs` for canonical
+  object-state/change response assembly, `service/canonical.rs` for generic
+  canonical get/query/change/import wrappers, and `service/blobs.rs` for
+  upload/download methods. The split deliberately leaves routing,
+  authentication, method dispatch, and canonical mutation call sites unchanged
+  in `service.rs`; no JMAP-local mailbox, submission, or collaboration state
+  path was introduced.
+- 2026-07-01 verification for the JMAP service threshold split: `cargo fmt
+  --package lpe-jmap`; `cargo test -p lpe-jmap --quiet` passed 183 tests with
+  1 ignored test and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and no longer lists `crates/lpe-jmap/src/service.rs`.
+  Direct physical line counts after extraction:
+  `crates/lpe-jmap/src/service.rs` 1,369 lines,
+  `crates/lpe-jmap/src/service/blobs.rs` 121 lines,
+  `crates/lpe-jmap/src/service/canonical.rs` 586 lines,
+  `crates/lpe-jmap/src/service/helpers.rs` 833 lines, and
+  `crates/lpe-jmap/src/service/state_objects.rs` 383 lines.
+- 2026-07-01: `crates/lpe-storage/src/storage_visibility.rs` no longer appears
+  in `python tools/check_oversized_sources.py` after moving its inline test
+  module to `crates/lpe-storage/src/storage_visibility/tests.rs`. Runtime
+  storage health, migration, cleanup, and metadata diagnostics code is
+  unchanged.
+- 2026-07-01: `crates/lpe-jmap/src/store.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving pure JMAP Share
+  projection and parser helpers to `crates/lpe-jmap/src/store/shares.rs`.
+  Canonical share mutation calls remain in the `Storage` adapter.
+- 2026-07-01: `crates/lpe-imap/src/render.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving its inline render
+  tests to `crates/lpe-imap/src/render/tests.rs`. IMAP rendering code and
+  response output remain unchanged.
+- 2026-07-01: `crates/lpe-storage/src/tasks.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving task DTOs and row
+  mapping helpers to `crates/lpe-storage/src/tasks/types.rs`. Canonical task,
+  task-list, grant, rights, audit, and change-log mutation SQL remains in
+  `tasks.rs`.
+- 2026-07-01: `crates/lpe-storage/src/public_folders.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving public-folder DTOs,
+  access-check helpers, select-SQL builders, row mappers, and public-folder
+  change-log helper methods to `crates/lpe-storage/src/public_folders/`.
+  Canonical public-folder tree, folder, item, permission, replica, and
+  per-user-state mutation methods remain in `public_folders.rs`, and the
+  schema contract now checks the combined public-folder module sources for
+  canonical replay coverage.
+- 2026-07-01: `LPE-CT/src/reporting.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving its inline reporting
+  tests to `LPE-CT/src/reporting/tests.rs`. Runtime reporting, quarantine
+  digest, audit-history, retention, and local LPE-CT custody behavior remains
+  unchanged.
+- 2026-07-01: `crates/lpe-storage/src/admin.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving read-only dashboard
+  projection code to `crates/lpe-storage/src/admin/dashboard.rs`, account,
+  mailbox, domain, alias, and PST provisioning methods to
+  `crates/lpe-storage/src/admin/provisioning.rs`, and pure mail-flow, trace,
+  rule-summary, unsupported-feature, and count helpers to
+  `crates/lpe-storage/src/admin/helpers.rs`. Canonical admin tenant,
+  account, mailbox, domain, alias, audit, Sieve, settings, and trace behavior
+  remains unchanged, and schema contracts now check the combined admin module
+  sources where account/domain/mailbox creation evidence moved.
+- 2026-07-01: `crates/lpe-storage/src/submission.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving submission DTOs,
+  sender/delegation access types, recipient normalization helpers, phase-order
+  tests, and mailbox/sender delegation storage methods to
+  `crates/lpe-storage/src/submission/`. Canonical draft save, submit, Sent
+  creation, protected Bcc persistence, outbound queue handoff, draft deletion,
+  sender-right authorization, audit, and change-log behavior remains
+  unchanged, and schema contracts now check the combined submission module
+  sources for canonical rights and change-log evidence.
+- 2026-07-01: `crates/lpe-storage/src/collaboration.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving collaboration DTOs,
+  collection ID helpers, free/busy projection helpers, free/busy tests, and
+  contact/calendar/task grant storage methods to
+  `crates/lpe-storage/src/collaboration/`. Canonical contact, calendar, and
+  task object mutation methods remain in `collaboration.rs`; grant methods
+  still use the concrete canonical `contact_book_grants`, `calendar_grants`,
+  and `task_list_grants` tables with audit, rights journal, and object-level
+  `mail_change_log` evidence checked across the combined collaboration module
+  sources.
+- 2026-07-01: `crates/lpe-jmap/src/mail.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving JMAP mail query,
+  property, body-value, submission, identity, thread, snippet, quota, keyword,
+  and follow-up projection helpers to `crates/lpe-jmap/src/mail/values.rs`,
+  RFC822 import parsing/write-guard helpers to
+  `crates/lpe-jmap/src/mail/imports.rs`, and import attachment validation to
+  `crates/lpe-jmap/src/mail/import_validation.rs`. JMAP method handlers,
+  query-state persistence, canonical draft save/update, canonical submission,
+  protected Bcc projection conditions, Magika validation points, and storage
+  calls remain behavior-preserving.
+- 2026-07-01: `crates/lpe-admin-api/src/client_config.rs` no longer appears
+  in `python tools/check_oversized_sources.py` after moving its inline
+  autoconfiguration tests to `crates/lpe-admin-api/src/client_config/tests.rs`.
+  Runtime route registration, public host/scheme inference, Thunderbird
+  autoconfig, JMAP discovery, POX/JSON/SOAP Autodiscover rendering, MAPI/EXPR
+  publication gates, ActiveSync version publication, and client SMTP suppression
+  behavior remain unchanged.
+- 2026-07-01: `crates/lpe-admin-api/src/workspace.rs` no longer appears in
+  `python tools/check_oversized_sources.py` after moving its inline workspace
+  tests to `crates/lpe-admin-api/src/workspace/tests.rs` and public-folder
+  workspace route handlers to `crates/lpe-admin-api/src/workspace/public_folders.rs`.
+  Runtime route names remain re-exported from `workspace`, and account
+  authentication, public-folder storage calls, audit action strings, request
+  mapping, and response shapes remain unchanged.
 
 ## Suggested Execution Order
 
@@ -9891,3 +10058,349 @@ of silently losing them.
   mapi_over_http_create_attachment_saves_canonical_attachment_from_properties`
   passed 1 focused MAPI attachment-save test, with only the known unrelated
   unused-import warning in `crates/lpe-exchange/src/mapi/sync.rs`.
+- 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving
+  Outlook search-folder definition types, user-saved CRUD, and Exchange
+  built-in search-folder bootstrap from `crates/lpe-storage/src/protocols.rs`
+  into `crates/lpe-storage/src/search_folders.rs`. The public
+  `SearchFolderDefinition`, `UpsertSearchFolderInput`, and `Storage`
+  method surface is preserved, while the SQL that persists
+  `search_folder_definition` objects, rejects built-in deletes, writes
+  tombstones, allocates search modseqs, inserts mail change-log rows, and emits
+  canonical search changes now belongs to a canonical search-folder storage
+  module.
+- 2026-07-01 verification for the canonical search-folder slice: `cargo fmt
+  --package lpe-storage`; `cargo test -p lpe-storage search_folder` passed the
+  focused storage contract against the new `search_folders.rs` owner; `cargo
+  test -p lpe-storage` passed 179 unit tests, 1 runtime schema drift test, and
+  doc tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange
+  search_folder` passed 29 focused Outlook search-folder tests; and
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed 1,594 tests
+  and doc tests, with only the known unrelated unused-import warning in
+  `crates/lpe-exchange/src/mapi/sync.rs`. Line counts after extraction:
+  `crates/lpe-storage/src/protocols.rs` 4,547 lines and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving
+  mailbox definition types, mailbox listing, IMAP mailbox bootstrap, JMAP/IMAP
+  create/update/rename/delete paths, subscription persistence, hierarchy
+  validation, UIDVALIDITY allocation, and managed retention-folder storage from
+  `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/mailboxes.rs`. The public `JmapMailbox`,
+  `JmapMailboxCreateInput`, `JmapMailboxUpdateInput`, and
+  `ManagedRetentionFolderCreateInput` exports remain stable through
+  `crates/lpe-storage/src/lib.rs`, while mailbox tombstones, mailbox change-log
+  rows, audit rows, and canonical mail-change emission now belong to the
+  canonical mailbox storage module.
+- 2026-07-01 verification for the canonical mailbox slice: `cargo fmt --package
+  lpe-storage`; `cargo test -p lpe-storage mailbox` passed 18 focused mailbox
+  and schema-contract tests; `cargo test -p lpe-storage` passed 179 unit tests,
+  1 runtime schema drift test, and doc tests; `cargo test -p lpe-jmap` passed
+  183 tests with 1 ignored benchmark and doc tests; `cargo test -p lpe-imap`
+  passed 52 tests and doc tests; `cargo test -p lpe-activesync` passed 91 tests
+  with 1 ignored benchmark and doc tests; and `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed 1,594 tests and doc tests, with only the
+  known unrelated unused-import warning in
+  `crates/lpe-exchange/src/mapi/sync.rs`. Line counts after extraction:
+  `crates/lpe-storage/src/protocols.rs` 3,238 lines,
+  `crates/lpe-storage/src/mailboxes.rs` 1,324 lines, and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Advanced MR-011 by moving ActiveSync storage/projection state
+  from `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/activesync.rs`. The moved module owns
+  `ActiveSyncDeviceState`, `ActiveSyncSyncState`, `ActiveSyncItemState`,
+  ActiveSync attachment read models, device policy/touch state, sync cursor
+  persistence, item fingerprint projections for mail/contacts/calendar, and
+  ActiveSync attachment content lookup. The public exports remain stable
+  through `crates/lpe-storage/src/lib.rs`; canonical mailbox, contact,
+  calendar, and task truth remains in the existing canonical storage modules.
+- 2026-07-01 verification for the ActiveSync storage/projection split: `cargo
+  fmt --package lpe-storage`; `cargo test -p lpe-storage` passed 179 unit
+  tests, 1 runtime schema drift test, and doc tests; `cargo test -p
+  lpe-activesync` passed 91 tests with 1 ignored benchmark and doc tests; and
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed 1,594 tests
+  and doc tests, with only the known unrelated unused-import warning in
+  `crates/lpe-exchange/src/mapi/sync.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-storage/src/protocols.rs` at 2,434 tracked source lines. Direct
+  physical line counts after extraction: `crates/lpe-storage/src/protocols.rs`
+  2,434 lines, `crates/lpe-storage/src/activesync.rs` 820 lines,
+  `crates/lpe-storage/src/mailboxes.rs` 1,324 lines, and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Advanced MR-011 by moving the IMAP message projection DTOs and
+  visible-message fetch SQL from `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/imap.rs`. This includes `ImapEmail`,
+  `ImapMimePart`, `ImapMailboxState`, and `Storage::fetch_imap_emails`.
+  `crates/lpe-storage/src/lib.rs` keeps the existing public re-exports, while
+  `crates/lpe-storage/src/mailboxes.rs` continues to own IMAP mailbox
+  hierarchy/state and canonical UIDNEXT/UIDVALIDITY behavior.
+- 2026-07-01 verification for the IMAP projection split: `cargo fmt --package
+  lpe-storage`; `cargo test -p lpe-storage` passed 179 unit tests, 1 runtime
+  schema drift test, and doc tests; `cargo test -p lpe-imap` passed 52 tests
+  and doc tests; and `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed 1,594 tests and doc tests, with only the known unrelated unused-import
+  warning in `crates/lpe-exchange/src/mapi/sync.rs`. `rg` confirmed
+  `fetch_imap_emails`, `ImapEmail`, `ImapMimePart`, and `ImapMailboxState`
+  live in `imap.rs` or public re-export/import sites rather than
+  `protocols.rs`; `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-storage/src/protocols.rs` at 2,170 tracked
+  source lines. Direct physical line counts after extraction:
+  `crates/lpe-storage/src/protocols.rs` 2,170 lines,
+  `crates/lpe-storage/src/imap.rs` 273 lines,
+  `crates/lpe-storage/src/activesync.rs` 820 lines,
+  `crates/lpe-storage/src/mailboxes.rs` 1,325 lines, and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Advanced MR-011 by moving JMAP stored-query state and
+  Email/Thread ID query projection from `crates/lpe-storage/src/protocols.rs`
+  into `crates/lpe-storage/src/jmap_queries.rs`. This includes
+  `JmapEmailQuery`, `JmapThreadQuery`, `JmapStoredQueryState`,
+  `Storage::save_jmap_query_state`, `Storage::fetch_jmap_query_state`,
+  `Storage::query_jmap_email_ids`, `Storage::query_jmap_thread_ids`, and the
+  local `jmap_query_hash` helper. The public exports remain stable through
+  `crates/lpe-storage/src/lib.rs`; the moved SQL still reads canonical
+  `mail_search_documents`, `mailbox_messages`, and `messages` state without
+  adding protocol-local content ownership.
+- 2026-07-01 verification for the JMAP query projection split: `cargo fmt
+  --package lpe-storage`; `cargo test -p lpe-storage` passed 179 unit tests,
+  1 runtime schema drift test, and doc tests; `cargo test -p lpe-jmap` passed
+  183 tests with 1 ignored benchmark and doc tests; and
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed 1,594 tests
+  and doc tests, with only the known unrelated unused-import warning in
+  `crates/lpe-exchange/src/mapi/sync.rs`. `rg` confirmed the JMAP query
+  structs, query-state methods, ID-query methods, and `jmap_query_hash` now
+  live in `jmap_queries.rs` or public re-export sites rather than
+  `protocols.rs`; `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-storage/src/protocols.rs` at 1,840 tracked
+  source lines. Direct physical line counts after extraction:
+  `crates/lpe-storage/src/protocols.rs` 1,840 lines,
+  `crates/lpe-storage/src/jmap_queries.rs` 339 lines,
+  `crates/lpe-storage/src/imap.rs` 273 lines,
+  `crates/lpe-storage/src/activesync.rs` 820 lines,
+  `crates/lpe-storage/src/mailboxes.rs` 1,325 lines, and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Advanced MR-011 by moving JMAP quota/blob projection and
+  temporary upload blob storage from `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/jmap_blobs.rs`. This includes `JmapQuota`,
+  `JmapUploadBlob`, `Storage::fetch_jmap_quota`,
+  `Storage::fetch_mailbox_logical_quota_used_octets`,
+  `Storage::fetch_domain_logical_quota_used_octets`,
+  `Storage::fetch_jmap_message_blob`,
+  `Storage::fetch_jmap_message_blob_with_protected_headers`,
+  `Storage::save_jmap_upload_blob`, `Storage::fetch_jmap_upload_blob`, and the
+  protected Bcc raw-message stripping helper/test. The public exports remain
+  stable through `crates/lpe-storage/src/lib.rs`; canonical mailbox, message,
+  blob, and protected Bcc truth remains in the existing canonical tables, while
+  this module owns JMAP projection and temporary upload state only.
+- 2026-07-01 verification for the JMAP blob/quota projection split: `cargo fmt
+  --package lpe-storage`; `cargo test -p lpe-storage --quiet` passed 179 unit
+  tests, 1 runtime schema drift test, and doc tests; `cargo test -p lpe-jmap
+  --quiet` passed 183 tests with 1 ignored benchmark and doc tests; and
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange --quiet` passed
+  1,594 tests and doc tests, with only the known unrelated unused-import
+  warning in `crates/lpe-exchange/src/mapi/sync.rs`. `rg` confirmed
+  `JmapQuota`, `JmapUploadBlob`, JMAP quota/message-blob/upload-blob methods,
+  and `strip_protected_bcc_headers` now live in `jmap_blobs.rs` or public
+  re-export sites rather than `protocols.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer lists
+  `crates/lpe-storage/src/protocols.rs`; the remaining oversized offender list
+  starts with `crates/lpe-exchange/src/store.rs`. Direct physical line counts
+  after extraction: `crates/lpe-storage/src/protocols.rs` 1,491 lines,
+  `crates/lpe-storage/src/jmap_blobs.rs` 359 lines,
+  `crates/lpe-storage/src/jmap_queries.rs` 339 lines,
+  `crates/lpe-storage/src/imap.rs` 273 lines,
+  `crates/lpe-storage/src/activesync.rs` 820 lines,
+  `crates/lpe-storage/src/mailboxes.rs` 1,325 lines, and
+  `crates/lpe-storage/src/search_folders.rs` 539 lines.
+- 2026-07-01: Started MR-012 by moving blob-store data shapes and primitive row
+  conversion helpers from `crates/lpe-storage/src/blob_store.rs` into
+  `crates/lpe-storage/src/blob_store/types.rs`. The slice includes
+  `DurableBlobKind`, `PutBlobRequest`, stored blob read/stat/ref structs,
+  `BlobMigrationJob`, active/write/target placement data shapes,
+  placement-cleanup result types, `PostgresBlobStore`, blob-kind
+  normalization, migration-job row decoding, and duplicate-job constraint
+  detection. Behavior-bearing SQL, backend reads/writes, placement transitions,
+  migration copy/switch, cleanup guards, quota accounting, rollback windows,
+  and hash verification remain in `blob_store.rs`.
+- 2026-07-01 verification for the MR-012 blob-store type/helper split: `cargo
+  fmt --package lpe-storage`; `cargo test -p lpe-storage blob_store --quiet`
+  passed 28 focused blob-store tests; `cargo test -p lpe-storage --quiet`
+  passed 179 unit tests, 1 runtime schema drift test, and doc tests. `rg`
+  confirms the moved blob-store structs and helper functions now live in
+  `blob_store/types.rs`, with `blob_store.rs` importing them and preserving the
+  existing crate-internal exports used by attachment, ActiveSync, and PST
+  storage paths. `python tools/check_oversized_sources.py` passed in warning
+  mode and still reports `crates/lpe-storage/src/blob_store.rs` as oversized at
+  4,615 tracked source lines. Direct physical line counts after extraction:
+  `crates/lpe-storage/src/blob_store.rs` 4,615 lines and
+  `crates/lpe-storage/src/blob_store/types.rs` 174 lines.
+- 2026-07-01: Completed the MR-012 production threshold split by moving the
+  inline blob-store test module to `crates/lpe-storage/src/blob_store/tests.rs`
+  and durable blob read/stat/verify plus placement byte I/O helpers to
+  `crates/lpe-storage/src/blob_store/io.rs`. `blob_store.rs` retains placement
+  routing, migration state transitions, cleanup guards, quota accounting,
+  rollback windows, and the main `PostgresBlobStore` behavior surface, while
+  `io.rs` preserves the existing read/stat/verify method signatures and keeps
+  migration helper methods module-internal.
+- 2026-07-01 verification for the MR-012 threshold split: `cargo fmt --package
+  lpe-storage`; `cargo test -p lpe-storage blob_store --quiet` passed 28
+  focused blob-store tests; `cargo test -p lpe-storage --quiet` passed 179
+  unit tests, 1 runtime schema drift test, and doc tests. `rg` confirms the
+  durable blob read/stat/verify and placement I/O methods now live in
+  `blob_store/io.rs`, with `blob_store.rs` retaining only module declarations
+  and call sites for migration helpers. `python tools/check_oversized_sources.py`
+  passed in warning mode and no longer lists
+  `crates/lpe-storage/src/blob_store.rs`; the remaining oversized offender list
+  starts with `crates/lpe-exchange/src/store.rs`. Direct physical line counts
+  after extraction: `crates/lpe-storage/src/blob_store.rs` 1,426 lines,
+  `crates/lpe-storage/src/blob_store/io.rs` 396 lines,
+  `crates/lpe-storage/src/blob_store/types.rs` 174 lines, and
+  `crates/lpe-storage/src/blob_store/tests.rs` 2,801 lines.
+- 2026-07-01: Started MR-013 by moving ActiveSync Ping behavior from
+  `crates/lpe-activesync/src/service.rs` into
+  `crates/lpe-activesync/src/service/ping.rs` and read-only Search behavior
+  into `crates/lpe-activesync/src/service/search.rs`. The slice preserves the
+  documented ActiveSync MVP behavior for protocol version 16.1, Ping heartbeat
+  bounds, Ping status codes, persisted Ping settings, folder-sync-required
+  detection, canonical-change waiting, Search status/range handling, and
+  canonical JMAP mail projection. It does not change authentication,
+  provisioning policy enforcement, WBXML encoding, sync-key semantics, or
+  canonical mailbox/contact/calendar mutation paths.
+- 2026-07-01 verification for the MR-013 Ping/Search split: `cargo fmt
+  --package lpe-activesync`; `cargo test -p lpe-activesync ping --quiet`
+  passed 14 focused Ping tests; `cargo test -p lpe-activesync search --quiet`
+  passed 2 focused Search tests; `cargo test -p lpe-activesync --quiet` passed
+  91 tests with 1 ignored benchmark and doc tests. `rg` confirms
+  `handle_ping`, `PingSettings`, Ping constants, Ping helper methods,
+  `handle_search`, `search_query_text`, `parse_range`, and `trim_preview` now
+  live in focused `service/ping.rs` or `service/search.rs`, with
+  `service.rs` retaining dispatch call sites. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `crates/lpe-activesync/src/service.rs` as oversized at 3,642 tracked source
+  lines. Direct physical line counts after extraction:
+  `crates/lpe-activesync/src/service.rs` 3,642 lines,
+  `crates/lpe-activesync/src/service/ping.rs` 371 lines, and
+  `crates/lpe-activesync/src/service/search.rs` 152 lines.
+- 2026-07-01: Advanced MR-013 by moving additional ActiveSync command families
+  out of `crates/lpe-activesync/src/service.rs`: `MoveItems` into
+  `crates/lpe-activesync/src/service/move_items.rs`, `ItemOperations Fetch`
+  into `crates/lpe-activesync/src/service/item_operations.rs`, and
+  `GetItemEstimate` into
+  `crates/lpe-activesync/src/service/get_item_estimate.rs`. The slice
+  preserves MoveItems status mapping and its canonical
+  `move_jmap_email_from_mailbox` call, ItemOperations message/attachment fetch
+  over canonical storage, MIME body preference handling for item fetch, and
+  GetItemEstimate persisted sync-state lookup plus canonical collection diff
+  calculation. It does not change authentication, WBXML response encoding,
+  sync-key semantics, SendMail/SmartReply/SmartForward submission, or Sync
+  mutation behavior.
+- 2026-07-01 verification for the MR-013 MoveItems/ItemOperations/GetItemEstimate
+  split: `cargo fmt --package lpe-activesync`; `cargo test -p lpe-activesync
+  move --quiet` passed 5 focused MoveItems and move-related tests; `cargo test
+  -p lpe-activesync item_operations --quiet` passed 2 focused ItemOperations
+  tests; `cargo test -p lpe-activesync estimate --quiet` passed 2 focused
+  GetItemEstimate tests; `cargo test -p lpe-activesync --quiet` passed 91
+  tests with 1 ignored benchmark and doc tests. `rg` confirms the moved handler
+  methods now live in focused `service/move_items.rs`,
+  `service/item_operations.rs`, and `service/get_item_estimate.rs`, with
+  `service.rs` retaining dispatch call sites. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `crates/lpe-activesync/src/service.rs` as oversized at 3,255 tracked source
+  lines. Direct physical line counts after extraction:
+  `crates/lpe-activesync/src/service.rs` 3,255 lines,
+  `crates/lpe-activesync/src/service/get_item_estimate.rs` 107 lines,
+  `crates/lpe-activesync/src/service/item_operations.rs` 193 lines,
+  `crates/lpe-activesync/src/service/move_items.rs` 137 lines,
+  `crates/lpe-activesync/src/service/ping.rs` 371 lines, and
+  `crates/lpe-activesync/src/service/search.rs` 152 lines.
+- 2026-07-01: Advanced MR-013 by moving ActiveSync submission and folder
+  command families out of `crates/lpe-activesync/src/service.rs`.
+  `service/submission.rs` now owns SendMail, SmartReply, and SmartForward MIME
+  parsing/attachment validation wrappers while preserving the canonical
+  `submit_message` calls that create authoritative Sent state. `service/folders.rs`
+  now owns FolderSync, FolderCreate, FolderDelete, FolderUpdate, folder
+  mutation status mapping, folder hierarchy snapshots, and hierarchy sync-key
+  persistence while preserving canonical `create_jmap_mailbox`,
+  `destroy_jmap_mailbox`, and `update_jmap_mailbox` calls.
+- 2026-07-01 verification for the MR-013 submission/folder split: `cargo fmt
+  --package lpe-activesync`; `cargo test -p lpe-activesync send --quiet`
+  passed 7 focused send tests; `cargo test -p lpe-activesync smart --quiet`
+  passed 4 focused smart-compose tests; `cargo test -p lpe-activesync folder
+  --quiet` passed 22 focused folder tests; `cargo test -p lpe-activesync sync
+  --quiet` passed 40 focused sync tests with 1 ignored test; `cargo test -p
+  lpe-activesync ping --quiet` passed 14 focused Ping tests; `cargo test -p
+  lpe-activesync --quiet` passed 91 tests with 1 ignored benchmark and doc
+  tests. `rg` confirms folder handlers and canonical mailbox calls now live in
+  `service/folders.rs`, with dispatch call sites retained in `service.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and still
+  reports `crates/lpe-activesync/src/service.rs` as oversized at 2,400 tracked
+  source lines. Direct physical line counts after extraction:
+  `crates/lpe-activesync/src/service.rs` 2,268 lines,
+  `crates/lpe-activesync/src/service/folders.rs` 506 lines,
+  `crates/lpe-activesync/src/service/get_item_estimate.rs` 95 lines,
+  `crates/lpe-activesync/src/service/item_operations.rs` 183 lines,
+  `crates/lpe-activesync/src/service/move_items.rs` 130 lines,
+  `crates/lpe-activesync/src/service/ping.rs` 339 lines,
+  `crates/lpe-activesync/src/service/search.rs` 144 lines, and
+  `crates/lpe-activesync/src/service/submission.rs` 333 lines.
+- 2026-07-01: Advanced MR-013 by moving ActiveSync provisioning and
+  policy-required response helpers out of `crates/lpe-activesync/src/service.rs`
+  into `crates/lpe-activesync/src/service/provisioning.rs`. The slice preserves
+  the two-phase Provision shape, `x-ms-policykey` handling, enforced-mode
+  policy-required response roots/statuses, and protocol-local device policy
+  storage calls. It does not move canonical mailbox, contact, calendar, draft,
+  or submission state.
+- 2026-07-01 verification for the MR-013 provisioning split: `cargo fmt
+  --package lpe-activesync`; `cargo test -p lpe-activesync provision --quiet`
+  passed 3 focused Provision tests; `cargo test -p lpe-activesync policy
+  --quiet` passed 3 focused policy tests; `cargo test -p lpe-activesync
+  --quiet` passed 91 tests with 1 ignored benchmark and doc tests. `rg`
+  confirms `handle_provision`, `policy_key_is_current`,
+  `policy_required_response`, and protocol-local device policy store calls now
+  live in `service/provisioning.rs`, with dispatch call sites retained in
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and still reports `crates/lpe-activesync/src/service.rs` as oversized
+  at 2,229 tracked source lines. Direct physical line counts after extraction:
+  `crates/lpe-activesync/src/service.rs` 2,106 lines,
+  `crates/lpe-activesync/src/service/folders.rs` 506 lines,
+  `crates/lpe-activesync/src/service/get_item_estimate.rs` 95 lines,
+  `crates/lpe-activesync/src/service/item_operations.rs` 183 lines,
+  `crates/lpe-activesync/src/service/move_items.rs` 130 lines,
+  `crates/lpe-activesync/src/service/ping.rs` 339 lines,
+  `crates/lpe-activesync/src/service/provisioning.rs` 177 lines,
+  `crates/lpe-activesync/src/service/search.rs` 144 lines, and
+  `crates/lpe-activesync/src/service/submission.rs` 333 lines.
+- 2026-07-01: Completed the MR-013 production threshold split by moving
+  application-data parsing, body-preference/delete-mode parsing, MIME
+  attachment validation, and pure Sync state/response helpers out of
+  `crates/lpe-activesync/src/service.rs`. The new modules are
+  `service/application_data.rs`, `service/body_preferences.rs`,
+  `service/mime_validation.rs`, and `service/sync_helpers.rs`. The slice keeps
+  canonical Sync mutation methods in `service.rs` and only moves helper
+  wrappers used by those methods and by already-focused command modules.
+- 2026-07-01 verification for the MR-013 threshold split: `cargo fmt --package
+  lpe-activesync`; `cargo test -p lpe-activesync contact --quiet` passed 4
+  focused contact/parser tests; `cargo test -p lpe-activesync calendar
+  --quiet` passed 3 focused calendar tests; `cargo test -p lpe-activesync send
+  --quiet` passed 7 send/MIME tests; `cargo test -p lpe-activesync
+  item_operations --quiet` passed 2 item fetch/body-preference tests; `cargo
+  test -p lpe-activesync folder --quiet` passed 22 folder/hierarchy tests;
+  `cargo test -p lpe-activesync sync --quiet` passed 40 focused Sync tests with
+  1 ignored test; `cargo test -p lpe-activesync ping --quiet` passed 14 Ping
+  tests; `cargo test -p lpe-activesync estimate --quiet` passed 2
+  GetItemEstimate tests; `cargo test -p lpe-activesync search --quiet` passed 2
+  Search tests; and `cargo test -p lpe-activesync --quiet` passed 91 tests with
+  1 ignored benchmark and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and no longer lists
+  `crates/lpe-activesync/src/service.rs`; the remaining oversized offender
+  list starts with `crates/lpe-exchange/src/store.rs`. Direct physical line
+  counts after extraction: `crates/lpe-activesync/src/service.rs` 1,391 lines,
+  `crates/lpe-activesync/src/service/application_data.rs` 487 lines,
+  `crates/lpe-activesync/src/service/body_preferences.rs` 53 lines,
+  `crates/lpe-activesync/src/service/folders.rs` 506 lines,
+  `crates/lpe-activesync/src/service/get_item_estimate.rs` 95 lines,
+  `crates/lpe-activesync/src/service/item_operations.rs` 183 lines,
+  `crates/lpe-activesync/src/service/mime_validation.rs` 79 lines,
+  `crates/lpe-activesync/src/service/move_items.rs` 130 lines,
+  `crates/lpe-activesync/src/service/ping.rs` 339 lines,
+  `crates/lpe-activesync/src/service/provisioning.rs` 177 lines,
+  `crates/lpe-activesync/src/service/search.rs` 144 lines,
+  `crates/lpe-activesync/src/service/submission.rs` 333 lines, and
+  `crates/lpe-activesync/src/service/sync_helpers.rs` 126 lines.

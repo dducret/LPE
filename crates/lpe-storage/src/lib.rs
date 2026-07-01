@@ -1,3 +1,4 @@
+pub mod activesync;
 pub mod admin;
 pub mod attachments;
 pub mod auth;
@@ -7,9 +8,13 @@ pub mod change;
 pub mod collaboration;
 pub mod conversation_actions;
 pub mod core;
+pub mod imap;
 pub mod inbound;
+pub mod jmap_blobs;
+pub mod jmap_queries;
 pub mod mail;
 pub mod mail_items;
+pub mod mailboxes;
 mod message_ops;
 pub mod models;
 pub mod notes_journal;
@@ -18,6 +23,7 @@ pub mod protocols;
 pub mod pst;
 pub mod public_folders;
 pub mod recoverable_items;
+pub mod search_folders;
 mod shared;
 mod storage_backend;
 pub mod storage_policy;
@@ -31,6 +37,10 @@ pub mod workspace;
 #[cfg(test)]
 mod schema_contract;
 
+pub use crate::activesync::{
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
+    ActiveSyncSyncState,
+};
 pub use crate::attachments::{
     calendar_attachment_file_reference, parse_calendar_attachment_file_reference,
     CalendarEventAttachment, ClientAttachment,
@@ -58,18 +68,19 @@ pub use crate::conversation_actions::{
     ConversationAction, UpsertConversationActionInput, CONVERSATION_ACTION_VERSION,
 };
 pub use crate::core::Storage;
+pub use crate::imap::{ImapEmail, ImapMailboxState, ImapMimePart};
+pub use crate::jmap_blobs::{JmapQuota, JmapUploadBlob};
+pub use crate::jmap_queries::{JmapEmailQuery, JmapStoredQueryState, JmapThreadQuery};
+pub use crate::mailboxes::{
+    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
+};
 pub use crate::notes_journal::{
     ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,
     UpsertJournalEntryInput,
 };
 pub use crate::protocols::{
-    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
-    ActiveSyncSyncState, ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress,
-    JmapEmailFollowupUpdate, JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    JmapThreadQuery, JmapUploadBlob, ManagedRetentionFolderCreateInput, SearchFolderDefinition,
-    UpsertSearchFolderInput,
+    JmapEmail, JmapEmailAddress, JmapEmailFollowupUpdate, JmapEmailMailboxState,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapStringObjectChange,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::public_folders::{
@@ -79,6 +90,7 @@ pub use crate::public_folders::{
     PublicFolderTree, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
 pub use crate::recoverable_items::RecoverableItem;
+pub use crate::search_folders::{SearchFolderDefinition, UpsertSearchFolderInput};
 pub use crate::submission::{
     AttachmentUploadInput, CancelSubmissionResult, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,

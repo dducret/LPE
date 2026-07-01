@@ -1085,7 +1085,7 @@ impl Storage {
         collection_id: &str,
     ) -> Result<Option<ActiveSyncSyncState>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        let collection_kind = crate::protocols::activesync_collection_kind(collection_id);
+        let collection_kind = crate::activesync::activesync_collection_kind(collection_id);
         let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
             r#"
             SELECT sync_key, state_json::text AS snapshot_json

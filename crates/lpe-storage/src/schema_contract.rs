@@ -1,24 +1,36 @@
 const SCHEMA: &str = include_str!("../sql/schema.sql");
+const ACTIVESYNC_STORAGE: &str = include_str!("activesync.rs");
 const ATTACHMENTS_STORAGE: &str = include_str!("attachments.rs");
 const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
+const COLLABORATION_GRANTS_STORAGE: &str = include_str!("collaboration/grants.rs");
+const COLLABORATION_TYPES_STORAGE: &str = include_str!("collaboration/types.rs");
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
 const CORE_STORAGE: &str = include_str!("core.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
+const IMAP_STORAGE: &str = include_str!("imap.rs");
+const JMAP_BLOBS_STORAGE: &str = include_str!("jmap_blobs.rs");
+const JMAP_QUERIES_STORAGE: &str = include_str!("jmap_queries.rs");
 const MAIL_ITEMS_STORAGE: &str = include_str!("mail_items.rs");
+const MAILBOXES_STORAGE: &str = include_str!("mailboxes.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
 const PST_STORAGE: &str = include_str!("pst.rs");
 const PUBLIC_FOLDERS_STORAGE: &str = include_str!("public_folders.rs");
+const PUBLIC_FOLDERS_CHANGES_STORAGE: &str = include_str!("public_folders/changes.rs");
 const RECOVERABLE_ITEMS_STORAGE: &str = include_str!("recoverable_items.rs");
+const SEARCH_FOLDERS_STORAGE: &str = include_str!("search_folders.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
 const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
+const SUBMISSION_DELEGATION_STORAGE: &str = include_str!("submission/delegation.rs");
+const SUBMISSION_TYPES_STORAGE: &str = include_str!("submission/types.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
 const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
+const ADMIN_PROVISIONING_STORAGE: &str = include_str!("admin/provisioning.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
@@ -70,6 +82,26 @@ fn assert_contains_before(haystack: &str, first: &str, second: &str, message: &s
         .find(second)
         .unwrap_or_else(|| panic!("{message}: missing {second}"));
     assert!(first_index < second_index, "{message}");
+}
+
+fn submission_storage_contains(needle: &str) -> bool {
+    [
+        SUBMISSION_STORAGE,
+        SUBMISSION_DELEGATION_STORAGE,
+        SUBMISSION_TYPES_STORAGE,
+    ]
+    .iter()
+    .any(|source| source.contains(needle))
+}
+
+fn collaboration_storage_contains(needle: &str) -> bool {
+    [
+        COLLABORATION_STORAGE,
+        COLLABORATION_GRANTS_STORAGE,
+        COLLABORATION_TYPES_STORAGE,
+    ]
+    .iter()
+    .any(|source| source.contains(needle))
 }
 
 fn assert_source_contains_all(name: &str, source: &str, needles: &[&str]) {
@@ -167,9 +199,10 @@ fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
         "'public_folder_per_user_state'",
         "object_kind IN (\n                'public_folder_tree'",
     ]);
+    let public_folder_storage = [PUBLIC_FOLDERS_STORAGE, PUBLIC_FOLDERS_CHANGES_STORAGE].concat();
     assert_source_contains_all(
-        "public_folders.rs",
-        PUBLIC_FOLDERS_STORAGE,
+        "public_folders module",
+        &public_folder_storage,
         &[
             "public_folder_access",
             "fetch_public_folder_trees",
@@ -359,9 +392,9 @@ fn collaboration_rights_are_canonical_and_same_tenant() {
 #[test]
 fn sender_delegation_storage_uses_canonical_sender_rights_table() {
     assert!(
-        SUBMISSION_STORAGE.contains("FROM sender_rights")
-            && SUBMISSION_STORAGE.contains("INSERT INTO sender_rights")
-            && SUBMISSION_STORAGE.contains("DELETE FROM sender_rights"),
+        submission_storage_contains("FROM sender_rights")
+            && submission_storage_contains("INSERT INTO sender_rights")
+            && submission_storage_contains("DELETE FROM sender_rights"),
         "sender delegation storage must use the canonical sender_rights table"
     );
     for retired_table_reference in [
@@ -370,7 +403,7 @@ fn sender_delegation_storage_uses_canonical_sender_rights_table() {
         "DELETE FROM sender_delegation_grants",
     ] {
         assert!(
-            !SUBMISSION_STORAGE.contains(retired_table_reference),
+            !submission_storage_contains(retired_table_reference),
             "sender delegation storage must not query the retired sender_delegation_grants table"
         );
     }
@@ -379,12 +412,12 @@ fn sender_delegation_storage_uses_canonical_sender_rights_table() {
 #[test]
 fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
     assert!(
-        SUBMISSION_STORAGE.contains("pub async fn set_mailbox_folder_delegation_grant")
-            && SUBMISSION_STORAGE.contains("INSERT INTO mailbox_delegation_grants")
-            && SUBMISSION_STORAGE.contains("DELETE FROM mailbox_delegation_grants")
-            && SUBMISSION_STORAGE.contains("\"mailbox_delegation_grant\"")
-            && SUBMISSION_STORAGE.contains("insert_mail_change_log_in_tx")
-            && SUBMISSION_STORAGE.contains("insert_audit"),
+        submission_storage_contains("pub async fn set_mailbox_folder_delegation_grant")
+            && submission_storage_contains("INSERT INTO mailbox_delegation_grants")
+            && submission_storage_contains("DELETE FROM mailbox_delegation_grants")
+            && submission_storage_contains("\"mailbox_delegation_grant\"")
+            && submission_storage_contains("insert_mail_change_log_in_tx")
+            && submission_storage_contains("insert_audit"),
         "MAPI folder permission writes must use canonical mailbox_delegation_grants with audit and change-log rows"
     );
     assert!(
@@ -409,7 +442,11 @@ fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
 
 #[test]
 fn collaboration_grant_storage_uses_concrete_grant_tables() {
-    for source in [COLLABORATION_STORAGE, CHANGE_STORAGE] {
+    for source in [
+        COLLABORATION_STORAGE,
+        COLLABORATION_GRANTS_STORAGE,
+        CHANGE_STORAGE,
+    ] {
         assert!(
             source.contains("contact_book_grants")
                 && source.contains("calendar_grants")
@@ -422,9 +459,9 @@ fn collaboration_grant_storage_uses_concrete_grant_tables() {
         );
     }
     assert!(
-        COLLABORATION_STORAGE.contains("Self::ensure_default_task_list")
-            && !COLLABORATION_STORAGE.contains("task-list grants require a task list id")
-            && !COLLABORATION_STORAGE.contains("task collections use task-list grants"),
+        collaboration_storage_contains("Self::ensure_default_task_list")
+            && !collaboration_storage_contains("task-list grants require a task list id")
+            && !collaboration_storage_contains("task collections use task-list grants"),
         "generic task collaboration grants must project to the canonical default task list"
     );
 }
@@ -474,15 +511,15 @@ fn grant_changes_emit_canonical_rights_journal_entries() {
 #[test]
 fn grant_changes_emit_object_level_mail_change_log_entries() {
     assert!(
-        COLLABORATION_STORAGE.contains("insert_mail_change_log_in_tx")
-            && COLLABORATION_STORAGE.contains("\"contact_book_grant\"")
-            && COLLABORATION_STORAGE.contains("\"calendar_grant\"")
-            && COLLABORATION_STORAGE.contains("\"task_list_grant\"")
+        collaboration_storage_contains("insert_mail_change_log_in_tx")
+            && collaboration_storage_contains("\"contact_book_grant\"")
+            && collaboration_storage_contains("\"calendar_grant\"")
+            && collaboration_storage_contains("\"task_list_grant\"")
             && TASKS_STORAGE.contains("insert_mail_change_log_in_tx")
             && TASKS_STORAGE.contains("\"task_list_grant\"")
-            && SUBMISSION_STORAGE.contains("insert_mail_change_log_in_tx")
-            && SUBMISSION_STORAGE.contains("\"mailbox_delegation_grant\"")
-            && SUBMISSION_STORAGE.contains("\"sender_right\""),
+            && submission_storage_contains("insert_mail_change_log_in_tx")
+            && submission_storage_contains("\"mailbox_delegation_grant\"")
+            && submission_storage_contains("\"sender_right\""),
         "grant upsert/delete paths must write object-level mail_change_log entries"
     );
 }
@@ -622,7 +659,7 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
     );
     assert!(
         PROTOCOLS_STORAGE.contains("FROM mail_change_log")
-            && PROTOCOLS_STORAGE.contains("fetch_canonical_change_cursor(account_id)")
+            && ACTIVESYNC_STORAGE.contains("fetch_canonical_change_cursor(account_id)")
             && SCHEMA.contains("CREATE TABLE mapi_sync_checkpoints")
             && SCHEMA.contains("CREATE TABLE mapi_mailbox_replicas")
             && SCHEMA.contains("CREATE TABLE mapi_object_identities")
@@ -1113,8 +1150,8 @@ fn collaboration_deletes_write_tombstones() {
         "contact, event, and task deletes must write collaboration tombstones"
     );
     assert!(
-        PROTOCOLS_STORAGE.contains("INSERT INTO tombstones")
-            && PROTOCOLS_STORAGE.contains("'mailbox'")
+        MAILBOXES_STORAGE.contains("INSERT INTO tombstones")
+            && MAILBOXES_STORAGE.contains("'mailbox'")
             && TASKS_STORAGE
                 .matches("insert_collaboration_tombstone_in_tx")
                 .count()
@@ -1464,10 +1501,11 @@ fn admin_settings_and_auth_runtime_tables_exist_in_core_schema() {
 
 #[test]
 fn admin_domain_account_and_audit_paths_bind_uuid_tenant_ids() {
+    let admin_storage = [ADMIN_STORAGE, ADMIN_PROVISIONING_STORAGE].concat();
     assert!(
-        ADMIN_STORAGE.contains("let tenant_id = PLATFORM_TENANT_ID;")
-            && ADMIN_STORAGE.contains("INSERT INTO domains (\n                id, tenant_id, name")
-            && ADMIN_STORAGE.contains(
+        admin_storage.contains("let tenant_id = PLATFORM_TENANT_ID;")
+            && admin_storage.contains("INSERT INTO domains (\n                id, tenant_id, name")
+            && admin_storage.contains(
                 "INSERT INTO accounts (\n                id, tenant_id, primary_domain_id"
             )
             && SHARED_STORAGE
@@ -1526,12 +1564,13 @@ fn mailbox_identity_schema_has_generated_normalized_address_helpers() {
 
 #[test]
 fn mailbox_identity_runtime_uses_generated_normalized_lookup_keys() {
+    let admin_storage = [ADMIN_STORAGE, ADMIN_PROVISIONING_STORAGE].concat();
     assert!(
-        ADMIN_STORAGE.contains("normalize_domain_name(&input.name)")
-            && ADMIN_STORAGE.contains("normalize_email(&input.email)")
-            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_primary_email)")
-            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_name)")
-            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_source)"),
+        admin_storage.contains("normalize_domain_name(&input.name)")
+            && admin_storage.contains("normalize_email(&input.email)")
+            && admin_storage.contains("ON CONFLICT (tenant_id, normalized_primary_email)")
+            && admin_storage.contains("ON CONFLICT (tenant_id, normalized_name)")
+            && admin_storage.contains("ON CONFLICT (tenant_id, normalized_source)"),
         "admin identity writes must normalize once and target generated normalized keys"
     );
     for (name, source) in [
@@ -1550,6 +1589,7 @@ fn mailbox_identity_runtime_uses_generated_normalized_lookup_keys() {
 
 #[test]
 fn account_creation_allocates_canonical_send_identity_rows() {
+    let admin_storage = [ADMIN_STORAGE, ADMIN_PROVISIONING_STORAGE].concat();
     let identities = table_definition("account_identities");
     for required in [
         "email_address_id UUID NOT NULL",
@@ -1566,12 +1606,12 @@ fn account_creation_allocates_canonical_send_identity_rows() {
         );
     }
     assert!(
-        ADMIN_STORAGE.contains("INSERT INTO account_email_addresses")
-            && ADMIN_STORAGE.contains("address_kind, is_primary")
-            && ADMIN_STORAGE.contains("INSERT INTO account_identities")
-            && ADMIN_STORAGE.contains("may_send, is_default")
-            && SUBMISSION_STORAGE.contains("FROM sender_rights")
-            && SUBMISSION_STORAGE.contains("sender_identity_id("),
+        admin_storage.contains("INSERT INTO account_email_addresses")
+            && admin_storage.contains("address_kind, is_primary")
+            && admin_storage.contains("INSERT INTO account_identities")
+            && admin_storage.contains("may_send, is_default")
+            && submission_storage_contains("FROM sender_rights")
+            && submission_storage_contains("sender_identity_id("),
         "account creation must allocate canonical primary address/default identity rows while sender projection remains derived from canonical rights"
     );
     for forbidden in [
@@ -1642,8 +1682,8 @@ fn mailbox_schema_allows_canonical_outlook_compatibility_mail_roles() {
             "mailboxes.role CHECK must allow {role}"
         );
         assert!(
-            PROTOCOLS_STORAGE.contains(&format!("\"{role}\"")),
-            "protocol bootstrap must create {role}"
+            MAILBOXES_STORAGE.contains(&format!("\"{role}\"")),
+            "mailbox bootstrap must create {role}"
         );
     }
 }
@@ -1688,15 +1728,15 @@ fn search_folder_schema_persists_exchange_builtin_definitions() {
         "tracked_mail_processing",
     ] {
         assert!(
-            PROTOCOLS_STORAGE.contains(&format!("role: \"{role}\"")),
-            "protocol bootstrap must persist the built-in {role} search folder definition"
+            SEARCH_FOLDERS_STORAGE.contains(&format!("role: \"{role}\"")),
+            "canonical search-folder storage must persist the built-in {role} definition"
         );
     }
     assert!(
-        PROTOCOLS_STORAGE.contains("\"search_folder_definition\"")
-            && PROTOCOLS_STORAGE.contains("CanonicalChangeCategory::Search")
-            && PROTOCOLS_STORAGE.contains("insert_mail_change_log_in_tx")
-            && PROTOCOLS_STORAGE.contains("emit_account_scoped_change"),
+        SEARCH_FOLDERS_STORAGE.contains("\"search_folder_definition\"")
+            && SEARCH_FOLDERS_STORAGE.contains("CanonicalChangeCategory::Search")
+            && SEARCH_FOLDERS_STORAGE.contains("insert_mail_change_log_in_tx")
+            && SEARCH_FOLDERS_STORAGE.contains("emit_account_scoped_change"),
         "search-folder definition bootstrap must write canonical object changes instead of MAPI-local FAI state"
     );
 }
@@ -2130,15 +2170,18 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
     );
     assert!(
         !SHARED_STORAGE.contains("MAX(imap_uid)")
+            && !IMAP_STORAGE.contains("MAX(imap_uid)")
             && !PROTOCOLS_STORAGE.contains("MAX(imap_uid)")
             && !MESSAGE_OPS_STORAGE.contains("MAX(imap_uid)"),
         "storage must allocate UIDNEXT from mailbox uid_next, not visible max UID"
     );
     assert!(
         SHARED_STORAGE.contains("pub(crate) fn allocate_uid_validity() -> i64")
-            && ADMIN_STORAGE.contains("allocate_uid_validity()")
+            && [ADMIN_STORAGE, ADMIN_PROVISIONING_STORAGE]
+                .concat()
+                .contains("allocate_uid_validity()")
             && INBOUND_STORAGE.contains("allocate_uid_validity()")
-            && PROTOCOLS_STORAGE.contains("allocate_uid_validity()"),
+            && MAILBOXES_STORAGE.contains("allocate_uid_validity()"),
         "new mailbox paths must share the mailbox UIDVALIDITY allocator"
     );
     assert!(
@@ -2181,7 +2224,7 @@ fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
 #[test]
 fn jmap_email_projection_preserves_multi_mailbox_memberships() {
     let fetch_body = function_body(PROTOCOLS_STORAGE, "pub async fn fetch_jmap_emails");
-    let query_body = function_body(PROTOCOLS_STORAGE, "pub async fn query_jmap_email_ids");
+    let query_body = function_body(JMAP_QUERIES_STORAGE, "pub async fn query_jmap_email_ids");
     assert!(
         fetch_body.contains("array_agg(mailbox_id")
             && fetch_body.contains("mailbox_ids: row.mailbox_ids.clone()")
@@ -2201,11 +2244,11 @@ fn jmap_mailbox_storage_uses_shared_name_policy() {
     for (name, body) in [
         (
             "create_jmap_mailbox",
-            function_body(PROTOCOLS_STORAGE, "pub async fn create_jmap_mailbox"),
+            function_body(MAILBOXES_STORAGE, "pub async fn create_jmap_mailbox"),
         ),
         (
             "update_jmap_mailbox",
-            function_body(PROTOCOLS_STORAGE, "pub async fn update_jmap_mailbox"),
+            function_body(MAILBOXES_STORAGE, "pub async fn update_jmap_mailbox"),
         ),
     ] {
         assert!(
@@ -2215,7 +2258,7 @@ fn jmap_mailbox_storage_uses_shared_name_policy() {
         );
     }
     assert!(
-        PROTOCOLS_STORAGE.contains("MailboxNamePolicy::canonical_key"),
+        MAILBOXES_STORAGE.contains("MailboxNamePolicy::canonical_key"),
         "storage duplicate checks must use shared mailbox canonical keys"
     );
 }
@@ -2229,23 +2272,24 @@ fn mailbox_hierarchy_and_subscriptions_are_canonical_storage() {
         "CREATE INDEX mailbox_subscriptions_subscriber_idx",
     ]);
     assert!(
-        PROTOCOLS_STORAGE.contains("mb.parent_mailbox_id")
-            && PROTOCOLS_STORAGE.contains("COALESCE(ms.is_subscribed, TRUE)")
-            && PROTOCOLS_STORAGE.contains("ensure_mailbox_parent_valid_in_tx")
-            && PROTOCOLS_STORAGE.contains("set_mailbox_subscription"),
-        "protocol storage must expose mailbox hierarchy and persisted subscription state"
+        MAILBOXES_STORAGE.contains("mb.parent_mailbox_id")
+            && MAILBOXES_STORAGE.contains("COALESCE(ms.is_subscribed, TRUE)")
+            && MAILBOXES_STORAGE.contains("ensure_mailbox_parent_valid_in_tx")
+            && MAILBOXES_STORAGE.contains("set_mailbox_subscription"),
+        "mailbox storage must expose mailbox hierarchy and persisted subscription state"
     );
 }
 
 #[test]
 fn system_mailbox_creation_uses_canonical_backend_names() {
+    let admin_storage = [ADMIN_STORAGE, ADMIN_PROVISIONING_STORAGE].concat();
     assert!(
-        PROTOCOLS_STORAGE.contains("\"inbox\", \"INBOX\", 0, 365")
-            && PROTOCOLS_STORAGE.contains("\"trash\", \"Trash\", 30, 365"),
+        MAILBOXES_STORAGE.contains("\"inbox\", \"INBOX\", 0, 365")
+            && MAILBOXES_STORAGE.contains("\"trash\", \"Trash\", 30, 365"),
         "IMAP mailbox bootstrap must store canonical system display names"
     );
     assert!(
-        ADMIN_STORAGE.contains("'inbox', 'INBOX', 0, 365"),
+        admin_storage.contains("'inbox', 'INBOX', 0, 365"),
         "new account creation must store canonical INBOX display name"
     );
     assert!(
@@ -2275,8 +2319,8 @@ fn runtime_access_paths_have_scaling_indexes() {
         "ON blob_placements (tenant_id, domain_id, blob_id, blob_kind)",
     ]);
     assert!(
-        PROTOCOLS_STORAGE.contains("ORDER BY mm.imap_uid ASC")
-            && PROTOCOLS_STORAGE.contains("GROUP BY s.message_id")
+        IMAP_STORAGE.contains("ORDER BY mm.imap_uid ASC")
+            && JMAP_QUERIES_STORAGE.contains("GROUP BY s.message_id")
             && PROTOCOLS_STORAGE.contains("ORDER BY cursor ASC"),
         "protocol runtime SQL must retain the mailbox UID, JMAP query, and change replay paths covered by scaling indexes"
     );
@@ -2321,6 +2365,10 @@ fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
     assert!(
         SCHEMA.contains("CREATE TABLE protected_bcc_recipients"),
         "Bcc must remain in the explicit protected metadata table"
+    );
+    assert!(
+        JMAP_BLOBS_STORAGE.contains("strip_protected_bcc_headers"),
+        "JMAP raw-message blob projection must keep protected Bcc stripping outside canonical message storage"
     );
     for table_name in [
         "mail_search_documents",
@@ -2419,21 +2467,21 @@ fn activesync_sync_state_uses_v2_cursor_table() {
         "schema.sql must not define the retired ActiveSync snapshot table"
     );
     assert!(
-        PROTOCOLS_STORAGE.contains("INSERT INTO activesync_sync_cursors")
-            && PROTOCOLS_STORAGE.contains("INSERT INTO activesync_devices")
-            && PROTOCOLS_STORAGE.contains("UPDATE activesync_devices")
-            && PROTOCOLS_STORAGE.contains("state_json")
-            && PROTOCOLS_STORAGE.contains("DELETE FROM activesync_sync_cursors")
-            && PROTOCOLS_STORAGE.contains("expires_at <= NOW()")
-            && !PROTOCOLS_STORAGE.contains("activesync_sync_states")
+        ACTIVESYNC_STORAGE.contains("INSERT INTO activesync_sync_cursors")
+            && ACTIVESYNC_STORAGE.contains("INSERT INTO activesync_devices")
+            && ACTIVESYNC_STORAGE.contains("UPDATE activesync_devices")
+            && ACTIVESYNC_STORAGE.contains("state_json")
+            && ACTIVESYNC_STORAGE.contains("DELETE FROM activesync_sync_cursors")
+            && ACTIVESYNC_STORAGE.contains("expires_at <= NOW()")
+            && !ACTIVESYNC_STORAGE.contains("activesync_sync_states")
             && !MESSAGE_OPS_STORAGE.contains("activesync_sync_states"),
         "ActiveSync storage must use v2 cursor rows, not the retired snapshot table"
     );
-    let cleanup_start = PROTOCOLS_STORAGE
+    let cleanup_start = ACTIVESYNC_STORAGE
         .find("DELETE FROM activesync_sync_cursors")
         .expect("ActiveSync cursor cleanup SQL is required");
-    let cleanup_end = (cleanup_start + 260).min(PROTOCOLS_STORAGE.len());
-    let cleanup_sql = &PROTOCOLS_STORAGE[cleanup_start..cleanup_end];
+    let cleanup_end = (cleanup_start + 260).min(ACTIVESYNC_STORAGE.len());
+    let cleanup_sql = &ACTIVESYNC_STORAGE[cleanup_start..cleanup_end];
     for canonical_table in ["messages", "mailboxes", "mailbox_messages"] {
         assert!(
             !cleanup_sql.contains(canonical_table),
@@ -2466,7 +2514,7 @@ fn runtime_collaboration_sql_uses_canonical_v2_columns() {
         ("workspace.rs", WORKSPACE_STORAGE),
         ("collaboration.rs", COLLABORATION_STORAGE),
         ("message_ops.rs", MESSAGE_OPS_STORAGE),
-        ("protocols.rs", PROTOCOLS_STORAGE),
+        ("activesync.rs", ACTIVESYNC_STORAGE),
     ] {
         assert!(
             source.contains("owner_account_id"),
