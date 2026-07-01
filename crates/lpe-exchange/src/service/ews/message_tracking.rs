@@ -1,5 +1,51 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn find_message_tracking_report(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let query_text = message_tracking_query_text(request);
+        let reports = self
+            .store
+            .fetch_ews_message_tracking_reports(principal, &query_text, 100)
+            .await?;
+        Ok(find_message_tracking_report_response(&reports))
+    }
+
+    pub(in crate::service) async fn get_message_tracking_report(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let report_id = requested_message_tracking_report_id(request);
+        let Some(report_id) = report_id else {
+            return Ok(operation_error_response(
+                "GetMessageTrackingReport",
+                "ErrorInvalidOperation",
+                "MessageTrackingReportId is required.",
+            ));
+        };
+        let detail = self
+            .store
+            .fetch_ews_message_tracking_report_detail(principal, &report_id)
+            .await?;
+        match detail {
+            Some(detail) => Ok(get_message_tracking_report_response(&detail)),
+            None => Ok(operation_error_response(
+                "GetMessageTrackingReport",
+                "ErrorItemNotFound",
+                "The requested message tracking report was not found.",
+            )),
+        }
+    }
+}
+
 pub(in crate::service) fn find_message_tracking_report_response(
     reports: &[EwsMessageTrackingReport],
 ) -> String {

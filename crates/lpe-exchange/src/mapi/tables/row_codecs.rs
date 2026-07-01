@@ -208,3 +208,28 @@ fn write_counted_query_rows_binary_values(
     }
     Some(current)
 }
+
+pub(in crate::mapi) fn write_property_default(row: &mut Vec<u8>, property_tag: u32) {
+    match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::Integer16) => write_u16(row, 0),
+        Some(MapiPropertyType::Integer32) | Some(MapiPropertyType::Error) => write_u32(row, 0),
+        Some(MapiPropertyType::Floating32) => row.extend_from_slice(&0.0f32.to_le_bytes()),
+        Some(MapiPropertyType::Floating64) => row.extend_from_slice(&0.0f64.to_le_bytes()),
+        Some(MapiPropertyType::Boolean) => row.push(0),
+        Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => write_u64(row, 0),
+        Some(MapiPropertyType::String8) => write_ascii_z(row, ""),
+        Some(MapiPropertyType::String) => write_utf16z(row, ""),
+        Some(MapiPropertyType::Guid) => row.extend_from_slice(Uuid::nil().as_bytes()),
+        Some(MapiPropertyType::ServerId | MapiPropertyType::Binary) => write_rop_binary(row, &[]),
+        Some(
+            MapiPropertyType::MultipleInteger16
+            | MapiPropertyType::MultipleInteger32
+            | MapiPropertyType::MultipleInteger64
+            | MapiPropertyType::MultipleString8
+            | MapiPropertyType::MultipleString
+            | MapiPropertyType::MultipleGuid
+            | MapiPropertyType::MultipleBinary,
+        ) => write_u32(row, 0),
+        _ => write_u32(row, 0x8004_0102),
+    }
+}

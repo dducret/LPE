@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use axum::{
     http::{
-        header::{CONTENT_LENGTH, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
+        header::{CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
         HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},

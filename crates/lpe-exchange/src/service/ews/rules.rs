@@ -1,5 +1,106 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_inbox_rules(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let rules = self.store.list_mailbox_rules(principal.account_id).await?;
+        Ok(get_inbox_rules_response(&rules))
+    }
+
+    pub(in crate::service) async fn update_inbox_rules(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let mut mutations = Vec::new();
+            for operation in element_contents(request, "DeleteRuleOperation") {
+                let rule_id = element_text(operation, "RuleId")
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| anyhow!("DeleteRuleOperation requires RuleId."))?;
+                mutations.push(EwsInboxRuleMutation::Delete { rule_id });
+            }
+            for operation in element_contents(request, "CreateRuleOperation") {
+                let rule = element_content(operation, "Rule").unwrap_or(operation);
+                let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
+                mutations.push(EwsInboxRuleMutation::Put {
+                    name,
+                    active,
+                    sieve,
+                    audit_action: "ews-update-inbox-rules-create",
+                });
+            }
+            for operation in element_contents(request, "SetRuleOperation") {
+                let rule = element_content(operation, "Rule").unwrap_or(operation);
+                let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
+                mutations.push(EwsInboxRuleMutation::Put {
+                    name,
+                    active,
+                    sieve,
+                    audit_action: "ews-update-inbox-rules-set",
+                });
+            }
+            if mutations.is_empty() && !request.contains("RemoveOutlookRuleBlob") {
+                bail!("UpdateInboxRules supports bounded create, set, and delete rule operations.");
+            }
+
+            for mutation in mutations {
+                match mutation {
+                    EwsInboxRuleMutation::Delete { rule_id } => {
+                        self.store
+                            .delete_sieve_script(
+                                principal.account_id,
+                                &rule_id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-update-inbox-rules-delete".to_string(),
+                                    subject: rule_id.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                    EwsInboxRuleMutation::Put {
+                        name,
+                        active,
+                        sieve,
+                        audit_action,
+                    } => {
+                        self.store
+                            .put_sieve_script(
+                                principal.account_id,
+                                &name,
+                                &sieve,
+                                active,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: audit_action.to_string(),
+                                    subject: name.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                }
+            }
+            Ok(simple_operation_success_response("UpdateInboxRules"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "UpdateInboxRules",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::service) enum EwsInboxRuleMutation {
     Delete {

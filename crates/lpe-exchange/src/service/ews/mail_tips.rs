@@ -5,6 +5,66 @@ where
     S: ExchangeStore + Clone + Send + Sync + 'static,
     V: Detector + Clone + Send + Sync + 'static,
 {
+    pub(in crate::service) async fn get_mail_tips(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let recipients = requested_mail_tips_recipients(request);
+            if recipients.is_empty() {
+                bail!("GetMailTips requires at least one recipient Mailbox.");
+            }
+            if recipients.len() > EWS_MAX_MAIL_TIPS_RECIPIENTS {
+                bail!(
+                    "GetMailTips supports at most {} recipients per request.",
+                    EWS_MAX_MAIL_TIPS_RECIPIENTS
+                );
+            }
+            let requested_tips = requested_mail_tips(request);
+            let entries = self.store.fetch_address_book_entries(principal).await?;
+            let mut recipient_tips = Vec::new();
+            for recipient in recipients {
+                let entry = entries
+                    .iter()
+                    .find(|entry| entry.email.eq_ignore_ascii_case(&recipient));
+                let oof = if requested_tips.contains("OutOfOfficeMessage") {
+                    if let Some(entry) = entry
+                        .filter(|entry| entry.entry_kind == ExchangeAddressBookEntryKind::Account)
+                    {
+                        self.store
+                            .fetch_active_sieve_script(entry.id)
+                            .await?
+                            .and_then(|script| {
+                                let projection =
+                                    oof_projection_from_script(Some(script.content.as_str()));
+                                (projection.state != EwsOofState::Disabled)
+                                    .then_some(projection.text_body)
+                            })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                recipient_tips.push(MailTipProjection {
+                    recipient,
+                    display_name: entry.map(|entry| entry.display_name.clone()),
+                    recipient_type: entry.map(|entry| entry.entry_kind),
+                    invalid_recipient: entry.is_none()
+                        && requested_tips.contains("InvalidRecipient"),
+                    out_of_office_message: oof,
+                });
+            }
+            Ok(get_mail_tips_response(&recipient_tips))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("GetMailTips", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
     pub(in crate::service) async fn get_service_configuration(
         &self,
         request: &str,

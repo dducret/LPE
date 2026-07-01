@@ -1,5 +1,115 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_discovery_search_configuration(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let searches = self
+            .store
+            .fetch_ews_discovery_search_configurations(principal)
+            .await?;
+        Ok(get_discovery_search_configuration_response(&searches))
+    }
+
+    pub(in crate::service) async fn get_searchable_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let mailboxes = self.store.fetch_ews_searchable_mailboxes(principal).await?;
+        Ok(get_searchable_mailboxes_response(&mailboxes))
+    }
+
+    pub(in crate::service) async fn search_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let query_text = discovery_query_text(request);
+        let mailbox_emails = requested_mailbox_emails(request);
+        let result = self
+            .store
+            .search_ews_mailboxes(principal, &query_text, &mailbox_emails, 100)
+            .await?;
+        Ok(search_mailboxes_response(&result))
+    }
+
+    pub(in crate::service) async fn get_hold_on_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let mailbox_emails = requested_mailbox_emails(request);
+        let holds = self
+            .store
+            .fetch_ews_hold_mailboxes(principal, &mailbox_emails)
+            .await?;
+        Ok(get_hold_on_mailboxes_response(&holds))
+    }
+
+    pub(in crate::service) async fn set_hold_on_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let mailbox_emails = requested_mailbox_emails(request);
+        let hold_name = element_text(request, "HoldId")
+            .or_else(|| element_text(request, "HoldName"))
+            .unwrap_or_else(|| "EWS Litigation Hold".to_string());
+        let query_text = discovery_query_text(request);
+        let enable = !element_text(request, "Action")
+            .unwrap_or_else(|| "CreateHold".to_string())
+            .to_ascii_lowercase()
+            .contains("release");
+        let holds = self
+            .store
+            .set_ews_hold_mailboxes(
+                principal,
+                &hold_name,
+                &query_text,
+                &mailbox_emails,
+                enable,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: if enable {
+                        "ews-set-hold".to_string()
+                    } else {
+                        "ews-release-hold".to_string()
+                    },
+                    subject: hold_name.clone(),
+                },
+            )
+            .await?;
+        Ok(set_hold_on_mailboxes_response(&holds, enable))
+    }
+
+    pub(in crate::service) async fn get_non_indexable_item_details(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let reports = self
+            .store
+            .fetch_ews_non_indexable_reports(principal)
+            .await?;
+        Ok(get_non_indexable_item_details_response(&reports))
+    }
+
+    pub(in crate::service) async fn get_non_indexable_item_statistics(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let reports = self
+            .store
+            .fetch_ews_non_indexable_reports(principal)
+            .await?;
+        Ok(get_non_indexable_item_statistics_response(&reports))
+    }
+}
+
 pub(in crate::service) fn get_discovery_search_configuration_response(
     searches: &[EwsDiscoverySearchConfig],
 ) -> String {

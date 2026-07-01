@@ -1,5 +1,205 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn subscribe(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        if element_content(request, "PullSubscriptionRequest").is_none() {
+            return Ok(operation_error_response(
+                "Subscribe",
+                "ErrorInvalidOperation",
+                "Subscribe currently supports only EWS pull subscriptions.",
+            ));
+        }
+
+        let subscription = self.register_pull_subscription(principal, request).await?;
+        Ok(subscribe_success_response(&subscription.0, &subscription.1))
+    }
+
+    pub(in crate::service) async fn get_events(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_subscription_id(principal.account_id, request));
+        let previous_watermark = element_text(request, "Watermark")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+
+        self.durable_events_response(
+            "GetEvents",
+            principal,
+            &subscription_id,
+            &previous_watermark,
+        )
+        .await
+    }
+
+    pub(in crate::service) async fn get_streaming_events(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_subscription_id(principal.account_id, request));
+        let previous_watermark = element_text(request, "Watermark")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+        self.durable_events_response(
+            "GetStreamingEvents",
+            principal,
+            &subscription_id,
+            &previous_watermark,
+        )
+        .await
+    }
+
+    pub(in crate::service) async fn durable_events_response(
+        &self,
+        operation: &str,
+        principal: &AccountPrincipal,
+        subscription_id: &str,
+        previous_watermark: &str,
+    ) -> Result<String> {
+        let after_cursor = notification_watermark_sequence(previous_watermark).unwrap_or(0) as i64;
+        let poll = self
+            .store
+            .poll_mapi_notifications(principal.account_id, after_cursor)
+            .await?;
+        let event_pending = poll.event_pending;
+        let cursor = poll.cursor;
+        if after_cursor > 0 && cursor.is_none() {
+            return Ok(operation_error_response(
+                operation,
+                "ErrorInvalidWatermark",
+                "The requested EWS notification watermark is no longer available in canonical change-log retention.",
+            ));
+        }
+        let mut notifications = Vec::new();
+        for event in poll.events {
+            let Some(mailbox_id) = event.canonical_folder_id() else {
+                continue;
+            };
+            let Some(item_id) = event.canonical_message_id() else {
+                continue;
+            };
+            let sequence = event
+                .change_cursor()
+                .unwrap_or_else(|| cursor.unwrap_or(after_cursor))
+                .max(0) as u64;
+            let kind = match event.change_kind().unwrap_or_default() {
+                "deleted" | "destroyed" | "removed" => EwsNotificationKind::Deleted,
+                "created" | "inserted" | "new" => EwsNotificationKind::NewMail,
+                _ => EwsNotificationKind::Created,
+            };
+            notifications.push(EwsQueuedNotification {
+                sequence,
+                kind,
+                item_id,
+                mailbox_id,
+                change_key: sequence.to_string(),
+                timestamp: "1970-01-01T00:00:00Z".to_string(),
+            });
+        }
+        if !notifications.is_empty() {
+            return Ok(match operation {
+                "GetStreamingEvents" => get_streaming_events_queued_response(
+                    subscription_id,
+                    previous_watermark,
+                    &notifications,
+                    event_pending && notifications.len() >= 100,
+                ),
+                _ => get_events_queued_response(
+                    subscription_id,
+                    previous_watermark,
+                    &notifications,
+                    event_pending && notifications.len() >= 100,
+                ),
+            });
+        }
+        Ok(match operation {
+            "GetStreamingEvents" => {
+                get_streaming_events_status_response(subscription_id, previous_watermark)
+            }
+            _ => get_events_status_response(subscription_id, previous_watermark),
+        })
+    }
+
+    pub(in crate::service) async fn unsubscribe(&self, request: &str) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId").unwrap_or_default();
+        if subscription_id.trim().is_empty() {
+            return Ok(operation_error_response(
+                "Unsubscribe",
+                "ErrorInvalidSubscription",
+                "Unsubscribe requires a SubscriptionId.",
+            ));
+        }
+
+        Ok(unsubscribe_success_response())
+    }
+
+    async fn register_pull_subscription(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<(String, String)> {
+        let subscription_id = notification_subscription_id(principal.account_id, request);
+        let folder_marker = self
+            .notification_request_folder_marker(principal, request)
+            .await?;
+        let requested_watermark =
+            element_text(request, "Watermark").filter(|value| !value.trim().is_empty());
+        let current_cursor = self
+            .store
+            .fetch_mapi_notification_cursor(principal.account_id)
+            .await?
+            .unwrap_or(0)
+            .max(0) as u64;
+        let watermark = requested_watermark.clone().unwrap_or_else(|| {
+            notification_watermark(&subscription_id, folder_marker.as_deref(), current_cursor)
+        });
+        Ok((subscription_id, watermark))
+    }
+
+    async fn notification_request_folder_marker(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Option<String>> {
+        if let Some(mailbox_id) = self
+            .requested_mailbox_folder_ids(principal, request)
+            .await?
+            .into_iter()
+            .next()
+        {
+            return Ok(Some(format!("mailbox:{mailbox_id}")));
+        }
+        if let Some(role) = requested_mailbox_role(request) {
+            return Ok(self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?
+                .into_iter()
+                .find(|mailbox| mailbox.role == role)
+                .map(|mailbox| format!("mailbox:{}", mailbox.id))
+                .or_else(|| Some(format!("role:{role}"))));
+        }
+        if pull_subscription_subscribes_to_all_folders(request) {
+            return Ok(Some("all".to_string()));
+        }
+        Ok(None)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::service) struct EwsQueuedNotification {
     pub(in crate::service) sequence: u64,

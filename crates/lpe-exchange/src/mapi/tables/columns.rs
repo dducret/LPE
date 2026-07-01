@@ -1,0 +1,451 @@
+use super::*;
+
+pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_ACCESS,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
+        PID_TAG_SUBFOLDERS,
+    ]
+}
+
+pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_CLIENT_SUBMIT_TIME,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_READ,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_DISPLAY_TO_W,
+        PID_TAG_DISPLAY_CC_W,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_associated_config_columns() -> Vec<u32> {
+    let mut columns = default_contents_columns();
+    columns.push(PID_TAG_FOLDER_ID);
+    columns.push(PID_TAG_ROAMING_DATATYPES);
+    columns
+}
+
+pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_ACCESS,
+        PID_TAG_ASSOCIATED,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_WLINK_SAVE_STAMP,
+        PID_TAG_WLINK_TYPE,
+        PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_ORDINAL,
+        PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_RECORD_KEY,
+        PID_TAG_WLINK_STORE_ENTRY_ID,
+        PID_TAG_WLINK_FOLDER_TYPE,
+        PID_TAG_WLINK_GROUP_HEADER_ID,
+        PID_TAG_WLINK_GROUP_CLSID,
+        PID_TAG_WLINK_GROUP_NAME_W,
+        PID_TAG_WLINK_SECTION,
+        PID_TAG_WLINK_CALENDAR_COLOR,
+        PID_TAG_WLINK_ADDRESS_BOOK_EID,
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+        PID_TAG_WLINK_CLIENT_ID,
+        PID_TAG_WLINK_RO_GROUP_TYPE,
+        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+    ]
+}
+
+pub(in crate::mapi) fn default_conversation_action_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_ACCESS,
+        PID_TAG_ASSOCIATED,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_CONVERSATION_INDEX,
+        PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG,
+        PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG,
+        PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_VERSION_TAG,
+        PID_LID_CONVERSATION_PROCESSED_TAG,
+        PID_NAME_KEYWORDS_TAG,
+    ]
+}
+
+pub(in crate::mapi) fn default_attachment_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_ATTACH_NUM,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ATTACH_LONG_FILENAME_W,
+        PID_TAG_ATTACH_FILENAME_W,
+        PID_TAG_ATTACH_EXTENSION_W,
+        PID_TAG_ATTACH_MIME_TAG_W,
+        PID_TAG_ATTACH_SIZE,
+        PID_TAG_ATTACH_METHOD,
+        PID_TAG_RENDERING_POSITION,
+        PID_TAG_ATTACHMENT_FLAGS,
+        PID_TAG_ATTACH_FLAGS,
+        PID_TAG_ATTACHMENT_LINK_ID,
+        PID_TAG_ATTACHMENT_HIDDEN,
+        PID_TAG_ATTACH_CONTENT_ID_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+    ]
+}
+
+pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_ACCESS,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME_MAX,
+        PID_TAG_HIERARCHY_CHANGE_NUMBER,
+        PID_TAG_HIER_REV,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_store_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_VALID_FOLDER_MASK,
+        PID_TAG_IPM_SUBTREE_ENTRY_ID,
+        PID_TAG_IPM_OUTBOX_ENTRY_ID,
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID,
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID,
+        PID_TAG_VIEWS_ENTRY_ID,
+        PID_TAG_COMMON_VIEWS_ENTRY_ID,
+        PID_TAG_FINDER_ENTRY_ID,
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+        PID_TAG_IPM_CONTACT_ENTRY_ID,
+        PID_TAG_IPM_JOURNAL_ENTRY_ID,
+        PID_TAG_IPM_NOTE_ENTRY_ID,
+        PID_TAG_IPM_TASK_ENTRY_ID,
+        PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_REM_OFFLINE_ENTRY_ID,
+        PID_TAG_IPM_DRAFTS_ENTRY_ID,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        PID_TAG_FREE_BUSY_ENTRY_IDS,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID,
+        PID_TAG_MAILBOX_OWNER_NAME_W,
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+        PID_TAG_PRIVATE,
+        PID_TAG_USER_GUID,
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
+    ]
+}
+
+pub(in crate::mapi) fn default_folder_identity_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_VALID_FOLDER_MASK,
+        PID_TAG_IPM_SUBTREE_ENTRY_ID,
+        PID_TAG_IPM_OUTBOX_ENTRY_ID,
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID,
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID,
+        PID_TAG_VIEWS_ENTRY_ID,
+        PID_TAG_COMMON_VIEWS_ENTRY_ID,
+        PID_TAG_FINDER_ENTRY_ID,
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+        PID_TAG_IPM_CONTACT_ENTRY_ID,
+        PID_TAG_IPM_JOURNAL_ENTRY_ID,
+        PID_TAG_IPM_NOTE_ENTRY_ID,
+        PID_TAG_IPM_TASK_ENTRY_ID,
+        PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_REM_OFFLINE_ENTRY_ID,
+        PID_TAG_IPM_DRAFTS_ENTRY_ID,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        PID_TAG_FREE_BUSY_ENTRY_IDS,
+    ]
+}
+
+pub(in crate::mapi) fn default_rule_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_RULE_ID,
+        PID_TAG_RULE_SEQUENCE,
+        PID_TAG_RULE_STATE,
+        PID_TAG_RULE_USER_FLAGS,
+        PID_TAG_RULE_PROVIDER,
+        PID_TAG_RULE_NAME,
+        PID_TAG_RULE_LEVEL,
+        PID_TAG_RULE_PROVIDER_DATA,
+        PID_TAG_RULE_CONDITION,
+        PID_TAG_RULE_ACTIONS,
+    ]
+}
+
+pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_DISPLAY_TO_W,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_BODY_W,
+        PID_TAG_INTERNET_MESSAGE_ID_W,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_COMMON_END_TAG,
+        PID_LID_COMPANIES_TAG,
+        PID_LID_CONTACTS_TAG,
+        PID_LID_LOG_TYPE_W_TAG,
+        PID_LID_LOG_START_TAG,
+        PID_LID_LOG_END_TAG,
+        PID_LID_LOG_DURATION_TAG,
+        PID_LID_LOG_FLAGS_TAG,
+        PID_LID_LOG_TYPE_DESC_W_TAG,
+    ]
+}
+
+pub(super) fn default_calendar_configuration_property_tags() -> Vec<u32> {
+    let mut tags = default_message_property_tags();
+    tags.extend([
+        PID_TAG_ASSOCIATED,
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_ROAMING_DICTIONARY,
+        PID_TAG_ROAMING_XML_STREAM,
+    ]);
+    tags
+}
+
+pub(in crate::mapi) fn default_contact_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_GIVEN_NAME_W,
+        PID_TAG_SURNAME_W,
+        PID_TAG_EMAIL_ADDRESS_W,
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
+        PID_TAG_BUSINESS_TELEPHONE_NUMBER_W,
+        PID_TAG_COMPANY_NAME_W,
+        PID_TAG_TITLE_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_LOCATION_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_REMINDER_OVERRIDE_TAG,
+        PID_LID_REMINDER_PLAY_SOUND_TAG,
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_task_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_FLAG_STATUS,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_REMINDER_OVERRIDE_TAG,
+        PID_LID_REMINDER_PLAY_SOUND_TAG,
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_reminder_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_REMINDER_OVERRIDE_TAG,
+        PID_LID_REMINDER_PLAY_SOUND_TAG,
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+    ]
+}
+
+pub(in crate::mapi) fn default_note_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_journal_entry_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}

@@ -162,6 +162,57 @@ where
         ))
     }
 
+    pub(in crate::service) async fn create_managed_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let folder_names = element_contents(request, "FolderName")
+                .into_iter()
+                .map(xml_text)
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>();
+            if folder_names.is_empty() {
+                bail!("CreateManagedFolder requires at least one FolderName.");
+            }
+
+            let mut folders = String::new();
+            for folder_name in folder_names {
+                let mailbox = self
+                    .store
+                    .create_managed_retention_folder(
+                        ManagedRetentionFolderCreateInput {
+                            account_id: principal.account_id,
+                            folder_name: folder_name.clone(),
+                            is_subscribed: true,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-create-managed-folder".to_string(),
+                            subject: folder_name,
+                        },
+                    )
+                    .await?;
+                folders.push_str(&mailbox_folder_xml(&mailbox));
+            }
+
+            Ok(folders_operation_success_response(
+                "CreateManagedFolder",
+                folders,
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "CreateManagedFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
     pub(in crate::service) async fn get_folder(
         &self,
         principal: &AccountPrincipal,

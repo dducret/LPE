@@ -1,5 +1,57 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn upload_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let item_ids = requested_transfer_item_ids(request);
+        let job = self
+            .store
+            .create_ews_transfer_job(
+                principal,
+                "import",
+                &item_ids,
+                serde_json::json!({ "operation": "UploadItems", "itemCount": item_ids.len() }),
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-upload-items".to_string(),
+                    subject: format!("{} items", item_ids.len()),
+                },
+            )
+            .await?;
+        Ok(transfer_job_response("UploadItems", &job))
+    }
+
+    pub(in crate::service) async fn export_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let item_ids = requested_item_ids(request);
+        let job = self
+            .store
+            .create_ews_transfer_job(
+                principal,
+                "export",
+                &item_ids,
+                serde_json::json!({ "operation": "ExportItems", "itemCount": item_ids.len() }),
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-export-items".to_string(),
+                    subject: format!("{} items", item_ids.len()),
+                },
+            )
+            .await?;
+        Ok(transfer_job_response("ExportItems", &job))
+    }
+}
+
 pub(in crate::service) fn transfer_job_response(operation: &str, job: &EwsTransferJob) -> String {
     let entries_xml = job
         .entries

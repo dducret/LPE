@@ -20,6 +20,7 @@ mod request_reader;
 mod responses;
 mod restrictions;
 mod serialize;
+mod typed_requests;
 
 pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use buffer::*;
@@ -36,6 +37,7 @@ pub(in crate::mapi) use request_reader::*;
 pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use restrictions::*;
 pub(in crate::mapi) use serialize::*;
+pub(in crate::mapi) use typed_requests::*;
 
 #[allow(dead_code)]
 pub(in crate::mapi) fn rop_get_properties_specific_response(
