@@ -206,6 +206,122 @@ pub(super) fn execute_response_handle_table(
     response_handle_table(handle_slots, output_handles, echo_input_handle_table)
 }
 
+pub(super) fn parse_execute_rop_dispatch_input(
+    rop_buffer: &[u8],
+) -> Result<(&[u8], Vec<u32>, bool), Vec<u8>> {
+    let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
+        return Err(rop_buffer_with_response(rop_parse_error_response(), &[]));
+    };
+    let extended = is_rpc_header_ext_rop_buffer(rop_buffer);
+    match read_handle_table(handle_table) {
+        Ok(handle_slots) => Ok((requests, handle_slots, extended)),
+        Err(_) => {
+            let response = if extended {
+                rop_buffer_with_response_spec(rop_parse_error_response(), &[])
+            } else {
+                rop_buffer_with_response(rop_parse_error_response(), &[])
+            };
+            Err(if extended {
+                rpc_header_ext_rop_buffer(response)
+            } else {
+                response
+            })
+        }
+    }
+}
+
+pub(super) fn record_execute_stream_batch_observation(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request_rop_names: &str,
+    request_handle_table_summary: &str,
+    session: &mut MapiSession,
+) {
+    if request_rop_names != "SetProperties,OpenStream,SetStreamSize,WriteStream,CommitStream" {
+        return;
+    }
+    let summary = format!(
+        "request_id={request_id};request_rops={request_rop_names};handles={request_handle_table_summary}"
+    );
+    session.record_outlook_stream_batch_observed(summary.clone());
+    session.record_outlook_view_failure_trace_event(format!("stream_batch_observed:{summary}"));
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_names = %request_rop_names,
+        input_handle_table_summary = %request_handle_table_summary,
+        stream_batch_observed = true,
+        "rca debug outlook stream batch observed"
+    );
+}
+
+pub(super) fn read_next_execute_rop_request(
+    cursor: &mut Cursor<'_>,
+    responses: &mut Vec<u8>,
+) -> Option<RopRequest> {
+    if cursor.remaining_is_zero_padding() {
+        return None;
+    }
+    match read_rop_request(cursor) {
+        Ok(request) => Some(request),
+        Err(_) => {
+            responses.extend_from_slice(&rop_parse_error_response());
+            None
+        }
+    }
+}
+
+pub(super) fn finalize_execute_rop_buffer(
+    responses: Vec<u8>,
+    handle_slots: &[u32],
+    output_handles: &[u32],
+    echo_input_handle_table: bool,
+    extended: bool,
+) -> Vec<u8> {
+    let response_handles = execute_response_handle_table(
+        &responses,
+        handle_slots,
+        output_handles,
+        echo_input_handle_table,
+    );
+    let response = if extended {
+        rop_buffer_with_response_spec(responses, &response_handles)
+    } else {
+        rop_buffer_with_response(responses, &response_handles)
+    };
+    if extended {
+        rpc_header_ext_rop_buffer(response)
+    } else {
+        response
+    }
+}
+
+pub(super) fn record_execute_sync_observations(
+    session: &mut MapiSession,
+    completed_hierarchy_sync: Option<(u64, String, String)>,
+    content_sync_configure_observed: bool,
+) {
+    if let Some((
+        sync_root_folder_id,
+        get_buffer_summary,
+        default_folder_hierarchy_membership_summary,
+    )) = completed_hierarchy_sync
+    {
+        session.record_completed_hierarchy_sync(
+            sync_root_folder_id,
+            get_buffer_summary,
+            default_folder_hierarchy_membership_summary,
+        );
+    }
+    if content_sync_configure_observed {
+        session.record_content_sync_configure();
+    }
+}
+
 pub(super) fn abort_response(request: &RopRequest, input_object: Option<&MapiObject>) -> Vec<u8> {
     let result = match input_object {
         Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. }) => 0x8004_0114,
@@ -315,12 +431,4 @@ pub(super) fn unknown_property_wire_type_response(
         request.response_handle_index(),
         0x8004_0102,
     ))
-}
-
-pub(super) fn unsupported_known_rop_response(rop_id: RopId, request: &RopRequest) -> Vec<u8> {
-    unsupported_rop_response(rop_id.as_u8(), request.response_handle_index())
-}
-
-pub(super) fn unsupported_unknown_rop_response(request: &RopRequest) -> Vec<u8> {
-    unsupported_rop_response(request.rop_id, request.response_handle_index())
 }

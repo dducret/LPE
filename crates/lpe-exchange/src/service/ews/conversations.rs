@@ -1,5 +1,245 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn find_conversation(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let emails = self.conversation_source_emails(principal, request).await?;
+            Ok(find_conversation_response(&emails, request))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "FindConversation",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    pub(in crate::service) async fn get_conversation_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let conversation_ids = requested_conversation_ids(request);
+            if conversation_ids.is_empty() {
+                bail!("GetConversationItems requires at least one ConversationId.");
+            }
+            let mut emails = self.conversation_source_emails(principal, request).await?;
+            filter_ignored_conversation_folders(&mut emails, request);
+            Ok(get_conversation_items_response(
+                &emails,
+                &conversation_ids,
+                request,
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "GetConversationItems",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    pub(in crate::service) async fn apply_conversation_action(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let actions = parse_conversation_actions(request);
+            if actions.is_empty() {
+                bail!("ApplyConversationAction requires at least one ConversationAction.");
+            }
+            let all_ids = self
+                .store
+                .fetch_all_jmap_email_ids(principal.account_id)
+                .await?;
+            let emails = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &all_ids)
+                .await?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+
+            for action in actions {
+                let conversation_id = action
+                    .conversation_id
+                    .ok_or_else(|| anyhow!("ConversationAction is missing ConversationId."))?;
+                let message_ids = emails
+                    .iter()
+                    .filter(|email| email.thread_id == conversation_id)
+                    .map(|email| email.id)
+                    .collect::<Vec<_>>();
+                if message_ids.is_empty() {
+                    return Ok(operation_error_response(
+                        "ApplyConversationAction",
+                        "ErrorItemNotFound",
+                        "conversation not found",
+                    ));
+                }
+                match action.action.as_str() {
+                    "Move" => {
+                        let target_mailbox_id = action.target_mailbox_id.ok_or_else(|| {
+                            anyhow!("Move conversation action requires DestinationFolderId.")
+                        })?;
+                        if !mailboxes.iter().any(|mailbox| mailbox.id == target_mailbox_id) {
+                            return Ok(operation_error_response(
+                                "ApplyConversationAction",
+                                "ErrorFolderNotFound",
+                                "destination folder not found",
+                            ));
+                        }
+                        for message_id in message_ids {
+                            self.store
+                                .move_jmap_email(
+                                    principal.account_id,
+                                    message_id,
+                                    target_mailbox_id,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-move".to_string(),
+                                        subject: format!(
+                                            "{conversation_id}:{message_id}->{target_mailbox_id}"
+                                        ),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    "Delete" => {
+                        for message_id in message_ids {
+                            self.store
+                                .delete_jmap_email(
+                                    principal.account_id,
+                                    message_id,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-delete".to_string(),
+                                        subject: format!("{conversation_id}:{message_id}"),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    "SetReadState" => {
+                        let unread = !action.read.unwrap_or(true);
+                        for message_id in message_ids {
+                            self.store
+                                .update_jmap_email_flags(
+                                    principal.account_id,
+                                    message_id,
+                                    Some(unread),
+                                    None,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-read-state".to_string(),
+                                        subject: format!("{conversation_id}:{message_id}"),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    value if value.starts_with("Always") => {
+                        return Ok(operation_error_response(
+                            "ApplyConversationAction",
+                            "ErrorInvalidOperation",
+                            "Persistent future-message conversation actions are not supported without first-class canonical thread lifecycle state.",
+                        ));
+                    }
+                    other => {
+                        return Ok(operation_error_response(
+                            "ApplyConversationAction",
+                            "ErrorInvalidOperation",
+                            &format!("unsupported conversation action {other}"),
+                        ));
+                    }
+                }
+            }
+
+            Ok(simple_operation_success_response("ApplyConversationAction"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "ApplyConversationAction",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn conversation_source_emails(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Vec<JmapEmail>> {
+        let folder_ids = if element_content(request, "ParentFolderId").is_some() {
+            self.requested_mailbox_folder_ids(principal, request)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let ids = if folder_ids.is_empty() {
+            self.store
+                .fetch_all_jmap_email_ids(principal.account_id)
+                .await?
+        } else {
+            let mut ids = Vec::new();
+            for folder_id in &folder_ids {
+                ids.extend(
+                    self.store
+                        .query_jmap_email_ids(
+                            principal.account_id,
+                            Some(*folder_id),
+                            None,
+                            0,
+                            MAILBOX_QUERY_LIMIT,
+                        )
+                        .await?
+                        .ids,
+                );
+            }
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        let mut emails = self
+            .store
+            .fetch_jmap_emails(principal.account_id, &ids)
+            .await?;
+        if !folder_ids.is_empty() {
+            let folder_set = folder_ids.into_iter().collect::<HashSet<_>>();
+            emails.retain(|email| folder_set.contains(&email.mailbox_id));
+        }
+        Ok(emails)
+    }
+}
+
+#[derive(Debug)]
+pub(in crate::service) struct ConversationActionRequest {
+    pub(in crate::service) action: String,
+    pub(in crate::service) conversation_id: Option<Uuid>,
+    pub(in crate::service) target_mailbox_id: Option<Uuid>,
+    pub(in crate::service) read: Option<bool>,
+}
+
 pub(in crate::service) fn find_conversation_response(
     emails: &[JmapEmail],
     request: &str,
@@ -118,6 +358,56 @@ pub(in crate::service) fn get_conversation_items_response(
         ),
         response_messages = response_messages,
     )
+}
+
+pub(in crate::service) fn requested_conversation_ids(request: &str) -> Vec<Uuid> {
+    attribute_values_for_tag(request, "ConversationId", "Id")
+        .into_iter()
+        .filter_map(parse_conversation_id)
+        .collect()
+}
+
+fn parse_conversation_id(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value.strip_prefix("conversation:").unwrap_or(value)).ok()
+}
+
+pub(in crate::service) fn parse_conversation_actions(
+    request: &str,
+) -> Vec<ConversationActionRequest> {
+    element_contents(request, "ConversationAction")
+        .into_iter()
+        .map(|action_xml| ConversationActionRequest {
+            action: element_text(action_xml, "Action").unwrap_or_default(),
+            conversation_id: attribute_values_for_tag(action_xml, "ConversationId", "Id")
+                .into_iter()
+                .next()
+                .and_then(parse_conversation_id),
+            target_mailbox_id: requested_mailbox_folder_ids_in(action_xml, "DestinationFolderId")
+                .into_iter()
+                .next(),
+            read: element_text(action_xml, "Read").and_then(|value| parse_xml_bool(&value).ok()),
+        })
+        .collect()
+}
+
+pub(in crate::service) fn filter_ignored_conversation_folders(
+    emails: &mut Vec<JmapEmail>,
+    request: &str,
+) {
+    let Some(ignore_xml) = element_content(request, "FoldersToIgnore") else {
+        return;
+    };
+    let ignored_ids = requested_mailbox_folder_ids(ignore_xml)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let ignored_roles = attribute_values_for_tag(ignore_xml, "DistinguishedFolderId", "Id")
+        .into_iter()
+        .filter_map(ews_distinguished_mailbox_role)
+        .collect::<HashSet<_>>();
+    emails.retain(|email| {
+        !ignored_ids.contains(&email.mailbox_id)
+            && !ignored_roles.contains(email.mailbox_role.as_str())
+    });
 }
 
 fn conversation_summary_xml(thread_id: Uuid, messages: &[&JmapEmail]) -> String {

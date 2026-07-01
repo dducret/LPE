@@ -104,194 +104,6 @@ pub(super) fn append_set_local_replica_midset_deleted_response(
     }
 }
 
-pub(super) fn append_upload_state_stream_begin_response(
-    session: &mut MapiSession,
-    handle_slots: &[u32],
-    request: &RopRequest,
-    mailbox_email: &str,
-    request_id: &str,
-    responses: &mut Vec<u8>,
-) {
-    match input_object_mut(session, handle_slots, request) {
-        Some(MapiObject::SynchronizationSource {
-            folder_id,
-            mailbox_id,
-            checkpoint_kind,
-            sync_type,
-            state_upload_property_tag,
-            state_upload_buffer,
-            ..
-        }) => {
-            let property_tag = request.upload_state_property_tag().unwrap_or_default();
-            let declared_bytes = request.upload_state_transfer_size().unwrap_or_default();
-            *state_upload_property_tag = Some(property_tag);
-            state_upload_buffer.clear();
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %mailbox_email,
-                request_type = "Execute",
-                mapi_request_id = request_id,
-                request_rop_id = "0x75",
-                sync_context_kind = "source",
-                folder_id = format_args!("0x{:016x}", *folder_id),
-                folder_role = debug_role_for_folder_id(*folder_id),
-                folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                sync_type = format_args!("0x{:02x}", *sync_type),
-                checkpoint_kind = checkpoint_kind.as_str(),
-                checkpoint_mailbox_id = (*mailbox_id)
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                upload_state_property_tag = format_args!("0x{property_tag:08x}"),
-                upload_state_property_name = upload_state_property_name(property_tag),
-                upload_state_declared_bytes = declared_bytes,
-                upload_state_empty_declared = declared_bytes == 0,
-                "rca debug mapi sync upload state begin"
-            );
-            responses.extend_from_slice(&rop_upload_state_success_response(request));
-        }
-        Some(MapiObject::SynchronizationCollector {
-            folder_id,
-            mailbox_id,
-            checkpoint_kind,
-            sync_type,
-            state_upload_property_tag,
-            state_upload_buffer,
-            client_state_uploaded_bytes,
-            client_state_uploaded_marker_mask,
-            ..
-        }) => {
-            let property_tag = request.upload_state_property_tag().unwrap_or_default();
-            let declared_bytes = request.upload_state_transfer_size().unwrap_or_default();
-            *state_upload_property_tag = Some(property_tag);
-            state_upload_buffer.clear();
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %mailbox_email,
-                request_type = "Execute",
-                mapi_request_id = request_id,
-                request_rop_id = "0x75",
-                sync_context_kind = "collector",
-                folder_id = format_args!("0x{:016x}", *folder_id),
-                folder_role = debug_role_for_folder_id(*folder_id),
-                folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                sync_type = format_args!("0x{:02x}", *sync_type),
-                checkpoint_kind = checkpoint_kind.as_str(),
-                checkpoint_mailbox_id = (*mailbox_id)
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                upload_state_property_tag = format_args!("0x{property_tag:08x}"),
-                upload_state_property_name = upload_state_property_name(property_tag),
-                upload_state_declared_bytes = declared_bytes,
-                upload_state_empty_declared = declared_bytes == 0,
-                upload_state_client_bytes = *client_state_uploaded_bytes,
-                upload_state_marker_mask =
-                    format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
-                "rca debug mapi sync upload state begin"
-            );
-            responses.extend_from_slice(&rop_upload_state_success_response(request));
-        }
-        _ => responses.extend_from_slice(&rop_error_response(
-            0x75,
-            request.response_handle_index(),
-            0x8004_0102,
-        )),
-    }
-}
-
-pub(super) fn append_upload_state_stream_continue_response(
-    session: &mut MapiSession,
-    handle_slots: &[u32],
-    request: &RopRequest,
-    mailbox_email: &str,
-    request_id: &str,
-    responses: &mut Vec<u8>,
-) {
-    match input_object_mut(session, handle_slots, request) {
-        Some(MapiObject::SynchronizationSource {
-            folder_id,
-            mailbox_id,
-            checkpoint_kind,
-            sync_type,
-            state_upload_buffer,
-            ..
-        }) => {
-            let stream_data = request.stream_data();
-            state_upload_buffer.extend_from_slice(stream_data);
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %mailbox_email,
-                request_type = "Execute",
-                mapi_request_id = request_id,
-                request_rop_id = "0x76",
-                sync_context_kind = "source",
-                folder_id = format_args!("0x{:016x}", *folder_id),
-                folder_role = debug_role_for_folder_id(*folder_id),
-                folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                sync_type = format_args!("0x{:02x}", *sync_type),
-                checkpoint_kind = checkpoint_kind.as_str(),
-                checkpoint_mailbox_id = (*mailbox_id)
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                upload_state_chunk_bytes = stream_data.len(),
-                upload_state_chunk_preview = %hex_preview(stream_data, 16),
-                upload_state_buffer_bytes = state_upload_buffer.len(),
-                "rca debug mapi sync upload state continue"
-            );
-            responses.extend_from_slice(&rop_upload_state_success_response(request));
-        }
-        Some(MapiObject::SynchronizationCollector {
-            folder_id,
-            mailbox_id,
-            checkpoint_kind,
-            sync_type,
-            state_upload_buffer,
-            client_state_uploaded_bytes,
-            client_state_uploaded_marker_mask,
-            ..
-        }) => {
-            let stream_data = request.stream_data();
-            state_upload_buffer.extend_from_slice(stream_data);
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %mailbox_email,
-                request_type = "Execute",
-                mapi_request_id = request_id,
-                request_rop_id = "0x76",
-                sync_context_kind = "collector",
-                folder_id = format_args!("0x{:016x}", *folder_id),
-                folder_role = debug_role_for_folder_id(*folder_id),
-                folder_container_class = debug_container_class_for_folder_id(*folder_id),
-                sync_type = format_args!("0x{:02x}", *sync_type),
-                checkpoint_kind = checkpoint_kind.as_str(),
-                checkpoint_mailbox_id = (*mailbox_id)
-                    .map(|id| id.to_string())
-                    .unwrap_or_default(),
-                upload_state_chunk_bytes = stream_data.len(),
-                upload_state_chunk_preview = %hex_preview(stream_data, 16),
-                upload_state_buffer_bytes = state_upload_buffer.len(),
-                upload_state_client_bytes = *client_state_uploaded_bytes,
-                upload_state_marker_mask =
-                    format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
-                "rca debug mapi sync upload state continue"
-            );
-            responses.extend_from_slice(&rop_upload_state_success_response(request));
-        }
-        _ => responses.extend_from_slice(&rop_error_response(
-            0x76,
-            request.response_handle_index(),
-            0x8004_0102,
-        )),
-    }
-}
-
 pub(super) fn append_get_local_replica_ids_response(
     principal: &AccountPrincipal,
     session: &mut MapiSession,
@@ -309,6 +121,147 @@ pub(super) fn append_get_local_replica_ids_response(
         request,
         first_global_counter,
     ));
+}
+
+pub(super) fn append_local_replica_dispatch_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::SetLocalReplicaMidsetDeleted) => {
+            append_set_local_replica_midset_deleted_response(
+                session,
+                handle_slots,
+                request,
+                responses,
+            );
+            false
+        }
+        Some(RopId::GetLocalReplicaIds) => {
+            append_get_local_replica_ids_response(principal, session, request, responses);
+            true
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn is_sync_import_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::SynchronizationImportMessageChange
+            | RopId::SynchronizationImportHierarchyChange
+            | RopId::SynchronizationImportDeletes
+            | RopId::SynchronizationImportMessageMove
+            | RopId::SynchronizationImportReadStateChanges
+            | RopId::SetLocalReplicaMidsetDeleted
+            | RopId::GetLocalReplicaIds
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_sync_import_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) -> bool
+where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::SynchronizationImportMessageChange) => {
+            append_synchronization_import_message_change_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+                output_handles,
+            )
+            .await;
+            false
+        }
+        Some(RopId::SynchronizationImportHierarchyChange) => {
+            append_synchronization_import_hierarchy_change_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                responses,
+            )
+            .await;
+            false
+        }
+        Some(RopId::SynchronizationImportDeletes) => {
+            append_synchronization_import_deletes_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+            )
+            .await;
+            false
+        }
+        Some(RopId::SynchronizationImportMessageMove) => {
+            append_synchronization_import_message_move_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+            )
+            .await;
+            false
+        }
+        Some(RopId::SynchronizationImportReadStateChanges) => {
+            append_synchronization_import_read_state_changes_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                responses,
+            )
+            .await;
+            false
+        }
+        Some(RopId::SetLocalReplicaMidsetDeleted | RopId::GetLocalReplicaIds) => {
+            append_local_replica_dispatch_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                responses,
+            )
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn append_fast_transfer_source_copy_messages_response(

@@ -1,5 +1,345 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_im_item_list(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let list = self.store.fetch_ews_im_list(principal).await?;
+        Ok(get_im_item_list_response(&list))
+    }
+
+    pub(in crate::service) async fn get_im_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let list = self.store.fetch_ews_im_list(principal).await?;
+        Ok(get_im_items_response(request, &list))
+    }
+
+    pub(in crate::service) async fn add_im_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let display_name = requested_im_group_name(request)
+            .ok_or_else(|| anyhow!("AddImGroup requires a group display name"))?;
+        let group = self
+            .store
+            .upsert_ews_im_group(
+                principal,
+                None,
+                &display_name,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-im-group".to_string(),
+                    subject: display_name.clone(),
+                },
+            )
+            .await?;
+        Ok(im_group_operation_response("AddImGroup", &group))
+    }
+
+    pub(in crate::service) async fn set_im_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("SetImGroup requires a group id"))?;
+        let display_name = requested_im_group_name(request)
+            .ok_or_else(|| anyhow!("SetImGroup requires a group display name"))?;
+        let group = self
+            .store
+            .upsert_ews_im_group(
+                principal,
+                Some(group_id),
+                &display_name,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-set-im-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_group_operation_response("SetImGroup", &group))
+    }
+
+    pub(in crate::service) async fn remove_im_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("RemoveImGroup requires a group id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group(
+                principal,
+                group_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-im-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result("RemoveImGroup", removed))
+    }
+
+    pub(in crate::service) async fn add_im_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddImContactToGroup requires a group id"))?;
+        let member = requested_im_contact_member(request, principal).ok_or_else(|| {
+            anyhow!("AddImContactToGroup requires a visible contact or account member")
+        })?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                member,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-im-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response("AddImContactToGroup", &member))
+    }
+
+    pub(in crate::service) async fn add_new_im_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddNewImContactToGroup requires a group id"))?;
+        let name = element_text(request, "DisplayName")
+            .or_else(|| element_text(request, "Name"))
+            .unwrap_or_else(|| "IM Contact".to_string());
+        let email = requested_smtp_address(request)
+            .ok_or_else(|| anyhow!("AddNewImContactToGroup requires an SMTP address"))?;
+        let contact = self
+            .store
+            .create_accessible_contact(
+                principal.account_id,
+                Some("im_contact_list"),
+                UpsertClientContactInput {
+                    account_id: principal.account_id,
+                    id: None,
+                    name,
+                    role: String::new(),
+                    email,
+                    phone: String::new(),
+                    team: String::new(),
+                    notes: String::new(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "contact".to_string(),
+                    contact_id: Some(contact.id),
+                    account_id: None,
+                    external_address: None,
+                    display_name: contact.name.clone(),
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-new-im-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddNewImContactToGroup",
+            &member,
+        ))
+    }
+
+    pub(in crate::service) async fn add_new_tel_uri_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddNewTelUriContactToGroup requires a group id"))?;
+        let tel_uri = element_text(request, "TelUri")
+            .or_else(|| element_text(request, "Address"))
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("AddNewTelUriContactToGroup requires a tel URI"))?;
+        let display_name = element_text(request, "DisplayName")
+            .or_else(|| element_text(request, "Name"))
+            .unwrap_or_else(|| tel_uri.clone());
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "tel_uri".to_string(),
+                    contact_id: None,
+                    account_id: None,
+                    external_address: Some(tel_uri),
+                    display_name,
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-new-tel-uri-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddNewTelUriContactToGroup",
+            &member,
+        ))
+    }
+
+    pub(in crate::service) async fn remove_contact_from_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let value = requested_im_member_value(request)
+            .ok_or_else(|| anyhow!("RemoveContactFromImList requires a member id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                None,
+                requested_im_member_kind(request).unwrap_or("contact"),
+                &value,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-contact-from-im-list".to_string(),
+                    subject: value.clone(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveContactFromImList",
+            removed,
+        ))
+    }
+
+    pub(in crate::service) async fn remove_im_contact_from_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("RemoveImContactFromGroup requires a group id"))?;
+        let value = requested_im_member_value(request)
+            .ok_or_else(|| anyhow!("RemoveImContactFromGroup requires a member id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                Some(group_id),
+                requested_im_member_kind(request).unwrap_or("contact"),
+                &value,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-im-contact-from-group".to_string(),
+                    subject: format!("{group_id}:{value}"),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveImContactFromGroup",
+            removed,
+        ))
+    }
+
+    pub(in crate::service) async fn add_distribution_group_to_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddDistributionGroupToImList requires a group id"))?;
+        let smtp = requested_smtp_address(request).ok_or_else(|| {
+            anyhow!("AddDistributionGroupToImList requires a distribution-list SMTP address")
+        })?;
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        let entry = entries
+            .iter()
+            .find(|entry| {
+                entry.entry_kind == ExchangeAddressBookEntryKind::DistributionList
+                    && entry.email.eq_ignore_ascii_case(&smtp)
+            })
+            .ok_or_else(|| anyhow!("distribution list not found"))?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "distribution_group".to_string(),
+                    contact_id: None,
+                    account_id: None,
+                    external_address: Some(entry.email.clone()),
+                    display_name: entry.display_name.clone(),
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-distribution-group-to-im-list".to_string(),
+                    subject: entry.email.clone(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddDistributionGroupToImList",
+            &member,
+        ))
+    }
+
+    pub(in crate::service) async fn remove_distribution_group_from_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let smtp = requested_smtp_address(request).ok_or_else(|| {
+            anyhow!("RemoveDistributionGroupFromImList requires a distribution-list SMTP address")
+        })?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                requested_im_group_id(request),
+                "distribution_group",
+                &smtp,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-distribution-group-from-im-list".to_string(),
+                    subject: smtp.clone(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveDistributionGroupFromImList",
+            removed,
+        ))
+    }
+}
+
 pub(in crate::service) fn get_im_item_list_response(list: &EwsImList) -> String {
     let groups_xml = list.groups.iter().map(im_group_xml).collect::<String>();
     let members_xml = list.members.iter().map(im_member_xml).collect::<String>();

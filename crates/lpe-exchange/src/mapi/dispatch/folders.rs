@@ -4,6 +4,42 @@ pub(super) fn private_create_folder_is_existing_response_flag() -> bool {
     false
 }
 
+pub(super) fn is_receive_folder_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::SetReceiveFolder | RopId::GetReceiveFolder)
+}
+
+pub(super) fn append_receive_folder_dispatch_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::SetReceiveFolder) => {
+            append_set_receive_folder_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                responses,
+            );
+            false
+        }
+        Some(RopId::GetReceiveFolder) => {
+            append_get_receive_folder_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                responses,
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn append_set_receive_folder_response(
     principal: &AccountPrincipal,
     session: &MapiSession,

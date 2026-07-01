@@ -1,5 +1,60 @@
 use super::*;
 
+pub(super) fn is_table_open_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::GetHierarchyTable | RopId::GetContentsTable | RopId::GetReceiveFolderTable
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_table_open_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request_rop_names: &str,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetHierarchyTable | RopId::GetContentsTable) => {
+            append_open_table_response(
+                store,
+                principal,
+                request_id,
+                request_rop_names,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+                output_handles,
+            )
+            .await;
+        }
+        Some(RopId::GetReceiveFolderTable) => {
+            append_receive_folder_table_dispatch_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                responses,
+            );
+        }
+        _ => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn append_open_table_response<S>(
     store: &S,

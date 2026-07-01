@@ -1,5 +1,180 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_sharing_metadata(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let requested_kind = requested_sharing_kind(request);
+        let contacts =
+            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Contacts) {
+                self.store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .filter(|collection| collection.is_owned)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+        let calendars =
+            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Calendar) {
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .filter(|collection| collection.is_owned)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+        Ok(get_sharing_metadata_response(
+            principal, &contacts, &calendars,
+        ))
+    }
+
+    pub(in crate::service) async fn get_sharing_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let input = parse_sharing_request(request)?;
+            let owner = self
+                .resolve_same_tenant_account(principal, &input.owner_email)
+                .await?;
+            let folder = self
+                .accessible_shared_collection(principal, owner.id, input.kind)
+                .await?
+                .ok_or_else(|| anyhow!("shared folder is not accessible to this account"))?;
+            Ok(get_sharing_folder_response(&folder))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "GetSharingFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    pub(in crate::service) async fn refresh_sharing_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let folder_id = requested_collection_id(request)
+                .ok_or_else(|| anyhow!("RefreshSharingFolder requires a FolderId."))?;
+            let mut collections = self
+                .store
+                .fetch_accessible_contact_collections(principal.account_id)
+                .await?;
+            collections.extend(
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?,
+            );
+            let Some(collection) = collections
+                .iter()
+                .find(|collection| collection.id == folder_id)
+            else {
+                bail!("shared folder is not accessible to this account");
+            };
+            Ok(refresh_sharing_folder_response(collection))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "RefreshSharingFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    pub(in crate::service) async fn accept_sharing_invitation(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let input = parse_sharing_request(request)?;
+        let owner = self
+            .resolve_same_tenant_account(principal, &input.owner_email)
+            .await?;
+        let grant = self
+            .store
+            .upsert_ews_sharing_grant(
+                owner.id,
+                &principal.email,
+                input.kind,
+                input.rights,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-accept-sharing-invitation".to_string(),
+                    subject: format!("{}:{}", input.kind.as_str(), owner.id),
+                },
+            )
+            .await?;
+        Ok(accept_sharing_invitation_response(&grant))
+    }
+
+    async fn accessible_shared_collection(
+        &self,
+        principal: &AccountPrincipal,
+        owner_account_id: Uuid,
+        kind: CollaborationResourceKind,
+    ) -> Result<Option<CollaborationCollection>> {
+        let collections = match kind {
+            CollaborationResourceKind::Contacts => {
+                self.store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+            }
+            CollaborationResourceKind::Calendar => {
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+            }
+            CollaborationResourceKind::Tasks => Vec::new(),
+        };
+        Ok(collections.into_iter().find(|collection| {
+            collection.owner_account_id == owner_account_id && !collection.is_owned
+        }))
+    }
+
+    async fn resolve_same_tenant_account(
+        &self,
+        principal: &AccountPrincipal,
+        email: &str,
+    ) -> Result<ExchangeAddressBookEntry> {
+        self.store
+            .fetch_address_book_entries(principal)
+            .await?
+            .into_iter()
+            .find(|entry| {
+                entry.entry_kind == ExchangeAddressBookEntryKind::Account
+                    && entry.email.eq_ignore_ascii_case(email)
+            })
+            .ok_or_else(|| anyhow!("sharing owner account not found in the same tenant"))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::service) struct SharingRequest {
+    pub(in crate::service) owner_email: String,
+    pub(in crate::service) kind: CollaborationResourceKind,
+    pub(in crate::service) rights: CollaborationRights,
+}
+
 pub(in crate::service) fn get_sharing_metadata_response(
     principal: &AccountPrincipal,
     contact_collections: &[CollaborationCollection],
@@ -103,6 +278,64 @@ pub(in crate::service) fn accept_sharing_invitation_response(grant: &Collaborati
         data_type = ews_sharing_data_type(&grant.kind),
         permission = ews_permission_level(&grant.rights),
     )
+}
+
+pub(in crate::service) fn requested_sharing_kind(
+    request: &str,
+) -> Option<CollaborationResourceKind> {
+    let value = element_text(request, "DataType")
+        .or_else(|| element_text(request, "FolderClass"))
+        .or_else(|| element_text(request, "FolderName"))
+        .unwrap_or_else(|| request.to_string())
+        .to_ascii_lowercase();
+    if value.contains("calendar") {
+        Some(CollaborationResourceKind::Calendar)
+    } else if value.contains("contact") {
+        Some(CollaborationResourceKind::Contacts)
+    } else {
+        None
+    }
+}
+
+pub(in crate::service) fn parse_sharing_request(request: &str) -> Result<SharingRequest> {
+    let owner_email = element_content(request, "SharedFolderOwner")
+        .and_then(parse_mailbox)
+        .map(|mailbox| mailbox.address)
+        .or_else(|| element_text(request, "OwnerSmtpAddress"))
+        .or_else(|| element_text(request, "SharingOwnerSmtpAddress"))
+        .or_else(|| element_text(request, "SmtpAddress"))
+        .or_else(|| {
+            element_content(request, "From")
+                .and_then(parse_mailbox)
+                .map(|mailbox| mailbox.address)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("sharing request is missing a same-tenant owner mailbox"))?;
+    let kind = requested_sharing_kind(request)
+        .ok_or_else(|| anyhow!("sharing request supports only calendar and contacts folders"))?;
+    let rights = sharing_rights(request);
+    Ok(SharingRequest {
+        owner_email,
+        kind,
+        rights,
+    })
+}
+
+fn sharing_rights(request: &str) -> CollaborationRights {
+    let permission = element_text(request, "PermissionLevel")
+        .or_else(|| element_text(request, "SharingPermission"))
+        .unwrap_or_else(|| "Reviewer".to_string())
+        .to_ascii_lowercase();
+    let may_write = permission.contains("editor")
+        || permission.contains("author")
+        || permission.contains("owner")
+        || permission.contains("write");
+    CollaborationRights {
+        may_read: true,
+        may_write,
+        may_delete: permission.contains("editor") || permission.contains("owner"),
+        may_share: permission.contains("owner"),
+    }
 }
 
 fn sharing_metadata_entry_xml(

@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn is_rules_dispatch_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::GetRulesTable | RopId::ModifyRules)
+}
+
 pub(super) fn append_get_rules_table_response(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
@@ -142,6 +146,48 @@ pub(super) async fn append_modify_rules_response<S>(
         ));
     } else {
         responses.extend_from_slice(&rop_simple_success_response(request));
+    }
+}
+
+pub(super) async fn append_rules_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetRulesTable) => {
+            append_get_rules_table_response(
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                snapshot,
+                responses,
+                output_handles,
+            );
+        }
+        Some(RopId::ModifyRules) => {
+            append_modify_rules_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                snapshot,
+                responses,
+            )
+            .await;
+        }
+        _ => {}
     }
 }
 

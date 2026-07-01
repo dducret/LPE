@@ -88,6 +88,84 @@ pub(super) fn append_options_data_response(
     responses.extend_from_slice(&options_data_response(request, has_input_object));
 }
 
+pub(super) fn append_transport_info_dispatch_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetTransportFolder) => {
+            append_transport_folder_response(session, handle_slots, request, responses);
+        }
+        Some(RopId::OptionsData) => {
+            append_options_data_response(session, handle_slots, request, responses);
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn is_submission_dispatch_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::SetSpooler
+            | RopId::SpoolerLockMessage
+            | RopId::TransportNewMail
+            | RopId::UpdateDeferredActionMessages
+            | RopId::SubmitMessage
+            | RopId::TransportSend
+            | RopId::AbortSubmit
+            | RopId::GetTransportFolder
+            | RopId::OptionsData
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_submission_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    responses: &mut Vec<u8>,
+    created_emails: &mut Vec<JmapEmail>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::SetSpooler | RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
+            append_spooler_advisory_dispatch_response(handle_slots, request, responses);
+        }
+        Some(RopId::UpdateDeferredActionMessages) => {
+            append_deferred_action_messages_dispatch_response(handle_slots, request, responses);
+        }
+        Some(RopId::SubmitMessage | RopId::TransportSend) => {
+            append_submit_message_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                created_emails,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::AbortSubmit) => {
+            append_abort_submit_response(store, principal, request, mailboxes, emails, responses)
+                .await;
+        }
+        Some(RopId::GetTransportFolder | RopId::OptionsData) => {
+            append_transport_info_dispatch_response(session, handle_slots, request, responses);
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn abort_submit_source_is_sent(email: &JmapEmail) -> bool {
     email.mailbox_role == "sent"
         || email
@@ -163,6 +241,18 @@ pub(super) fn append_spooler_advisory_response(
     responses.extend_from_slice(&spooler_advisory_response(request, has_input_handle));
 }
 
+pub(super) fn append_spooler_advisory_dispatch_response(
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    append_spooler_advisory_response(
+        request,
+        input_handle(handle_slots, request).is_some(),
+        responses,
+    );
+}
+
 pub(super) fn append_deferred_action_messages_response(
     request: &RopRequest,
     has_input_handle: bool,
@@ -172,6 +262,18 @@ pub(super) fn append_deferred_action_messages_response(
         request,
         has_input_handle,
     ));
+}
+
+pub(super) fn append_deferred_action_messages_dispatch_response(
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    append_deferred_action_messages_response(
+        request,
+        input_handle(handle_slots, request).is_some(),
+        responses,
+    );
 }
 
 pub(super) async fn append_submit_message_response<S>(

@@ -1,5 +1,119 @@
 use super::*;
 
+pub(super) fn is_attachment_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::GetValidAttachments
+            | RopId::GetAttachmentTable
+            | RopId::OpenAttachment
+            | RopId::CreateAttachment
+            | RopId::DeleteAttachment
+            | RopId::OpenEmbeddedMessage
+            | RopId::SaveChangesAttachment
+    )
+}
+
+pub(super) async fn append_attachment_response<S, V>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    validator: &Validator<V>,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) where
+    S: ExchangeStore,
+    V: Detector,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetValidAttachments) => {
+            append_get_valid_attachments_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
+        }
+        Some(RopId::GetAttachmentTable) => {
+            append_get_attachment_table_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                output_handles,
+            );
+        }
+        Some(RopId::OpenAttachment) => {
+            append_open_attachment_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                output_handles,
+            );
+        }
+        Some(RopId::CreateAttachment) => {
+            append_create_attachment_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+                output_handles,
+            );
+        }
+        Some(RopId::DeleteAttachment) => {
+            append_delete_attachment_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
+        }
+        Some(RopId::OpenEmbeddedMessage) => {
+            append_open_embedded_message_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                output_handles,
+            )
+            .await;
+        }
+        Some(RopId::SaveChangesAttachment) => {
+            append_save_changes_attachment_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                validator,
+                responses,
+            )
+            .await;
+        }
+        _ => unreachable!("append_attachment_response called for non-attachment ROP"),
+    }
+}
+
 pub(super) fn append_get_valid_attachments_response(
     session: &MapiSession,
     handle_slots: &[u32],

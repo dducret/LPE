@@ -548,6 +548,56 @@ pub(super) async fn append_write_per_user_information_response<S: ExchangeStore>
     responses.extend_from_slice(&rop_write_per_user_information_response(request));
 }
 
+pub(super) async fn append_public_folder_per_user_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetPerUserLongTermIds) => {
+            append_get_per_user_long_term_ids_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::GetPerUserGuid) => {
+            append_get_per_user_guid_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::ReadPerUserInformation) => {
+            append_read_per_user_information_response(
+                store, principal, request, snapshot, responses,
+            )
+            .await;
+        }
+        Some(RopId::WritePerUserInformation) => {
+            append_write_per_user_information_response(
+                store, principal, request, snapshot, responses,
+            )
+            .await;
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn append_get_owning_servers_response(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -623,4 +673,80 @@ pub(super) fn append_public_folder_is_ghosted_response(
             .public_folder_replica_server_names(folder_id)
             .is_empty();
     responses.extend_from_slice(&rop_public_folder_is_ghosted_response(request, is_ghosted))
+}
+
+pub(super) fn append_public_folder_replica_probe_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetOwningServers) => {
+            append_get_owning_servers_response(session, handle_slots, request, snapshot, responses);
+        }
+        Some(RopId::PublicFolderIsGhosted) => {
+            append_public_folder_is_ghosted_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn is_public_folder_metadata_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::GetPerUserLongTermIds
+            | RopId::GetPerUserGuid
+            | RopId::ReadPerUserInformation
+            | RopId::WritePerUserInformation
+            | RopId::GetOwningServers
+            | RopId::PublicFolderIsGhosted
+    )
+}
+
+pub(super) async fn append_public_folder_metadata_dispatch_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(
+            RopId::GetPerUserLongTermIds
+            | RopId::GetPerUserGuid
+            | RopId::ReadPerUserInformation
+            | RopId::WritePerUserInformation,
+        ) => {
+            append_public_folder_per_user_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::GetOwningServers | RopId::PublicFolderIsGhosted) => {
+            append_public_folder_replica_probe_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
+        }
+        _ => {}
+    }
 }

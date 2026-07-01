@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::ews_types::{EwsMonth, EwsResponseType, EwsWeekday};
 
 pub(in crate::service) fn calendar_change_key(
     event: &AccessibleEvent,
@@ -108,6 +109,181 @@ pub(in crate::service) fn create_event_success_response(event: &AccessibleEvent)
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
     )
+}
+
+pub(in crate::service) fn ews_datetime(date: &str, time: &str) -> String {
+    format!("{}T{}:00Z", date.trim(), time.trim())
+}
+
+pub(in crate::service) fn event_end_datetime(event: &AccessibleEvent) -> String {
+    let (hour, minute) = event
+        .time
+        .split_once(':')
+        .and_then(|(hour, minute)| Some((hour.parse::<i32>().ok()?, minute.parse::<i32>().ok()?)))
+        .unwrap_or((0, 0));
+    let total = hour
+        .saturating_mul(60)
+        .saturating_add(minute)
+        .saturating_add(event.duration_minutes.max(0));
+    let end_hour = (total / 60).min(23);
+    let end_minute = total % 60;
+    ews_datetime(&event.date, &format!("{end_hour:02}:{end_minute:02}"))
+}
+
+pub(in crate::service) fn parse_create_event_input(
+    principal: &AccountPrincipal,
+    request: &str,
+) -> Result<UpsertClientEventInput> {
+    let event = element_content(request, "CalendarItem")
+        .ok_or_else(|| anyhow!("CreateItem is missing CalendarItem"))?;
+    let start = element_text(event, "Start").unwrap_or_default();
+    let end = element_text(event, "End").unwrap_or_default();
+    let (date, time) = ews_datetime_parts(&start)
+        .ok_or_else(|| anyhow!("CalendarItem is missing a valid Start value"))?;
+    let duration_minutes = ews_duration_minutes(&start, &end).unwrap_or(60);
+    let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+    let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+    let body_value = element_text(event, "Body").unwrap_or_default();
+    let notes = if body_type.eq_ignore_ascii_case("HTML") {
+        html_to_text(&body_value)
+    } else {
+        body_value.clone()
+    };
+    let (participants, _) = parse_event_participants(principal, event);
+
+    Ok(UpsertClientEventInput {
+        id: None,
+        account_id: principal.account_id,
+        uid: String::new(),
+        date,
+        time,
+        time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
+        duration_minutes,
+        all_day: element_text(event, "IsAllDayEvent")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: parse_ews_recurrence(event)?,
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: element_text(event, "Subject").unwrap_or_else(|| "Untitled event".to_string()),
+        location: element_text(event, "Location").unwrap_or_default(),
+        organizer_json: participants
+            .organizer
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?
+            .unwrap_or_else(|| "{}".to_string()),
+        attendees: calendar_attendee_labels(&participants),
+        attendees_json: serialize_calendar_participants_metadata(&participants),
+        notes,
+        body_html: if body_type.eq_ignore_ascii_case("HTML") {
+            body_value
+        } else {
+            String::new()
+        },
+    })
+}
+
+pub(in crate::service) fn parse_update_event_input(
+    principal: &AccountPrincipal,
+    existing: &AccessibleEvent,
+    request: &str,
+) -> Result<UpsertClientEventInput> {
+    let event = element_content(request, "CalendarItem").unwrap_or(request);
+    let start = element_text(event, "Start");
+    let end = element_text(event, "End");
+    let (date, time) = start
+        .as_deref()
+        .and_then(ews_datetime_parts)
+        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
+    let duration_minutes = match (start.as_deref(), end.as_deref()) {
+        (Some(start), Some(end)) => {
+            ews_duration_minutes(start, end).unwrap_or(existing.duration_minutes)
+        }
+        (Some(start), None) => {
+            ews_duration_minutes(start, &format!("{}T{}:00Z", existing.date, existing.time))
+                .unwrap_or(existing.duration_minutes)
+        }
+        _ => existing.duration_minutes,
+    };
+    let notes = if field_deleted(request, "item:Body") {
+        String::new()
+    } else if let Some(body_value) = element_text(event, "Body") {
+        let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+        let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+        if body_type.eq_ignore_ascii_case("HTML") {
+            html_to_text(&body_value)
+        } else {
+            body_value
+        }
+    } else {
+        existing.notes.clone()
+    };
+    let (participants, has_attendee_updates) = parse_event_participants(principal, event);
+
+    Ok(UpsertClientEventInput {
+        id: Some(existing.id),
+        account_id: principal.account_id,
+        uid: existing.uid.clone(),
+        date,
+        time,
+        time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),
+        duration_minutes,
+        all_day: element_text(event, "IsAllDayEvent")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(existing.all_day),
+        status: existing.status.clone(),
+        sequence: existing.sequence,
+        recurrence_rule: if field_deleted(request, "calendar:Recurrence") {
+            String::new()
+        } else if element_content(event, "Recurrence").is_some() {
+            parse_ews_recurrence(event)?
+        } else {
+            existing.recurrence_rule.clone()
+        },
+        recurrence_json: existing.recurrence_json.clone(),
+        recurrence_exceptions_json: existing.recurrence_exceptions_json.clone(),
+        title: deleted_or_updated_text(
+            request,
+            event,
+            "calendar:Subject",
+            "Subject",
+            &existing.title,
+        )
+        .if_empty(existing.title.clone()),
+        location: deleted_or_updated_text(
+            request,
+            event,
+            "calendar:Location",
+            "Location",
+            &existing.location,
+        ),
+        organizer_json: existing.organizer_json.clone(),
+        attendees: if has_attendee_updates {
+            calendar_attendee_labels(&participants)
+        } else {
+            existing.attendees.clone()
+        },
+        attendees_json: if has_attendee_updates {
+            serialize_calendar_participants_metadata(&participants)
+        } else {
+            existing.attendees_json.clone()
+        },
+        notes,
+        body_html: if let Some(body_value) = element_text(event, "Body") {
+            let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+            let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+            if body_type.eq_ignore_ascii_case("HTML") {
+                body_value
+            } else {
+                existing.body_html.clone()
+            }
+        } else {
+            existing.body_html.clone()
+        },
+    })
 }
 
 fn ews_attendees_xml(event: &AccessibleEvent) -> String {
@@ -321,4 +497,178 @@ fn rrule_until_to_ews_date(value: &str) -> String {
     } else {
         date.to_string()
     }
+}
+
+pub(in crate::service) fn parse_ews_recurrence(event: &str) -> Result<String> {
+    let Some(recurrence) = element_content(event, "Recurrence") else {
+        return Ok(String::new());
+    };
+
+    let mut parts = Vec::new();
+    if let Some(daily) = element_content(recurrence, "DailyRecurrence") {
+        parts.push("FREQ=DAILY".to_string());
+        push_interval_part(&mut parts, daily);
+    } else if let Some(weekly) = element_content(recurrence, "WeeklyRecurrence") {
+        parts.push("FREQ=WEEKLY".to_string());
+        push_interval_part(&mut parts, weekly);
+        if let Some(days) = element_text(weekly, "DaysOfWeek") {
+            let byday = days
+                .split_whitespace()
+                .map(ews_weekday_to_rrule)
+                .collect::<Result<Vec<_>>>()?;
+            if !byday.is_empty() {
+                parts.push(format!("BYDAY={}", byday.join(",")));
+            }
+        }
+    } else if let Some(monthly) = element_content(recurrence, "AbsoluteMonthlyRecurrence") {
+        parts.push("FREQ=MONTHLY".to_string());
+        push_interval_part(&mut parts, monthly);
+        if let Some(day) = element_text(monthly, "DayOfMonth") {
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+        }
+    } else if let Some(yearly) = element_content(recurrence, "AbsoluteYearlyRecurrence") {
+        parts.push("FREQ=YEARLY".to_string());
+        if let Some(day) = element_text(yearly, "DayOfMonth") {
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+        }
+        if let Some(month) = element_text(yearly, "Month") {
+            parts.push(format!("BYMONTH={}", ews_month_to_number(&month)?));
+        }
+    } else {
+        bail!("unsupported EWS recurrence pattern");
+    }
+
+    if let Some(numbered) = element_content(recurrence, "NumberedRecurrence") {
+        if let Some(count) = element_text(numbered, "NumberOfOccurrences") {
+            parts.push(format!(
+                "COUNT={}",
+                parse_positive_number(&count, "NumberOfOccurrences")?
+            ));
+        }
+    } else if let Some(end_date) = element_content(recurrence, "EndDateRecurrence") {
+        if let Some(end) = element_text(end_date, "EndDate") {
+            parts.push(format!("UNTIL={}", rrule_date(&end)?));
+        }
+    }
+
+    Ok(parts.join(";"))
+}
+
+fn push_interval_part(parts: &mut Vec<String>, recurrence: &str) {
+    if let Some(interval) = element_text(recurrence, "Interval")
+        .and_then(|value| parse_positive_number(&value, "Interval").ok())
+        .filter(|value| *value > 1)
+    {
+        parts.push(format!("INTERVAL={interval}"));
+    }
+}
+
+fn parse_positive_number(value: &str, field: &str) -> Result<u32> {
+    let number = value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| anyhow!("{field} must be a positive integer"))?;
+    if number == 0 {
+        bail!("{field} must be a positive integer");
+    }
+    Ok(number)
+}
+
+fn ews_weekday_to_rrule(value: &str) -> Result<&'static str> {
+    Ok(EwsWeekday::parse(value)?.rrule_day())
+}
+
+fn ews_month_to_number(value: &str) -> Result<u32> {
+    Ok(EwsMonth::parse(value)?.number())
+}
+
+fn rrule_date(value: &str) -> Result<String> {
+    let date = value.trim().split('T').next().unwrap_or_default();
+    let mut parts = date.split('-');
+    let (Some(year), Some(month), Some(day), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        bail!("recurrence end date must be YYYY-MM-DD");
+    };
+    Ok(format!("{year}{month}{day}"))
+}
+
+fn parse_event_participants(
+    principal: &AccountPrincipal,
+    event: &str,
+) -> (CalendarParticipantsMetadata, bool) {
+    let mut metadata = CalendarParticipantsMetadata {
+        organizer: Some(CalendarOrganizerMetadata {
+            email: principal.email.clone(),
+            common_name: principal.display_name.clone(),
+        }),
+        attendees: Vec::new(),
+    };
+    let mut has_attendee_collections = false;
+    for (collection_name, role) in [
+        ("RequiredAttendees", "REQ-PARTICIPANT"),
+        ("OptionalAttendees", "OPT-PARTICIPANT"),
+    ] {
+        let Some(collection) = element_content(event, collection_name) else {
+            continue;
+        };
+        has_attendee_collections = true;
+        metadata.attendees.extend(
+            element_contents(collection, "Attendee")
+                .into_iter()
+                .filter_map(|attendee| parse_attendee(attendee, role)),
+        );
+    }
+    (metadata, has_attendee_collections)
+}
+
+fn parse_attendee(attendee: &str, role: &str) -> Option<CalendarParticipantMetadata> {
+    let mailbox = element_content(attendee, "Mailbox").and_then(parse_mailbox)?;
+    Some(CalendarParticipantMetadata {
+        email: mailbox.address,
+        common_name: mailbox.display_name.unwrap_or_default(),
+        role: role.to_string(),
+        partstat: ews_response_type_to_partstat(&element_text(attendee, "ResponseType")),
+        rsvp: false,
+    })
+}
+
+fn ews_response_type_to_partstat(response_type: &Option<String>) -> String {
+    EwsResponseType::parse(response_type.as_deref().unwrap_or_default())
+        .partstat()
+        .to_string()
+}
+
+fn requested_time_zone(request: &str) -> Option<String> {
+    let time_zone = open_tag_text(request, "TimeZoneDefinition")?;
+    attribute_value(time_zone, "Id").map(str::to_string)
+}
+
+fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
+    let trimmed = value.trim();
+    if trimmed.len() < 16 {
+        return None;
+    }
+    let date = trimmed.get(0..10)?;
+    let time = trimmed.get(11..16)?;
+    Some((date.to_string(), time.to_string()))
+}
+
+fn ews_duration_minutes(start: &str, end: &str) -> Option<i32> {
+    let (_, start_time) = ews_datetime_parts(start)?;
+    let (_, end_time) = ews_datetime_parts(end)?;
+    let start_minutes = time_minutes(&start_time)?;
+    let end_minutes = time_minutes(&end_time)?;
+    (end_minutes > start_minutes).then_some(end_minutes - start_minutes)
+}
+
+fn time_minutes(value: &str) -> Option<i32> {
+    let (hour, minute) = value.split_once(':')?;
+    Some(hour.parse::<i32>().ok()? * 60 + minute.parse::<i32>().ok()?)
 }

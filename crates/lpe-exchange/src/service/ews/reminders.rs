@@ -1,5 +1,12 @@
 use super::super::*;
 
+#[derive(Debug, Clone)]
+pub(in crate::service) struct ParsedReminderItemId {
+    pub(in crate::service) source_type: String,
+    pub(in crate::service) source_id: Uuid,
+    pub(in crate::service) occurrence_start_at: Option<String>,
+}
+
 pub(in crate::service) fn get_reminders_response(reminders: &[ClientReminder]) -> String {
     let mut reminders_xml = String::new();
     for reminder in reminders {
@@ -53,4 +60,19 @@ fn reminder_item_id(reminder: &ClientReminder) -> String {
     } else {
         format!("{}:{}", reminder.source_type, reminder.source_id)
     }
+}
+
+pub(in crate::service) fn parse_reminder_item_id(id: &str) -> Option<ParsedReminderItemId> {
+    let mut parts = id.splitn(3, ':');
+    let source_type = parts.next()?.to_ascii_lowercase();
+    let source_id = Uuid::parse_str(parts.next()?).ok()?;
+    let occurrence_start_at = parts
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    Some(ParsedReminderItemId {
+        source_type,
+        source_id,
+        occurrence_start_at,
+    })
 }

@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn is_object_id_conversion_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::LongTermIdFromId | RopId::IdFromLongTermId)
+}
+
 pub(super) fn debug_object_scope_for_id(
     object_id: Option<u64>,
     mailboxes: &[JmapMailbox],
@@ -193,4 +197,23 @@ pub(super) fn append_id_from_long_term_id_response(
         message = "rca debug mapi id from long term id",
     );
     responses.extend_from_slice(&response)
+}
+
+pub(super) fn append_object_id_conversion_response(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::LongTermIdFromId) => append_long_term_id_from_id_response(
+            principal, request, mailboxes, emails, snapshot, responses,
+        ),
+        Some(RopId::IdFromLongTermId) => append_id_from_long_term_id_response(
+            principal, request, mailboxes, emails, snapshot, responses,
+        ),
+        _ => {}
+    }
 }

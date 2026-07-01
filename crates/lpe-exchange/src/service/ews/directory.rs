@@ -1,5 +1,97 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn resolve_names(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(resolve_names_response(principal, request, &entries))
+    }
+
+    pub(in crate::service) async fn expand_dl(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(expand_dl_response(principal, request, &entries))
+    }
+
+    pub(in crate::service) async fn find_people(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(find_people_response(principal, request, &entries))
+    }
+
+    pub(in crate::service) async fn get_persona(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(get_persona_response(principal, request, &entries))
+    }
+
+    pub(in crate::service) async fn get_user_photo(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let email = element_text(request, "Email")
+            .or_else(|| element_text(request, "EmailAddress"))
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let Some(email) = email else {
+            return Ok(get_user_photo_error_response(
+                "ErrorInvalidOperation",
+                "GetUserPhoto requires an Email value.",
+            ));
+        };
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        if !visible_address_book_email(principal, &entries, &email) {
+            return Ok(get_user_photo_error_response(
+                "ErrorNameResolutionNoResults",
+                "No same-tenant directory account or contact matches the requested email address.",
+            ));
+        }
+        Ok(get_user_photo_error_response(
+            "ErrorItemNotFound",
+            "No canonical LPE account photo is available for this directory entry.",
+        ))
+    }
+
+    pub(in crate::service) async fn get_password_expiration_date(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let requested = element_text(request, "MailboxSmtpAddress")
+            .or_else(|| element_text(request, "EmailAddress"))
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| principal.email.to_ascii_lowercase());
+        if requested != principal.email.to_ascii_lowercase() {
+            return Ok(get_password_expiration_date_error_response(
+                "ErrorAccessDenied",
+                "Password expiration can only be queried for the authenticated account.",
+            ));
+        }
+        Ok(get_password_expiration_date_error_response(
+            "ErrorInvalidOperation",
+            "LPE has no canonical account password expiration date to expose through EWS.",
+        ))
+    }
+}
+
 pub(in crate::service) fn resolve_names_response(
     principal: &AccountPrincipal,
     request: &str,

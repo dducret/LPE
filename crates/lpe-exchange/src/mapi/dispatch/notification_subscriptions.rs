@@ -1,5 +1,42 @@
 use super::*;
 
+pub(super) fn is_notification_dispatch_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::RegisterNotification)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_notification_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request_rop_names: &str,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) where
+    S: ExchangeStore,
+{
+    if matches!(
+        RopId::from_u8(request.rop_id),
+        Some(RopId::RegisterNotification)
+    ) {
+        append_register_notification_response(
+            store,
+            principal,
+            request_id,
+            request_rop_names,
+            session,
+            handle_slots,
+            request,
+            responses,
+            output_handles,
+        )
+        .await;
+    }
+}
+
 pub(super) async fn append_register_notification_response<S>(
     store: &S,
     principal: &AccountPrincipal,

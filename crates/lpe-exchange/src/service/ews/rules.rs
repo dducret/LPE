@@ -1,5 +1,18 @@
 use super::super::*;
 
+#[derive(Debug, Clone)]
+pub(in crate::service) enum EwsInboxRuleMutation {
+    Delete {
+        rule_id: String,
+    },
+    Put {
+        name: String,
+        active: bool,
+        sieve: String,
+        audit_action: &'static str,
+    },
+}
+
 pub(in crate::service) fn get_inbox_rules_response(rules: &[MailboxRule]) -> String {
     let mut rules_xml = String::new();
     for (index, rule) in rules.iter().enumerate() {
@@ -39,4 +52,67 @@ pub(in crate::service) fn get_inbox_rules_response(rules: &[MailboxRule]) -> Str
         ),
         rules_xml = rules_xml
     )
+}
+
+pub(in crate::service) fn bounded_ews_rule_to_sieve(rule: &str) -> Result<(String, bool, String)> {
+    if element_text(rule, "IsClientOnly")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        bail!("UpdateInboxRules does not support client-only Exchange rules.");
+    }
+    if rule.contains("RuleProviderData")
+        || rule.contains("RuleBlob")
+        || rule.contains("DeferredAction")
+        || rule.contains("DeferredActionMessage")
+    {
+        bail!("UpdateInboxRules does not support Exchange rule blobs or deferred-action data.");
+    }
+
+    let name = element_text(rule, "DisplayName")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| element_text(rule, "RuleId").filter(|value| !value.trim().is_empty()))
+        .unwrap_or_else(|| format!("ews-rule-{}", Uuid::new_v4()));
+    let active = element_text(rule, "IsEnabled")
+        .map(|value| !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    let subject = element_content(rule, "SubjectContainsWords")
+        .and_then(|content| element_text(content, "String"))
+        .filter(|value| !value.trim().is_empty());
+    let target = element_content(rule, "MoveToFolder")
+        .and_then(|content| {
+            element_text(content, "DisplayName")
+                .or_else(|| element_text(content, "Name"))
+                .or_else(|| attribute_value_after(content, "FolderId", "Id").map(str::to_string))
+        })
+        .unwrap_or_else(|| "Inbox".to_string());
+    let sieve = if let Some(subject) = subject {
+        format!(
+            concat!(
+                "require [\"fileinto\"];\n",
+                "if header :contains \"Subject\" \"{subject}\" {{\n",
+                "  fileinto \"{target}\";\n",
+                "  stop;\n",
+                "}}\n"
+            ),
+            subject = escape_sieve_string(&subject),
+            target = escape_sieve_string(&target),
+        )
+    } else if rule.contains("<t:Delete") || rule.contains("<Delete") {
+        concat!(
+            "require [\"discard\"];\n",
+            "if true {\n",
+            "  discard;\n",
+            "  stop;\n",
+            "}\n"
+        )
+        .to_string()
+    } else {
+        bail!("UpdateInboxRules supports subject contains with move-to-folder or delete.");
+    };
+    Ok((name, active, sieve))
+}
+
+fn escape_sieve_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }

@@ -1,5 +1,43 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_rooms(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            if let Some(room_list) = requested_room_list_address(request) {
+                let expected = computed_room_list_address(principal);
+                if !room_list.eq_ignore_ascii_case(&expected) {
+                    bail!(
+                        "GetRooms supports only LPE's computed tenant room/resource list; explicit room-list membership is not supported."
+                    );
+                }
+            }
+            let entries = self.store.fetch_address_book_entries(principal).await?;
+            Ok(get_rooms_response(&entries))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("GetRooms", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    pub(in crate::service) async fn get_room_lists(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(get_room_lists_response(principal, &entries))
+    }
+}
+
 pub(in crate::service) fn computed_room_list_address(principal: &AccountPrincipal) -> String {
     let domain = principal
         .email
@@ -7,6 +45,13 @@ pub(in crate::service) fn computed_room_list_address(principal: &AccountPrincipa
         .map(|(_, domain)| domain)
         .unwrap_or("local");
     format!("rooms@{domain}")
+}
+
+pub(in crate::service) fn requested_room_list_address(request: &str) -> Option<String> {
+    let room_list = element_content(request, "RoomList")?;
+    element_text(room_list, "EmailAddress")
+        .or_else(|| element_text(room_list, "Address"))
+        .filter(|value| !value.trim().is_empty())
 }
 
 pub(in crate::service) fn get_rooms_response(entries: &[ExchangeAddressBookEntry]) -> String {

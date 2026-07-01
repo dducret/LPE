@@ -1,5 +1,51 @@
 use super::*;
 
+pub(super) fn is_logon_dispatch_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::Logon | RopId::GetAddressTypes)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn append_logon_dispatch_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    typed_request: &TypedRopRequest,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) -> bool {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::Logon) => {
+            append_logon_response(
+                session,
+                handle_slots,
+                request,
+                typed_request,
+                principal,
+                request_id,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+                output_handles,
+            );
+            false
+        }
+        Some(RopId::GetAddressTypes) => append_address_types_dispatch_response(
+            principal,
+            session,
+            handle_slots,
+            request,
+            responses,
+        ),
+        _ => false,
+    }
+}
+
 pub(super) struct LogonResponseContext {
     pub(super) handle: u32,
     pub(super) is_private_logon: bool,
@@ -41,6 +87,51 @@ pub(super) fn allocate_logon_response_context(
         is_private_logon,
         special_folder_ids,
     }
+}
+
+pub(super) fn append_logon_response(
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    typed_request: &TypedRopRequest,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) {
+    if let TypedRopRequest::Logon(logon_request) = typed_request {
+        log_rop_logon_request_identity(principal, request_id, logon_request);
+    }
+    let logon_context = allocate_logon_response_context(session, handle_slots, principal, request);
+    if logon_context.is_private_logon {
+        responses.extend_from_slice(&rop_logon_response_body(principal, request));
+        log_default_folder_discovery_contract(
+            principal,
+            request_id,
+            "private_logon_response",
+            "0xfe",
+            mailboxes,
+            emails,
+            snapshot,
+        );
+    } else {
+        responses.extend_from_slice(&rop_public_folder_logon_response_body(principal, request));
+    }
+    log_outlook_bootstrap_phase(
+        principal,
+        "logon_default_folder_ids_returned",
+        "0xfe",
+        None,
+        false,
+        None,
+        None,
+        Some(logon_context.handle),
+        &logon_context.special_folder_ids,
+    );
+    output_handles.push(logon_context.handle);
 }
 
 pub(super) fn private_logon_request_handle(
@@ -100,6 +191,22 @@ pub(super) fn append_address_types_response(
         message = "rca debug mapi get address types",
     );
     responses.extend_from_slice(&address_types_response(request, true));
+}
+
+pub(super) fn append_address_types_dispatch_response(
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool {
+    append_address_types_response(
+        principal,
+        input_object(session, handle_slots, request),
+        request,
+        responses,
+    );
+    true
 }
 
 pub(super) fn store_state_response(request: &RopRequest, has_input_handle: bool) -> Vec<u8> {

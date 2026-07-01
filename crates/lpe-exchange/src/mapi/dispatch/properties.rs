@@ -1,5 +1,86 @@
 use super::*;
 
+pub(super) async fn append_stream_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    output_handles: &mut Vec<u32>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::OpenStream) => {
+            append_open_stream_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+                output_handles,
+            )
+            .await;
+        }
+        Some(RopId::ReadStream) => {
+            append_read_stream_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                responses,
+            );
+        }
+        Some(RopId::SeekStream) => {
+            append_seek_stream_response(principal, session, handle_slots, request, responses);
+        }
+        Some(RopId::SetStreamSize) => {
+            append_set_stream_size_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                responses,
+            );
+        }
+        Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
+            append_write_stream_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                responses,
+            );
+        }
+        Some(RopId::CopyToStream) => {
+            append_copy_to_stream_response(session, handle_slots, request, responses);
+        }
+        Some(RopId::GetStreamSize) => {
+            append_get_stream_size_response(session, handle_slots, request, responses);
+        }
+        Some(RopId::CloneStream) => {
+            append_clone_stream_response(session, handle_slots, request, responses, output_handles);
+        }
+        Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => {
+            append_stream_region_response(session, handle_slots, request, responses);
+        }
+        _ => unreachable!("append_stream_response called for non-stream ROP"),
+    }
+}
+
 pub(super) async fn append_get_properties_specific_response<S>(
     store: &S,
     principal: &AccountPrincipal,

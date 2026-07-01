@@ -1,5 +1,22 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_user_retention_policy_tags(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let tags = self
+            .store
+            .fetch_ews_retention_policy_tags(principal)
+            .await?;
+        Ok(get_user_retention_policy_tags_response(&tags))
+    }
+}
+
 pub(in crate::service) fn get_user_retention_policy_tags_response(
     tags: &[EwsRetentionPolicyTag],
 ) -> String {

@@ -1,5 +1,22 @@
 use super::super::*;
 
+#[derive(Clone, Debug)]
+pub(in crate::service) struct EwsQueuedNotification {
+    pub(in crate::service) sequence: u64,
+    pub(in crate::service) kind: EwsNotificationKind,
+    pub(in crate::service) item_id: Uuid,
+    pub(in crate::service) mailbox_id: Uuid,
+    pub(in crate::service) change_key: String,
+    pub(in crate::service) timestamp: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::service) enum EwsNotificationKind {
+    Created,
+    Deleted,
+    NewMail,
+}
+
 pub(in crate::service) fn subscribe_success_response(
     subscription_id: &str,
     watermark: &str,

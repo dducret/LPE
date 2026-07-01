@@ -103,6 +103,107 @@ pub(in crate::service) fn create_task_success_response(task: &ClientTask) -> Str
     )
 }
 
+pub(in crate::service) fn parse_create_task_input(
+    principal: &AccountPrincipal,
+    request: &str,
+) -> Result<UpsertClientTaskInput> {
+    let task =
+        element_content(request, "Task").ok_or_else(|| anyhow!("CreateItem is missing Task"))?;
+    let body_tag = open_tag_text(task, "Body").unwrap_or_default();
+    let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+    let body_value = element_text(task, "Body").unwrap_or_default();
+    let description = if body_type.eq_ignore_ascii_case("HTML") {
+        html_to_text(&body_value)
+    } else {
+        body_value
+    };
+    let status = element_text(task, "Status")
+        .map(|value| ews_task_status_to_canonical(&value))
+        .transpose()?
+        .unwrap_or("needs-action")
+        .to_string();
+
+    Ok(UpsertClientTaskInput {
+        id: None,
+        principal_account_id: principal.account_id,
+        account_id: principal.account_id,
+        task_list_id: requested_task_list_id(request)?,
+        title: element_text(task, "Subject").unwrap_or_else(|| "Untitled task".to_string()),
+        description,
+        status,
+        due_at: element_text(task, "DueDate"),
+        completed_at: element_text(task, "CompleteDate"),
+        recurrence_rule: parse_ews_recurrence(task)?,
+        sort_order: 0,
+    })
+}
+
+pub(in crate::service) fn parse_update_task_input(
+    principal: &AccountPrincipal,
+    existing: &ClientTask,
+    request: &str,
+) -> Result<UpsertClientTaskInput> {
+    let task = element_content(request, "Task").unwrap_or(request);
+    let description = if field_deleted(request, "item:Body") {
+        String::new()
+    } else if let Some(body_value) = element_text(task, "Body") {
+        let body_tag = open_tag_text(task, "Body").unwrap_or_default();
+        let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+        if body_type.eq_ignore_ascii_case("HTML") {
+            html_to_text(&body_value)
+        } else {
+            body_value
+        }
+    } else {
+        existing.description.clone()
+    };
+    let status = element_text(task, "Status")
+        .map(|value| ews_task_status_to_canonical(&value))
+        .transpose()?
+        .unwrap_or(existing.status.as_str())
+        .to_string();
+
+    Ok(UpsertClientTaskInput {
+        id: Some(existing.id),
+        principal_account_id: principal.account_id,
+        account_id: principal.account_id,
+        task_list_id: requested_task_list_id(request)?.or(Some(existing.task_list_id)),
+        title: deleted_or_updated_text(request, task, "task:Subject", "Subject", &existing.title)
+            .if_empty(existing.title.clone()),
+        description,
+        status,
+        due_at: if field_deleted(request, "task:DueDate") {
+            None
+        } else {
+            element_text(task, "DueDate").or_else(|| existing.due_at.clone())
+        },
+        completed_at: if field_deleted(request, "task:CompleteDate") {
+            None
+        } else {
+            element_text(task, "CompleteDate").or_else(|| existing.completed_at.clone())
+        },
+        recurrence_rule: if field_deleted(request, "task:Recurrence") {
+            String::new()
+        } else {
+            parse_ews_recurrence(task)?.if_empty(existing.recurrence_rule.clone())
+        },
+        sort_order: existing.sort_order,
+    })
+}
+
+fn requested_task_list_id(request: &str) -> Result<Option<Uuid>> {
+    match requested_collection_id(request) {
+        Some("default") | Some("tasks") | None => Ok(None),
+        Some(id) => Uuid::parse_str(id)
+            .map(Some)
+            .map_err(|_| anyhow!("Task folder id is not a canonical task-list id")),
+    }
+}
+
+fn ews_task_status_to_canonical(value: &str) -> Result<&'static str> {
+    Ok(EwsTaskStatus::parse(value)?.canonical_status())
+}
+
 fn ews_task_status(status: &str) -> &'static str {
     match status {
         "in-progress" => "InProgress",

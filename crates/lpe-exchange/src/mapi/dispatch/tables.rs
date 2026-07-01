@@ -991,6 +991,23 @@ pub(super) fn append_receive_folder_table_response(
     session.record_receive_folder_verification_passed();
 }
 
+pub(super) fn append_receive_folder_table_dispatch_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    let has_private_logon_handle = private_logon_request_handle(session, handle_slots, request);
+    append_receive_folder_table_response(
+        principal,
+        session,
+        has_private_logon_handle,
+        request,
+        responses,
+    );
+}
+
 pub(super) fn get_permissions_table_response(request: &RopRequest) -> Vec<u8> {
     rop_get_permissions_table_response(request)
 }

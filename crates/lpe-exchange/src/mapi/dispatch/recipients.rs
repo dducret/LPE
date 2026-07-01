@@ -36,6 +36,58 @@ pub(super) fn pending_recipients_from_email(email: &JmapEmail) -> Vec<PendingRec
         .collect()
 }
 
+pub(super) fn is_recipient_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::RemoveAllRecipients | RopId::ModifyRecipients | RopId::ReadRecipients
+    )
+}
+
+pub(super) async fn append_recipient_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::RemoveAllRecipients) => {
+            append_remove_all_recipients_response(session, handle_slots, request, responses);
+        }
+        Some(RopId::ModifyRecipients) => {
+            append_modify_recipients_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::ReadRecipients) => {
+            append_read_recipients_response(
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                snapshot,
+                responses,
+            );
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn append_read_recipients_response(
     session: &MapiSession,
     handle_slots: &[u32],

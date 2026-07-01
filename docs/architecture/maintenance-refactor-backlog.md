@@ -63,8 +63,8 @@ working tree proves, not the desired end state.
 | MR-001 | Partial | Dispatch diagnostics and helper-only modules exist under `crates/lpe-exchange/src/mapi/dispatch/`; focused tests are recorded in progress notes. | `dispatch.rs` remains the largest source file; more helper/error extraction is still needed. |
 | MR-002 | Partial | Folder, message, logon, public-folder, recipient, rule, attachment, table-validation, execute, and sync-import helper slices are recorded in progress notes. | ROP execution branches, submission, properties, tables, associated config, and more mutation routing still need extraction. |
 | MR-003 | Partial | Spooler/advisory behavior is documented in `docs/architecture/mapi-spooler-advisory-model.md`, and `dispatch/submission.rs` now owns submission response-policy helpers. | Full submission ROP execution extraction into `dispatch/submission.rs` is not yet complete. |
-| MR-004 | Partial | `service/http_routes.rs` now owns the endpoint path constants and RPC proxy path list, with focused route/RPC/EWS verification recorded in progress notes. | Extract EWS SOAP operation dispatch without endpoint, auth, or response changes. |
-| MR-005 | Pending | No completed EWS item-family split is recorded in this backlog. | Extract EWS mail/contact/calendar/task/MIME operation modules and verify behavior. |
+| MR-004 | Partial | `service/http_routes.rs` now owns endpoint path constants, RPC proxy path list, and top-level route assembly, with focused route/RPC/MAPI verification recorded in progress notes. | Extract EWS SOAP operation dispatch without endpoint, auth, or response changes. |
+| MR-005 | Partial | EWS mail, contact, calendar recurrence, task, reminder, room, rules, attachment, OOF, user-configuration, MailTips, Mail Apps, and ConvertId parser/helper slices are recorded in progress notes. | Continue extracting EWS item-family parsers and handlers while preserving canonical mutations and SOAP responses. |
 | MR-006 | Pending | No completed `ExchangeStore` split is recorded in this backlog. | Split `crates/lpe-exchange/src/store.rs` by storage family while preserving trait semantics. |
 | MR-007 | Pending | Earlier table helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `tables.rs` and prove table row output is unchanged. |
 | MR-008 | Pending | Earlier property helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
@@ -2995,8 +2995,9 @@ of silently losing them.
   action item ID parsing, and escaping remain unchanged.
 - 2026-06-29 verification for the EWS reminders split: `cargo fmt --package
   lpe-exchange`; `rg` confirmed `get_reminders_response` and
-  `reminder_item_id` now live in `service/ews/reminders.rs` while
-  `parse_reminder_item_id` remains local to the reminder action path; `cargo
+  `reminder_item_id` now live in `service/ews/reminders.rs` while, at this
+  point in the refactor sequence, `parse_reminder_item_id` remained local to
+  the reminder action path; `cargo
   test -p lpe-exchange reminders_are_read_and_dismissed_from_canonical_reminder_state`
   passed 1 focused test; `cargo test -p lpe-exchange
   perform_reminder_action_snoozes_calendar_and_task_canonical_reminders` passed
@@ -5751,3 +5752,2701 @@ of silently losing them.
   tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
   at 12,789 lines, `mapi/dispatch/messages.rs` at 1,446 lines, and
   `mapi/dispatch/properties.rs` at 1,363 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopDeleteProperties` and
+  `RopDeletePropertiesNoReplicate` response routing out of `mapi/dispatch.rs`
+  into `mapi/dispatch/property_mutations.rs` as
+  `append_delete_properties_response`. The move preserves virtual conversation
+  action staging, conversation action property deletion, associated config
+  property deletion diagnostics, custom property deletion, canonical message
+  text-property clearing, best-effort persisted-message delete fallback,
+  session-local property deletion, success response bytes, and unsupported
+  error mapping.
+- 2026-06-30 verification for the delete-properties routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange delete_properties`
+  passed 3 focused delete-property tests; `cargo test -p lpe-exchange
+  get_properties` passed 26 focused property tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 13,078 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,676 lines and
+  `mapi/dispatch/property_mutations.rs` at 136 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopSetProperties` and
+  `RopSetPropertiesNoReplicate` response routing out of `mapi/dispatch.rs`
+  into `mapi/dispatch/property_mutations.rs` as
+  `append_set_properties_response`. The move preserves malformed property
+  value batch-stop behavior, virtual conversation action staging, message
+  property staging, canonical object property updates, folder property problem
+  responses, default-folder entry-id alias recording, default-folder
+  identification write filtering, profile folder-property persistence,
+  post-hierarchy diagnostics, success response bytes, and unsupported error
+  mapping.
+- 2026-06-30 verification for the set-properties routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange set_properties` passed
+  19 focused setter tests; `cargo test -p lpe-exchange delete_properties`
+  passed 3 focused delete-property tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,895 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,493 lines and
+  `mapi/dispatch/property_mutations.rs` at 334 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopSortTable` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_sort_table_response`. The move preserves inbox sort trace
+  construction, invalid sort-order reset behavior, invalid-sort error mapping,
+  contents-table sort/category/position/bookmark mutation, selected named
+  property context logging, success response bytes, unsupported object error
+  mapping, and Outlook view failure trace recording.
+- 2026-06-30 verification for the sort-table routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sort_table` passed 4
+  focused sort-table tests; `cargo test -p lpe-exchange tables` passed 194
+  broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,836 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,434 lines and
+  `mapi/dispatch/table_controls.rs` at 80 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopRestrict` table-state response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_restrict_response`. The move preserves the existing supported-object
+  precheck in dispatch, invalid async flag table invalidation, invalid-flag
+  error mapping, inbox restriction trace construction, hierarchy/contents
+  table restriction mutation, rule-table cursor reset behavior, selected named
+  property context logging, success response bytes, unsupported object error
+  mapping, Outlook view failure trace recording, and malformed restriction
+  batch-stop behavior through `TableControlFlow::StopBatch`.
+- 2026-06-30 verification for the restrict routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange restrict` passed 35
+  focused restriction tests; `cargo test -p lpe-exchange tables` passed 194
+  broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,746 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,344 lines and
+  `mapi/dispatch/table_controls.rs` at 203 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopQueryRows` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_query_rows_response`. The move preserves visible-inbox and calendar
+  query diagnostics, bootstrap phase and row-invariant logging, associated
+  query context recording, Common Views shortcut context recording, hierarchy
+  query context recording, Outlook smart-input variant handling, queried
+  cursor capture, canonical query-row response generation, contents/hierarchy
+  response diagnostics, associated non-empty row tracking, last table query
+  context recording, success response bytes, and Outlook view failure trace
+  recording.
+- 2026-06-30 verification for the query-rows routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange query_rows` passed 52
+  focused query-row tests; `cargo test -p lpe-exchange tables` passed 194
+  broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,506 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 12,104 lines and
+  `mapi/dispatch/table_controls.rs` at 459 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopSetSearchCriteria` and
+  `RopGetSearchCriteria` response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/search_folders.rs` as
+  `append_set_search_criteria_response` and
+  `append_get_search_criteria_response`. The move preserves folder-handle
+  validation, search-folder definition lookup, built-in search-folder refresh
+  acknowledgement, built-in fallback criteria, access-denied and not-found
+  error mapping, bounded criteria parsing and serialization, rejected criteria
+  diagnostics, canonical search-folder upsert behavior, session definition
+  refresh, success response bytes, and GetSearchCriteria response encoding.
+- 2026-06-30 verification for the search-criteria routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange search_criteria`
+  passed 22 focused search-criteria tests; `cargo test -p lpe-exchange
+  search_folder` passed 29 broader search-folder tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 12,357
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 11,955 lines and
+  `mapi/dispatch/search_folders.rs` at 928 lines.
+- 2026-06-30: Advanced MR-002 by moving `RopFindRow` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_find_row_response`. The move preserves inbox find-row trace
+  construction, selected named-property context selection, canonical
+  find-row response generation, Outlook contents-table find-row diagnostics,
+  associated find context recording, broad associated find-row tracking,
+  Outlook view failure trace recording, and success/error response bytes.
+- 2026-06-30 verification for the find-row routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange find_row` passed 47
+  focused find-row tests; `cargo test -p lpe-exchange tables` passed 194
+  broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,310 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 11,908 lines and
+  `mapi/dispatch/table_controls.rs` at 529 lines.
+- 2026-06-30: Advanced MR-002 by grouping adjacent attachment ROP routing in
+  `mapi/dispatch/attachments.rs` as `append_attachment_response`. The move
+  preserves the existing per-ROP handlers for `RopGetValidAttachments`,
+  `RopGetAttachmentTable`, `RopOpenAttachment`, `RopCreateAttachment`,
+  `RopDeleteAttachment`, `RopOpenEmbeddedMessage`, and
+  `RopSaveChangesAttachment`, including handle allocation, output handle
+  tracking, canonical attachment persistence, embedded-message handling,
+  validation, and response bytes.
+- 2026-06-30 verification for the attachment routing grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange attachment` passed 47
+  focused attachment tests; `cargo test -p lpe-exchange properties` passed
+  247 broader property and stream tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 12,254 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 11,852 lines and
+  `mapi/dispatch/attachments.rs` at 1,044 lines.
+- 2026-06-30: Advanced MR-002 by grouping stream ROP routing in
+  `mapi/dispatch/properties.rs` as `append_stream_response`. The move
+  preserves the existing per-ROP handlers for `RopOpenStream`,
+  `RopReadStream`, `RopSeekStream`, `RopSetStreamSize`, `RopWriteStream`,
+  `RopWriteAndCommitStream`, `RopWriteStreamExtended`, `RopCopyToStream`,
+  `RopGetStreamSize`, `RopCloneStream`, `RopLockRegionStream`, and
+  `RopUnlockRegionStream`, including stream handle allocation, output handle
+  tracking, body/attachment/config stream reads and writes, stream sizing,
+  clone/region responses, diagnostics, and response bytes.
+- 2026-06-30: Advanced MR-002 by moving `RopSetColumns` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_set_columns_response`. The move preserves table property tag
+  normalization, named-property alias diagnostics, hierarchy/contents/
+  attachment/permission/rule table column state, invalid column request table
+  invalidation, invalid-request batch-stop behavior through
+  `TableControlFlow::StopBatch`, visible inbox and calendar set-column
+  tracking, Outlook view failure trace recording, success response bytes, and
+  unsupported-object error mapping.
+- 2026-06-30 verification for the stream grouping and SetColumns routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  stream` passed 38 focused stream tests before the SetColumns slice; `cargo
+  test -p lpe-exchange set_columns` passed 13 focused SetColumns/table
+  validation tests; `cargo test -p lpe-exchange tables` passed 194 broader
+  table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 11,949 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 11,547 lines,
+  `mapi/dispatch/table_controls.rs` at 823 lines, and
+  `mapi/dispatch/properties.rs` at 1,443 lines. `rg` confirmed
+  `append_stream_response` lives in the focused properties module and
+  `append_set_columns_response` lives in the focused table-controls module,
+  with dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002 by moving `RopOpenMessage` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/message_open.rs` as
+  `append_open_message_response`. The move preserves mailbox, search-folder,
+  unique-message folder fallback, contact, event, task, note, journal,
+  Common Views named-view, search-folder definition, navigation shortcut,
+  delegate free/busy, conversation action, associated config, recoverable
+  item, and public-folder item lookup order; handle allocation; message-handle
+  generation tracking; associated-config open diagnostics; Outlook view
+  failure trace recording; success response bytes; and not-found error
+  mapping.
+- 2026-06-30 verification for the OpenMessage routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange open_message` passed
+  12 focused OpenMessage tests; `cargo test -p lpe-exchange properties`
+  passed 247 broader property and OpenMessage/GetProperties tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 11,485
+  tracked-source lines; `mapi/dispatch/messages.rs` no longer appears in the
+  oversized-source report. Direct physical line counts report
+  `mapi/dispatch.rs` at 11,083 lines, `mapi/dispatch/messages.rs` at 1,446
+  lines, and `mapi/dispatch/message_open.rs` at 440 lines. `rg` confirmed
+  `append_open_message_response` lives in the focused message-open module,
+  with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopCreateFolder` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/folder_create.rs` as
+  `append_create_folder_response`. The move preserves parent-folder handle
+  validation and error mapping, root/public/search/role parent validation,
+  display-name/type/reserved-field validation, advertised special-folder
+  open/deleted behavior, public-folder duplicate/open/create paths, search
+  folder reuse and staging, canonical mailbox duplicate/create paths, MAPI
+  identity allocation, handle slot updates, notifications, audit entries,
+  response bytes, and output-handle behavior.
+- 2026-06-30 verification for the CreateFolder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange create_folder` passed
+  17 focused CreateFolder tests; `cargo test -p lpe-exchange hierarchy`
+  passed 157 broader hierarchy tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing. Direct
+  physical line counts report `mapi/dispatch.rs` at 10,520 lines,
+  `mapi/dispatch/folder_create.rs` at 575 lines, and
+  `mapi/dispatch/folders.rs` at 1,313 lines. `rg` confirmed
+  `append_create_folder_response` lives in the focused folder-create module,
+  with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopSaveChangesMessage` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/message_save.rs` as
+  `append_save_changes_message_route_response`. The move preserves save-flag
+  validation, recent-probe diagnostics, pending contact/event/task/note/journal
+  creation, conversation-action and navigation-shortcut persistence, embedded
+  message save handling, staged message property and recipient commits,
+  message/calendar attachment deletion commits, associated-config persistence,
+  public-folder item saves, transient sync artifact handling, canonical message
+  import, MAPI identity allocation, custom property persistence, sync upload
+  change recording, notifications, response bytes, and error mapping.
+- 2026-06-30 verification for the SaveChangesMessage routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange save_changes` passed 3
+  focused SaveChanges tests; `cargo test -p lpe-exchange message` passed 205
+  broader message tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 9,404 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 9,009 lines,
+  `mapi/dispatch/message_save.rs` at 1,486 lines, and
+  `mapi/dispatch/messages.rs` at 1,446 lines. `rg` confirmed
+  `append_save_changes_message_route_response` lives in the focused
+  message-save module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopSynchronizationConfigure`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_configure.rs` as
+  `append_synchronization_configure_response`. The move preserves folder-handle
+  validation, sync-type and property-tag validation, batch-stop behavior for
+  invalid sync type/property tags, checkpoint load and usability filtering,
+  change-log lookup, mailbox/email/special-object scope selection, attachment
+  fact collection, deleted-object projection, sync-state and manifest buffer
+  generation, hierarchy/FAI diagnostics, partial-scope checkpoint gating,
+  transfer-handle allocation, output-handle tracking, and content-sync
+  configure observation.
+- 2026-06-30 verification for the SynchronizationConfigure routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_configure` passed 2 focused sync-configure tests; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing before the helper was moved from `sync_import.rs`
+  into its own `sync_configure.rs` module; the focused sync-configure tests
+  passed again after that module move. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 8,856
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 8,461 lines,
+  `mapi/dispatch/sync_configure.rs` at 554 lines, and
+  `mapi/dispatch/sync_import.rs` at 1,426 lines. `rg` confirmed
+  `append_synchronization_configure_response` lives in the focused
+  sync-configure module, with dispatch reduced to a thin flow-checked call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopSynchronizationImportMessageChange` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import_message.rs` as
+  `append_synchronization_import_message_change_response`. The move preserves
+  folder-handle validation, import property parsing, import-flag diagnostics,
+  Common Views navigation-shortcut import, associated-message staging,
+  conflict detection, canonical message/public-folder/note/journal property
+  updates, fallback pending object staging, output-handle allocation,
+  sync-upload content-change recording, response bytes, and error mapping.
+- 2026-06-30 verification for the SynchronizationImportMessageChange routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_import_message` passed 3 focused sync-import message tests; `cargo test
+  -p lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 8,507
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 8,112 lines and
+  `mapi/dispatch/sync_import_message.rs` at 368 lines. `rg` confirmed
+  `append_synchronization_import_message_change_response` lives in the
+  focused sync-import-message module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopSynchronizationImportReadStateChanges` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import_read_state.rs` as
+  `append_synchronization_import_read_state_changes_response`. The move
+  preserves folder-handle validation, transient client-local message skip
+  behavior, partial-completion handling for missing messages and failed flag
+  updates, canonical read/unread flag mutation through the store, sync-upload
+  content-change recording, and response bytes.
+- 2026-06-30 verification for the SynchronizationImportReadStateChanges routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  import_read_state` passed 3 focused import-read-state tests; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 8,468
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 8,073 lines and
+  `mapi/dispatch/sync_import_read_state.rs` at 63 lines. `rg` confirmed
+  `append_synchronization_import_read_state_changes_response` lives in the
+  focused sync-import-read-state module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopSynchronizationImportHierarchyChange` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import_hierarchy.rs` as
+  `append_synchronization_import_hierarchy_change_response`. The move
+  preserves folder-handle validation, hierarchy property parsing, system-folder
+  reconciliation, duplicate/custom folder validation, canonical mailbox
+  creation, MAPI identity allocation, sync-upload hierarchy-change recording,
+  response bytes, and error mapping.
+- 2026-06-30 verification for the SynchronizationImportHierarchyChange routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  import_hierarchy` passed 2 focused hierarchy-import tests; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 8,354
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 7,960 lines and `mapi/dispatch/sync_import_hierarchy.rs` at 119 lines.
+  `rg` confirmed `append_synchronization_import_hierarchy_change_response`
+  lives in the focused sync-import-hierarchy module, with dispatch reduced to
+  a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopSynchronizationImportDeletes`
+  response routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_import_deletes.rs` as
+  `append_synchronization_import_deletes_response`. The move preserves
+  hierarchy collector folder deletion, custom-folder validation, canonical
+  mailbox deletion, message hard-delete/soft-delete/delete-without-trash
+  routing, transient client-local skip behavior, note and journal deletion,
+  partial-completion reporting, sync-upload hierarchy/content change
+  recording, response bytes, and error mapping.
+- 2026-06-30 verification for the SynchronizationImportDeletes routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_import_delete` passed 3 focused delete tests; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 8,211
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 7,817 lines and `mapi/dispatch/sync_import_deletes.rs` at 164 lines.
+  `rg` confirmed `append_synchronization_import_deletes_response` lives in the
+  focused sync-import-deletes module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopSynchronizationImportMessageMove` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import_message_move.rs` as
+  `append_synchronization_import_message_move_response`. The move preserves
+  malformed move request handling, target folder-handle validation, note and
+  journal same-folder acknowledgement, source message and target mailbox
+  lookup, canonical message move through the store, moved-message MAPI identity
+  allocation, sync-upload source checkpoint and target content-change
+  recording, response bytes, and error mapping.
+- 2026-06-30 verification for the SynchronizationImportMessageMove routing
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_import_move` passed 1 focused move test; `cargo test -p lpe-exchange
+  sync` passed 218 broader sync tests; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 8,103 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 7,709 lines and
+  `mapi/dispatch/sync_import_message_move.rs` at 128 lines. `rg` confirmed
+  `append_synchronization_import_message_move_response` lives in the focused
+  sync-import-message-move module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopOpenFolder` response routing out
+  of `mapi/dispatch.rs` into `mapi/dispatch/folder_open.rs` as
+  `append_open_folder_response`. The move preserves special-folder alias
+  resolution, mailbox/collaboration/public/search-folder lookup, advertised
+  special-folder handling, not-found errors, public-folder ghosted responses,
+  folder property loading, output-handle allocation, post-hierarchy and inbox
+  diagnostics, root/IPM bootstrap logging, response bytes, and output-handle
+  tracking.
+- 2026-06-30 verification for the OpenFolder routing split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange open_folder` passed 6
+  focused OpenFolder tests; `cargo test -p lpe-exchange hierarchy` passed 157
+  broader hierarchy tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 7,680 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 7,286 lines and
+  `mapi/dispatch/folder_open.rs` at 429 lines. `rg` confirmed
+  `append_open_folder_response` lives in the focused folder-open module, with
+  dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving `RopRelease` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/release.rs` as
+  `append_release_response`. The move preserves input-handle echoing,
+  associated-config stream persistence on release, handle-slot release,
+  same-execute released-handle tracking, post-hierarchy release diagnostics,
+  inbox FAI handoff and visible-inbox release diagnostics, logoff-after-
+  hierarchy tracking, recent probe recording, and trace output.
+- 2026-06-30 verification for the Release routing split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange release` passed 16 focused
+  release tests; `cargo test -p lpe-exchange connect` passed 82 broader
+  connect/transport tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 7,348 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,954 lines and
+  `mapi/dispatch/release.rs` at 363 lines. `rg` confirmed
+  `append_release_response` lives in the focused release module, with dispatch
+  reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving
+  `RopFastTransferSourceGetBuffer` response routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_get_buffer.rs` as
+  `append_fast_transfer_source_get_buffer_response`. The move preserves
+  synchronization-source handle validation, transfer buffer chunking and
+  completion status, hierarchy completion summaries, FastTransfer get-buffer
+  diagnostics, hierarchy payload summary logging, completed hierarchy-sync
+  propagation, sync checkpoint cursor construction, checkpoint skip/partial/
+  error/ok logging, durable sync checkpoint persistence, response bytes, and
+  unsupported-object error mapping.
+- 2026-06-30 verification for the FastTransferSourceGetBuffer routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange get_buffer`
+  passed 3 focused get-buffer tests; `cargo test -p lpe-exchange sync` passed
+  218 broader sync tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,981 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,587 lines and
+  `mapi/dispatch/sync_get_buffer.rs` at 385 lines. `rg` confirmed
+  `append_fast_transfer_source_get_buffer_response` lives in the focused
+  sync-get-buffer module, with dispatch reduced to a thin call that preserves
+  completed hierarchy-sync propagation.
+- 2026-06-30: Advanced MR-002 by moving upload-state stream routing for
+  `RopSynchronizationUploadStateStreamBegin`,
+  `RopSynchronizationUploadStateStreamContinue`, and
+  `RopSynchronizationUploadStateStreamEnd` into
+  `mapi/dispatch/sync_upload_state.rs`. The move preserves source and
+  collector upload-state begin/continue/end behavior, upload property tag
+  tracking, stream buffer accumulation and clearing, client-upload byte counts,
+  marker-mask updates, delta-anchor checkpoint gating, checkpoint-delta
+  transfer-buffer selection, source/collector diagnostics, success response
+  bytes, and unsupported-object error mapping. Shared upload-state marker
+  helpers remain in `sync_import.rs` because other sync paths still use them.
+- 2026-06-30 verification for the upload-state stream routing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  upload_state` passed 3 focused upload-state tests; `cargo test -p
+  lpe-exchange sync` passed 218 broader sync tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 6,809
+  tracked-source lines. Direct physical line counts report
+  `mapi/dispatch.rs` at 6,415 lines, `mapi/dispatch/sync_import.rs` at 1,240
+  lines, and `mapi/dispatch/sync_upload_state.rs` at 371 lines. `rg`
+  confirmed the upload-state response helpers live in the focused
+  sync-upload-state module, with dispatch reduced to thin calls.
+- 2026-06-30: Advanced MR-002 by moving the remaining `RopLogon` response
+  routing out of `mapi/dispatch.rs` into `mapi/dispatch/logon.rs` as
+  `append_logon_response`. The move completes the earlier logon helper slice
+  by preserving private/public logon response selection, logon request identity
+  diagnostics, handle allocation and handle-table updates, default-folder
+  discovery logging, Outlook bootstrap phase logging, special-folder summary
+  propagation, and output-handle collection.
+- 2026-06-30 verification for the Logon routing split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange logon` passed 34 focused logon
+  tests; `cargo test -p lpe-exchange connect` passed 82 broader
+  connect/transport tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,785 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,391 lines and
+  `mapi/dispatch/logon.rs` at 156 lines. `rg` confirmed
+  `append_logon_response` lives in the focused logon module, with dispatch
+  reduced to a thin call.
+- 2026-06-30: Advanced MR-002 by moving post-hierarchy release diagnostic
+  logging out of `mapi/dispatch.rs` into `mapi/dispatch/release.rs` as
+  `log_post_hierarchy_release_events`. The move preserves post-sync
+  release-containing execute diagnostics, release-only execute diagnostics,
+  close-reason context diagnostics, response-payload byte/empty reporting,
+  released-handle summaries, live-handle summaries, content-sync-after-
+  hierarchy flags, and logon-before/after-content-sync detection. It does not
+  change response bytes or handle-table construction.
+- 2026-06-30 verification for the post-hierarchy release diagnostics split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange release`
+  passed 16 focused release tests; `cargo test -p lpe-exchange connect`
+  passed 82 broader connect/transport tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,685 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,291 lines and
+  `mapi/dispatch/release.rs` at 491 lines. `rg` confirmed
+  `log_post_hierarchy_release_events` lives in the focused release module,
+  with dispatch reduced to a single post-loop call before response handle-table
+  construction.
+- 2026-06-30: Advanced MR-002 by moving per-ROP execute-loop sync bookkeeping
+  out of `mapi/dispatch.rs` into `mapi/dispatch/execute.rs` as
+  `record_execute_sync_observations`. The move preserves completed hierarchy
+  sync recording, hierarchy get-buffer summary propagation, default-folder
+  hierarchy membership summary propagation, and content-sync configure
+  observation recording after each ROP dispatch.
+- 2026-06-30 verification for the execute sync-bookkeeping split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync` passed 218
+  broader sync tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,675 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,281 lines and
+  `mapi/dispatch/execute.rs` at 324 lines. `rg` confirmed
+  `record_execute_sync_observations` lives in the focused execute module,
+  with dispatch reduced to a single per-ROP-loop call.
+- 2026-06-30: Advanced MR-002 by moving final Execute ROP-buffer assembly out
+  of `mapi/dispatch.rs` into `mapi/dispatch/execute.rs` as
+  `finalize_execute_rop_buffer`. The move preserves response handle-table
+  selection, input-handle-table echo behavior, empty-response handling,
+  standard ROP buffer wrapping, RPC header extension wrapping, and response
+  bytes.
+- 2026-06-30 verification for the Execute response assembly split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange execute` passed 55
+  focused execute tests; `cargo test -p lpe-exchange connect` passed 82
+  broader connect/transport tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,666 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,272 lines and
+  `mapi/dispatch/execute.rs` at 348 lines. `rg` confirmed
+  `finalize_execute_rop_buffer` lives in the focused execute module, with
+  dispatch reduced to a single final assembly call.
+- 2026-06-30: Advanced MR-002 by moving initial Execute ROP dispatch input
+  parsing out of `mapi/dispatch.rs` into `mapi/dispatch/execute.rs` as
+  `parse_execute_rop_dispatch_input`. The move preserves ROP buffer framing
+  split behavior, handle-table parsing, malformed-framing parse-error
+  responses, malformed-handle-table parse-error responses, RPC header
+  extension parse-error wrapping, and the `extended` flag passed to final
+  response assembly.
+- 2026-06-30 verification for the Execute dispatch-input parsing split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange execute`
+  passed 55 focused execute tests; `cargo test -p lpe-exchange malformed`
+  passed 6 malformed-buffer tests; `cargo test -p lpe-exchange handle_table`
+  passed 6 handle-table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,652 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,258 lines and
+  `mapi/dispatch/execute.rs` at 371 lines. `rg` confirmed
+  `parse_execute_rop_dispatch_input` lives in the focused execute module,
+  with dispatch reduced to a single initial parse call.
+- 2026-06-30: Advanced MR-002 by moving the pre-dispatch Outlook stream-batch
+  observation out of `mapi/dispatch.rs` into `mapi/dispatch/execute.rs` as
+  `record_execute_stream_batch_observation`. The move preserves the exact
+  `SetProperties,OpenStream,SetStreamSize,WriteStream,CommitStream` batch
+  detection, session stream-batch recording, Outlook view failure trace event,
+  RCA debug logging fields, request ID, ROP-name summary, and input handle
+  table summary.
+- 2026-06-30 verification for the Execute stream-batch observation split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange stream`
+  passed 38 focused stream tests; `cargo test -p lpe-exchange execute` passed
+  55 focused execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,640 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,246 lines and
+  `mapi/dispatch/execute.rs` at 399 lines. `rg` confirmed
+  `record_execute_stream_batch_observation` lives in the focused execute
+  module, with dispatch reduced to a single pre-loop observation call.
+- 2026-06-30: Advanced MR-002 by moving per-ROP request read and parse-error
+  response handling out of `mapi/dispatch.rs` into `mapi/dispatch/execute.rs`
+  as `read_next_execute_rop_request`. The move preserves `read_rop_request`
+  success behavior, parse-error response bytes, and immediate ROP-loop
+  termination on malformed request data.
+- 2026-06-30 verification for the Execute request-read split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange malformed` passed 6
+  malformed-buffer tests; `cargo test -p lpe-exchange execute` passed 55
+  focused execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,636 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,242 lines and
+  `mapi/dispatch/execute.rs` at 411 lines. `rg` confirmed
+  `read_next_execute_rop_request` lives in the focused execute module, with
+  dispatch reduced to a single per-loop request-read call.
+- 2026-06-30: Advanced MR-002 by moving Execute ROP-loop zero-padding
+  termination into `mapi/dispatch/execute.rs` through
+  `read_next_execute_rop_request`. The move preserves zero-padding
+  termination before request parsing, malformed-request parse-error response
+  bytes, and immediate loop termination before any ROP dispatch side effects.
+- 2026-06-30 verification for the Execute zero-padding termination split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange malformed`
+  passed 6 malformed-buffer tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,633 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,239 lines and
+  `mapi/dispatch/execute.rs` at 414 lines. `rg` confirmed
+  `remaining_is_zero_padding` is now checked in the focused execute module,
+  with dispatch retaining only the `read_next_execute_rop_request` loop call.
+- 2026-06-30: Advanced MR-002 by moving the `RopRestrict` table-scope support
+  guard out of `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_restrict_table_control_response`. The move preserves unsupported
+  object error mapping, successful restrict routing, invalid-restriction
+  stop-batch behavior, and all existing table-control response bytes.
+- 2026-06-30 verification for the Restrict table-control split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange restrict` passed 35
+  focused restrict tests; `cargo test -p lpe-exchange tables` passed 194
+  broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,623 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,229 lines and
+  `mapi/dispatch/table_controls.rs` at 850 lines. `rg` confirmed
+  `append_restrict_table_control_response` lives in the focused table-controls
+  module, with dispatch reduced to a thin call.
+- 2026-06-30: Advanced MR-002/MR-003 by moving transport spooler/advisory and
+  deferred-action input-handle checks out of `mapi/dispatch.rs` into
+  `mapi/dispatch/submission.rs` as
+  `append_spooler_advisory_dispatch_response` and
+  `append_deferred_action_messages_dispatch_response`. The move preserves
+  advisory success/error mapping, deferred-action unsupported/not-found
+  responses, batch alignment, and the absence of protocol-local Outbox state.
+- 2026-06-30 verification for the spooler/advisory dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange submission` passed 25
+  focused submission tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,619 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,225 lines and
+  `mapi/dispatch/submission.rs` at 495 lines. `rg` confirmed the new
+  dispatch wrappers live in the focused submission module, with dispatch
+  reduced to thin calls.
+- 2026-06-30: Advanced MR-002/MR-007 by moving the `RopGetReceiveFolderTable`
+  private-logon-handle dispatch check out of `mapi/dispatch.rs` into
+  `mapi/dispatch/tables.rs` as `append_receive_folder_table_dispatch_response`.
+  The move preserves private-logon enforcement, receive-folder table response
+  bytes, receive-folder verification recording, and diagnostic fields.
+- 2026-06-30 verification for the ReceiveFolderTable dispatch split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange receive_folder`
+  passed 12 focused receive-folder tests; `cargo test -p lpe-exchange tables`
+  passed 194 broader table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,619 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,225 lines and
+  `mapi/dispatch/tables.rs` at 1,274 lines. `rg` confirmed the new dispatch
+  wrapper lives in the focused tables module, with dispatch retaining a thin
+  call.
+- 2026-06-30: Advanced MR-002/MR-007 by moving public-folder per-user ROP
+  routing for `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`,
+  `RopReadPerUserInformation`, and `RopWritePerUserInformation` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/public_folders.rs` as
+  `append_public_folder_per_user_response`. The move preserves long-term-id
+  discovery, per-user GUID lookup, canonical per-user read-state streaming,
+  write validation, response bytes, and existing error mapping.
+- 2026-06-30 verification for the public-folder per-user dispatch split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  public_folder` passed 74 focused public-folder tests; `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 6,592
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 6,198 lines and `mapi/dispatch/public_folders.rs` at 660 lines. `rg`
+  confirmed the per-user dispatch wrapper lives in the focused public-folders
+  module, with dispatch reduced to a single grouped call.
+- 2026-06-30: Advanced MR-002 by moving object-id conversion routing for
+  `RopLongTermIdFromId` and `RopIdFromLongTermId` out of `mapi/dispatch.rs`
+  into `mapi/dispatch/object_ids.rs` as `append_object_id_conversion_response`.
+  The move preserves long-term-id scope validation, mailbox GUID alias
+  handling, special-folder conversion behavior, response bytes, and RCA
+  diagnostics.
+- 2026-06-30 verification for the object-id conversion dispatch split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange long_term_id`
+  passed 8 focused object-id tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,582 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,188 lines and
+  `mapi/dispatch/object_ids.rs` at 208 lines. `rg` confirmed the object-id
+  dispatch wrapper lives in the focused object-ids module, with dispatch
+  reduced to a single grouped call.
+- 2026-06-30: Advanced MR-002/MR-007 by moving public-folder replica probe
+  routing for `RopGetOwningServers` and `RopPublicFolderIsGhosted` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/public_folders.rs` as
+  `append_public_folder_replica_probe_response`. The move preserves logon
+  handle validation, canonical folder-id validation, ordered replica server
+  projection, ghosted-folder detection, response bytes, and existing error
+  mapping.
+- 2026-06-30 verification for the public-folder replica probe dispatch split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  public_folder` passed 74 focused public-folder tests; `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 6,573
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 6,179 lines and `mapi/dispatch/public_folders.rs` at 683 lines. `rg`
+  confirmed the replica probe dispatch wrapper lives in the focused
+  public-folders module, with dispatch reduced to a single grouped call.
+- 2026-06-30: Advanced MR-002/MR-008 by moving named-property ROP routing for
+  `RopGetNamesFromPropertyIds`, `RopGetPropertyIdsFromNames`, and
+  `RopQueryNamedProperties` out of `mapi/dispatch.rs` into
+  `mapi/dispatch/named_properties.rs` as
+  `append_named_property_dispatch_response`. The move preserves session-cache
+  hydration, named-property allocation, no-create missing-property errors,
+  query enumeration, Outlook contact-source tracing, response bytes, and the
+  input-handle-table echo required by `RopGetPropertyIdsFromNames`.
+- 2026-06-30 verification for the named-property dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties` passed 247
+  focused property/named-property tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,556 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,162 lines and
+  `mapi/dispatch/named_properties.rs` at 294 lines. `rg` confirmed the
+  named-property dispatch wrapper lives in the focused named-properties module,
+  with dispatch reduced to a single grouped call.
+- 2026-06-30: Advanced MR-002 by moving `RopGetAddressTypes` routing out of
+  `mapi/dispatch.rs` into `mapi/dispatch/logon.rs` as
+  `append_address_types_dispatch_response`. The move preserves input-handle
+  validation, RCA debug logging, `EX`/`SMTP` response bytes, missing-handle
+  error mapping, and the input-handle-table echo required by the Execute
+  response.
+- 2026-06-30 verification for the address-types dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange logon` passed 34
+  focused logon/bootstrap tests; `cargo test -p lpe-exchange execute` passed
+  55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,556 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,162 lines and
+  `mapi/dispatch/logon.rs` at 171 lines. `rg` confirmed the address-types
+  dispatch wrapper lives in the focused logon module; this slice moved routing
+  ownership but did not materially reduce the dispatch line count.
+- 2026-06-30: Advanced MR-002 by moving permissions and rules ROP routing for
+  `RopGetPermissionsTable`, `RopModifyPermissions`, `RopGetRulesTable`, and
+  `RopModifyRules` out of `mapi/dispatch.rs` into
+  `mapi/dispatch/permissions.rs` and `mapi/dispatch/rules.rs` as
+  `append_permissions_dispatch_response` and `append_rules_dispatch_response`.
+  The move preserves table-handle allocation, output-handle recording,
+  canonical mailbox/calendar/public-folder permission writes, canonical Sieve
+  rule writes, bounded Exchange-rule rejection, response bytes, and existing
+  error mapping.
+- 2026-06-30 verification for the permissions/rules dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange permissions` passed 20
+  focused permission tests; `cargo test -p lpe-exchange rules` passed 11
+  focused rule tests; `cargo test -p lpe-exchange execute` passed 55 focused
+  Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,536 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,142 lines,
+  `mapi/dispatch/permissions.rs` at 359 lines, and `mapi/dispatch/rules.rs`
+  at 347 lines. `rg` confirmed the permissions and rules dispatch wrappers
+  live in their focused modules, with dispatch reduced to two grouped calls.
+- 2026-06-30: Advanced MR-002 by moving local-replica sync utility routing for
+  `RopSetLocalReplicaMidsetDeleted` and `RopGetLocalReplicaIds` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/sync_import.rs` as
+  `append_local_replica_dispatch_response`. The move preserves synchronization
+  source/collector transfer-state mutation, local replica id allocation,
+  response bytes, unsupported-object error mapping, and the input-handle-table
+  echo required by `RopGetLocalReplicaIds`.
+- 2026-06-30 verification for the local-replica dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync` passed 218
+  focused sync tests; `cargo test -p lpe-exchange connect` passed 82
+  connect/profile tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,533 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,139 lines and
+  `mapi/dispatch/sync_import.rs` at 1,264 lines. `rg` confirmed the
+  local-replica dispatch wrapper lives in the focused sync-import module, with
+  dispatch reduced to a single grouped call.
+- 2026-06-30: Advanced MR-002 by moving lightweight Execute status/bookmark
+  dispatch routing for `RopGetStoreState`, `RopAbort`, `RopProgress`,
+  `RopResetTable`, and `RopFreeBookmark` out of `mapi/dispatch.rs` into
+  `mapi/dispatch/table_controls.rs` as
+  `append_status_or_bookmark_dispatch_response`. The existing response helpers
+  remain in their current focused modules, preserving store-state,
+  abort/progress/reset-table, and free-bookmark response bytes.
+- 2026-06-30 verification for the status/bookmark dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `cargo test -p lpe-exchange logon` passed 34 focused
+  logon/bootstrap tests; `cargo test -p lpe-exchange tables` passed 194
+  focused table tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,534 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,140 lines and
+  `mapi/dispatch/table_controls.rs` at 879 lines. `rg` confirmed the grouped
+  status/bookmark dispatch wrapper lives in the focused table-controls module,
+  with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-020 by moving receive-folder dispatch routing
+  for `RopSetReceiveFolder` and `RopGetReceiveFolder` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/folders.rs` as
+  `append_receive_folder_dispatch_response`. The move preserves private-logon
+  enforcement, fixed canonical receive-folder mapping, validation errors,
+  response bytes, and the input-handle-table echo required by
+  `RopGetReceiveFolder`.
+- 2026-06-30 verification for the receive-folder dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange receive_folder`
+  passed 12 focused receive-folder tests; `cargo test -p lpe-exchange logon`
+  passed 34 focused logon/bootstrap tests; `cargo test -p lpe-exchange
+  execute` passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,524 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,130 lines and
+  `mapi/dispatch/folders.rs` at 1,347 lines. `rg` confirmed the grouped
+  receive-folder dispatch wrapper lives in the focused folders module, with
+  dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-023 by moving Search Folder criteria ROP
+  routing for `RopSetSearchCriteria` and `RopGetSearchCriteria` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/search_folders.rs` as
+  `append_search_criteria_dispatch_response`. The move preserves existing
+  canonical search-folder validation, built-in fallback behavior, persisted
+  bounded criteria updates, response bytes, and search diagnostics.
+- 2026-06-30 verification for the search-criteria dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange search` passed 70
+  focused search tests; `cargo test -p lpe-exchange tables` passed 194
+  focused table tests; `cargo test -p lpe-exchange execute` passed 55 focused
+  Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,512 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,118 lines and
+  `mapi/dispatch/search_folders.rs` at 974 lines. `rg` confirmed the grouped
+  search-criteria dispatch wrapper lives in the focused search-folders module,
+  with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/P0 mailbox mutation cleanup by moving
+  `RopSetReadFlags` dispatch ownership out of `mapi/dispatch.rs` into
+  `mapi/dispatch/messages.rs` as `append_message_state_dispatch_response`.
+  The move preserves the existing canonical read-state mutation path,
+  public-folder read-state handling, partial-completion behavior, and response
+  bytes.
+- 2026-06-30 verification for the message-state dispatch ownership split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange read`
+  passed 51 focused read-state tests; `cargo test -p lpe-exchange message`
+  passed 205 broader message tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,512 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,118 lines and
+  `mapi/dispatch/messages.rs` at 1,477 lines. `rg` confirmed the grouped
+  message-state dispatch wrapper lives in the focused messages module; this
+  slice moved routing ownership but did not materially reduce the dispatch
+  line count.
+- 2026-06-30: Advanced MR-002/MR-003 by moving recipient ROP routing for
+  `RopRemoveAllRecipients`, `RopModifyRecipients`, and `RopReadRecipients`
+  out of `mapi/dispatch.rs` into `mapi/dispatch/recipients.rs` as
+  `append_recipient_dispatch_response`. The move preserves staged recipient
+  replacement behavior, canonical save/import behavior, Bcc-safe read
+  projection, reserved-field validation, response bytes, and existing
+  recipient debug logging.
+- 2026-06-30 verification for the recipient dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange recipient` passed 24
+  focused recipient tests; `cargo test -p lpe-exchange message` passed 205
+  broader message tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,494 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 6,100 lines and
+  `mapi/dispatch/recipients.rs` at 326 lines. `rg` confirmed the grouped
+  recipient dispatch wrapper lives in the focused recipients module, with
+  dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002 by moving non-import FastTransfer and
+  synchronization ROP routing out of `mapi/dispatch.rs` into
+  `mapi/dispatch/sync_transfer.rs` as `append_sync_transfer_dispatch_response`.
+  The move preserves SynchronizationConfigure stop-batch behavior, completed
+  hierarchy-sync observation, content-sync configure observation, FastTransfer
+  source/destination response bytes, upload-state handling, collector/transfer
+  state handles, and TellVersion behavior.
+- 2026-06-30 verification for the sync-transfer dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync` passed 218
+  focused sync/FastTransfer tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,377 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,983 lines and
+  `mapi/dispatch/sync_transfer.rs` at 186 lines. `rg` confirmed the grouped
+  sync-transfer dispatch wrapper lives in the focused sync-transfer module,
+  with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-007 by moving table-control ROP routing for
+  `RopSetColumns`, `RopSortTable`, `RopRestrict`, `RopQueryRows`,
+  table-position/bookmark/collapse ROPs, `RopExpandRow`, and `RopFindRow` out
+  of `mapi/dispatch.rs` into `mapi/dispatch/table_controls.rs` as
+  `append_table_control_dispatch_response`. The move preserves SetColumns and
+  Restrict stop-batch behavior, QueryRows request-batch diagnostics,
+  Microsoft table-control validation errors, table cursor/bookmark behavior,
+  and the existing `RopExpandRow` folder-handle exclusion.
+- 2026-06-30 verification for the table-control dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table tests; `cargo test -p lpe-exchange execute` passed 55 focused
+  Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,284 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,890 lines and
+  `mapi/dispatch/table_controls.rs` at 1,011 lines. `rg` confirmed the
+  grouped table-control dispatch wrapper lives in the focused table-controls
+  module, with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-008 by moving property get/set/delete ROP
+  routing for `RopGetPropertiesSpecific`, `RopGetPropertiesAll`,
+  `RopGetPropertiesList`, `RopSetProperties`, `RopSetPropertiesNoReplicate`,
+  `RopDeleteProperties`, and `RopDeletePropertiesNoReplicate` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/property_dispatch.rs` as
+  `append_property_dispatch_response`. The move preserves input-handle-table
+  echo behavior for GetPropertiesSpecific and SetProperties, SetProperties
+  stop-batch behavior, property response bytes, property encoding,
+  named-property resolution, custom property persistence, and existing
+  canonical object mutation paths.
+- 2026-06-30 verification for the property dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties` passed 247
+  focused property tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,240 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,846 lines and
+  `mapi/dispatch/property_dispatch.rs` at 127 lines. `rg` confirmed the
+  grouped property dispatch wrapper lives in the focused property-dispatch
+  module, with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-007 by moving folder mutation ROP routing for
+  `RopCreateFolder`, `RopDeleteFolder`, `RopMoveFolder`, `RopCopyFolder`,
+  `RopEmptyFolder`, and `RopHardDeleteMessagesAndSubfolders` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/folder_dispatch.rs` as
+  `append_folder_dispatch_response`. The move preserves output-handle
+  allocation for CreateFolder, canonical mailbox/public-folder mutation paths,
+  search-folder persistence behavior, empty-folder partial completion handling,
+  folder response bytes, and existing error mapping.
+- 2026-06-30 verification for the folder dispatch split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange folder` passed 406 focused
+  folder/hierarchy tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,203 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,809 lines and
+  `mapi/dispatch/folder_dispatch.rs` at 85 lines. `rg` confirmed the grouped
+  folder dispatch wrapper lives in the focused folder-dispatch module, with
+  dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002/MR-007 by moving message ROP routing for
+  `RopOpenMessage`, `RopCreateMessage`, `RopSaveChangesMessage`,
+  `RopDeleteMessages`, `RopHardDeleteMessages`, `RopGetMessageStatus`,
+  `RopSetMessageStatus`, and `RopMoveCopyMessages` out of
+  `mapi/dispatch.rs` into `mapi/dispatch/message_dispatch.rs` as
+  `append_message_dispatch_response`. The move preserves output-handle
+  allocation for open/create, same-Execute saved-message visibility, delete
+  and hard-delete canonical paths, session-local message status, and
+  move/copy canonical store behavior.
+- 2026-06-30 verification for the message dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange message` passed 205
+  focused message/property/submission tests; `cargo test -p lpe-exchange
+  execute` passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,142 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,748 lines and
+  `mapi/dispatch/message_dispatch.rs` at 115 lines. `rg` confirmed the
+  grouped message dispatch wrapper lives in the focused message-dispatch
+  module, with dispatch reduced to a single guarded call.
+- 2026-06-30: Advanced MR-002 by moving submission, spooler advisory,
+  deferred-action, and transport-info ROP routing for `RopSetSpooler`,
+  `RopSpoolerLockMessage`, `RopTransportNewMail`,
+  `RopUpdateDeferredActionMessages`, `RopSubmitMessage`, `RopTransportSend`,
+  `RopAbortSubmit`, `RopGetTransportFolder`, and `RopOptionsData` into
+  `mapi/dispatch/submission.rs` as `append_submission_dispatch_response`.
+  The move preserves advisory no-op alignment, deferred-action rejection,
+  canonical submission, abort-submit cancellation checks, and the existing
+  transport folder/options response bytes.
+- 2026-06-30 verification for the submission dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange submission` passed 25
+  focused submission tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,113 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,719 lines and
+  `mapi/dispatch/submission.rs` at 570 lines. `rg` confirmed the grouped
+  submission dispatch wrapper lives in the focused submission module, with
+  dispatch reduced to a single guarded call.
+- 2026-07-01: Advanced MR-002/MR-008 by moving stream, copy-to,
+  copy-properties, and commit-stream ROP routing for `RopOpenStream`,
+  `RopReadStream`, `RopSeekStream`, `RopSetStreamSize`, `RopWriteStream`,
+  `RopWriteAndCommitStream`, `RopWriteStreamExtended`, `RopCopyToStream`,
+  `RopGetStreamSize`, `RopCloneStream`, `RopLockRegionStream`,
+  `RopUnlockRegionStream`, `RopCopyTo`, `RopCopyProperties`, and
+  `RopCommitStream` into `mapi/dispatch/stream_dispatch.rs` as
+  `append_stream_dispatch_response`. The move preserves stream handle
+  allocation, write/commit persistence, computed stream reads, copy-to and
+  copy-properties response mapping, and existing batch alignment.
+- 2026-07-01 verification for the stream dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties` first
+  reported one parallel-only failure in
+  `mapi::rop::tests::get_properties_specific_resolves_unspecified_modeled_message_properties`;
+  the exact test passed when rerun, and `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange properties` passed 247 focused property/stream tests.
+  `cargo test -p lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 6,062
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 5,668 lines and `mapi/dispatch/stream_dispatch.rs` at 110 lines. `rg`
+  confirmed the grouped stream dispatch wrapper lives in the focused
+  stream-dispatch module, with dispatch reduced to a single guarded call.
+- 2026-07-01: Advanced MR-002/MR-007 by replacing the direct attachment ROP
+  list in `mapi/dispatch.rs` with `is_attachment_rop` in
+  `mapi/dispatch/attachments.rs`. The detailed attachment dispatch remains in
+  `append_attachment_response`; the move only centralizes the attachment ROP
+  predicate and preserves attachment table, open/create/delete,
+  open-embedded-message, and save-changes behavior.
+- 2026-07-01 verification for the attachment dispatch predicate split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange attachment` passed
+  47 focused attachment tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 6,054 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,660 lines and
+  `mapi/dispatch/attachments.rs` at 1,056 lines. `rg` confirmed the grouped
+  attachment predicate lives in the focused attachment module, with dispatch
+  reduced to a single guarded call.
+- 2026-07-01: Advanced MR-002/MR-007 by moving sync-import ROP routing for
+  `RopSynchronizationImportMessageChange`,
+  `RopSynchronizationImportHierarchyChange`, `RopSynchronizationImportDeletes`,
+  `RopSynchronizationImportMessageMove`,
+  `RopSynchronizationImportReadStateChanges`,
+  `RopSetLocalReplicaMidsetDeleted`, and `RopGetLocalReplicaIds` into
+  `mapi/dispatch/sync_import.rs` as `append_sync_import_dispatch_response`.
+  The move preserves message, hierarchy, delete, move, read-state, and local
+  replica import behavior, including the input-handle-table echo for local
+  replica ID allocation.
+- 2026-07-01 verification for the sync-import dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sync` passed 218
+  focused sync/FastTransfer tests; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,992 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,598 lines and
+  `mapi/dispatch/sync_import.rs` at 1,378 lines. `rg` confirmed the grouped
+  sync-import dispatch wrapper lives in the focused sync-import module, with
+  dispatch reduced to a single guarded call.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping public-folder per-user and
+  replica metadata ROP routing behind `is_public_folder_metadata_rop` and
+  `append_public_folder_metadata_dispatch_response` in
+  `mapi/dispatch/public_folders.rs`. The move preserves the existing
+  per-user state, per-user GUID/long-term-id, owning-server, and ghosted-folder
+  response helpers while reducing `mapi/dispatch.rs` to one guarded
+  public-folder metadata call.
+- 2026-07-01 verification for the public-folder metadata dispatch grouping:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  public_folder` passed 74 focused public-folder tests; `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 5,978
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 5,584 lines and `mapi/dispatch/public_folders.rs` at 733 lines. `rg`
+  confirmed the grouped public-folder metadata predicate and dispatch wrapper
+  live in the focused public-folder module.
+- 2026-07-01: Advanced MR-002 by moving the remaining direct ROP lists for
+  named-property, object-id conversion, permissions, and rules dispatch into
+  focused module predicates:
+  `is_named_property_rop`, `is_object_id_conversion_rop`,
+  `is_permissions_dispatch_rop`, and `is_rules_dispatch_rop`. The move keeps
+  all response helpers and behavior in their existing modules and reduces
+  `mapi/dispatch.rs` to guarded family calls.
+- 2026-07-01 verification for the dispatch predicate grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties` passed 247
+  focused property/named-property tests; `cargo test -p lpe-exchange
+  long_term_id` passed 8 focused object-id tests; `cargo test -p
+  lpe-exchange permission` passed 22 focused permission tests; `cargo test -p
+  lpe-exchange rules` passed 11 focused rule tests; `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 5,974
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 5,580 lines, `mapi/dispatch/named_properties.rs` at 302 lines,
+  `mapi/dispatch/object_ids.rs` at 211 lines,
+  `mapi/dispatch/permissions.rs` at 365 lines, and
+  `mapi/dispatch/rules.rs` at 350 lines. `rg` confirmed the grouped predicates
+  live in the focused modules and `mapi/dispatch.rs` now calls those
+  predicates.
+- 2026-07-01: Advanced MR-002/P0 mailbox mutation cleanup by moving
+  `RopReloadCachedInformation`, `RopSetMessageReadFlag`, and
+  `RopSetReadFlags` routing behind `is_message_state_rop` and
+  `append_message_state_dispatch_response` in
+  `mapi/dispatch/message_state.rs`. The move preserves reload-cached
+  summaries, open-message read flag mutation, bulk read-state mutation,
+  public-folder read-state handling, response bytes, and the existing message
+  helper implementations.
+- 2026-07-01 verification for the message-state dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange read` passed 51
+  focused read-state tests; `cargo test -p lpe-exchange message` first
+  reported a parallel-only failure in
+  `tests::mapi_over_http::hierarchy::mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_deletes_trash_contents`;
+  the exact test passed when rerun and `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange message` passed 205 focused message tests. `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `mapi/dispatch.rs` at 5,951
+  tracked-source lines. Direct physical line counts report `mapi/dispatch.rs`
+  at 5,557 lines, `mapi/dispatch/messages.rs` at 1,446 lines, and
+  `mapi/dispatch/message_state.rs` at 63 lines. `rg` confirmed the grouped
+  message-state predicate and dispatch wrapper live in the focused
+  message-state module, with `mapi/dispatch.rs` reduced to a single guarded
+  call.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping table-open routing for
+  `RopGetHierarchyTable`, `RopGetContentsTable`, and
+  `RopGetReceiveFolderTable` behind `is_table_open_rop` and
+  `append_table_open_dispatch_response` in `mapi/dispatch/table_open.rs`. The
+  move preserves hierarchy table opening, contents table opening, receive-folder
+  table projection, output-handle allocation, row counts, RCA diagnostics, and
+  receive-folder private-logon validation.
+- 2026-07-01 verification for the table-open dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table tests; `cargo test -p lpe-exchange receive_folder` passed 12
+  focused receive-folder tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,942 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,548 lines and
+  `mapi/dispatch/table_open.rs` at 320 lines. `rg` confirmed the grouped
+  table-open predicate and dispatch wrapper live in the focused table-open
+  module, with `mapi/dispatch.rs` reduced to a single guarded call.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping `RopLogon` and
+  `RopGetAddressTypes` behind `is_logon_dispatch_rop` and
+  `append_logon_dispatch_response` in `mapi/dispatch/logon.rs`. The move
+  preserves private and public logon responses, output-handle allocation,
+  default-folder IDs, logon RCA diagnostics, and the GetAddressTypes
+  input-handle-table echo behavior.
+- 2026-07-01 verification for the logon dispatch grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange logon` passed 34
+  focused logon tests; `cargo test -p lpe-exchange address_types` passed one
+  focused address-type framing test; `cargo test -p lpe-exchange execute`
+  passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,933 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,539 lines and
+  `mapi/dispatch/logon.rs` at 215 lines. `rg` confirmed the grouped logon
+  predicate and dispatch wrapper live in the focused logon module.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping
+  `RopRegisterNotification` behind `is_notification_dispatch_rop` and
+  `append_notification_dispatch_response` in
+  `mapi/dispatch/notification_subscriptions.rs`. The move preserves
+  notification registration, cursor loading, output-handle allocation,
+  response bytes, and existing RCA diagnostics.
+- 2026-07-01 verification for the notification dispatch grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange notification` passed
+  13 focused notification tests; `cargo test -p lpe-exchange execute` passed
+  55 focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,933 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,539 lines and
+  `mapi/dispatch/notification_subscriptions.rs` at 116 lines. `rg` confirmed
+  the grouped notification predicate and dispatch wrapper live in the focused
+  notification module.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping `RopRelease` behind
+  `is_release_dispatch_rop` and `append_release_dispatch_response` in
+  `mapi/dispatch/release.rs`. The move preserves input-handle-table echo,
+  released-handle tracking for same-Execute batches, associated-config stream
+  release persistence, post-hierarchy release diagnostics, and logoff-after-
+  hierarchy-completion state.
+- 2026-07-01 verification for the release dispatch grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange release` passed 16
+  focused release tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,932 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,538 lines and
+  `mapi/dispatch/release.rs` at 530 lines. `rg` confirmed the grouped release
+  predicate and dispatch wrapper live in the focused release module.
+- 2026-07-01: Advanced MR-002/MR-007 by grouping `RopOpenFolder` behind
+  `is_folder_open_rop` and `append_folder_open_dispatch_response` in
+  `mapi/dispatch/folder_open.rs`. The move preserves folder alias
+  resolution, canonical mailbox/collaboration/public-folder/search-folder
+  lookup, output-handle allocation that avoids same-Execute released handles,
+  ghosted public-folder response shape, and existing Outlook RCA diagnostics.
+- 2026-07-01 verification for the folder-open dispatch grouping: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange open_folder` passed 6
+  focused OpenFolder tests; `cargo test -p lpe-exchange folder` passed 406
+  focused folder tests; `cargo test -p lpe-exchange execute` passed 55
+  focused Execute tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1593 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `mapi/dispatch.rs` at 5,932 tracked-source lines. Direct physical line
+  counts report `mapi/dispatch.rs` at 5,538 lines and
+  `mapi/dispatch/folder_open.rs` at 465 lines. `rg` confirmed the grouped
+  folder-open predicate and dispatch wrapper live in the focused folder-open
+  module.
+- 2026-07-01: Advanced MR-002/MR-007 by moving the known and unknown
+  unsupported ROP fallback response helpers from `mapi/dispatch/execute.rs`
+  into `mapi/dispatch/unsupported.rs`. The main Execute router now calls
+  `append_unsupported_known_dispatch_response` and
+  `append_unsupported_unknown_dispatch_response`, preserving the existing
+  unsupported/reserved ROP response bytes and the terminal behavior owned by
+  the parsed typed request.
+- 2026-07-01 verification for the unsupported fallback split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange unsupported` passed 16
+  focused unsupported/reserved behavior tests; `cargo test -p lpe-exchange
+  execute` passed 55 focused Execute tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1593 tests and doc tests passing.
+  `python tools/check_oversized_sources.py` passed in warning mode and
+  reports `mapi/dispatch.rs` at 5,934 tracked-source lines. Direct physical
+  line counts report `mapi/dispatch.rs` at 5,540 lines,
+  `mapi/dispatch/execute.rs` at 408 lines, and
+  `mapi/dispatch/unsupported.rs` at 20 lines. `rg` confirmed the fallback
+  append helpers and unsupported response primitives live in the focused
+  unsupported module; this boundary split adds module wiring, so it does not
+  reduce the main router line count.
+- 2026-07-01: Resolved the `mapi/dispatch.rs` production-source hotspot by
+  moving the in-file `#[cfg(test)] mod tests` body into
+  `mapi/dispatch/tests.rs` and leaving `mapi/dispatch.rs` as the module hub
+  for routing, helpers, and module declarations. This move is test-only and
+  preserves the existing `mapi::dispatch::tests::*` module path.
+- 2026-07-01 verification for the dispatch test-module extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi::dispatch::tests` passed 139 extracted dispatch tests; `cargo test -p
+  lpe-exchange execute` passed 55 focused Execute tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1593
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and no longer reports `mapi/dispatch.rs` as an
+  oversized production source file. Direct physical line counts report
+  `mapi/dispatch.rs` at 990 lines and `mapi/dispatch/tests.rs` at 4,506
+  lines. The extracted test file remains a follow-up test-organization
+  hotspot and should be split by scenario family.
+- 2026-07-01: Advanced the dispatch test-organization follow-up by moving the
+  core Execute framing, active-session overlap, release-only, and Execute
+  debug/response-summary tests from `mapi/dispatch/tests.rs` into
+  `mapi/dispatch/tests/execute.rs`. This is test-only and preserves production
+  dispatch behavior.
+- 2026-07-01 verification for the Execute dispatch test split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi::dispatch::tests::execute` passed 24 Execute-focused dispatch tests;
+  `cargo test -p lpe-exchange mapi::dispatch::tests` passed all 139 dispatch
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1,593 tests and doc tests passing. `git diff --check` exited
+  successfully with CRLF warnings only, and `python
+  tools/check_oversized_sources.py` passed in warning mode. Direct physical
+  line counts report `mapi/dispatch/tests.rs` at 3,758 lines and
+  `mapi/dispatch/tests/execute.rs` at 751 lines.
+- 2026-07-01: Advanced the dispatch test-organization follow-up again by
+  moving associated-configuration, Common Views, Quick Step, Free/Busy,
+  conversation-action, and virtual FAI row tests from `mapi/dispatch/tests.rs`
+  into `mapi/dispatch/tests/associated_config.rs`. This is test-only and
+  preserves production dispatch behavior.
+- 2026-07-01 verification for the associated-config dispatch test split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi::dispatch::tests::associated_config` passed 25 focused tests; `cargo
+  test -p lpe-exchange mapi::dispatch::tests` passed all 139 dispatch tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,593
+  tests and doc tests passing. `git diff --check` exited successfully with
+  CRLF warnings only, and `python tools/check_oversized_sources.py` passed in
+  warning mode. Direct physical line counts report `mapi/dispatch/tests.rs` at
+  2,820 lines, `mapi/dispatch/tests/associated_config.rs` at 941 lines, and
+  `mapi/dispatch/tests/execute.rs` at 751 lines.
+- 2026-07-01: Advanced the dispatch test-organization follow-up by moving
+  folder/default-folder projection, special-folder GetProps probe, folder
+  set-property, advertised-folder, and post-hierarchy probe tests from
+  `mapi/dispatch/tests.rs` into `mapi/dispatch/tests/folders.rs`. This is
+  test-only and preserves production dispatch behavior.
+- 2026-07-01 verification for the folder dispatch test split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi::dispatch::tests::folders` passed 42 focused tests; `cargo test -p
+  lpe-exchange mapi::dispatch::tests` passed all 139 dispatch tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,593
+  tests and doc tests passing. `git diff --check` exited successfully with
+  CRLF warnings only, and `python tools/check_oversized_sources.py` passed in
+  warning mode. Direct physical line counts report `mapi/dispatch/tests.rs` at
+  1,416 lines, `mapi/dispatch/tests/folders.rs` at 1,407 lines,
+  `mapi/dispatch/tests/associated_config.rs` at 941 lines, and
+  `mapi/dispatch/tests/execute.rs` at 751 lines.
+- 2026-07-01: Advanced MR-004 by moving top-level Exchange HTTP route assembly
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/http_routes.rs` as `exchange_router`.
+  `service.rs` now delegates its public `router()` entry point to that focused
+  route module while preserving the existing endpoint paths and handler
+  functions.
+- 2026-07-01 verification for the HTTP route assembly split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange http_routes` passed 2
+  route tests; `cargo test -p lpe-exchange rpc_proxy` passed 51 RPC proxy
+  tests; `cargo test -p lpe-exchange mapi_over_http::transport` passed 36
+  MAPI transport tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `git diff
+  --check` exited successfully with CRLF warnings only, and `python
+  tools/check_oversized_sources.py` passed in warning mode. The oversized
+  source check reports `crates/lpe-exchange/src/service.rs` at 11,549 tracked
+  source lines after this slice.
+- 2026-07-01: Advanced MR-004 by moving EWS request body decoding, SOAP
+  operation-name detection, and the SOAP envelope response wrapper from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/xml.rs`. This keeps XML/body primitives
+  together while preserving endpoint routing, SOAP dispatch behavior, response
+  envelope bytes, request decoding errors, and UTF-8/UTF-16 handling.
+- 2026-07-01 verification for the EWS XML/body helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_folder_items_accepts_utf16_soap_requests` passed the focused UTF-16
+  SOAP request test; `cargo test -p lpe-exchange http_routes` passed 2 route
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `git diff --check` exited successfully
+  with CRLF warnings only, and `python tools/check_oversized_sources.py`
+  passed in warning mode. The oversized-source check reports
+  `crates/lpe-exchange/src/service.rs` at 11,448 tracked source lines. Direct
+  physical line counts report `service.rs` at 10,817 lines and
+  `service/ews/xml.rs` at 264 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS delegate request parsing
+  and owner validation from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/delegation.rs`. This keeps the
+  AddDelegate, UpdateDelegate, GetDelegate, and RemoveDelegate parser policy
+  with the existing delegate response XML helpers while preserving canonical
+  delegate storage calls, same-tenant lookup behavior, unsupported
+  Exchange-only permission rejection, and SOAP response shapes.
+- 2026-07-01 verification for the EWS delegate parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  delegate_operations_use_canonical_permissions_and_preferences` passed the
+  canonical delegate mutation test; `cargo test -p lpe-exchange
+  delegate_add_rejects` passed the cross-tenant and unsupported-permission
+  rejection tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `git diff --check` exited
+  successfully with CRLF warnings only, and `python
+  tools/check_oversized_sources.py` passed in warning mode. The
+  oversized-source check reports `crates/lpe-exchange/src/service.rs` at
+  11,311 tracked source lines. Direct physical line counts report
+  `service.rs` at 10,688 lines and `service/ews/delegation.rs` at 220 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS user-configuration key,
+  upsert, and dictionary request parsing from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/user_configuration.rs`. This keeps
+  Create/Get/Update/DeleteUserConfiguration parsing with the existing
+  user-configuration response renderer while preserving canonical storage
+  calls, account/mailbox/public-folder scoping, base64 validation, dictionary
+  shape, and SOAP responses.
+- 2026-07-01 verification for the EWS user-configuration parser split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  user_configuration_create_get_update_and_delete_use_canonical_storage`
+  passed the canonical CRUD test; `cargo test -p lpe-exchange
+  user_configuration_supports_mailbox_scoped_names_and_not_found_errors`
+  passed the scoped-name and not-found behavior test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `git diff --check` exited successfully with
+  CRLF warnings only, and `python tools/check_oversized_sources.py` passed in
+  warning mode. The oversized-source check reports
+  `crates/lpe-exchange/src/service.rs` at 11,225 tracked source lines. Direct
+  physical line counts report `service.rs` at 10,605 lines and
+  `service/ews/user_configuration.rs` at 202 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS OOF state and
+  scheduled-duration request parsing from `crates/lpe-exchange/src/service.rs`
+  into `crates/lpe-exchange/src/service/ews/oof.rs`. This keeps
+  SetUserOofSettings parser policy with the existing OOF response XML helpers
+  while preserving OOF Sieve projection/storage, disabled/enabled/scheduled
+  state behavior, duration validation messages, and SOAP responses.
+- 2026-07-01 verification for the EWS OOF parser split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange oof_settings` passed 6 focused
+  OOF tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1,594 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 11,204 tracked source lines. Direct
+  physical line counts report `service.rs` at 10,586 lines and
+  `service/ews/oof.rs` at 70 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS file-attachment upload
+  parsing and expected attachment-kind detection from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/attachments.rs`. This keeps
+  CreateAttachment request parsing with the existing attachment response XML
+  helpers while preserving Magika validation, canonical attachment storage,
+  audit behavior, and Get/Create/DeleteAttachment SOAP responses.
+- 2026-07-01 verification for the EWS attachment parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange attachment` passed 47
+  focused attachment tests including the EWS Get/Create/DeleteAttachment cases;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  11,160 tracked source lines. Direct physical line counts report `service.rs`
+  at 10,545 lines and `service/ews/attachments.rs` at 97 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS ConvertId request parsing,
+  canonical object-id validation, opaque EWS id encoding/decoding, destination
+  format normalization, and ConvertId helper structs from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/ids.rs`. This keeps ConvertId request
+  and response policy together while preserving supported canonical object
+  families, HexEntryId round trips, opaque id format, and SOAP response shape.
+- 2026-07-01 verification for the EWS ConvertId split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange convert_id` passed 2 focused
+  ConvertId tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 10,956 tracked source lines. Direct
+  physical line counts report `service.rs` at 10,355 lines and
+  `service/ews/ids.rs` at 217 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS MailTips recipient/tip
+  request parsing and GetServiceConfiguration request parsing from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail_tips.rs`. This keeps the bounded
+  MailTips and service-configuration request policy with the existing response
+  renderers while preserving directory lookup, OOF projection, parseable
+  unsupported-configuration responses, and SOAP response shapes.
+- 2026-07-01 verification for the EWS MailTips parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange mail_tips` passed 3
+  focused MailTips/service-configuration tests; `cargo test -p lpe-exchange
+  service_configuration` passed 2 focused service-configuration tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  10,880 tracked source lines. Direct physical line counts report `service.rs`
+  at 10,282 lines and `service/ews/mail_tips.rs` at 231 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS Mail Apps request parsing
+  for app identifiers and client-access token scopes into
+  `crates/lpe-exchange/src/service/ews/mail_apps.rs`, and EWS Unified
+  Messaging phone-call id parsing into
+  `crates/lpe-exchange/src/service/ews/unified_messaging.rs`. This keeps
+  operation-specific request parsing with each response module while preserving
+  canonical catalog/install/token state, canonical call state, and SOAP
+  response/error behavior.
+- 2026-07-01 verification for the EWS Mail Apps and Unified Messaging parser
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mail_app_operations` passed the focused catalog/install/token-state test;
+  `cargo test -p lpe-exchange unified_messaging_operations` passed the focused
+  canonical call-state test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 10,849 tracked source lines. Direct
+  physical line counts report `service.rs` at 10,254 lines,
+  `service/ews/mail_apps.rs` at 138 lines, and
+  `service/ews/unified_messaging.rs` at 85 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS reminder ItemId request
+  parsing into `crates/lpe-exchange/src/service/ews/reminders.rs`, and EWS
+  GetRooms room-list address parsing into
+  `crates/lpe-exchange/src/service/ews/rooms.rs`. This keeps pure request
+  parsing beside the corresponding response helpers while preserving canonical
+  reminder updates, room/resource directory projection, unsupported custom room
+  list behavior, and SOAP response shapes.
+- 2026-07-01 verification for the EWS reminder and rooms parser split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  reminders_are_read_and_dismissed_from_canonical_reminder_state` passed the
+  focused reminder action test; `cargo test -p lpe-exchange
+  rooms_are_projected_from_canonical_directory_entries` passed the focused
+  room/resource projection test; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `ParsedReminderItemId`, `parse_reminder_item_id`, and
+  `requested_room_list_address` now live in the focused EWS modules instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 10,820 tracked
+  source lines. Direct physical line counts report `service.rs` at 10,228
+  lines, `service/ews/reminders.rs` at 74 lines, and `service/ews/rooms.rs` at
+  76 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS inbox-rule mutation
+  classification, bounded rule-to-Sieve projection, and Sieve string escaping
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/rules.rs`. Canonical Sieve script
+  writes remain in the service method, while request parsing and response XML
+  now live together in the rules module. This preserves GetInboxRules output,
+  UpdateInboxRules create/set/delete behavior, Exchange-only rule rejection,
+  and no-side-effect failure behavior.
+- 2026-07-01 verification for the EWS inbox-rule parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  inbox_rules_project_and_update_canonical_sieve_rules` passed the focused
+  projection/update test; `cargo test -p lpe-exchange
+  update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effects`
+  passed the focused rejection/no-side-effect test; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `EwsInboxRuleMutation`, `bounded_ews_rule_to_sieve`, and
+  `escape_sieve_string` now live in `service/ews/rules.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 10,744 tracked
+  source lines. Direct physical line counts report `service.rs` at 10,156
+  lines and `service/ews/rules.rs` at 113 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS task create/update request
+  parsing, task-list folder id parsing, and EWS task status normalization from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/tasks.rs`. Shared recurrence parsing
+  remains in `service.rs` for now because it is used by both calendar and task
+  inputs. This preserves canonical task create/update/delete behavior, task
+  folder routing, task status mapping, HTML body text conversion, field-delete
+  handling, and SyncFolderItems task projection.
+- 2026-07-01 verification for the EWS task parser split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  create_update_task_round_trips_through_sync_folder_items` passed the focused
+  task create/update/sync test; `cargo test -p lpe-exchange
+  delete_item_deletes_canonical_task` passed the focused task delete routing
+  test; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `rg` confirms `parse_create_task_input`,
+  `parse_update_task_input`, `requested_task_list_id`, and
+  `ews_task_status_to_canonical` now live in `service/ews/tasks.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 10,643 tracked
+  source lines. Direct physical line counts report `service.rs` at 10,061
+  lines and `service/ews/tasks.rs` at 208 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS Recurrence
+  request parser and its bounded RRULE helpers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/calendar.rs`. The parser remains shared
+  by calendar and task request paths, but now sits with the existing calendar
+  RRULE-to-EWS response projection code. This preserves supported daily,
+  weekly, absolute monthly, absolute yearly, numbered, and end-date recurrence
+  behavior, unsupported-pattern errors, and the existing task/calendar callers.
+- 2026-07-01 verification for the EWS recurrence parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed the
+  focused calendar recurrence create/sync/delete test; `cargo test -p
+  lpe-exchange create_update_task_round_trips_through_sync_folder_items`
+  passed the focused task caller test; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms `parse_ews_recurrence`, `push_interval_part`,
+  `parse_positive_number`, `ews_weekday_to_rrule`, `ews_month_to_number`, and
+  `rrule_date` now live in `service/ews/calendar.rs` instead of `service.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 10,543 tracked source lines. Direct
+  physical line counts report `service.rs` at 9,970 lines,
+  `service/ews/calendar.rs` at 400 lines, and `service/ews/tasks.rs` at 208
+  lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS message read/flag update
+  request parsing from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail.rs`, and moving generic EWS XML
+  boolean parsing helpers into `crates/lpe-exchange/src/service/ews/xml.rs`.
+  Canonical flag mutation remains in the service method. This preserves
+  UpdateItem message IsRead/FlagStatus behavior, field-delete handling for
+  message flags, MarkAllItemsAsRead boolean parsing, and notification/delegate
+  boolean parsing callers.
+- 2026-07-01 verification for the EWS message flag parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  update_item_updates_message_read_and_flag_state` passed the focused
+  UpdateItem read/flag test; `cargo test -p lpe-exchange
+  mark_all_items_as_read_updates_canonical_mailbox_message_flags` passed the
+  focused mailbox read-flag bulk-update test; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `parse_update_message_flags` now lives in `service/ews/mail.rs`
+  and `parse_xml_bool` / `parse_xml_bool_attr` now live in
+  `service/ews/xml.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 10,513 tracked source lines. Direct
+  physical line counts report `service.rs` at 9,944 lines,
+  `service/ews/mail.rs` at 106 lines, and `service/ews/xml.rs` at 274 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS Message CreateItem request
+  parsing from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail.rs`. The canonical draft/import
+  handling remains in the service method, and shared EWS mailbox/recipient
+  parsing remains in `service.rs` because it is still used by directory,
+  MailTips, calendar participants, and sharing request paths. This preserves
+  MessageDisposition handling, From/Sender defaults, recipient parsing, body
+  text conversion, protected Bcc input, draft creation, custom-folder import,
+  and CreateItem SOAP response behavior.
+- 2026-07-01 verification for the EWS message CreateItem parser split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_item_saveonly_stores_message_as_canonical_draft` passed the focused
+  draft creation test; `cargo test -p lpe-exchange
+  create_item_saveonly_imports_message_into_custom_mailbox_folder` passed the
+  focused custom-folder import test; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms `parse_create_message_input` now lives in `service/ews/mail.rs`
+  instead of `service.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 10,463
+  tracked source lines. Direct physical line counts report `service.rs` at
+  9,896 lines and `service/ews/mail.rs` at 154 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS Contact CreateItem and
+  UpdateItem request parsing from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/contacts.rs`. The slice also moves the
+  contact-only indexed entry parser, contact JSON update helpers, and contact
+  display fallback helpers into the contact module. Shared field-delete and
+  updated-text helpers remain in `service.rs` because mail, task, and calendar
+  parsers still use them. This preserves contact create/update SOAP behavior,
+  rich-field omission on narrow updates, sync-folder visibility, and canonical
+  contact mutations.
+- 2026-07-01 verification for the EWS contact parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  ews_contact_narrow_update_omits_unowned_rich_fields` passed in its new
+  module location; `cargo test -p lpe-exchange
+  create_delete_contact_round_trips_through_sync_folder_items` passed the
+  focused contact CreateItem/DeleteItem sync round-trip; `cargo test -p
+  lpe-exchange update_contact_round_trips_through_sync_folder_items` passed
+  the focused contact UpdateItem sync round-trip; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `parse_create_contact_input`, `parse_update_contact_input`,
+  `contact_entry_value`, and the narrow-update test now live in
+  `service/ews/contacts.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 10,003 tracked source lines. Direct
+  physical line counts report `service.rs` at 9,460 lines and
+  `service/ews/contacts.rs` at 651 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS CalendarItem CreateItem and
+  UpdateItem request parsing from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/calendar.rs`. The slice also moves the
+  event participant parser, EWS response-type-to-partstat mapper, time-zone
+  lookup, and event date/duration helpers into the calendar module. Availability
+  window helpers remain in `service.rs` because the free/busy path and
+  `service/ews/availability.rs` still use them. This preserves CalendarItem
+  create/update parsing, attendee metadata serialization, recurrence handling,
+  body conversion, and canonical calendar mutations.
+- 2026-07-01 verification for the EWS calendar event parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed the
+  focused CalendarItem CreateItem/DeleteItem sync round-trip; `cargo test -p
+  lpe-exchange find_item_returns_calendar_items_from_canonical_store` passed
+  the focused calendar FindItem projection test; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `parse_create_event_input`, `parse_update_event_input`,
+  `parse_event_participants`, and `ews_datetime_parts` now live in
+  `service/ews/calendar.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,773 tracked source lines. Direct
+  physical line counts report `service.rs` at 9,241 lines and
+  `service/ews/calendar.rs` at 619 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving public-folder item UpdateItem
+  parsing and MoveItem/CopyItem clone input construction from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/public_folders.rs`. Public-folder
+  service orchestration, CreateItem public-folder post construction, and
+  recursive folder-copy traversal remain in `service.rs` because they are tied
+  to request dispatch, audit actions, and store control flow. This preserves
+  public-folder item subject/body updates, message-class preservation, move
+  copy-then-delete behavior, copy behavior, and canonical public-folder item
+  mutations.
+- 2026-07-01 verification for the EWS public-folder item helper split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  update_item_updates_public_folder_item` passed the focused UpdateItem
+  public-folder item test; `cargo test -p lpe-exchange
+  move_item_moves_public_folder_item_to_target_public_folder` passed the
+  focused MoveItem public-folder item test; `cargo test -p lpe-exchange
+  copy_item_copies_public_folder_item_to_target_public_folder` passed the
+  focused CopyItem public-folder item test; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms `parse_update_public_folder_item_input` and
+  `public_folder_item_clone_input` now live in `service/ews/public_folders.rs`
+  instead of `service.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 9,715
+  tracked source lines. Direct physical line counts report `service.rs` at
+  9,185 lines and `service/ews/public_folders.rs` at 130 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS out-of-office
+  projection model and Sieve conversion helpers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/oof.rs`. The service methods still own
+  request dispatch, store reads/writes, and audit actions. This preserves
+  GetUserOofSettings projection over canonical Sieve vacation scripts,
+  SetUserOofSettings canonical Sieve generation, scheduled OOF metadata, OOF
+  disable behavior, and MailTips OOF projection.
+- 2026-07-01 verification for the EWS OOF helper split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  get_user_oof_settings_projects_canonical_sieve_vacation` passed the focused
+  OOF projection test; `cargo test -p lpe-exchange
+  set_user_oof_settings_writes_canonical_sieve_vacation` passed the focused
+  OOF write test; `cargo test -p lpe-exchange
+  set_user_oof_settings_scheduled_round_trips_canonical_sieve_metadata` passed
+  the scheduled OOF metadata round-trip; `cargo test -p lpe-exchange
+  get_mail_tips_projects_directory_and_oof_without_local_tip_state` passed the
+  MailTips OOF projection caller; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `OofDuration`, `OofProjection`, `oof_projection_from_script`,
+  `vacation_sieve_script`, `find_vacation_reason`, and `sieve_quote` now live
+  in `service/ews/oof.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,573 tracked source lines. Direct
+  physical line counts report `service.rs` at 9,053 lines and
+  `service/ews/oof.rs` at 200 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving shared EWS calendar datetime
+  rendering helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/calendar.rs`, and moving
+  availability request-window and event-overlap helpers into
+  `crates/lpe-exchange/src/service/ews/availability.rs`. The
+  GetUserAvailability service method still owns recipient resolution, store
+  reads, filtering orchestration, and response selection. This preserves
+  calendar item Start/End XML rendering, free/busy event windows, suggestions
+  fallback windows, and canonical event filtering.
+- 2026-07-01 verification for the EWS availability/calendar helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_user_availability_returns_canonical_busy_events` passed the focused
+  free/busy filtering test; `cargo test -p lpe-exchange
+  get_user_availability_returns_suggestions_when_requested` passed the
+  suggestions fallback-window test; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed the
+  focused CalendarItem Start/End rendering path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `ews_datetime` and `event_end_datetime` now live in
+  `service/ews/calendar.rs`, while `requested_availability_window` and
+  `event_overlaps_window` now live in `service/ews/availability.rs`, instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,539 tracked
+  source lines. Direct physical line counts report `service.rs` at 9,023
+  lines, `service/ews/availability.rs` at 106 lines, and
+  `service/ews/calendar.rs` at 636 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS CreateItem
+  save-only custom mailbox import input mapper from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail.rs`. The service method still owns
+  request dispatch, target folder resolution, store import, and audit action
+  selection. This preserves the exact `SubmitMessageInput` to
+  `JmapImportedEmailInput` field mapping for saved messages in custom mailbox
+  folders.
+- 2026-07-01 verification for the EWS mail import helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_item_saveonly_imports_message_into_custom_mailbox_folder` passed the
+  focused custom-folder import path; `cargo test -p lpe-exchange
+  create_item_saveonly_stores_message_as_canonical_draft` passed the adjacent
+  draft path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1,594 tests and doc tests passing. `rg` confirms
+  `imported_email_input` now lives in `service/ews/mail.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,511 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,996 lines and
+  `service/ews/mail.rs` at 184 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS canonical
+  message ItemId parser from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/ids.rs`, alongside the existing
+  ConvertId and canonical EWS object ID helpers. The PlayOnPhone and SendItem
+  service methods still own operation dispatch, store calls, audit actions,
+  and response mapping.
+- 2026-07-01 verification for the EWS message ID helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  send_item_submits_existing_draft_through_canonical_submission` passed the
+  focused SendItem draft-submission path; `cargo test -p lpe-exchange
+  unified_messaging_operations_use_canonical_call_state` passed the focused
+  PlayOnPhone message ItemId path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `canonical_message_id_from_ews_id` now lives in `service/ews/ids.rs` instead
+  of `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,503 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,989 lines and
+  `service/ews/ids.rs` at 224 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving stateless EWS request folder ID
+  parsers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/request_ids.rs`. This includes
+  mailbox-folder IDs, public-folder IDs, distinguished mailbox roles, and
+  wrapper-scoped variants. The async service method that resolves mailbox roles
+  against canonical mailbox storage remains in `service.rs` because it owns
+  store access and fallback behavior.
+- 2026-07-01 verification for the EWS request folder ID helper split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_folder_items_returns_empty_sync_for_custom_mailbox_folder` passed the
+  focused custom mailbox-folder ID path; `cargo test -p lpe-exchange
+  sync_folder_items_reports_public_folder_items` passed the focused public
+  folder ID path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. The first focused compile
+  identified two existing cross-module users of `requested_distinguished_folder_id`
+  and `ews_distinguished_mailbox_role`; those helpers are now visible within
+  `crate::service`. `rg` confirms the moved stateless parsers now live in
+  `service/ews/request_ids.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,449 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,943 lines and
+  `service/ews/request_ids.rs` at 97 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS sync-state request parsing
+  and mailbox-folder sync-state helpers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/sync_state.rs`, alongside the existing
+  collaboration sync-state formatter/parser. General collection ID extraction
+  remains in `service.rs` for now because non-sync EWS paths still share it.
+- 2026-07-01 verification for the EWS sync-state helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_folder_items_returns_contacts_from_canonical_store` passed the focused
+  collaboration sync-state path; `cargo test -p lpe-exchange
+  sync_folder_items_reports_custom_mailbox_create_and_delete_changes` passed
+  the focused custom mailbox sync-state path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `requested_sync_collection_id`, `requested_sync_state`,
+  `mailbox_sync_state`, `mailbox_sync_state_ids`, and
+  `mailbox_sync_state_folder_id` now live in `service/ews/sync_state.rs`
+  instead of `service.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 9,405
+  tracked source lines. Direct physical line counts report `service.rs` at
+  8,904 lines and `service/ews/sync_state.rs` at 136 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS sharing request parsing
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/sharing.rs`, alongside the sharing
+  response renderers. The service methods still own same-tenant owner
+  resolution, accessible collection checks, grant writes, audit actions, and
+  operation response mapping.
+- 2026-07-01 verification for the EWS sharing parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_tokens`
+  passed the focused metadata request-kind path; `cargo test -p lpe-exchange
+  accept_sharing_invitation_creates_same_tenant_calendar_grant` passed the
+  focused sharing invitation parser and grant path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `SharingRequest`, `requested_sharing_kind`,
+  `parse_sharing_request`, and `sharing_rights` now live in
+  `service/ews/sharing.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,342 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,845 lines and
+  `service/ews/sharing.rs` at 211 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS conversation request parsing
+  and ignored-folder filtering helpers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/conversations.rs`, alongside the
+  conversation response renderers. The service methods still own source email
+  loading, canonical message move/delete/read-state mutations, audit actions,
+  and unsupported future-message action response mapping.
+- 2026-07-01 verification for the EWS conversation parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_conversation_items_returns_current_canonical_thread_nodes` passed the
+  focused ConversationId parsing and ignored-folder filtering path; `cargo test
+  -p lpe-exchange apply_conversation_action_moves_current_thread_messages`
+  passed the focused conversation action parser and destination folder path;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `ConversationActionRequest`,
+  `requested_conversation_ids`, `parse_conversation_id`,
+  `parse_conversation_actions`, and `filter_ignored_conversation_folders` now
+  live in `service/ews/conversations.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,289 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,797 lines and
+  `service/ews/conversations.rs` at 294 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the remaining stateless EWS
+  collection and relative-folder-path request parsers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/request_ids.rs`. This includes
+  `request_contains_folder_reference`, `requested_collection_id`,
+  `requested_collection_id_in`, and `requested_folder_path_segments`. The
+  service methods still own folder resolution, canonical store access, default
+  collection fallbacks, and SOAP response mapping.
+- 2026-07-01 verification for the EWS collection/path request parser split:
+  focused tests for FindFolder, CreateFolder, and SyncFolderItems collection
+  paths had already passed before the full verification. `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms the moved helper definitions now live in
+  `service/ews/request_ids.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,249 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,761 lines and
+  `service/ews/request_ids.rs` at 136 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS GetItem MIME content
+  request helper from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail.rs`, next to the message XML and
+  MIME response rendering helpers. The GetItem service method still owns item
+  loading, attachment-content loading, Bcc-safe MIME rendering selection, and
+  SOAP response mapping.
+- 2026-07-01 verification for the EWS MIME content request helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_item_returns_requested_mime_content_without_leaking_bcc_for_normal_mailbox`
+  passed the focused normal-mailbox MIME request path; `cargo test -p
+  lpe-exchange get_item_mime_content_hides_bcc_for_sent_message_default_fetch`
+  passed the sent-message Bcc hiding path; `cargo test -p lpe-exchange
+  get_item_mime_content_includes_canonical_attachments` passed the canonical
+  attachment MIME path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `requested_mime_content` now lives in `service/ews/mail.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,245 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,758 lines and
+  `service/ews/mail.rs` at 187 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS mailbox parser
+  cluster from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mailboxes.rs`. This includes
+  `ParsedMailbox`, `parse_recipients`, `parse_first_mailbox`, and
+  `parse_mailbox`. The slice preserves the existing XML parsing behavior used
+  by message recipients, availability mailbox checks, directory requests,
+  MailTips recipients, calendar attendees, and sharing invitations.
+- 2026-07-01 verification for the shared EWS mailbox parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_item_saveonly_stores_message_as_canonical_draft` passed the message
+  recipient path; `cargo test -p lpe-exchange
+  get_user_availability_returns_canonical_busy_events` passed the availability
+  mailbox path; `cargo test -p lpe-exchange
+  get_mail_tips_projects_directory_and_oof_without_local_tip_state` passed the
+  MailTips recipient path; `cargo test -p lpe-exchange
+  accept_sharing_invitation_creates_same_tenant_calendar_grant` passed the
+  sharing mailbox path; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed
+  the calendar attendee path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the moved mailbox parser definitions now live in `service/ews/mailboxes.rs`
+  instead of `service.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 9,209
+  tracked source lines. Direct physical line counts report `service.rs` at
+  8,726 lines and `service/ews/mailboxes.rs` at 38 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS compliance mailbox-list
+  parser `requested_mailbox_emails` from `crates/lpe-exchange/src/service.rs`
+  into `crates/lpe-exchange/src/service/ews/mailboxes.rs`, next to the shared
+  mailbox XML parser cluster. Search and hold service methods still own
+  canonical compliance store calls, result limits, audit input construction,
+  and SOAP response mapping.
+- 2026-07-01 verification for the EWS compliance mailbox-list parser split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  search_mailboxes_records_canonical_discovery_search_results_without_bcc`
+  passed the SearchMailboxes parser path; `cargo test -p lpe-exchange
+  hold_operations_use_canonical_compliance_hold_state` passed the
+  GetHoldOnMailboxes and SetHoldOnMailboxes parser paths; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  The attempted narrower `get_hold_on_mailboxes_projects_canonical_hold_state`
+  filter matched zero tests and was replaced by the exact combined hold test.
+  `rg` confirms `requested_mailbox_emails` now lives in
+  `service/ews/mailboxes.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,197 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,715 lines and
+  `service/ews/mailboxes.rs` at 49 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS field-delete
+  parsing helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/fields.rs`. This includes
+  `deleted_or_updated_text`, `field_deleted`, and the local
+  `field_block_matches` matcher. The object-family parsers still own their
+  field-to-canonical-input mapping and service methods still own store calls
+  and SOAP response mapping.
+- 2026-07-01 verification for the EWS field-delete helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  update_item_updates_message_read_and_flag_state` passed the message read/flag
+  delete-field path; `cargo test -p lpe-exchange
+  update_contact_round_trips_through_sync_folder_items` passed the contact
+  update path; `cargo test -p lpe-exchange update_item_updates_public_folder_item`
+  passed the public-folder item update path; `cargo test -p lpe-exchange
+  create_update_task_round_trips_through_sync_folder_items` passed the task
+  update path; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed the
+  calendar item path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `rg` confirms the moved
+  helper definitions now live in `service/ews/fields.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,162 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,684 lines and
+  `service/ews/fields.rs` at 34 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving shared EWS XML numeric-attribute
+  and tag-count helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/xml.rs`, next to the existing XML
+  primitive helpers. This includes `ews_usize_attribute`,
+  `count_folder_elements`, and `count_tag_occurrences`. The service methods
+  and response builders still own their response selection, debug summaries,
+  and SOAP payload assembly.
+- 2026-07-01 verification for the EWS XML count helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_conversation_items_returns_current_canonical_thread_nodes` passed the
+  focused `IndexedPageItemView` numeric-attribute and conversation count path;
+  `cargo test -p lpe-exchange
+  sync_folder_hierarchy_lists_contact_and_calendar_folders` passed the focused
+  folder-count response path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the moved helper definitions now live in `service/ews/xml.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,147 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,672 lines and
+  `service/ews/xml.rs` at 286 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS notification event
+  model from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/notifications.rs`, beside the
+  notification response renderers that consume it. This includes
+  `EwsQueuedNotification` and `EwsNotificationKind`. The service method still
+  owns canonical notification polling, event filtering, and change-kind to EWS
+  event-kind mapping.
+- 2026-07-01 verification for the EWS notification model split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  pull_and_streaming_notifications_replay_canonical_sql_change_cursor` passed
+  the focused pull/streaming replay path; `cargo test -p lpe-exchange
+  pull_subscription_get_events_replays_canonical_changes_after_restart` passed
+  the focused canonical NewMail event mapping path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  The attempted narrower filter
+  `get_events_replays_new_mail_canonical_change` matched zero tests and was
+  replaced by the exact restart replay test. `rg` confirms the moved type
+  definitions now live in `service/ews/notifications.rs` instead of
+  `service.rs`. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 9,130 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,657 lines and
+  `service/ews/notifications.rs` at 223 lines.
+- 2026-07-01: Advanced MR-004 by moving EWS request/response diagnostics from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/diagnostics.rs`. This includes
+  `ews_operation_hint`, `log_ews_connection`, `EwsResponseDebug`,
+  `ews_response_code`, `ews_response_debug_detail`, and
+  `ews_payload_debug_detail`. EWS route handling, response creation, SOAP
+  payloads, and MAPI/RPC diagnostics remain unchanged.
+- 2026-07-01 verification for the EWS diagnostics split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange
+  create_item_saveonly_stores_message_as_canonical_draft` passed the focused
+  CreateItem debug-detail path; `cargo test -p lpe-exchange
+  sync_folder_items_returns_contacts_from_canonical_store` passed the focused
+  SyncFolderItems debug-detail path; `cargo test -p lpe-exchange
+  pull_subscription_get_events_replays_canonical_changes_after_restart` passed
+  the focused GetEvents debug-detail path; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms the moved diagnostics definitions now live in
+  `service/ews/diagnostics.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 9,008 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,542 lines and
+  `service/ews/diagnostics.rs` at 123 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS folder-kind request
+  classifier from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/folders.rs`, beside the folder response
+  and projection helpers. This includes `FolderKind`,
+  `requested_folder_kind`, `sync_state_folder_kind`, and
+  `requested_folder_kinds`. The service methods still own store reads,
+  response assembly, and object-family routing after classification.
+- 2026-07-01 verification for the EWS folder-kind classifier split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  find_folder_lists_contact_and_calendar_folders` passed the FindFolder
+  multi-kind classification path; `cargo test -p lpe-exchange
+  find_item_lists_custom_mailbox_messages` passed the FindItem mailbox
+  classification path; `cargo test -p lpe-exchange
+  sync_folder_items_reports_custom_mailbox_create_and_delete_changes` passed
+  the mailbox SyncFolderItems classification path; `cargo test -p lpe-exchange
+  sync_folder_items_reports_public_folder_items` passed the public-folder
+  SyncFolderItems classification path; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms the classifier definitions now live in `service/ews/folders.rs`
+  instead of `service.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 8,864
+  tracked source lines. Direct physical line counts report `service.rs` at
+  8,402 lines and `service/ews/folders.rs` at 344 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving EWS custom mailbox folder guard
+  helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/folders.rs`, beside the folder request
+  classifier and folder response helpers. This includes `mailbox_by_id` and
+  `ensure_custom_mailbox`. The folder mutation service methods still own store
+  reads/writes, audit input construction, and SOAP response mapping.
+- 2026-07-01 verification for the EWS custom mailbox guard split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  copy_move_and_update_folder_use_canonical_mailbox_changes` passed the
+  focused custom-folder move/copy/update path; `cargo test -p lpe-exchange
+  folder_operations_preserve_system_and_public_folder_boundaries` passed the
+  focused system-folder and public-folder boundary path;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms the guard helper definitions now
+  live in `service/ews/folders.rs` instead of `service.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 8,849 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,389 lines and
+  `service/ews/folders.rs` at 360 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS stable
+  change-key helper from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/ids.rs`, beside the EWS ID conversion
+  helpers used by item-family response builders. Contact, calendar, task, and
+  public-folder response modules now share the helper from the ID module; the
+  response builders still own the object-family-specific key inputs.
+- 2026-07-01 verification for the EWS stable change-key helper split: focused
+  item-family tests for contact, calendar, task, and public-folder update paths
+  had already passed before the full verification; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `stable_change_key` is now defined only in
+  `service/ews/ids.rs` and consumed by the EWS contact, calendar, task, and
+  public-folder modules. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 8,836
+  tracked source lines. Direct physical line counts report `service.rs` at
+  8,377 lines and `service/ews/ids.rs` at 236 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the shared EWS empty-string
+  fallback extension helper from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/fields.rs`, beside the shared EWS field
+  update helpers. Calendar and task parsers still own their object-specific
+  update mapping; the helper only preserves the existing blank-value fallback
+  behavior.
+- 2026-07-01 verification for the EWS empty-string fallback helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  create_delete_calendar_item_round_trips_through_sync_folder_items` passed
+  the calendar update path; `cargo test -p lpe-exchange
+  create_update_task_round_trips_through_sync_folder_items` passed the task
+  update path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1,594 tests and doc tests passing. `rg` confirms
+  `EmptyStringFallback` now lives in `service/ews/fields.rs` and the remaining
+  `.if_empty(...)` call sites are in the EWS calendar and task modules.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 8,822 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,365 lines and
+  `service/ews/fields.rs` at 46 lines.
+- 2026-07-01: Advanced MR-004 by moving service-level HTTP response/query
+  diagnostics helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/http_utils.rs`. This includes
+  `response_header`, `response_set_cookie_names`, and `query_parameter`. Route
+  handling, MAPI/HTTP response envelopes, RPC proxy responses, and logging
+  fields remain unchanged.
+- 2026-07-01 verification for the service HTTP helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_options_handler_reports_transport_session_ready` passed the MAPI route
+  response-header path; `cargo test -p lpe-exchange
+  rpc_proxy_accepts_authenticated_rca_probe_without_405` passed the RPC proxy
+  response logging path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the helper definitions now live in `service/http_utils.rs` and `service.rs`
+  only calls them. `python tools/check_oversized_sources.py` passed in warning
+  mode and reports `crates/lpe-exchange/src/service.rs` at 8,790 tracked source
+  lines. Direct physical line counts report `service.rs` at 8,336 lines and
+  `service/http_utils.rs` at 32 lines.
+- 2026-07-01: Advanced MR-004 by moving MAPI/HTTP and RPC proxy service
+  diagnostics from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/transport_diagnostics.rs`. This includes
+  `log_mapi_transport_connection`, `log_rpc_proxy_connection`, and the RPC
+  proxy response extension types used to report payload byte counts and preview
+  hashes. MAPI/HTTP response envelopes, RPC proxy response generation, endpoint
+  routes, and auth behavior remain unchanged.
+- 2026-07-01 verification for the transport diagnostics split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_options_handler_reports_transport_session_ready` passed the MAPI
+  transport logging path; `cargo test -p lpe-exchange
+  rpc_proxy_accepts_authenticated_rca_probe_without_405` passed the RPC proxy
+  diagnostics path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `rg` confirms the moved
+  logging helpers and RPC proxy response debug types now live in
+  `service/transport_diagnostics.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  8,539 tracked source lines. Direct physical line counts report `service.rs`
+  at 8,093 lines and `service/transport_diagnostics.rs` at 246 lines.
+- 2026-07-01: Advanced MR-004 by moving primitive RPC proxy codec helpers from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_codec.rs`. This includes
+  little-endian `u32` reads/writes plus bounded NDR byte-array, ASCII string,
+  and UTF-16 string writers. Higher-level RPC proxy response builders, routing,
+  auth, endpoint classification, and NSPI matching remain in `service.rs`.
+- 2026-07-01 verification for the RPC proxy codec helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_nspi_resolve_names_ascii_request_gets_response` passed
+  the ASCII NDR response path; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response` passed the
+  UTF-16 NDR response path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the primitive helper definitions now live in `service/rpc_proxy_codec.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 8,496 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,055 lines and
+  `service/rpc_proxy_codec.rs` at 40 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy request classifier helpers
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_requests.rs`. This includes
+  endpoint-ping, MSRPC header, zero-length, echo-probe, and streaming
+  `RPC_IN_DATA` classification. RPC proxy parsing, response generation,
+  endpoint paths, auth, and transport semantics remain unchanged.
+- 2026-07-01 verification for the RPC proxy request classifier split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_classifies_zero_length_endpoint_in_data_as_echo_probe` passed the
+  zero-length echo classification path; `cargo test -p lpe-exchange
+  rpc_proxy_classifies_referral_endpoint_as_streaming_in_data_channel` passed
+  the streaming `RPC_IN_DATA` path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the classifier definitions now live in `service/rpc_proxy_requests.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 8,456 tracked source lines. Direct
+  physical line counts report `service.rs` at 8,022 lines and
+  `service/rpc_proxy_requests.rs` at 40 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy RTS `RPC_OUT_DATA` connect
+  parser helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_rts.rs`. This includes the
+  `RpcProxyOutDataConnect` request model, Conn A1 RTS parser, and shared RTS
+  command parsers used by the existing Conn B1 parser. RPC proxy routing,
+  endpoint paths, auth, response generation, and RTS response bytes remain
+  unchanged.
+- 2026-07-01 verification for the RPC proxy RTS parser split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ack`
+  passed the Conn B1 ordering path; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_waits_for_b1_before_bind_ack` passed the
+  wait path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed
+  with 1,594 tests and doc tests passing. `rg` confirms the moved RTS parser
+  definitions now live in `service/rpc_proxy_rts.rs`, with `service.rs` only
+  declaring and importing that module. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  8,382 tracked source lines. Direct physical line counts report `service.rs`
+  at 7,954 lines and `service/rpc_proxy_rts.rs` at 72 lines.
+- 2026-07-01: Advanced MR-004 by moving primitive RPC proxy RTS response-body
+  helpers from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_rts.rs`. This includes RTS
+  connect body construction, endpoint connect timeout body construction, Conn
+  B1 response-body parsing, the shared in-channel response carrier, and RTS
+  header/connection-established PDU builders. Higher-level HTTP response
+  assembly remains in `service.rs`.
+- 2026-07-01 verification for the RPC proxy RTS response-body split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ack`
+  passed the Conn B1 ordering path; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_waits_for_b1_before_bind_ack` passed the
+  wait path; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_emsmdb_connect_ex_gets_session_context_response` passed
+  the connection-established response path; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms the moved RTS response-body helper definitions now live in
+  `service/rpc_proxy_rts.rs`. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/service.rs` at 8,297
+  tracked source lines. Direct physical line counts report `service.rs` at
+  7,878 lines and `service/rpc_proxy_rts.rs` at 149 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy DCE/RPC primitive helpers
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_dce.rs`. This includes bind ack
+  and alter-context response construction, context-result negotiation,
+  bound-interface tracking, protocol fault framing, request-auth trailer
+  echoing, and generic DCE response framing. Endpoint operation selection and
+  service routing remain in `service.rs`.
+- 2026-07-01 verification for the RPC proxy DCE/RPC helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_bind_request_gets_bind_ack_response` passed the bind ack
+  path; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_alter_context_request_gets_alter_context_response`
+  passed the alter-context path; `cargo test -p lpe-exchange
+  rpc_proxy_emsmdb_rpc_ext2_parse_failure_returns_protocol_fault` passed the
+  protocol-fault path; `cargo test -p lpe-exchange
+  rpc_proxy_address_book_management_stats_accepts_rca_short_stub` passed the
+  RCA-style management path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the DCE/RPC helper definitions now live in `service/rpc_proxy_dce.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 7,916 tracked source lines. Direct
+  physical line counts report `service.rs` at 7,525 lines and
+  `service/rpc_proxy_dce.rs` at 364 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy out-channel bookkeeping from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_channels.rs`. This includes
+  out-channel registration, cookie-scoped forwarding, pending response queues,
+  RTS connect markers, bind-ack markers, stale-channel removal, and the
+  existing cookie-scoping unit tests. Held-open HTTP response assembly remains
+  in `service.rs`.
+- 2026-07-01 verification for the RPC proxy out-channel bookkeeping split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_out_channels_are_scoped_by_virtual_connection_cookie` passed the
+  moved channel scoping unit test; `cargo test -p lpe-exchange
+  rpc_proxy_cookie_scoped_response_does_not_fall_back_to_unscoped_out_channel`
+  passed the moved stale-cookie unit test; `cargo test -p lpe-exchange
+  rpc_proxy_address_book_endpoint_ping_includes_pending_conn_b1_when_in_arrives_first`
+  passed the pending out-channel response path; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ack`
+  passed the bind-ack ordering path; `$env:RUST_TEST_THREADS='1'; cargo test
+  -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms the bookkeeping definitions now live in `service/rpc_proxy_channels.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 7,702 tracked source lines. Direct
+  physical line counts report `service.rs` at 7,336 lines and
+  `service/rpc_proxy_channels.rs` at 198 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy auth response builders from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_auth.rs`. This includes the
+  authenticated compatibility acceptance response and Basic challenge response.
+  Authentication decisions and endpoint routing remain in `service.rs`.
+- 2026-07-01 verification for the RPC proxy auth response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_challenges_missing_authentication_with_basic` passed the Basic
+  challenge path; `cargo test -p lpe-exchange
+  rpc_proxy_accepts_authenticated_rca_probe_without_405` passed the accepted
+  RCA probe path; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `rg` confirms the auth
+  response builders now live in `service/rpc_proxy_auth.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 7,667 tracked source lines. Direct
+  physical line counts report `service.rs` at 7,303 lines and
+  `service/rpc_proxy_auth.rs` at 44 lines.
+- 2026-07-01: Advanced MR-004/MR-015 by moving RPC proxy endpoint DCE/RPC
+  response builders from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_endpoints.rs`. This includes
+  management stats, RFRI referral responses, EMSMDB connect/RpcExt2 responses,
+  NSPI opnum dispatch, NSPI row projection, and NSPI lookup parsing used by the
+  address-book fallback path. HTTP routing, auth decisions, DCE/RPC framing,
+  and channel handling remain in their existing modules.
+- 2026-07-01 verification for the RPC proxy endpoint response split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_nspi_resolve_names_ascii_request_gets_response` passed
+  the ASCII NSPI ResolveNames path; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response` passed the
+  UTF-16 NSPI ResolveNames path; `cargo test -p lpe-exchange
+  rpc_proxy_address_book_management_stats_accepts_rca_short_stub` passed the
+  RCA-style management stats path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 6,479 tracked source lines. Direct
+  physical line counts report `service.rs` at 6,216 lines and
+  `service/rpc_proxy_endpoints.rs` at 1,110 lines.
+- 2026-07-01: Advanced MR-004 by moving RPC proxy streaming response assembly
+  and in-data channel drain handling from `crates/lpe-exchange/src/service.rs`
+  into `crates/lpe-exchange/src/service/rpc_proxy_stream.rs`. This includes
+  RTS connect/echo/in-channel HTTP responses, held-open out-channel response
+  assembly, in-data stream chunk logging, out-channel forwarding, buffered DCE
+  fragment scanning, and the address-book CheckName fallback. Route handling,
+  authentication decisions, endpoint response body construction, and
+  out-channel bookkeeping remain in their existing modules.
+- 2026-07-01 focused verification for the RPC proxy stream split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ack`
+  passed the held-open out-channel ordering path; `cargo test -p lpe-exchange
+  rpc_proxy_opens_authenticated_address_book_in_data_channel_without_waiting_for_body_eof`
+  passed the authenticated streaming in-data path; `cargo test -p lpe-exchange
+  rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu` passed buffered
+  fragment scanning; `cargo test -p lpe-exchange
+  rpc_proxy_address_book_check_name_fallback_answers_framing_mismatch` passed
+  the CheckName fallback path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 5,653 tracked source lines. Direct
+  physical line counts report `service.rs` at 5,428 lines and
+  `service/rpc_proxy_stream.rs` at 811 lines.
+- 2026-07-01: Advanced MR-004 by moving the top-level MAPI/HTTP and RPC proxy
+  service entrypoint methods from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/mapi_http.rs`. This includes `handle_mapi`,
+  `handle_rpc_proxy`, and `handle_rpc_proxy_in_data_channel`. Route handlers,
+  authentication behavior, endpoint paths, RPC proxy response helpers, and
+  MAPI execution remain unchanged.
+- 2026-07-01 verification for the MAPI/HTTP service entrypoint split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  mapi_options_handler_reports_transport_session_ready` passed the MAPI route
+  path; `cargo test -p lpe-exchange
+  rpc_proxy_accepts_authenticated_rca_probe_without_405` passed the
+  authenticated RPC proxy path; `cargo test -p lpe-exchange
+  rpc_proxy_opens_authenticated_address_book_in_data_channel_without_waiting_for_body_eof`
+  passed the streaming `RPC_IN_DATA` entrypoint path;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms the entrypoint method definitions
+  now live in `service/mapi_http.rs`, with `service.rs` retaining only module
+  wiring and route-handler calls. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  5,594 tracked source lines. Direct physical line counts report `service.rs`
+  at 5,372 lines and `service/mapi_http.rs` at 64 lines.
+- 2026-07-01: Advanced MR-004 by moving the RPC proxy out-channel hold-time
+  helper from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/rpc_proxy_channels.rs`, beside the channel
+  queues that apply the timeout. The environment override, test timeout,
+  response behavior, and streaming callers remain unchanged.
+- 2026-07-01 verification for the RPC proxy channel hold-time helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  rpc_proxy_out_channels_are_scoped_by_virtual_connection_cookie` passed the
+  channel bookkeeping path; `cargo test -p lpe-exchange
+  rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ack`
+  passed the held-open out-channel ordering path;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `rpc_proxy_channel_hold_ms` now
+  lives in `service/rpc_proxy_channels.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 5,580 tracked source lines. Direct
+  physical line counts report `service.rs` at 5,360 lines and
+  `service/rpc_proxy_channels.rs` at 211 lines.
+- 2026-07-01: Advanced MR-004/MR-005 by moving the EWS directory operation
+  methods from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/directory.rs`, beside the existing
+  directory response builders and visibility helpers. This includes
+  `ResolveNames`, `ExpandDL`, `FindPeople`, `GetPersona`, `GetUserPhoto`, and
+  `GetPasswordExpirationDate`. SOAP operation routing, address-book store
+  calls, canonical photo/password gap responses, and response XML remain
+  unchanged.
+- 2026-07-01 verification for the EWS directory operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  resolve_names_returns_tenant_directory_account_match`; `cargo test -p
+  lpe-exchange find_people_projects_canonical_accounts_and_contacts`; `cargo
+  test -p lpe-exchange get_persona_resolves_only_visible_stateless_persona_ids`;
+  `cargo test -p lpe-exchange
+  expand_dl_projects_same_tenant_directory_group_members`; `cargo test -p
+  lpe-exchange get_user_photo_returns_parseable_canonical_photo_gap`; and
+  `cargo test -p lpe-exchange
+  get_password_expiration_date_returns_parseable_canonical_account_gap` all
+  passed. An initial guessed `expand_dl_projects_distribution_group_members`
+  test filter matched zero tests and was replaced by the exact test name above.
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms the moved directory method
+  definitions now live in `service/ews/directory.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 5,513 tracked source lines. Direct
+  physical line counts report `service.rs` at 5,299 lines and
+  `service/ews/directory.rs` at 470 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `MarkAsJunk` operation method
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail.rs`, beside the mail request and
+  response helpers. The canonical Junk mailbox move, audit input, blocked
+  Exchange-only sender behavior gap response, SOAP routing, and response XML
+  remain unchanged.
+- 2026-07-01 verification for the EWS `MarkAsJunk` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  mark_as_junk_moves_messages_to_canonical_junk_mailbox` passed the canonical
+  message move path; `cargo test -p lpe-exchange
+  mark_as_junk_keeps_exchange_only_block_sender_behavior_parseable` passed the
+  blocked-sender compatibility gap response path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `mark_as_junk` now lives in `service/ews/mail.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 5,438 tracked source lines. Direct
+  physical line counts report `service.rs` at 5,228 lines and
+  `service/ews/mail.rs` at 268 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS instant-messaging contact-list
+  operation methods from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/ucs.rs`, beside the existing IM/UCS
+  response builders and request parsers. This includes `GetImItemList`,
+  `GetImItems`, group create/update/delete, contact/tel-URI member add/remove,
+  and distribution-list member add/remove operations. SOAP routing, canonical
+  contact creation, tenant-scoped distribution-list lookup, audit inputs, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the EWS IM/UCS operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  ucs_im_group_operations_use_canonical_contact_group_state` passed the group,
+  contact, tel-URI, list, and removal lifecycle paths; `cargo test -p
+  lpe-exchange ucs_distribution_list_membership_stays_tenant_scoped` passed
+  the visible and foreign distribution-list membership paths;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms the moved IM operation method
+  definitions now live in `service/ews/ucs.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 5,122 tracked source lines. Direct
+  physical line counts report `service.rs` at 4,924 lines and
+  `service/ews/ucs.rs` at 588 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS Mail Apps operation methods from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/mail_apps.rs`, beside the existing
+  request parsers and response builders. This includes `GetAppManifests`,
+  `GetAppMarketplaceUrl`, `InstallApp`, `DisableApp`, `UninstallApp`, and
+  `GetClientAccessToken`. Catalog lookup, marketplace policy response, install
+  state changes, token hashing/issuance, audit inputs, SOAP routing, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the EWS Mail Apps operation split: `cargo test
+  -p lpe-exchange mail_app_operations_use_canonical_catalog_install_and_token_state`
+  passed the catalog, install-state, and token paths; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms the moved Mail Apps operation method definitions now live in
+  `service/ews/mail_apps.rs`. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/service.rs` at 4,963
+  tracked source lines. Direct physical line counts report `service.rs` at
+  4,771 lines and `service/ews/mail_apps.rs` at 314 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS Unified Messaging operation
+  methods from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/unified_messaging.rs`, beside the
+  existing phone-call request parser and response builders. This includes
+  `PlayOnPhone`, `GetPhoneCallInformation`, and `DisconnectPhoneCall`.
+  Canonical call creation/fetch/disconnect store calls, audit inputs, SOAP
+  routing, not-found behavior, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS Unified Messaging operation split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  unified_messaging_operations_use_canonical_call_state` passed the
+  PlayOnPhone, lookup, tenant isolation, and disconnect paths;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms the moved Unified Messaging
+  operation method definitions now live in `service/ews/unified_messaging.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 4,868 tracked source lines. Direct
+  physical line counts report `service.rs` at 4,679 lines and
+  `service/ews/unified_messaging.rs` at 186 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS User Configuration operation
+  methods from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/user_configuration.rs`, beside the
+  existing configuration key parser, upsert parser, and response builder. This
+  includes `GetUserConfiguration`, `CreateUserConfiguration`,
+  `UpdateUserConfiguration`, and `DeleteUserConfiguration`. Account/mailbox
+  scoping, canonical configuration store calls, audit inputs, not-found
+  behavior, SOAP routing, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS User Configuration operation split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  user_configuration_` passed the account-scoped lifecycle and mailbox-scoped
+  not-found paths; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `rg` confirms the moved User
+  Configuration operation method definitions now live in
+  `service/ews/user_configuration.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  4,724 tracked source lines. Direct physical line counts report `service.rs`
+  at 4,539 lines and `service/ews/user_configuration.rs` at 347 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS Sharing operation methods from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/sharing.rs`, beside the existing
+  sharing request parser and response builders. This includes
+  `GetSharingMetadata`, `GetSharingFolder`, `RefreshSharingFolder`, and
+  `AcceptSharingInvitation`, plus the module-local helpers that resolve
+  same-tenant owners and accessible shared collections. Same-tenant grant
+  lookup, canonical sharing grant creation, contact/calendar scope handling,
+  SOAP routing, error mapping, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS Sharing operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange sharing_` passed the
+  EWS sharing metadata, invitation, shared-folder lookup, refresh, and related
+  MAPI named-property coverage; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the moved Sharing operation method definitions now live in
+  `service/ews/sharing.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 4,561
+  tracked source lines. Direct physical line counts report `service.rs` at
+  4,384 lines and `service/ews/sharing.rs` at 371 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS Delegation operation methods from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/delegation.rs`, beside the existing
+  delegate request validators, parsers, and response builders. This includes
+  `AddDelegate`, `UpdateDelegate`, `GetDelegate`, and `RemoveDelegate`, plus
+  the module-local mutation helper shared by add/update. Mailbox-owner
+  validation, canonical delegate upsert/remove calls, address-book tenant
+  checks, unsupported Exchange-only permission rejection, audit inputs, SOAP
+  routing, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS Delegation operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange delegate_` passed the
+  EWS delegate add/get/update/remove paths, rejection paths, and related
+  MAPI free/busy and permission projections; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms the moved Delegation operation method definitions now live in
+  `service/ews/delegation.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  4,374 tracked source lines. Direct physical line counts report `service.rs`
+  at 4,202 lines and `service/ews/delegation.rs` at 423 lines.
+- 2026-07-01: Advanced MR-005 by moving EWS OOF operation methods from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/oof.rs`, beside the existing OOF
+  projection, parser, Sieve script, and response helpers. This includes
+  `GetUserOofSettings` and `SetUserOofSettings`. Canonical active Sieve
+  script fetch/update calls, vacation-script metadata, scheduled OOF handling,
+  disable behavior, audit inputs, SOAP routing, and response XML remain
+  unchanged.
+- 2026-07-01 verification for the EWS OOF operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange oof_settings` passed the
+  disabled, active vacation, scheduled metadata, disable, write, and error
+  response-shape paths; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the moved OOF operation method definitions now live in `service/ews/oof.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 4,288 tracked source lines. Direct
+  physical line counts report `service.rs` at 4,119 lines and
+  `service/ews/oof.rs` at 292 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `GetUserAvailability`
+  operation method from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/availability.rs`, beside the existing
+  free/busy response builders, suggestions response builder, requested-window
+  parser, and overlap helper. Authenticated-mailbox filtering, canonical
+  calendar event lookup, window filtering, response ordering, SOAP routing, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the EWS availability operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange get_user_availability`
+  passed the canonical busy-event and suggestions-response paths;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `get_user_availability` now lives
+  in `service/ews/availability.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  4,255 tracked source lines. Direct physical line counts report `service.rs`
+  at 4,088 lines and `service/ews/availability.rs` at 143 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS root child-folder count helper
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/folders.rs`, beside the folder-kind
+  parsers and folder XML helpers that consume the count. Contact, calendar,
+  task, mailbox, and public-folder tree lookups remain unchanged.
+- 2026-07-01 verification for the EWS root child-folder count helper split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_folder_root` passed the root bootstrap child-folder count path;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `root_child_folder_count` now
+  lives in `service/ews/folders.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  4,225 tracked source lines. Direct physical line counts report `service.rs`
+  at 4,059 lines and `service/ews/folders.rs` at 398 lines.
+- 2026-07-01: Advanced MR-005 by moving the read-only EWS folder projection
+  operations from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/folders.rs`. This includes `FindFolder`
+  and `SyncFolderHierarchy`. Mailbox, contact, calendar, task, and
+  public-folder root projection order, sync-state text, SOAP routing, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the EWS folder projection operation split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  find_folder_lists_contact_and_calendar_folders` passed the `FindFolder`
+  projection path; `cargo test -p lpe-exchange
+  sync_folder_hierarchy_lists_contact_and_calendar_folders` passed the
+  hierarchy sync projection path; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `find_folder` and `sync_folder_hierarchy` now live in
+  `service/ews/folders.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 4,084
+  tracked source lines. Direct physical line counts report `service.rs` at
+  3,922 lines and `service/ews/folders.rs` at 541 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `GetFolder` operation method
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/folders.rs`, beside the folder
+  projection operations and XML helpers. Mailbox folder resolution,
+  public-folder projection, supported distinguished folder projections,
+  unsupported-folder errors, SOAP routing, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS `GetFolder` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange get_folder_returns`
+  passed the supported folder and unsupported folder response paths; `cargo
+  test -p lpe-exchange get_folder_root_reports_child_folders_for_client_bootstrap`
+  passed the root child-count projection path; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `get_folder` now lives in `service/ews/folders.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 3,896 tracked source lines. Direct
+  physical line counts report `service.rs` at 3,741 lines and
+  `service/ews/folders.rs` at 705 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `SyncFolderItems` operation
+  method from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/sync_state.rs`, beside the sync-state
+  token parsers and builders it uses. Contact, calendar, task, mailbox, and
+  public-folder item sync projections, legacy sync-state handling, SOAP
+  routing, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS `SyncFolderItems` operation split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  sync_folder_items` passed 17 focused tests covering contacts, calendar,
+  tasks, mailbox messages, public-folder items, UTF-16 requests, legacy sync
+  states, delete/update detection, and no-access public folders;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `sync_folder_items` now lives in
+  `service/ews/sync_state.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  3,578 tracked source lines. Direct physical line counts report `service.rs`
+  at 3,426 lines and `service/ews/sync_state.rs` at 457 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `FindItem` operation method
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/items.rs`, a new focused read-only item
+  projection module. Contact, calendar, task, mailbox, and public-folder item
+  listing, public-folder no-access behavior, SOAP routing, and response XML
+  remain unchanged.
+- 2026-07-01 verification for the EWS `FindItem` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange find_item` passed 5
+  focused tests covering mailbox, system mailbox, calendar, public-folder, and
+  public-folder no-access paths; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `find_item` now lives in `service/ews/items.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 3,499 tracked source lines. Direct
+  physical line counts report `service.rs` at 3,348 lines and
+  `service/ews/items.rs` at 90 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `GetItem` operation method
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/items.rs`, beside the read-only
+  `FindItem` projection. Contact, calendar, task, mailbox, public-folder,
+  attachment-reference, MIME-content, Bcc-hiding, unsupported-id, SOAP routing,
+  and response XML behavior remain unchanged.
+- 2026-07-01 verification for the EWS `GetItem` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange get_item` passed 9
+  focused tests covering mailbox, system mailbox, public-folder, MIME content,
+  attachment, Bcc-hiding, unsupported-id, and public-folder no-access paths;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `get_item` now lives in
+  `service/ews/items.rs`. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/service.rs` at 3,375
+  tracked source lines. Direct physical line counts report `service.rs` at
+  3,228 lines and `service/ews/items.rs` at 214 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS conversation operation methods
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/conversations.rs`, beside the existing
+  conversation request parsers and response builders. This includes
+  `FindConversation`, `GetConversationItems`, `ApplyConversationAction`, and
+  their shared canonical source-email helper. Conversation grouping, ignored
+  folders, current-thread move/delete/read-state mutations, future-message
+  unsupported behavior, SOAP routing, audit subjects, and response XML remain
+  unchanged.
+- 2026-07-01 verification for the EWS conversation operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange conversation_` passed
+  32 focused tests covering EWS conversation find/get/apply paths and adjacent
+  MAPI conversation-action projections; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange` passed with 1,594 tests and doc tests passing. `rg`
+  confirms the conversation operation methods now live in
+  `service/ews/conversations.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/service.rs` at
+  3,148 tracked source lines. Direct physical line counts report `service.rs`
+  at 3,010 lines and `service/ews/conversations.rs` at 517 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS attachment operation methods
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/attachments.rs`, beside the existing
+  attachment request parser and response builders. This includes
+  `GetAttachment`, `CreateAttachment`, and `DeleteAttachment`. Canonical
+  attachment fetch/create/delete calls, Magika validation, parent-message
+  checks, file-attachment-only rejection, audit subjects, SOAP routing, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the EWS attachment operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange attachment_` passed 40
+  focused tests covering EWS attachment get/create/delete paths, Magika blocked
+  payloads, unknown parent and attachment errors, and adjacent MAPI attachment
+  projections; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange`
+  passed with 1,594 tests and doc tests passing. `rg` confirms the attachment
+  operation methods now live in `service/ews/attachments.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 2,974 tracked source lines. Direct
+  physical line counts report `service.rs` at 2,848 lines and
+  `service/ews/attachments.rs` at 268 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS room-list operation methods
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/rooms.rs`, beside the existing room
+  list request parser and response builders. This includes `GetRooms` and
+  `GetRoomLists`. Canonical address-book lookup, computed tenant room-list
+  filtering, explicit room-list rejection, SOAP routing, and response XML
+  remain unchanged.
+- 2026-07-01 verification for the EWS room-list operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange
+  rooms_are_projected_from_canonical_directory_entries` passed the room and
+  room-list projection, accepted computed room-list address, and rejected
+  explicit custom room-list paths; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  the room-list operation methods now live in `service/ews/rooms.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 2,948 tracked source lines. Direct
+  physical line counts report `service.rs` at 2,825 lines and
+  `service/ews/rooms.rs` at 111 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS service-configuration and
+  retention tag operation methods from `crates/lpe-exchange/src/service.rs`
+  into their existing focused modules. `GetServiceConfiguration` now lives in
+  `crates/lpe-exchange/src/service/ews/mail_tips.rs` beside its bounded
+  MailTips configuration response builder; `GetUserRetentionPolicyTags` now
+  lives in `crates/lpe-exchange/src/service/ews/retention.rs` beside its tag
+  response builder. Requested configuration parsing, unsupported service
+  configuration errors, canonical retention-tag fetches, SOAP routing, and
+  response XML remain unchanged.
+- 2026-07-01 verification for the service-configuration and retention tag
+  split: `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange
+  get_service_configuration` passed 2 focused tests covering bounded MailTips
+  configuration and parseable unsupported configuration gaps; `cargo test -p
+  lpe-exchange get_user_retention_policy_tags` passed 2 focused tests covering
+  same-tenant assignment visibility and documented response shape;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `get_service_configuration` now
+  lives in `service/ews/mail_tips.rs` and
+  `get_user_retention_policy_tags` now lives in `service/ews/retention.rs`.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 2,934 tracked source lines. Direct
+  physical line counts report `service.rs` at 2,813 lines,
+  `service/ews/mail_tips.rs` at 244 lines, and `service/ews/retention.rs` at
+  80 lines.
+- 2026-07-01: Advanced MR-005 by moving the EWS `ConvertId` operation method
+  from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/ids.rs`, beside its existing request
+  scanner, canonical-id conversion, alternate-id serialization, and hex-entry
+  helpers. Destination-format parsing, source-id validation, unsupported-format
+  errors, SOAP routing, and response XML remain unchanged.
+- 2026-07-01 verification for the EWS `ConvertId` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange convert_id` passed 2
+  focused tests covering supported canonical object families and HexEntryId
+  attachment round-trips; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `async fn convert_id` now lives in `service/ews/ids.rs` and `service.rs`
+  only retains the `"ConvertId" => self.convert_id(&body).await?` router arm.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/service.rs` at 2,905 tracked source lines. Direct
+  physical line counts report `service.rs` at 2,788 lines and
+  `service/ews/ids.rs` at 267 lines.

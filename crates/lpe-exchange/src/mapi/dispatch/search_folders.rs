@@ -1,9 +1,58 @@
 use super::*;
+use lpe_storage::UpsertSearchFolderInput;
 
 #[derive(Debug)]
 pub(super) struct BoundedSearchCriteria {
     pub(super) scope_json: Value,
     pub(super) restriction_json: Value,
+}
+
+pub(super) fn is_search_criteria_rop(rop_id: RopId) -> bool {
+    matches!(rop_id, RopId::SetSearchCriteria | RopId::GetSearchCriteria)
+}
+
+pub(super) async fn append_search_criteria_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::SetSearchCriteria) => {
+            append_set_search_criteria_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                mailboxes,
+                snapshot,
+                responses,
+            )
+            .await;
+        }
+        Some(RopId::GetSearchCriteria) => {
+            append_get_search_criteria_response(
+                principal,
+                session,
+                handle_slots,
+                request,
+                request_id,
+                mailboxes,
+                snapshot,
+                responses,
+            );
+        }
+        _ => {}
+    }
 }
 
 pub(super) fn search_folder_handle_properties(
@@ -51,6 +100,197 @@ pub(super) fn search_folder_handle_properties(
             .map(|value| (tag, value))
     })
     .collect()
+}
+
+pub(super) async fn append_set_search_criteria_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) where
+    S: ExchangeStore,
+{
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x30,
+            request.response_handle_index(),
+            EC_SEARCH_UNSUPPORTED,
+        ));
+        return;
+    };
+    let definition = snapshot
+        .search_folder_definition_for_folder_id(*folder_id)
+        .or_else(|| session.search_folder_definition(*folder_id));
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x30",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        definition_found = definition.is_some(),
+        fallback_builtin_role = builtin_search_role_for_folder_id(*folder_id).unwrap_or(""),
+        search_criteria_scope = %format_debug_search_criteria_scope(request),
+        message = "rca debug mapi set search criteria lookup"
+    );
+    let Some(definition) = definition else {
+        if builtin_search_role_for_folder_id(*folder_id).is_some() {
+            responses.extend_from_slice(&rop_error_response(
+                0x30,
+                request.response_handle_index(),
+                EC_SEARCH_ACCESS_DENIED,
+            ));
+            return;
+        }
+        responses.extend_from_slice(&rop_error_response(
+            0x30,
+            request.response_handle_index(),
+            EC_SEARCH_NOT_FOUND,
+        ));
+        return;
+    };
+    if definition.is_builtin {
+        responses.extend_from_slice(&rop_simple_success_response(request));
+        return;
+    }
+    let criteria =
+        match bounded_search_criteria_from_rop(request, *folder_id, Some(definition), mailboxes) {
+            Ok(criteria) => criteria,
+            Err(error) => {
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    request_rop_id = "0x30",
+                    folder_id = %format!("0x{folder_id:016x}"),
+                    folder_role = debug_role_for_folder_id(*folder_id),
+                    search_criteria_scope = %format_debug_search_criteria_scope(request),
+                    search_criteria_error = %format!("{error:#010x}"),
+                    "rca debug mapi set search criteria rejected"
+                );
+                responses.extend_from_slice(&rop_error_response(
+                    0x30,
+                    request.response_handle_index(),
+                    error,
+                ));
+                return;
+            }
+        };
+    let input = UpsertSearchFolderInput {
+        id: Some(definition.id),
+        account_id: principal.account_id,
+        display_name: definition.display_name.clone(),
+        result_object_kind: definition.result_object_kind.clone(),
+        scope_json: criteria.scope_json,
+        restriction_json: criteria.restriction_json,
+        excluded_folder_roles: definition.excluded_folder_roles.clone(),
+    };
+    match store.upsert_search_folder(input).await {
+        Ok(definition) => {
+            session.remember_search_folder_definition(*folder_id, definition);
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        Err(_) => responses.extend_from_slice(&rop_error_response(
+            0x30,
+            request.response_handle_index(),
+            EC_SEARCH_NOT_FOUND,
+        )),
+    }
+}
+
+pub(super) fn append_get_search_criteria_response(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+) {
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x31,
+            request.response_handle_index(),
+            EC_SEARCH_UNSUPPORTED,
+        ));
+        return;
+    };
+    let definition = snapshot
+        .search_folder_definition_for_folder_id(*folder_id)
+        .or_else(|| session.search_folder_definition(*folder_id));
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x31",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        definition_found = definition.is_some(),
+        fallback_builtin_role = builtin_search_role_for_folder_id(*folder_id).unwrap_or(""),
+        message = "rca debug mapi get search criteria lookup"
+    );
+    let Some(definition) = definition else {
+        if let Some((restriction, folder_ids, flags)) =
+            builtin_search_criteria_to_rop_for_folder_id(*folder_id)
+        {
+            responses.extend_from_slice(&get_search_criteria_response(
+                request,
+                &restriction,
+                &folder_ids,
+                flags,
+            ));
+            return;
+        }
+        responses.extend_from_slice(&rop_error_response(
+            0x31,
+            request.response_handle_index(),
+            EC_SEARCH_NOT_FOUND,
+        ));
+        return;
+    };
+    match bounded_search_criteria_to_rop(
+        definition,
+        mailboxes,
+        request.get_search_criteria_use_unicode(),
+    )
+    .or_else(|error| builtin_search_criteria_to_rop(definition).ok_or(error))
+    {
+        Ok((restriction, folder_ids, flags)) => responses.extend_from_slice(
+            &get_search_criteria_response(request, &restriction, &folder_ids, flags),
+        ),
+        Err(error) => responses.extend_from_slice(&rop_error_response(
+            0x31,
+            request.response_handle_index(),
+            error,
+        )),
+    }
 }
 
 pub(super) fn bounded_search_criteria_from_rop(

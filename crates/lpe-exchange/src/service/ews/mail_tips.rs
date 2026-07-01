@@ -1,5 +1,19 @@
 use super::super::*;
 
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    pub(in crate::service) async fn get_service_configuration(
+        &self,
+        request: &str,
+    ) -> Result<String> {
+        let configs = requested_service_configurations(request);
+        Ok(get_service_configuration_response(&configs))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::service) struct MailTipProjection {
     pub(in crate::service) recipient: String,
@@ -82,6 +96,84 @@ pub(in crate::service) fn get_service_configuration_response(
         ),
         response_messages = response_messages,
     )
+}
+
+pub(in crate::service) fn requested_mail_tips_recipients(request: &str) -> Vec<String> {
+    element_content(request, "RecipientMailboxes")
+        .or_else(|| element_content(request, "Recipients"))
+        .map(|mailboxes| {
+            element_contents(mailboxes, "Mailbox")
+                .into_iter()
+                .filter_map(parse_mailbox)
+                .map(|mailbox| mailbox.address.trim().to_ascii_lowercase())
+                .filter(|address| !address.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(in crate::service) fn requested_mail_tips(request: &str) -> HashSet<String> {
+    element_content(request, "MailTipsRequested")
+        .map(|value| {
+            value
+                .split(|ch: char| ch.is_whitespace() || ch == ',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            ["InvalidRecipient", "OutOfOfficeMessage"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+pub(in crate::service) fn requested_service_configurations(
+    request: &str,
+) -> Vec<RequestedServiceConfiguration> {
+    let mut configs = Vec::new();
+    let mut values = element_contents(request, "ConfigurationName")
+        .into_iter()
+        .map(xml_text)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        values.extend(
+            element_text(request, "RequestedConfiguration")
+                .into_iter()
+                .flat_map(|value| {
+                    value
+                        .split(|ch: char| ch.is_whitespace() || ch == ',')
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                }),
+        );
+    }
+    for value in values {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let config = match normalized {
+            "MailTips" | "MailTipsConfiguration" => RequestedServiceConfiguration::MailTips,
+            "UnifiedMessaging" | "UnifiedMessagingConfiguration" => {
+                RequestedServiceConfiguration::UnifiedMessaging
+            }
+            "ProtectionRules" | "ProtectionRulesConfiguration" => {
+                RequestedServiceConfiguration::ProtectionRules
+            }
+            "PolicyTips" | "PolicyTipsConfiguration" => RequestedServiceConfiguration::PolicyTips,
+            _ => RequestedServiceConfiguration::Unsupported,
+        };
+        if !configs.contains(&config) {
+            configs.push(config);
+        }
+    }
+    if configs.is_empty() {
+        configs.push(RequestedServiceConfiguration::MailTips);
+    }
+    configs
 }
 
 fn service_configuration_success_message(configuration_name: &str, payload: &str) -> String {

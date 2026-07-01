@@ -1,5 +1,14 @@
 use super::*;
 
+pub(super) fn is_named_property_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::GetNamesFromPropertyIds
+            | RopId::GetPropertyIdsFromNames
+            | RopId::QueryNamedProperties
+    )
+}
+
 pub(super) fn contains_outlook_osc_contact_source_probe(properties: &[MapiNamedProperty]) -> bool {
     properties.iter().any(|property| {
         property.guid == PS_PUBLIC_STRINGS_GUID
@@ -255,4 +264,46 @@ pub(super) async fn append_query_named_properties_response<S>(
         }
     }
     responses.extend_from_slice(&rop_query_named_properties_response(request, session));
+}
+
+pub(super) async fn append_named_property_dispatch_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool
+where
+    S: ExchangeStore,
+{
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetNamesFromPropertyIds) => {
+            append_get_names_from_property_ids_response(
+                store, principal, session, request, responses,
+            )
+            .await;
+            false
+        }
+        Some(RopId::GetPropertyIdsFromNames) => {
+            append_get_property_ids_from_names_response(
+                store,
+                principal,
+                request_id,
+                session,
+                handle_slots,
+                request,
+                responses,
+            )
+            .await;
+            true
+        }
+        Some(RopId::QueryNamedProperties) => {
+            append_query_named_properties_response(store, principal, session, request, responses)
+                .await;
+            false
+        }
+        _ => false,
+    }
 }
