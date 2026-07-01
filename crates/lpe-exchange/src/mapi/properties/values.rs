@@ -1,6 +1,27 @@
 use super::*;
 use lpe_domain::crypto::hex_lower;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) enum MapiValue {
+    Bool(bool),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
+    F64(u64),
+    String(String),
+    Binary(Vec<u8>),
+    Guid([u8; 16]),
+    Error(u32),
+    MultiI16(Vec<i16>),
+    MultiI32(Vec<i32>),
+    MultiI64(Vec<i64>),
+    MultiString(Vec<String>),
+    MultiBinary(Vec<Vec<u8>>),
+    MultiGuid(Vec<[u8; 16]>),
+}
+
 pub(in crate::mapi) fn mapi_properties_to_json(
     properties: &HashMap<u32, MapiValue>,
 ) -> serde_json::Value {

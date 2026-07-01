@@ -6,6 +6,7 @@ const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
 const CORE_STORAGE: &str = include_str!("core.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
+const MAIL_ITEMS_STORAGE: &str = include_str!("mail_items.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
@@ -21,6 +22,22 @@ const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
+const EXCHANGE_MAPI_CALENDAR_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/calendar.rs");
+const EXCHANGE_MAPI_CONNECT_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/connect.rs");
+const EXCHANGE_MAPI_CONTACTS_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/contacts.rs");
+const EXCHANGE_MAPI_HIERARCHY_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/hierarchy.rs");
+const EXCHANGE_MAPI_PERMISSIONS_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/permissions.rs");
+const EXCHANGE_MAPI_PUBLIC_FOLDERS_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/public_folders.rs");
+const EXCHANGE_MAPI_SYNC_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/sync.rs");
+const EXCHANGE_MAPI_TABLES_TESTS: &str =
+    include_str!("../../lpe-exchange/src/tests/mapi_over_http/tables.rs");
 const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
@@ -302,11 +319,11 @@ fn mailbox_messages_persist_outlook_followup_state() {
             && MESSAGE_OPS_STORAGE.contains("WHEN $14::text = '' THEN NULL")
             && MESSAGE_OPS_STORAGE.contains("keywords = COALESCE")
             && NOTES_JOURNAL_STORAGE.contains("'mail'::text AS source_type")
-            && PROTOCOLS_STORAGE.contains("followup_flag_status = CASE")
+            && MAIL_ITEMS_STORAGE.contains("followup_flag_status = CASE")
             && PROTOCOLS_STORAGE.contains("categories: Vec<String>")
             && PROTOCOLS_STORAGE.contains("array_agg(to_jsonb(keywords)")
-            && PROTOCOLS_STORAGE.contains("WHEN $5 THEN 'flagged'")
-            && PROTOCOLS_STORAGE.contains("JmapEmailFollowupUpdate"),
+            && MAIL_ITEMS_STORAGE.contains("WHEN $5 THEN 'flagged'")
+            && MAIL_ITEMS_STORAGE.contains("JmapEmailFollowupUpdate"),
         "canonical message writes must expose a protocol-neutral follow-up update path"
     );
 }
@@ -373,7 +390,7 @@ fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
     assert!(
         EXCHANGE_STORE.contains("set_mailbox_folder_delegation_grant")
             && EXCHANGE_STORE.contains("fetch_mapi_folder_permissions")
-            && EXCHANGE_TESTS
+            && EXCHANGE_MAPI_PERMISSIONS_TESTS
                 .contains("mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants"),
         "MAPI permission ROPs must call the canonical mailbox delegation store path"
     );
@@ -1133,12 +1150,12 @@ fn collaboration_deletes_write_tombstones() {
 #[test]
 fn attachment_metadata_changes_write_mail_change_log_entries() {
     assert!(
-        PROTOCOLS_STORAGE.contains("pub async fn delete_message_attachment")
-            && PROTOCOLS_STORAGE.contains("pub async fn add_message_attachment")
-            && PROTOCOLS_STORAGE.contains("\"attachment\"")
-            && PROTOCOLS_STORAGE.contains("\"attachmentId\"")
-            && PROTOCOLS_STORAGE.contains("\"created\"")
-            && PROTOCOLS_STORAGE.contains("\"destroyed\""),
+        ATTACHMENTS_STORAGE.contains("pub async fn delete_message_attachment")
+            && ATTACHMENTS_STORAGE.contains("pub async fn add_message_attachment")
+            && ATTACHMENTS_STORAGE.contains("\"attachment\"")
+            && ATTACHMENTS_STORAGE.contains("\"attachmentId\"")
+            && ATTACHMENTS_STORAGE.contains("\"created\"")
+            && ATTACHMENTS_STORAGE.contains("\"destroyed\""),
         "attachment metadata changes must write durable mail_change_log entries"
     );
 }
@@ -1751,12 +1768,16 @@ fn mailbox_rules_are_canonical_sieve_scripts_with_replay() {
 
 #[test]
 fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
+    let exchange_mapi_tests = format!(
+        "{EXCHANGE_TESTS}{EXCHANGE_MAPI_CALENDAR_TESTS}{EXCHANGE_MAPI_CONNECT_TESTS}{EXCHANGE_MAPI_CONTACTS_TESTS}{EXCHANGE_MAPI_HIERARCHY_TESTS}{EXCHANGE_MAPI_PUBLIC_FOLDERS_TESTS}{EXCHANGE_MAPI_SYNC_TESTS}{EXCHANGE_MAPI_TABLES_TESTS}"
+    );
     assert_source_contains_all(
         "Exchange/MAPI tests",
-        EXCHANGE_TESTS,
+        &exchange_mapi_tests,
         &[
             "mapi_over_http_contact_crud_uses_canonical_contacts",
-            "mapi_over_http_calendar_crud_uses_canonical_events",
+            "mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection",
+            "fetch_accessible_events_in_collection",
             "mapi_over_http_task_crud_uses_canonical_tasks",
             "mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai",
             "mapi_over_http_set_get_search_criteria_updates_canonical_search_folder",
@@ -2028,7 +2049,7 @@ fn recoverable_items_are_canonical_lifecycle_state() {
     assert!(
         SCHEMA.contains("'recoverable_item'")
             && SCHEMA.contains("summary_json ? 'sourceMailboxMessageId'")
-            && PROTOCOLS_STORAGE.contains("INSERT INTO recoverable_items")
+            && MAIL_ITEMS_STORAGE.contains("INSERT INTO recoverable_items")
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn list_recoverable_items")
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn restore_recoverable_item")
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn purge_recoverable_item")
@@ -2036,8 +2057,8 @@ fn recoverable_items_are_canonical_lifecycle_state() {
             && RECOVERABLE_ITEMS_STORAGE.contains("restoredMailboxMessageId")
             && RECOVERABLE_ITEMS_STORAGE.contains("sourceImapUid")
             && RECOVERABLE_ITEMS_STORAGE.contains("let recoverable_folder")
-            && PROTOCOLS_STORAGE.contains("\"recoverable_item\"")
-            && PROTOCOLS_STORAGE.contains("\"recoverableFolder\": \"deletions\""),
+            && MAIL_ITEMS_STORAGE.contains("\"recoverable_item\"")
+            && MAIL_ITEMS_STORAGE.contains("\"recoverableFolder\": \"deletions\""),
         "hard delete must write canonical recoverable item state and replay rows"
     );
     for forbidden in [
@@ -2068,7 +2089,7 @@ fn existing_draft_updates_write_mailbox_message_change_log_entries() {
 fn mailbox_count_mutations_recalculate_from_visible_memberships() {
     let draft_destroy_body =
         function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
-    let imap_expunge_body = function_body(PROTOCOLS_STORAGE, "pub async fn expunge_imap_deleted");
+    let imap_expunge_body = function_body(MAIL_ITEMS_STORAGE, "pub async fn expunge_imap_deleted");
     assert!(
         SUBMISSION_STORAGE
             .matches("recalculate_mailbox_counts_in_tx")

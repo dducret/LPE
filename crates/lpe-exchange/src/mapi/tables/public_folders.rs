@@ -1,4 +1,37 @@
 use super::*;
+use crate::mapi_store::{MapiPublicFolder, MapiPublicFolderItem};
+
+pub(in crate::mapi) fn serialize_public_folder_row(
+    folder: &MapiPublicFolder,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    let parent_folder_id = folder
+        .folder
+        .parent_folder_id
+        .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
+        .unwrap_or(PUBLIC_FOLDERS_ROOT_FOLDER_ID);
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.folder.display_name),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, folder.id),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_SUBFOLDERS => row.push((folder.child_count > 0) as u8),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
+            PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+                write_utf16z(&mut row, &folder.folder.folder_class)
+            }
+            _ => match public_folder_property_value(folder, *column) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
+        }
+    }
+    row
+}
 
 pub(in crate::mapi) fn serialize_public_folder_item_row(
     item: &MapiPublicFolderItem,
@@ -122,4 +155,13 @@ pub(super) fn public_folder_item_property_value(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+pub(super) fn restriction_matches_public_folder_item(
+    restriction: Option<&MapiRestriction>,
+    item: &MapiPublicFolderItem,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        public_folder_item_property_value(item, property_tag)
+    })
 }

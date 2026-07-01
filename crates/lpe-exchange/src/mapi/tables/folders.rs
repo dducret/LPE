@@ -689,6 +689,76 @@ pub(super) fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMai
             .any(|candidate| candidate.parent_id == Some(mailbox.id))
 }
 
+pub(in crate::mapi) fn serialize_folder_row_with_context(
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+    mailbox_guid: Uuid,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mapi_mailbox_display_name(mailbox)),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, mapi_folder_id(mailbox)),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, mapi_parent_folder_id(mailbox)),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
+            PID_TAG_MESSAGE_SIZE => write_u32(
+                &mut row,
+                mailbox.size_octets.min(u64::from(u32::MAX)) as u32,
+            ),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => write_u64(&mut row, mailbox.size_octets),
+            PID_TAG_SUBFOLDERS => row.push(mailbox_has_subfolders(mailbox, mailboxes) as u8),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, folder_type(mailbox)),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
+            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
+            _ => match mailbox_property_value_with_context_for_account(
+                mailbox,
+                mailboxes,
+                *column,
+                mailbox_guid,
+            ) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context(
+    folder: &MapiCollaborationFolder,
+    columns: &[u32],
+    associated_count: u32,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.collection.display_name),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, folder.id),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_ASSOCIATED_CONTENT_COUNT => write_u32(&mut row, associated_count),
+            PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
+            PID_TAG_CONTAINER_CLASS_W => {
+                write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
+            }
+            PID_TAG_MESSAGE_CLASS_W => {
+                write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
+            }
+            _ => match collaboration_folder_property_value(folder, *column) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn mapi_message_id(email: &JmapEmail) -> u64 {
     mapi_item_id(&email.id)
 }

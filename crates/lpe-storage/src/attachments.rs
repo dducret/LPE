@@ -6,7 +6,8 @@ use uuid::Uuid;
 use crate::{
     blob_store::{DurableBlobKind, PostgresBlobStore, PutBlobRequest, StoredBlobRef},
     submission::AttachmentUploadInput,
-    ActiveSyncAttachmentContent, AuditEntryInput, CanonicalChangeCategory, JmapUploadBlob, Storage,
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, AuditEntryInput, CanonicalChangeCategory,
+    JmapEmail, JmapUploadBlob, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -472,6 +473,235 @@ impl Storage {
         tx.commit().await?;
 
         Ok(Some(event_id))
+    }
+
+    pub async fn add_message_attachment(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> Result<Option<(JmapEmail, ActiveSyncAttachment)>> {
+        let file_name = attachment.file_name.trim();
+        if file_name.is_empty() {
+            anyhow::bail!("attachment file name is required");
+        }
+        let media_type = attachment.media_type.trim();
+        if media_type.is_empty() {
+            anyhow::bail!("attachment media type is required");
+        }
+
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let exists = sqlx::query(
+            r#"
+            SELECT id
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(existing_membership) = exists else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let attachment_ids = self
+            .ingest_message_attachments_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                message_id,
+                &[attachment],
+            )
+            .await?;
+        let Some(attachment_id) = attachment_ids.into_iter().next() else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+
+        self.assign_message_attachments_membership_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            message_id,
+            existing_membership.try_get("id")?,
+        )
+        .await?;
+
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "attachment",
+            attachment_id,
+            "created",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "attachmentId": attachment_id
+            }),
+        )
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET modseq = $3, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $4 AND message_id = $2
+              AND visibility = 'visible'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(modseq)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        let email = self
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("message not found after attachment creation"))?;
+        let attachment = self
+            .fetch_activesync_message_attachments(account_id, message_id)
+            .await?
+            .into_iter()
+            .find(|attachment| attachment.id == attachment_id)
+            .ok_or_else(|| anyhow::anyhow!("attachment not found after creation"))?;
+
+        Ok(Some((email, attachment)))
+    }
+
+    pub async fn delete_message_attachment(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+        audit: AuditEntryInput,
+    ) -> Result<Option<JmapEmail>> {
+        let Some((message_id, attachment_id)) =
+            crate::parse_activesync_file_reference(file_reference)
+        else {
+            return Ok(None);
+        };
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM attachments a
+            WHERE a.tenant_id = $1
+              AND a.id = $2
+              AND a.message_id = $3
+              AND a.account_id = $4
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = a.tenant_id
+                    AND mm.account_id = a.account_id
+                    AND mm.message_id = a.message_id
+                    AND mm.visibility = 'visible'
+              )
+            RETURNING a.message_id
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(attachment_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if deleted.is_none() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "attachment",
+            attachment_id,
+            "destroyed",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "attachmentId": attachment_id
+            }),
+        )
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET
+                has_attachments = EXISTS (
+                    SELECT 1
+                    FROM attachments
+                    WHERE tenant_id = $1 AND message_id = $2
+                )
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET modseq = $3, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $4 AND message_id = $2
+              AND visibility = 'visible'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(modseq)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        Ok(self
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next())
     }
 
     async fn store_attachment_blob_in_tx(

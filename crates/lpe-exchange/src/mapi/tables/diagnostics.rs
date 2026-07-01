@@ -1,6 +1,163 @@
 use super::*;
 use lpe_domain::crypto::hex_lower;
 
+pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
+    forward_read: bool,
+    requested_row_count: usize,
+) -> Vec<String> {
+    match object {
+        Some(MapiObject::HierarchyTable {
+            folder_id,
+            sort_orders,
+            restriction,
+            position,
+            deleted_advertised_special_folders,
+            ..
+        }) if matches!(
+            *folder_id,
+            ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
+        ) =>
+        {
+            let rows = hierarchy_table_rows_excluding_deleted(
+                *folder_id,
+                mailboxes,
+                snapshot,
+                restriction.as_ref(),
+                sort_orders,
+                mailbox_guid,
+                deleted_advertised_special_folders,
+            );
+            selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
+                .into_iter()
+                .map(|index| {
+                    let row = &rows[index];
+                    let object_id = hierarchy_row_id(row);
+                    let parent_id = hierarchy_row_parent_id(row, mailboxes);
+                    classify_outlook_bootstrap_row_invariants(
+                        index,
+                        "hierarchy_folder",
+                        object_id,
+                        Some(object_id),
+                        Some(parent_id),
+                        hierarchy_row_expected_container_class(row),
+                        |tag| {
+                            debug_folder_row_property_value(
+                                || hierarchy_row_property_value(row, mailboxes, tag, mailbox_guid),
+                                object_id,
+                                parent_id,
+                                tag,
+                                mailbox_guid,
+                                associated_folder_message_count(object_id, snapshot),
+                            )
+                        },
+                    )
+                })
+                .collect()
+        }
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            sort_orders,
+            restriction,
+            position,
+            ..
+        }) if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID => {
+            let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+            rows.retain(|message| {
+                restriction_matches_common_views_message(
+                    restriction.as_ref(),
+                    message,
+                    mailbox_guid,
+                )
+            });
+            sort_common_views_messages(&mut rows, sort_orders);
+            selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
+                .into_iter()
+                .map(|index| {
+                    let message = &rows[index];
+                    classify_outlook_bootstrap_row_invariants(
+                        index,
+                        "common_views_associated",
+                        common_views_message_id(message),
+                        None,
+                        None,
+                        None,
+                        |tag| common_views_message_property_value(message, mailbox_guid, tag),
+                    )
+                })
+                .collect()
+        }
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            sort_orders,
+            restriction,
+            position,
+            ..
+        }) if *associated && *folder_id == INBOX_FOLDER_ID => {
+            let mut rows =
+                associated_table_rows(*folder_id, snapshot, restriction.as_ref(), mailbox_guid);
+            rows.retain(|row| associated_table_row_config(row).is_some());
+            sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
+            selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
+                .into_iter()
+                .map(|index| {
+                    let message = &rows[index];
+                    classify_outlook_bootstrap_row_invariants(
+                        index,
+                        "inbox_associated",
+                        associated_table_row_id(message),
+                        None,
+                        None,
+                        None,
+                        |tag| associated_table_row_property_value(message, mailbox_guid, tag),
+                    )
+                })
+                .collect()
+        }
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            sort_orders,
+            restriction,
+            position,
+            ..
+        }) if !*associated && *folder_id == INBOX_FOLDER_ID => {
+            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+            rows.retain(|email| {
+                restriction_matches_email_in_snapshot(
+                    restriction.as_ref(),
+                    email,
+                    *folder_id,
+                    snapshot,
+                )
+            });
+            sort_emails(&mut rows, sort_orders);
+            selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
+                .into_iter()
+                .map(|index| {
+                    let email = rows[index];
+                    classify_outlook_bootstrap_row_invariants(
+                        index,
+                        "inbox_contents",
+                        mapi_message_id(email),
+                        None,
+                        Some(INBOX_FOLDER_ID),
+                        None,
+                        |tag| email_property_value(email, tag),
+                    )
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 pub(super) fn debug_folder_row_property_value<F>(
     value: F,
     folder_id: u64,

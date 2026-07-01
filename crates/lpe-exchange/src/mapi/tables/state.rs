@@ -68,3 +68,62 @@ fn table_sort_is_invalid(sort_orders: &[MapiSortOrder]) -> bool {
 fn table_restriction_is_invalid(restriction: Option<&MapiRestriction>) -> bool {
     matches!(restriction, Some(MapiRestriction::InvalidTableRestriction))
 }
+
+pub(in crate::mapi) fn table_position_mut(object: &mut MapiObject) -> Option<&mut usize> {
+    match object {
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. }
+        | MapiObject::PermissionTable { position, .. }
+        | MapiObject::RuleTable { position, .. } => Some(position),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn table_position(object: &MapiObject) -> Option<usize> {
+    match object {
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. }
+        | MapiObject::PermissionTable { position, .. }
+        | MapiObject::RuleTable { position, .. } => Some(*position),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn table_bookmark_state_mut(
+    object: &mut MapiObject,
+) -> Option<(&mut usize, &mut HashMap<Vec<u8>, TableBookmark>, &mut u32)> {
+    match object {
+        MapiObject::HierarchyTable {
+            position,
+            bookmarks,
+            next_bookmark,
+            ..
+        }
+        | MapiObject::ContentsTable {
+            position,
+            bookmarks,
+            next_bookmark,
+            ..
+        } => Some((position, bookmarks, next_bookmark)),
+        _ => None,
+    }
+}
+
+pub(super) fn selected_row_indexes(
+    row_len: usize,
+    start_position: usize,
+    forward_read: bool,
+    requested_row_count: usize,
+) -> Vec<usize> {
+    let row_count = requested_row_count.min(row_len);
+    if forward_read {
+        return (start_position.min(row_len)..row_len)
+            .take(row_count)
+            .collect();
+    }
+    let end_position = start_position.min(row_len);
+    let selected_start = end_position.saturating_sub(row_count);
+    (selected_start..end_position).rev().collect()
+}

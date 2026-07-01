@@ -67,10 +67,10 @@ working tree proves, not the desired end state.
 | MR-005 | Partial | EWS mail, contact, calendar recurrence, task, reminder, room, rules, attachment, OOF, user-configuration, MailTips, Mail Apps, and ConvertId parser/helper slices are recorded in progress notes. | Continue extracting EWS item-family parsers and handlers while preserving canonical mutations and SOAP responses. |
 | MR-006 | Pending | No completed `ExchangeStore` split is recorded in this backlog. | Split `crates/lpe-exchange/src/store.rs` by storage family while preserving trait semantics. |
 | MR-007 | Partial | `mapi/tables/columns.rs` now owns pure default table column/property-tag lists, while row serialization and table behavior remain in `mapi/tables.rs`. Focused table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `tables.rs` by row families and prove table row output is unchanged. |
-| MR-008 | Pending | Earlier property helper extraction exists in the repository, but this backlog does not record a completed current slice. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
+| MR-008 | Partial | `mapi/properties/named.rs` owns named-property data shapes and well-known ID mapping, `folder.rs` owns folder/logon bootstrap property helpers, `values.rs` owns `MapiValue`, and `restrictions.rs` owns `MapiSortOrder`/`MapiRestriction`. Focused property/restriction/table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
 | MR-009 | Complete for hub split | `mapi/rop.rs` and `mapi/rop/parse.rs` are now below the 1,500-line production target, with parser, typed request, request-reader, response, restriction, recipient, property-row, debug, error, object-id, receive-folder, logon, named-property, attachment, and buffer helpers in focused modules. | Keep future ROP behavior additions in focused modules; preserve unsupported/reserved ROP behavior. |
 | MR-010 | Pending | No completed MAPI mailstore/store projection split is recorded in this backlog. | Split projection and Outlook metadata boundaries while preserving IDs, source keys, change keys, and sync facts. |
-| MR-011 | Pending | No completed storage protocol projection split is recorded. | Split `crates/lpe-storage/src/protocols.rs` while preserving exports and serialized output. |
+| MR-011 | Partial | IMAP flag, IMAP expunge, and JMAP/EWS/MAPI/ActiveSync hard-delete membership mutation SQL now lives in `crates/lpe-storage/src/mail_items.rs`; message attachment add/delete mutation SQL now lives in `crates/lpe-storage/src/attachments.rs`. This preserves IMAP `Deleted`, CONDSTORE, tombstones, recoverable items, attachment metadata changes, modseq allocation, count recalculation, mail change-log, audit, and change emission behavior while moving canonical mutations out of protocol projection code. | Continue splitting `crates/lpe-storage/src/protocols.rs` while preserving exports and serialized output. |
 | MR-012 | Pending | No completed blob-store split is recorded. | Split `blob_store.rs` and verify placement, migration, cleanup, and hash behavior. |
 | MR-013 | Pending | No completed ActiveSync service split is recorded. | Split ActiveSync service without WBXML/status/auth/sync-key changes. |
 | MR-014 | Complete for threshold split | `mapi/transport.rs` is below the 1,500-line production target. `mapi/transport/headers.rs` owns pure request/header helpers, `mapi/transport/cookies.rs` owns cookie and sequence-cookie helpers, `mapi/transport/diagnostics.rs` owns Connect, post-hierarchy/bootstrap, and disconnect diagnostics, and `mapi/transport/tests.rs` owns the transport unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep future session, replay, request-validation, and response-envelope behavior in focused modules instead of growing the hub again. |
@@ -9318,3 +9318,576 @@ of silently losing them.
   at 4,758 tracked source lines. Direct physical line counts report
   `mapi/tables.rs` at 4,621 lines and `mapi/tables/folders.rs` at 675 lines.
   `git diff --check` reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving the mailbox-backed folder row
+  serializer from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/folders.rs`. This keeps mailbox folder
+  display names, counts, parent IDs, folder type, container classes, subfolder
+  flags, and fallback property-value projection on the same existing
+  table-module API, with no row-output change.
+- 2026-07-01 verification for the MAPI mailbox-folder row split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `serialize_folder_row_with_context` now lives in
+  `mapi/tables/folders.rs`. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at
+  4,720 tracked source lines. Direct physical line counts report
+  `mapi/tables.rs` at 4,584 lines and `mapi/tables/folders.rs` at 712 lines.
+  `git diff --check` reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving the collaboration-folder hierarchy row
+  serializer from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/folders.rs`. This keeps collaboration
+  folder display names, folder IDs, fixed IPM-subtree parentage, item counts,
+  associated counts, folder classes, access flags, and fallback property-value
+  projection on the existing table-module API without changing row output.
+- 2026-07-01 verification for the MAPI collaboration-folder row split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `serialize_collaboration_folder_row_with_context` now lives in
+  `mapi/tables/folders.rs`. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at
+  4,688 tracked source lines. Direct physical line counts report
+  `mapi/tables.rs` at 4,553 lines and `mapi/tables/folders.rs` at 743 lines.
+  `git diff --check` reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving the public-folder hierarchy row
+  serializer from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/public_folders.rs`. This keeps
+  public-folder display names, folder IDs, canonical parent object mapping,
+  item counts, child flags, folder classes, access flags, and fallback
+  property-value projection on the existing table-module API without changing
+  row output.
+- 2026-07-01 verification for the MAPI public-folder row split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `serialize_public_folder_row` now lives in
+  `mapi/tables/public_folders.rs`. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs`
+  at 4,656 tracked source lines. Direct physical line counts report
+  `mapi/tables.rs` at 4,522 lines and `mapi/tables/public_folders.rs` at
+  153 lines. `git diff --check` reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving normal and categorized contents-table
+  message row serializers from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/contents.rs`. This covers message leaf
+  row serialization, categorized message instance rows, category override value
+  handling, canonical folder/message IDs, sender/recipient display columns,
+  body/RTF/native-body columns, and fallback message property projection while
+  keeping the existing table-module API and row bytes unchanged.
+- 2026-07-01 verification for the MAPI contents message-row split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `serialize_message_row`, `serialize_categorized_message_row`,
+  and `serialize_message_row_with_table_instance` now live in
+  `mapi/tables/contents.rs`. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at
+  4,534 tracked source lines. Direct physical line counts report
+  `mapi/tables.rs` at 4,403 lines and `mapi/tables/contents.rs` at 338 lines.
+  `git diff --check` reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving associated-content row serializers
+  from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/associated_contents.rs`. This covers
+  navigation shortcut, Common Views, Search Folder definition, named view,
+  conversation action, delegate/freebusy, and associated configuration row
+  serialization while keeping associated-table selection, visibility,
+  restriction, sorting, and property fallback behavior unchanged.
+- 2026-07-01 verification for the MAPI associated-content row split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms the associated-content row serializers now live in
+  `mapi/tables/associated_contents.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 4,412 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 4,289 lines and
+  `mapi/tables/associated_contents.rs` at 117 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving delegate/freebusy associated-message
+  property fallback helpers from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/associated_contents.rs`. This keeps
+  delegate/freebusy row projection, message size calculation, synthetic
+  Outlook probe defaults, and change-key fallback behavior on the existing
+  table-module API without changing row output.
+- 2026-07-01 verification for the MAPI delegate/freebusy associated-content
+  helper split: `cargo fmt --package lpe-exchange`; `cargo test -p
+  lpe-exchange tables` passed 194 focused table and MAPI-over-HTTP table
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `rg` confirms
+  `delegate_freebusy_message_size` and `delegate_freebusy_property_value` now
+  live in `mapi/tables/associated_contents.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 4,340 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 4,219 lines and
+  `mapi/tables/associated_contents.rs` at 187 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving associated-configuration property
+  fallback helpers from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/associated_contents.rs`. This keeps
+  associated configuration message identity, default Outlook configuration
+  streams, roaming datatype fallbacks, sharing/contact helper defaults, compact
+  view descriptor fallbacks, and modification-time fallback behavior on the
+  existing table-module API. `property_tag_id_matches` intentionally remains in
+  the parent table module because sibling table modules use it through the
+  existing parent boundary.
+- 2026-07-01 verification for the MAPI associated-configuration property
+  fallback split: `cargo fmt --package lpe-exchange`; `cargo test -p
+  lpe-exchange tables` passed 194 focused table and MAPI-over-HTTP table
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `rg` confirms
+  `associated_config_property_value`,
+  `associated_config_property_value_with_mailbox_guid`,
+  `minimal_roaming_dictionary_stream`, and related associated-configuration
+  fallback helpers now live in `mapi/tables/associated_contents.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 3,931 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 3,825 lines and
+  `mapi/tables/associated_contents.rs` at 581 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving associated-table row selection and
+  Outlook placeholder visibility policy from
+  `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/associated_contents.rs`. This covers
+  the `AssociatedTableRow` adapter, associated-table row collection,
+  default-folder named-view materialization, modeled Inbox virtual
+  configuration insertion, broad/exact Outlook configuration restrictions,
+  table-visible associated configuration filtering, and associated-row
+  property/identity accessors while leaving query/find-row execution and cursor
+  state in the table hub unchanged.
+- 2026-07-01 verification for the MAPI associated-table selection and
+  visibility split: `cargo fmt --package lpe-exchange`; `cargo test -p
+  lpe-exchange tables` passed 194 focused table and MAPI-over-HTTP table
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `rg` confirms `AssociatedTableRow`,
+  `associated_table_rows`, `associated_config_visible_in_table`,
+  `outlook_configuration_prefix_restriction`, and related associated-row
+  helpers now live in `mapi/tables/associated_contents.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 3,589 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 3,505 lines and
+  `mapi/tables/associated_contents.rs` at 903 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving table cursor/bookmark state helpers
+  from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/state.rs`. This covers
+  `table_position_mut`, `table_position`, and `table_bookmark_state_mut` while
+  leaving table row-count, row-key, seek, bookmark ROP, and query/find
+  execution behavior unchanged.
+- 2026-07-01 verification for the MAPI table state-helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `table_position_mut`, `table_position`, and
+  `table_bookmark_state_mut` now live in `mapi/tables/state.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 3,547 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 3,466 lines and
+  `mapi/tables/state.rs` at 104 lines. `git diff --check` reported only CRLF
+  normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving Common Views associated-message
+  restriction and property-value adapters from
+  `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/associated_contents.rs`. This covers
+  `restriction_matches_common_views_message` and
+  `common_views_message_property_value` while keeping Common Views table
+  selection, row ordering, row serialization, and dispatch-visible table API
+  unchanged.
+- 2026-07-01 verification for the MAPI Common Views helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `restriction_matches_common_views_message` and
+  `common_views_message_property_value` now live in
+  `mapi/tables/associated_contents.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 3,505 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 3,426 lines and
+  `mapi/tables/associated_contents.rs` at 943 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving calendar contents-table row filtering
+  helpers from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/calendar.rs`. This covers
+  `calendar_content_rows` and `restriction_matches_event` while keeping
+  calendar table row serialization, restrictions, sorting, cursor handling,
+  and table module call sites unchanged.
+- 2026-07-01 verification for the MAPI calendar contents helper split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `calendar_content_rows` and `restriction_matches_event` now
+  live in `mapi/tables/calendar.rs`, with callers still using the existing
+  table module API. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at 3,491
+  tracked source lines. Direct physical line counts report `mapi/tables.rs` at
+  3,414 lines and `mapi/tables/calendar.rs` at 18 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving the public-folder item restriction
+  predicate from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/public_folders.rs`, next to the
+  public-folder item property projector it delegates to. This keeps public
+  folder item table filtering, row serialization, sorting, cursor behavior,
+  and table module call sites unchanged.
+- 2026-07-01 verification for the MAPI public-folder item restriction split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables`
+  passed 194 focused table and MAPI-over-HTTP table tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms
+  `restriction_matches_public_folder_item` now lives in
+  `mapi/tables/public_folders.rs`, with callers still using the existing table
+  module API. `python tools/check_oversized_sources.py` passed in warning mode
+  and reports `crates/lpe-exchange/src/mapi/tables.rs` at 3,482 tracked source
+  lines. Direct physical line counts report `mapi/tables.rs` at 3,406 lines
+  and `mapi/tables/public_folders.rs` at 162 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving hierarchy-table row collection,
+  sorting, matching, special-folder property projection, sync-issues hierarchy
+  diagnostics, and hierarchy row serialization from
+  `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/hierarchy.rs`. This keeps
+  `tables.rs` responsible for ROP execution flow, cursor handling, find-row
+  routing, and row framing while preserving hierarchy row output and the
+  existing table module API.
+- 2026-07-01 verification for the MAPI hierarchy table split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `HierarchyRow`, `hierarchy_rows_excluding_deleted`,
+  `hierarchy_table_rows_excluding_deleted`, `special_folder_property_value`,
+  and `serialize_hierarchy_row` now live in `mapi/tables/hierarchy.rs`, with
+  callers still using the existing table module API. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 2,904 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 2,852 lines and
+  `mapi/tables/hierarchy.rs` at 563 lines. `git diff --check` reported only
+  CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving table control ROP response helpers
+  from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/controls.rs`. This covers
+  `RopGetStatus`, `RopQueryPosition`, `RopSeekRow`, `RopCreateBookmark`,
+  `RopSeekRowBookmark`, `RopSeekRowFractional`, and `RopFreeBookmark` response
+  helpers while preserving cursor movement, bookmark state, row-key lookup,
+  Microsoft request validation, and error mapping.
+- 2026-07-01 verification for the MAPI table-control ROP split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms the table-control ROP response helpers now live in
+  `mapi/tables/controls.rs`, with dispatch and tests still using the existing
+  table module API. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at 2,628
+  tracked source lines. Direct physical line counts report `mapi/tables.rs` at
+  2,596 lines and `mapi/tables/controls.rs` at 259 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving the `RopQueryColumnsAll` response
+  helper from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/controls.rs`, alongside the other
+  table-control ROP helpers. This preserves default column selection, table
+  object validation, response framing, and error mapping.
+- 2026-07-01 verification for the MAPI query-columns-all control split: `cargo
+  fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `rop_query_columns_all_response` now lives in
+  `mapi/tables/controls.rs`, with dispatch and tests still using the existing
+  table module API. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/tables.rs` at 2,564
+  tracked source lines. Direct physical line counts report `mapi/tables.rs` at
+  2,534 lines and `mapi/tables/controls.rs` at 321 lines. `git diff --check`
+  reported only CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving table row-count helpers from
+  `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/counts.rs`. This covers hierarchy row
+  counts, normal contents counts, associated contents counts, restricted
+  associated counts, and the contact-folder classifier while preserving the
+  existing table module API and all row materialization logic.
+- 2026-07-01 verification for the MAPI table count-helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `hierarchy_row_count_excluding_deleted`,
+  `folder_message_count`, `associated_folder_message_count`,
+  `restricted_associated_folder_message_count`, and
+  `is_contact_contents_folder` now live in `mapi/tables/counts.rs`, with
+  dispatch, ROP, diagnostics, and tests still using the existing table module
+  API. `python tools/check_oversized_sources.py` passed in warning mode and
+  reports `crates/lpe-exchange/src/mapi/tables.rs` at 2,396 tracked source
+  lines. Direct physical line counts report `mapi/tables.rs` at 2,371 lines
+  and `mapi/tables/counts.rs` at 166 lines. `git diff --check` reported only
+  CRLF normalization warnings.
+- 2026-07-01: Advanced MR-007 by moving generic table filtering helpers from
+  `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/filters.rs`. This covers snapshot-backed
+  email restriction predicates, conversation-member restriction matching,
+  top-level count restriction detection, and count-aware row retention while
+  keeping `RopQueryRows`, `RopFindRow`, table row framing, and row output
+  unchanged.
+- 2026-07-01 verification for the MAPI table filter-helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `restriction_matches_email_in_snapshot`,
+  `restriction_matches_conversation_member_in_snapshot`,
+  `is_top_level_count_restriction`, and `retain_rows_by_restriction` now live
+  in `mapi/tables/filters.rs`, with `tables.rs` retaining only a module import.
+  `python tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 2,347 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 2,326 lines and
+  `mapi/tables/filters.rs` at 48 lines. `git diff --check` reported only CRLF
+  normalization warnings, and a process poll found no lingering cargo/rustc
+  processes.
+- 2026-07-01: Advanced MR-007 by moving `RopQueryRows` validation and response
+  column selection helpers from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/query.rs`. This keeps query-row
+  materialization, cursor movement, row framing, and table row output in the
+  existing execution path while narrowing the hub's helper responsibilities.
+- 2026-07-01 verification for the MAPI query-row helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `query_rows_request_is_valid` and
+  `query_rows_response_columns` now live in `mapi/tables/query.rs`, with
+  `tables.rs` retaining only the module import. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 2,260 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 2,241 lines and
+  `mapi/tables/query.rs` at 88 lines. `git diff --check` reported only CRLF
+  normalization warnings, and a process poll found no lingering cargo/rustc
+  processes.
+- 2026-07-01: Advanced MR-007 by moving isolated `RopFindRow` helper wrappers
+  from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/find.rs`. This covers the no-match
+  response wrapper and request flag validation only; the main `RopFindRow`
+  execution branches, row matching, cursor updates, and response row output
+  remain unchanged.
+- 2026-07-01 verification for the MAPI find-row helper split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `rop_find_row_no_match_response` and
+  `find_row_request_is_valid` now live in `mapi/tables/find.rs`, with
+  `tables.rs` retaining only the module import. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/tables.rs` at 2,251 tracked source lines.
+  Direct physical line counts report `mapi/tables.rs` at 2,234 lines and
+  `mapi/tables/find.rs` at 10 lines. `git diff --check` reported only CRLF
+  normalization warnings, and a process poll found no lingering cargo/rustc
+  processes.
+- 2026-07-01: Advanced MR-007 by moving Outlook bootstrap table invariant
+  diagnostics from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/diagnostics.rs`, and by moving the
+  shared selected-row index helper into `crates/lpe-exchange/src/mapi/tables/state.rs`.
+  This preserves diagnostic summary content, row-window selection, table row
+  output, and cursor behavior.
+- 2026-07-01 verification for the MAPI table bootstrap diagnostics split:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange tables`
+  passed 194 focused table and MAPI-over-HTTP table tests;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms
+  `outlook_bootstrap_row_invariant_summaries` now lives in
+  `mapi/tables/diagnostics.rs` and `selected_row_indexes` now lives in
+  `mapi/tables/state.rs`, with `tables.rs` retaining only the public
+  re-export. `python tools/check_oversized_sources.py` passed in warning mode
+  and reports `crates/lpe-exchange/src/mapi/tables.rs` at 2,077 tracked source
+  lines. Direct physical line counts report `mapi/tables.rs` at 2,062 lines,
+  `mapi/tables/diagnostics.rs` at 371 lines, and `mapi/tables/state.rs` at
+  120 lines. `git diff --check` reported only CRLF normalization warnings, and
+  a process poll found no lingering cargo/rustc processes.
+- 2026-07-01: Advanced MR-007 by moving the filtered table position/count
+  helper from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/counts.rs`. This preserves current
+  position clamping, filtered row totals, categorized count behavior,
+  associated-table counts, and all row materialization/output.
+- 2026-07-01 verification for the MAPI table position/count split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `table_position_and_count` now lives in
+  `mapi/tables/counts.rs`, with existing callers still using the table module
+  API. `python tools/check_oversized_sources.py` passed in warning mode and
+  reports `crates/lpe-exchange/src/mapi/tables.rs` at 1,795 tracked source
+  lines. Direct physical line counts report `mapi/tables.rs` at 1,781 lines
+  and `mapi/tables/counts.rs` at 447 lines. `git diff --check` reported only
+  CRLF normalization warnings, and a process poll found no lingering cargo/rustc
+  processes.
+- 2026-07-01: Completed the MR-007 production-threshold split for
+  `crates/lpe-exchange/src/mapi/tables.rs` by moving table row-key materialization
+  into `crates/lpe-exchange/src/mapi/tables/row_keys.rs`, moving generic
+  `RopFindRow` row-walk helpers into `crates/lpe-exchange/src/mapi/tables/find.rs`,
+  and moving the small property-tag ID matcher into
+  `crates/lpe-exchange/src/mapi/tables/filters.rs`. This keeps `RopQueryRows`
+  and `RopFindRow` response construction, cursor updates, row serialization, and
+  table row bytes unchanged while reducing the hub below the 1,500-line source
+  target.
+- 2026-07-01 verification for the MAPI table hub threshold split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables` passed 194
+  focused table and MAPI-over-HTTP table tests; `$env:RUST_TEST_THREADS='1';
+  cargo test -p lpe-exchange` passed with 1,594 tests and doc tests passing.
+  `rg` confirms `table_row_keys` now lives in `mapi/tables/row_keys.rs`,
+  `find_row` and `find_hierarchy_row` now live in `mapi/tables/find.rs`, and
+  `property_tag_id_matches` now lives in `mapi/tables/filters.rs`. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer reports
+  `crates/lpe-exchange/src/mapi/tables.rs` as an oversized production source
+  file. Direct physical line counts report `mapi/tables.rs` at 1,487 lines,
+  `mapi/tables/row_keys.rs` at 236 lines, `mapi/tables/find.rs` at 68 lines,
+  and `mapi/tables/filters.rs` at 51 lines. `git diff --check` reported only
+  CRLF normalization warnings, and a process poll found no lingering cargo/rustc
+  processes.
+- 2026-07-01: Started the current MR-008 split by moving named-property data
+  shapes and well-known named-property ID mapping from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/named.rs`. This preserves the
+  existing re-exported properties API, named-property IDs, reserved-ID checks,
+  session allocation behavior, and custom named-property persistence.
+- 2026-07-01 verification for the MAPI named-property split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange named_property` passed
+  20 focused named-property, session-allocation, and MAPI-over-HTTP
+  named-property persistence tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `MapiNamedProperty`, `MapiNamedPropertyKind`,
+  `well_known_named_property_id`, `well_known_named_property_for_id`, and
+  `is_reserved_named_property_id` now live in `mapi/properties/named.rs`, with
+  `properties.rs` retaining the module declaration and re-export. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/properties.rs` at 8,056 tracked source lines,
+  down from 8,337. Direct physical line counts report `mapi/properties.rs` at
+  7,688 lines and `mapi/properties/named.rs` at 278 lines. `git diff --check`
+  reported only CRLF normalization warnings, and a process poll found no
+  lingering cargo/rustc processes.
+- 2026-07-01: Advanced MR-008 by moving folder/logon bootstrap property helpers
+  from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/folder.rs`. This preserves logon
+  property projection, special/default folder EntryID projection,
+  `AdditionalRenEntryIds` and `AdditionalRenEntryIdsEx`, FreeBusy EntryIDs,
+  mailbox-owner EntryIDs, sent-representing EntryIDs, and the existing
+  properties module re-export API.
+- 2026-07-01 verification for the MAPI folder/logon property split: `cargo test
+  -p lpe-exchange special_folder_identification` passed 1 focused test; `cargo
+  test -p lpe-exchange logon_projects` passed 4 focused tests; `cargo test -p
+  lpe-exchange additional_ren_entry_ids` passed 7 focused tests; `cargo test
+  -p lpe-exchange free_busy_entry_ids` passed 1 focused test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with 1,594
+  tests and doc tests passing. `rg` confirms `logon_property_value`,
+  `special_folder_identification_property_value`,
+  `is_default_folder_identification_property_tag`,
+  `is_scalar_default_folder_entry_id_property_tag`, `ipm_subtree_ost_ostid`,
+  `mailbox_owner_entry_id`, and `sent_representing_entry_id` now live in
+  `mapi/properties/folder.rs`, with `properties.rs` retaining the module
+  declaration and re-export. `python tools/check_oversized_sources.py` passed
+  in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs` at
+  7,795 tracked source lines. Direct physical line counts report
+  `mapi/properties.rs` at 7,441 lines and `mapi/properties/folder.rs` at 250
+  lines. `git diff --check` reported only CRLF normalization warnings, and a
+  process poll found no lingering cargo/rustc processes.
+- 2026-07-01: Advanced MR-008 by moving the `MapiValue` data shape from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/values.rs`, next to the existing
+  MAPI value JSON conversion helpers. This preserves the enum variants,
+  visibility, property serialization behavior, and the existing properties
+  module re-export API.
+- 2026-07-01 verification for the MAPI value type split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange mapi_properties` compiled cleanly
+  but matched zero tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed with 1,594 tests and doc tests passing. `rg` confirms
+  `MapiValue` now lives in `mapi/properties/values.rs`, with `properties.rs`
+  retaining the module declaration and re-export. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/properties.rs` at 7,774 tracked source lines.
+  Direct physical line counts report `mapi/properties.rs` at 7,421 lines and
+  `mapi/properties/values.rs` at 439 lines. A process poll found no lingering
+  cargo/rustc processes.
+- 2026-07-01: Advanced MR-008 by moving the MAPI table sort-order and
+  restriction data shapes from `crates/lpe-exchange/src/mapi/properties.rs`
+  into `crates/lpe-exchange/src/mapi/properties/restrictions.rs`. This
+  preserves the variants, field visibility, parser/matcher call sites, and the
+  existing properties module re-export API; restriction matching and table
+  sorting behavior remain in their existing modules.
+- 2026-07-01 verification for the MAPI restriction data-shape split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange restriction` passed 27
+  focused parser, matcher, and MAPI-over-HTTP restriction tests; `cargo test
+  -p lpe-exchange tables` passed 194 focused table and MAPI-over-HTTP table
+  tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange` passed with
+  1,594 tests and doc tests passing. `rg` confirms `MapiSortOrder` and
+  `MapiRestriction` now live in `mapi/properties/restrictions.rs`, with
+  `properties.rs` retaining the module declaration and re-export. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/properties.rs` at 7,725 tracked source lines.
+  Direct physical line counts report `mapi/properties.rs` at 7,374 lines and
+  `mapi/properties/restrictions.rs` at 50 lines. A process poll found no
+  lingering cargo/rustc processes.
+- 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving the
+  IMAP flag mutation implementation from `crates/lpe-storage/src/protocols.rs`
+  into `crates/lpe-storage/src/mail_items.rs`. `Storage::update_imap_flags`
+  remains as the existing public wrapper, while the SQL that updates
+  `mailbox_messages`, applies follow-up flag projection, enforces CONDSTORE,
+  allocates one command modseq, recalculates mailbox counts, writes
+  `mail_change_log`, and emits canonical mail changes now belongs to the
+  canonical mail-item storage module. The slice deliberately does not route
+  IMAP through the single-message flag helper because that would risk changing
+  IMAP batch modseq and change-log semantics.
+- 2026-07-01 verification for the canonical IMAP flag mutation slice: `cargo
+  fmt --package lpe-storage --package lpe-imap`; `cargo test -p lpe-storage
+  mail_items` passed 1 focused flag-projection test; `cargo test -p lpe-imap
+  store_and_uid_store_update_only_canonical_supported_flags` passed 1 focused
+  IMAP STORE test; `cargo test -p lpe-storage` passed 179 unit tests, 1
+  runtime schema drift test, and doc tests; `cargo test -p lpe-imap` passed 52
+  unit tests and doc tests; `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange` passed 1,594 tests and doc tests, with only the known unrelated
+  unused-import warning in `crates/lpe-exchange/src/mapi/sync.rs`. Storage
+  schema-contract checks were updated to include `mail_items.rs` as the
+  canonical follow-up write owner and to include the split MAPI-over-HTTP
+  scenario test modules as canonical adapter evidence.
+- 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving the
+  IMAP expunge implementation from `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/mail_items.rs`. `Storage::expunge_imap_deleted`
+  remains as the existing public wrapper, while the SQL that selects deleted
+  visible mailbox-message memberships, writes `expunged` mail change-log rows,
+  inserts expunge tombstones, marks rows `visibility = 'expunged'`,
+  recalculates mailbox counts, records audit, and emits canonical mail changes
+  now belongs to the canonical mail-item storage module.
+- 2026-07-01 verification for the canonical IMAP expunge slice: `cargo fmt
+  --package lpe-storage --package lpe-imap`; `cargo test -p lpe-storage
+  mailbox_count_mutations_recalculate_from_visible_memberships` passed the
+  storage contract against the new `mail_items.rs` owner; `cargo test -p
+  lpe-imap expunge` passed 4 focused IMAP expunge tests; `cargo test -p
+  lpe-storage` passed 179 unit tests, 1 runtime schema drift test, and doc
+  tests; `cargo test -p lpe-imap` passed 52 unit tests and doc tests.
+- 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving the
+  JMAP/EWS/MAPI/ActiveSync hard-delete membership implementation from
+  `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/mail_items.rs`. `Storage::delete_custom_jmap_email`,
+  `Storage::delete_jmap_email`, and `Storage::delete_jmap_email_from_mailbox`
+  remain as existing public wrappers, while the SQL that writes destroyed
+  mailbox-message change-log rows, delete tombstones, recoverable item rows,
+  recoverable replay rows, search-document cleanup, mailbox count
+  recalculation, audit, and canonical mail change emission now belongs to the
+  canonical mail-item storage module.
+- 2026-07-01 verification for the canonical hard-delete membership slice:
+  `cargo fmt --package lpe-storage`; `cargo test -p lpe-storage
+  recoverable_items_are_canonical_lifecycle_state` passed the storage contract
+  against the new `mail_items.rs` owner; `cargo test -p lpe-storage` passed 179
+  unit tests, 1 runtime schema drift test, and doc tests; `cargo test -p
+  lpe-activesync sync_delete` passed 1 focused ActiveSync delete test;
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange
+  mapi_over_http_sync_import_delete_and_read_state_use_canonical_store` passed
+  1 focused MAPI delete/read-state test, with only the known unrelated
+  unused-import warning in `crates/lpe-exchange/src/mapi/sync.rs`.
+- 2026-07-01: Advanced MR-011 by moving message attachment add/delete mutation
+  methods from `crates/lpe-storage/src/protocols.rs` into
+  `crates/lpe-storage/src/attachments.rs`, which already owns attachment
+  ingestion and calendar attachment mutation. `Storage::add_message_attachment`
+  and `Storage::delete_message_attachment` remain public `Storage` methods,
+  while the SQL that creates/destroys attachment metadata, updates
+  `has_attachments`, updates visible mailbox-message modseqs, writes
+  attachment mail change-log rows, records audit, and emits canonical mail
+  changes now belongs to the attachment storage module.
+- 2026-07-01 verification for the message attachment mutation slice: `cargo
+  fmt --package lpe-storage`; `cargo test -p lpe-storage
+  attachment_metadata_changes_write_mail_change_log_entries` passed the storage
+  contract against the new `attachments.rs` owner; `cargo test -p lpe-storage`
+  passed 179 unit tests, 1 runtime schema drift test, and doc tests; `cargo
+  test -p lpe-activesync item_operations_fetch_returns_attachment_bytes` passed
+  1 focused ActiveSync attachment test; `$env:RUST_TEST_THREADS='1'; cargo
+  test -p lpe-exchange
+  mapi_over_http_create_attachment_saves_canonical_attachment_from_properties`
+  passed 1 focused MAPI attachment-save test, with only the known unrelated
+  unused-import warning in `crates/lpe-exchange/src/mapi/sync.rs`.

@@ -2643,6 +2643,7 @@ async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         });
     }
@@ -3382,6 +3383,7 @@ async fn store_survives_concurrent_selected_mailbox_removal() {
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         });
     }
@@ -3447,6 +3449,7 @@ async fn idle_reports_replacement_when_selected_mailbox_membership_changes_witho
             modseq: 1,
             total_emails: 0,
             unread_emails: 0,
+            size_octets: 0,
             is_subscribed: true,
         });
     }
@@ -3882,6 +3885,7 @@ fn mailbox_with_parent(
         modseq: 1,
         total_emails: 0,
         unread_emails: 0,
+        size_octets: 0,
         is_subscribed: true,
     }
 }

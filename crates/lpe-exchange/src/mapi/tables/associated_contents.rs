@@ -1,0 +1,992 @@
+use super::*;
+
+#[derive(Clone)]
+pub(super) enum AssociatedTableRow {
+    Config(MapiAssociatedConfigMessage),
+    NamedView(MapiCommonViewNamedViewMessage),
+}
+
+pub(in crate::mapi) fn serialize_navigation_shortcut_row(
+    message: &MapiNavigationShortcutMessage,
+    principal: Option<&AccountPrincipal>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let account_id = principal
+        .map(|principal| principal.account_id)
+        .unwrap_or_default();
+    let mut row = Vec::new();
+    for column in columns {
+        match navigation_shortcut_property_value(message, account_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(super) fn serialize_common_views_row_with_mailbox_guid(
+    message: &MapiCommonViewsMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(message) => {
+            serialize_navigation_shortcut_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        MapiCommonViewsMessage::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            serialize_search_folder_definition_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+    }
+}
+
+pub(in crate::mapi) fn serialize_search_folder_definition_row_with_mailbox_guid(
+    message: &SearchFolderDefinition,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match search_folder_definition_message_property_value(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_navigation_shortcut_row_with_mailbox_guid(
+    message: &MapiNavigationShortcutMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match navigation_shortcut_property_value(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_common_view_named_view_row_with_mailbox_guid(
+    message: &MapiCommonViewNamedViewMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match common_view_named_view_property_value(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_conversation_action_row(
+    message: &MapiConversationActionMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match conversation_action_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_delegate_freebusy_row(
+    message: &MapiDelegateFreeBusyMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match delegate_freebusy_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_associated_config_row_with_mailbox_guid(
+    message: &MapiAssociatedConfigMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match associated_config_property_value_with_mailbox_guid(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(super) fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStoreSnapshot) -> bool {
+    !snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .is_empty()
+        || default_folder_associated_named_view(snapshot, folder_id).is_some()
+}
+
+pub(super) fn should_use_associated_config_table(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    if has_associated_table_rows(folder_id, snapshot) {
+        return true;
+    }
+    if folder_id == INBOX_FOLDER_ID
+        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction))
+    {
+        return true;
+    }
+    folder_id == INBOX_FOLDER_ID
+        && exact_message_class_restriction_value(restriction)
+            .and_then(
+                crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class,
+            )
+            .is_some()
+}
+
+pub(super) fn associated_table_rows(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    _mailbox_guid: Uuid,
+) -> Vec<AssociatedTableRow> {
+    let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
+    append_exact_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
+    let mut rows = config_messages
+        .into_iter()
+        .filter(|message| {
+            restriction_matches_associated_config(restriction, message)
+                && associated_config_visible_in_table(folder_id, restriction, message)
+        })
+        .map(AssociatedTableRow::Config)
+        .collect::<Vec<_>>();
+    if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
+            rows.push(AssociatedTableRow::NamedView(message));
+        }
+    }
+    rows
+}
+
+fn default_folder_associated_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| {
+            let (_, _, container_class, _) = special_folder_metadata(folder_id);
+            (!container_class.is_empty()).then_some(container_class)
+        })?;
+    default_view_supported_folder(folder_id, container_class)
+        .then(|| {
+            snapshot.default_folder_named_view_message(
+                folder_id,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+        })
+        .flatten()
+}
+
+fn append_exact_virtual_inbox_associated_config(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    messages: &mut Vec<MapiAssociatedConfigMessage>,
+) {
+    if folder_id != INBOX_FOLDER_ID {
+        return;
+    }
+    if restriction.is_none() || is_broad_outlook_configuration_restriction(restriction) {
+        append_modeled_inbox_broad_startup_configs(messages);
+    }
+    let Some(message_class) = exact_message_class_restriction_value(restriction) else {
+        return;
+    };
+    let Some(message) =
+        crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+            message_class,
+        )
+    else {
+        return;
+    };
+    if !messages.iter().any(|existing| {
+        existing
+            .message_class
+            .eq_ignore_ascii_case(&message.message_class)
+    }) {
+        messages.push(message);
+    }
+}
+
+fn append_modeled_inbox_broad_startup_configs(messages: &mut Vec<MapiAssociatedConfigMessage>) {
+    for message in crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults() {
+        if !messages.iter().any(|existing| {
+            existing.id == message.id
+                && existing
+                    .message_class
+                    .eq_ignore_ascii_case(&message.message_class)
+        }) {
+            messages.push(message);
+        }
+    }
+}
+
+fn exact_message_class_restriction_value(restriction: Option<&MapiRestriction>) -> Option<&str> {
+    match restriction? {
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        }
+        | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+            ..
+        } => Some(value.as_str()),
+        _ => None,
+    }
+}
+
+pub(super) fn is_broad_outlook_configuration_restriction(
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    restriction.is_some_and(is_broad_outlook_configuration_find_row)
+}
+
+pub(super) fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> bool {
+    matches!(
+        restriction,
+        MapiRestriction::Property {
+            relop: 0x02,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        } | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+            ..
+        } if value.eq_ignore_ascii_case("IPM.Configuration.")
+    )
+}
+
+pub(in crate::mapi) fn associated_config_visible_in_table(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    if folder_id != INBOX_FOLDER_ID {
+        return true;
+    }
+    if message.message_class == "IPM.ExtendedRule.Message" {
+        return false;
+    }
+    if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
+        return matches!(
+            message.message_class.as_str(),
+            "IPM.Configuration.ELC"
+                | "IPM.Configuration.MRM"
+                | "IPM.Configuration.UMOLK.UserOptions"
+                | "IPM.Sharing.Configuration"
+                | "IPM.Sharing.Index"
+                | "IPM.Aggregation"
+        ) && restriction.is_some_and(|restriction| {
+            message_class_restriction_matches_exact(restriction, &message.message_class)
+        });
+    }
+    if message.message_class.starts_with("IPM.Configuration.") {
+        if is_inbox_broad_startup_config_visible(restriction, message) {
+            return true;
+        }
+        return restriction.is_some_and(|restriction| {
+            message_class_restriction_matches_exact(restriction, &message.message_class)
+        }) && !is_empty_inbox_configuration_placeholder(message);
+    }
+    !is_empty_inbox_configuration_placeholder(message)
+}
+
+fn is_inbox_broad_startup_config_visible(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    if !message.message_class.starts_with("IPM.Configuration.") {
+        return false;
+    }
+    let exact = restriction.is_some_and(|restriction| {
+        message_class_restriction_matches_exact(restriction, &message.message_class)
+    });
+    if exact {
+        return !is_empty_inbox_configuration_placeholder(message);
+    }
+    if is_broad_outlook_configuration_restriction(restriction) {
+        return is_modeled_inbox_broad_startup_config(message);
+    }
+    if restriction.is_none() {
+        return is_modeled_inbox_broad_startup_config(message)
+            || !is_empty_inbox_configuration_placeholder(message);
+    }
+    false
+}
+
+fn is_modeled_inbox_broad_startup_config(message: &MapiAssociatedConfigMessage) -> bool {
+    crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults()
+        .into_iter()
+        .any(|modeled| {
+            message.id == modeled.id
+                && message
+                    .message_class
+                    .eq_ignore_ascii_case(&modeled.message_class)
+        })
+}
+
+fn message_class_restriction_matches_exact(
+    restriction: &MapiRestriction,
+    message_class: &str,
+) -> bool {
+    matches!(
+        restriction,
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String(value),
+        } | MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value,
+            ..
+        } if value.eq_ignore_ascii_case(message_class)
+    )
+}
+
+fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
+    if message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+        && message.subject == "Compact"
+    {
+        return message
+            .properties_json
+            .as_object()
+            .is_some_and(|object| object.is_empty());
+    }
+    if !message.message_class.starts_with("IPM.Configuration.")
+        || message.message_class == "IPM.Configuration.UMOLK.UserOptions"
+    {
+        return false;
+    }
+    let properties = mapi_properties_from_json(&message.properties_json);
+    !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
+        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
+        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
+        && !properties.contains_key(&0x7C09_0102)
+}
+
+pub(super) fn outlook_configuration_prefix_restriction() -> MapiRestriction {
+    MapiRestriction::Content {
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: "IPM.Configuration.".to_string(),
+        fuzzy_level_low: 0x0002,
+        fuzzy_level_high: 0x0001,
+    }
+}
+
+pub(super) fn serialize_associated_table_row(
+    message: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
+    }
+}
+
+pub(super) fn associated_table_row_property_value(
+    message: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
+    }
+}
+
+pub(super) fn associated_table_row_matches(
+    message: &AssociatedTableRow,
+    restriction: Option<&MapiRestriction>,
+    _mailbox_guid: Uuid,
+) -> bool {
+    match message {
+        AssociatedTableRow::Config(message) => {
+            restriction_matches_associated_config(restriction, message)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            restriction_matches_common_view_named_view(restriction, message, _mailbox_guid)
+        }
+    }
+}
+
+pub(super) fn associated_table_row_config(
+    message: &AssociatedTableRow,
+) -> Option<&MapiAssociatedConfigMessage> {
+    match message {
+        AssociatedTableRow::Config(message) => Some(message),
+        AssociatedTableRow::NamedView(_) => None,
+    }
+}
+
+pub(super) fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
+    match message {
+        AssociatedTableRow::Config(message) => message.id,
+        AssociatedTableRow::NamedView(message) => message.id,
+    }
+}
+
+pub(super) fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
+    match message {
+        AssociatedTableRow::Config(message) => &message.message_class,
+        AssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
+    }
+}
+
+pub(in crate::mapi) fn restriction_matches_common_views_message(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiCommonViewsMessage,
+    mailbox_guid: Uuid,
+) -> bool {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+            restriction_matches_navigation_shortcut(restriction, shortcut, mailbox_guid)
+        }
+        MapiCommonViewsMessage::NamedView(view) => {
+            restriction_matches_common_view_named_view(restriction, view, mailbox_guid)
+        }
+        MapiCommonViewsMessage::SearchFolderDefinition(definition) => {
+            restriction_matches(restriction, |property_tag| {
+                search_folder_definition_message_property_value(
+                    definition,
+                    mailbox_guid,
+                    property_tag,
+                )
+            })
+        }
+    }
+}
+
+pub(super) fn common_views_message_property_value(
+    message: &MapiCommonViewsMessage,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(message) => {
+            navigation_shortcut_property_value(message, mailbox_guid, property_tag)
+        }
+        MapiCommonViewsMessage::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
+        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            search_folder_definition_message_property_value(message, mailbox_guid, property_tag)
+        }
+    }
+}
+
+fn associated_config_message_size(message: &MapiAssociatedConfigMessage) -> i64 {
+    message
+        .subject
+        .len()
+        .saturating_add(message.message_class.len())
+        .saturating_add(message.properties_json.to_string().len())
+        .min(i64::MAX as usize) as i64
+}
+
+pub(in crate::mapi) fn associated_config_property_value(
+    message: &MapiAssociatedConfigMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    associated_config_property_value_with_mailbox_guid(message, Uuid::nil(), property_tag)
+}
+
+pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
+    message: &MapiAssociatedConfigMessage,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let lookup_tag = canonical_property_storage_tag(property_tag);
+    let properties = mapi_properties_from_json(&message.properties_json);
+    properties.get(&lookup_tag).cloned().or_else(|| {
+        let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+        match lookup_tag {
+            PID_TAG_MID => Some(MapiValue::U64(message.id)),
+            PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+            PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+            PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_guid,
+                message.folder_id,
+                message.id,
+            )
+            .map(MapiValue::Binary),
+            PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+                crate::mapi::identity::instance_key_for_object_id(message.id),
+            )),
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
+                Some(MapiValue::String(message.subject.clone()))
+            }
+            PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
+                Some(MapiValue::String(message.message_class.clone()))
+            }
+            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+            PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
+            PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+            PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
+            PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+            PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(associated_config_message_size(
+                message,
+            ))),
+            PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+                associated_config_message_size(message),
+            )),
+            PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+            PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+            PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+                mapi_mailstore::source_key_for_store_id(message.folder_id),
+            )),
+            PID_TAG_PARENT_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                message.folder_id,
+            )
+            .map(MapiValue::Binary),
+            PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(change_number),
+            )),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+                mapi_mailstore::predecessor_change_list(change_number),
+            )),
+            PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+            PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+                associated_config_last_modified_filetime(message)
+                    .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number))
+                    as i64,
+            )),
+            PID_TAG_ROAMING_DATATYPES
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::U32(configuration_roaming_datatypes(
+                    &message.message_class,
+                    &properties,
+                )))
+            }
+            PID_TAG_ROAMING_DICTIONARY
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                (!matches!(
+                    message.message_class.as_str(),
+                    "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
+                ) && !properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                .then(|| MapiValue::Binary(minimal_roaming_dictionary_stream()))
+            }
+            PID_TAG_ROAMING_XML_STREAM
+                if message.message_class == "IPM.Configuration.WorkHours" =>
+            {
+                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_working_hours_roaming_xml_stream()))
+            }
+            PID_TAG_ROAMING_XML_STREAM
+                if message.message_class == "IPM.Configuration.CategoryList" =>
+            {
+                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_category_list_roaming_xml_stream()))
+            }
+            PID_TAG_ROAMING_XML_STREAM if message.message_class == "IPM.Configuration.MRM" => {
+                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_mrm_roaming_xml_stream()))
+            }
+            PID_TAG_ROAMING_DATATYPES
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::U32(0x0000_0002))
+            }
+            PID_TAG_ROAMING_XML_STREAM
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
+            }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+            {
+                Some(MapiValue::Binary(Vec::new()))
+            }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::Binary(Vec::new()))
+            }
+            PID_NAME_CONTENT_CLASS_W_TAG
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::String("urn:content-classes:message".to_string()))
+            }
+            PID_NAME_CONTENT_TYPE_W_TAG
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::String("text/xml".to_string()))
+            }
+            PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::U32(0))
+            }
+            0x685D_0003 if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::U32(outlook_configuration_stamp(message)))
+            }
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B if is_outlook_contacts_helper_config(message) => {
+                Some(MapiValue::Binary(Vec::new()))
+            }
+            tag if is_outlook_contacts_helper_config(message) => {
+                outlook_contact_link_empty_property_value(tag)
+            }
+            PID_TAG_VIEW_DESCRIPTOR_FLAGS
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::U32(14_745_605))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::U32(8))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_NAME_W
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::String(message.subject.clone()))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                let definition = outlook_mail_view_definition(&message.subject);
+                log_view_definition_diagnostics(
+                    message.folder_id,
+                    message.id,
+                    &message.subject,
+                    &definition,
+                );
+                Some(MapiValue::String(view_descriptor_strings(&definition)))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                Some(MapiValue::U32(0))
+            }
+            PID_TAG_VIEW_DESCRIPTOR_BINARY
+            | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                let definition = outlook_mail_view_definition(&message.subject);
+                log_view_definition_diagnostics(
+                    message.folder_id,
+                    message.id,
+                    &message.subject,
+                    &definition,
+                );
+                Some(MapiValue::Binary(view_descriptor_binary(&definition)))
+            }
+            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
+                if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+            {
+                let definition = outlook_mail_view_definition(&message.subject);
+                log_view_definition_diagnostics(
+                    message.folder_id,
+                    message.id,
+                    &message.subject,
+                    &definition,
+                );
+                Some(MapiValue::Binary(view_descriptor_strings_binary(
+                    &definition,
+                )))
+            }
+            tag if message.message_class
+                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_CLSID) =>
+            {
+                Some(guid_property_value(
+                    property_tag,
+                    *message.canonical_id.as_bytes(),
+                ))
+            }
+            tag if message.message_class
+                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) =>
+            {
+                Some(guid_property_value(
+                    property_tag,
+                    common_view_named_view_folder_type_guid(),
+                ))
+            }
+            tag if message.message_class
+                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                && property_tag_id_matches(tag, PID_TAG_WLINK_GROUP_HEADER_ID) =>
+            {
+                Some(guid_property_value(
+                    property_tag,
+                    default_wlink_group_guid(),
+                ))
+            }
+            PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+            }
+            PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::String(String::new()))
+            }
+            PID_LID_OUTLOOK_SHARING_REMOTE_UID_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::String(String::new()))
+            }
+            PID_LID_OUTLOOK_SHARING_LOCAL_TYPE_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+            }
+            PID_NAME_SHARING_SEND_AS_STATE_TAG | PID_LID_OUTLOOK_SHARING_8AA6_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::U32(0))
+            }
+            PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
+                if is_outlook_virtual_sharing_state_config(message) =>
+            {
+                Some(MapiValue::U32(0))
+            }
+            0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
+                Some(MapiValue::U32(outlook_configuration_stamp(message)))
+            }
+            PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+            _ => None,
+        }
+    })
+}
+
+fn associated_config_last_modified_filetime(message: &MapiAssociatedConfigMessage) -> Option<u64> {
+    message
+        .properties_json
+        .get("__lpe_updated_at")
+        .and_then(serde_json::Value::as_str)
+        .map(mapi_mailstore::filetime_from_rfc3339_utc)
+        .filter(|filetime| *filetime != 0)
+}
+
+fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage) -> bool {
+    matches!(
+        message.message_class.as_str(),
+        "IPM.Aggregation" | "IPM.Sharing.Configuration" | "IPM.Sharing.Index"
+    )
+}
+
+fn is_outlook_contacts_helper_config(message: &MapiAssociatedConfigMessage) -> bool {
+    matches!(
+        message.message_class.as_str(),
+        "IPM.Microsoft.ContactLink.TimeStamp" | "IPM.Microsoft.OSC.ContactSync"
+    )
+}
+
+fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiValue> {
+    let tag = MapiPropertyTag::new(property_tag);
+    let property_id = u32::from(tag.property_id());
+    if !matches!(property_id, 0x8450 | 0x80E1 | 0x80EA | 0x80EC | 0x80ED) {
+        return None;
+    }
+    match tag.property_type_code() {
+        0x0003 => Some(MapiValue::U32(0)),
+        0x000B => Some(MapiValue::Bool(false)),
+        0x0040 => Some(MapiValue::I64(0)),
+        0x001E | 0x001F => Some(MapiValue::String(String::new())),
+        0x0102 => Some(MapiValue::Binary(Vec::new())),
+        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
+        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
+        _ => None,
+    }
+}
+
+fn configuration_roaming_datatypes(
+    message_class: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> u32 {
+    let mut datatypes = 0;
+    if properties.contains_key(&0x7C09_0102) {
+        datatypes |= 0x0000_0001;
+    }
+    if properties.contains_key(&PID_TAG_ROAMING_XML_STREAM) {
+        datatypes |= 0x0000_0002;
+    }
+    if properties.contains_key(&PID_TAG_ROAMING_DICTIONARY) {
+        datatypes |= 0x0000_0004;
+    }
+    if datatypes == 0 {
+        match message_class {
+            "IPM.Configuration.CategoryList"
+            | "IPM.Configuration.MRM"
+            | "IPM.Configuration.WorkHours" => 0x0000_0002,
+            _ => 0x0000_0004,
+        }
+    } else {
+        datatypes
+    }
+}
+
+pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
+}
+
+fn minimal_custom_action_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><customActions xmlns="http://schemas.microsoft.com/office/outlook/quicksteps/2010" version="1"/>"#.to_vec()
+}
+
+fn minimal_working_hours_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0"?><Root xmlns="WorkingHours.xsd"><WorkHoursVersion1><TimeZone><Bias>0</Bias><Standard><Bias>0</Bias><ChangeDate><Time>02:00:00</Time><Date>0000/11/01</Date><DayOfWeek>0</DayOfWeek></ChangeDate></Standard><DaylightSavings><Bias>0</Bias><ChangeDate><Time>02:00:00</Time><Date>0000/03/02</Date><DayOfWeek>0</DayOfWeek></ChangeDate></DaylightSavings><Name>UTC</Name></TimeZone><TimeSlot><Start>09:00:00</Start><End>17:00:00</End></TimeSlot><WorkDays>Monday Tuesday Wednesday Thursday Friday</WorkDays></WorkHoursVersion1></Root>"#.to_vec()
+}
+
+fn minimal_category_list_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0"?><categories default="Red Category" lastSavedSession="0" lastSavedTime="1601-01-01T00:00:00.000" xmlns="CategoryList.xsd"><category name="Red Category" color="0" keyboardShortcut="0" usageCount="0" lastTimeUsedNotes="1601-01-01T00:00:00.000" lastTimeUsedJournal="1601-01-01T00:00:00.000" lastTimeUsedContacts="1601-01-01T00:00:00.000" lastTimeUsedTasks="1601-01-01T00:00:00.000" lastTimeUsedCalendar="1601-01-01T00:00:00.000" lastTimeUsedMail="1601-01-01T00:00:00.000" lastTimeUsed="1601-01-01T00:00:00.000" lastSessionUsed="0" guid="{2B7FC69C-7046-44A2-8FF3-007D7467DC82}"/></categories>"#.to_vec()
+}
+
+fn minimal_mrm_roaming_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0"?><UserConfiguration><Info version="LPE.1"><Data><RetentionHold Enabled="False" RetentionComment="" RetentionUrl=""/></Data></Info></UserConfiguration>"#.to_vec()
+}
+
+fn guid_property_value(property_tag: u32, guid: [u8; 16]) -> MapiValue {
+    if (property_tag & 0x0000_FFFF) == 0x0102 {
+        MapiValue::Binary(guid.to_vec())
+    } else {
+        MapiValue::Guid(guid)
+    }
+}
+
+fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {
+    let mut hash = 0x811c_9dc5u32;
+    for byte in message
+        .message_class
+        .as_bytes()
+        .iter()
+        .chain(message.subject.as_bytes())
+    {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash.max(1)
+}
+
+fn delegate_freebusy_message_size(message: &MapiDelegateFreeBusyMessage) -> i64 {
+    message
+        .message
+        .subject
+        .len()
+        .saturating_add(message.message.body_text.len())
+        .saturating_add(message.message.payload_json.len())
+        .min(i64::MAX as usize) as i64
+}
+
+pub(in crate::mapi) fn delegate_freebusy_property_value(
+    message: &MapiDelegateFreeBusyMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(message.message.subject.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(message.message.body_text.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            if message.message.message_kind == "delegate" {
+                "IPM.Microsoft.Delegate".to_string()
+            } else {
+                "IPM.Microsoft.ScheduleData.FreeBusy".to_string()
+            },
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(delegate_freebusy_message_size(
+            message,
+        ))),
+        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+            delegate_freebusy_message_size(message),
+        )),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&message.message.updated_at) as i64,
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
+        0x6842_000B | 0x6843_000B | 0x684B_000B | 0x686D_000B | 0x686E_000B | 0x686F_000B => {
+            Some(MapiValue::Bool(false))
+        }
+        0x6844_101F | 0x684A_101F => Some(MapiValue::MultiString(Vec::new())),
+        0x6845_1102 | 0x6870_1102 => Some(MapiValue::MultiBinary(Vec::new())),
+        0x686B_1003 | 0x6871_1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x6872_001F => Some(MapiValue::String(String::new())),
+        _ => None,
+    }
+}
