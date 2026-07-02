@@ -166,6 +166,33 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
     assert!(body.ends_with(&[0; 16]));
 }
 
+#[test]
+fn notification_wait_empty_delay_uses_long_poll_when_subscription_exists() {
+    let short_session = test_session(HashMap::new());
+
+    assert_eq!(
+        notification_wait_empty_delay_millis(&short_session),
+        MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+    );
+
+    let mut handles = HashMap::new();
+    handles.insert(
+        7,
+        MapiObject::NotificationSubscription {
+            registration: MapiNotificationRegistration {
+                notification_types: 0x0078,
+                folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            },
+        },
+    );
+    let subscription_session = test_session(handles);
+
+    assert_eq!(
+        notification_wait_empty_delay_millis(&subscription_session),
+        MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
+    );
+}
+
 #[tokio::test]
 async fn notification_wait_active_session_acquire_waits_for_short_outlook_overlap() {
     let session_id = "notification-overlap-session".to_string();
@@ -461,6 +488,26 @@ fn outlook_bootstrap_phase_classifies_current_wall_and_successful_progress() {
         outlook_bootstrap_phase_name(outlook_bootstrap_phase(&state)),
         "inbox_normal_contents_table_opened"
     );
+}
+
+#[test]
+fn outlook_bootstrap_stall_classifies_post_common_views_notification_handoff() {
+    let mut state = PostHierarchyActionState {
+        last_common_views_inbox_shortcut_context: "target_folder=0x0000000000050001".to_string(),
+        last_inbox_notification_registration_context: "notification_folder=0x0000000000050001"
+            .to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 4);
+    assert_eq!(
+        outlook_bootstrap_stall_name(outlook_bootstrap_stall_code(&state)),
+        "after_common_views_inbox_notification_without_contents"
+    );
+
+    state.inbox_normal_contents_table_observed = true;
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 0);
 }
 
 #[test]

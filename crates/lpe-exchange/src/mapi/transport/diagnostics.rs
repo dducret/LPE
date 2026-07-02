@@ -434,7 +434,15 @@ pub(in crate::mapi) fn outlook_bootstrap_phase_name(phase: u64) -> &'static str 
 }
 
 pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActionState) -> u64 {
-    if actions.post_inbox_fai_folder_type_probe_loop_logged {
+    if !actions
+        .last_inbox_notification_registration_context
+        .is_empty()
+        && !actions.last_common_views_inbox_shortcut_context.is_empty()
+        && !actions.inbox_associated_contents_table_observed
+        && !actions.inbox_normal_contents_table_observed
+    {
+        4
+    } else if actions.post_inbox_fai_folder_type_probe_loop_logged {
         3
     } else if !actions.last_inbox_hierarchy_query_context.is_empty()
         && actions.inbox_open_folder_probe_count >= 2
@@ -453,6 +461,7 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
 
 pub(in crate::mapi) fn outlook_bootstrap_stall_name(stall_code: u64) -> &'static str {
     match stall_code {
+        4 => "after_common_views_inbox_notification_without_contents",
         3 => "repeated_inbox_folder_type_probe_without_contents",
         2 => "after_ipm_hierarchy_without_inbox_contents",
         1 => "after_inbox_fai_without_inbox_contents",
@@ -482,6 +491,14 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
 ) -> &'static str {
     if actions.content_sync_configure_observed {
         "post_hierarchy_content_sync_observed"
+    } else if !actions
+        .last_inbox_notification_registration_context
+        .is_empty()
+        && !actions.last_common_views_inbox_shortcut_context.is_empty()
+        && !actions.inbox_associated_contents_table_observed
+        && !actions.inbox_normal_contents_table_observed
+    {
+        "outlook_post_common_views_notification_before_content_sync"
     } else if actions.release_client_initiated && actions.logoff_client_initiated {
         "outlook_release_logoff_before_content_sync"
     } else if actions.release_client_initiated {
@@ -740,6 +757,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
+    } else if post_hierarchy_summary.outlook_bootstrap_stall_code == 4 {
+        "post_common_views_inbox_notification_without_contents"
     } else if post_fai_inbox_probe_loop_terminal {
         "post_fai_inbox_folder_type_probe_loop"
     } else if clean_client_close_after_sync {

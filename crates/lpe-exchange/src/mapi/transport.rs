@@ -31,6 +31,7 @@ pub(in crate::mapi) const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 pub(in crate::mapi) const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 pub(in crate::mapi) const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS: u64 = 1_500;
+pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS: u64 = 300_000;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS: usize = 200;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_DELAY_MS: u64 = 10;
 pub(in crate::mapi) const NSPI_UNICODE_CODEPAGE: u32 = 1200;
@@ -653,6 +654,7 @@ where
     let mut active_during_empty_wait = false;
     let mut reacquire_after_wait_failed = false;
     let mut empty_wait_elapsed_millis = 0u128;
+    let empty_wait_delay_millis = notification_wait_empty_delay_millis(&session);
     if !event_pending {
         if let Some(cursor) = session.notification_cursor {
             if let Ok(poll) = store
@@ -672,10 +674,7 @@ where
         store_session(session_id.clone(), session);
         drop(_active_request);
         let empty_wait_started_at = std::time::Instant::now();
-        tokio::time::sleep(std::time::Duration::from_millis(
-            MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS,
-        ))
-        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(empty_wait_delay_millis)).await;
         empty_wait_elapsed_millis = empty_wait_started_at.elapsed().as_millis();
         active_during_empty_wait = session_request_is_active(&session_id);
         waited_for_empty_events = true;
@@ -703,7 +702,7 @@ where
                 first_poll_event_count,
                 first_poll_cursor = ?first_poll_cursor,
                 waited_for_empty_events,
-                configured_empty_wait_millis = MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS,
+                configured_empty_wait_millis = empty_wait_delay_millis,
                 empty_wait_elapsed_millis,
                 active_during_empty_wait,
                 reacquire_after_wait_failed,
@@ -798,7 +797,7 @@ where
             post_inbox_fai_handoff_context = %post_inbox_fai_handoff_context,
             waited_for_empty_events,
             configured_empty_wait_millis = if waited_for_empty_events {
-                MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+                empty_wait_delay_millis
             } else {
                 0
             },
@@ -856,7 +855,7 @@ where
             post_inbox_fai_handoff_context = %post_inbox_fai_handoff_context,
             waited_for_empty_events,
             configured_empty_wait_millis = if waited_for_empty_events {
-                MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+                empty_wait_delay_millis
             } else {
                 0
             },
@@ -875,6 +874,18 @@ where
         body,
         session_context_cookies(endpoint, &session_id, false),
     )
+}
+
+fn notification_wait_empty_delay_millis(session: &MapiSession) -> u64 {
+    if session
+        .handles
+        .values()
+        .any(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+    {
+        MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
+    } else {
+        MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+    }
 }
 
 fn notification_wait_empty_response(

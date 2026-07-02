@@ -101,6 +101,7 @@ static MAPI_OUTLOOK_VIEW_LAST_STALL_CODE: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_STALL_AFTER_INBOX_FAI_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_STALL_AFTER_IPM_HIERARCHY_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_STALL_AFTER_COMMON_VIEWS_NOTIFICATION_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -134,6 +135,7 @@ pub struct MapiOutlookViewMetrics {
     pub stall_after_inbox_fai_total: u64,
     pub stall_after_ipm_hierarchy_total: u64,
     pub repeated_inbox_folder_type_probe_total: u64,
+    pub stall_after_common_views_notification_total: u64,
     pub last_inbox_open_probe_count: u64,
     pub last_inbox_folder_type_getprops_probe_count: u64,
 }
@@ -248,6 +250,10 @@ pub(crate) fn record_mapi_outlook_view_bootstrap_stall(stall_code: u64) {
             MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL
                 .fetch_add(1, AtomicOrdering::Relaxed);
         }
+        4 => {
+            MAPI_OUTLOOK_VIEW_STALL_AFTER_COMMON_VIEWS_NOTIFICATION_TOTAL
+                .fetch_add(1, AtomicOrdering::Relaxed);
+        }
         _ => {}
     }
 }
@@ -302,6 +308,9 @@ pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
             .load(AtomicOrdering::Relaxed),
         repeated_inbox_folder_type_probe_total:
             MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL.load(AtomicOrdering::Relaxed),
+        stall_after_common_views_notification_total:
+            MAPI_OUTLOOK_VIEW_STALL_AFTER_COMMON_VIEWS_NOTIFICATION_TOTAL
+                .load(AtomicOrdering::Relaxed),
         last_inbox_open_probe_count: MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT
             .load(AtomicOrdering::Relaxed),
         last_inbox_folder_type_getprops_probe_count:

@@ -104,6 +104,7 @@ pub(super) async fn append_register_notification_response<S>(
             .inbox_normal_contents_table_observed
     {
         record_mapi_outlook_view_post_common_views_inbox_notification_without_contents();
+        record_mapi_outlook_view_bootstrap_stall(4);
         session.record_outlook_view_failure_trace_event(format!(
             "post_common_views_inbox_notification_without_contents:{registration_context}"
         ));
