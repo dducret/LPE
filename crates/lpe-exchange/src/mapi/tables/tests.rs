@@ -5346,7 +5346,10 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
         .map(|message| message.message_class.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(classes, vec!["IPM.Configuration.AccountPrefs"]);
+    assert_eq!(
+        classes,
+        vec!["IPM.Configuration.AccountPrefs", "IPM.Configuration.ELC"]
+    );
 }
 
 #[test]
@@ -5837,6 +5840,40 @@ fn inbox_associated_query_rows_suppresses_prefix_configuration_with_stored_strea
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+}
+
+#[test]
+fn inbox_associated_query_rows_prefix_configuration_includes_virtual_elc() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let mut table = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: true,
+        columns: vec![PID_TAG_MESSAGE_CLASS_W],
+        columns_set: true,
+        sort_orders: vec![MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            order: 0,
+        }],
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: Some(outlook_configuration_prefix_restriction()),
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let request = RopRequest {
+        rop_id: RopId::QueryRows.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: vec![0, 1, 50, 0],
+    };
+
+    let response =
+        rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+    assert_eq!(response[0], RopId::QueryRows.as_u8());
+    assert_response_contains_utf16(&response, "IPM.Configuration.ELC");
 }
 
 #[test]
