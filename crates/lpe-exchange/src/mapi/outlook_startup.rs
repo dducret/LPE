@@ -117,7 +117,7 @@ pub(in crate::mapi) fn configured_smart_input_variant() -> String {
         .to_ascii_lowercase();
     match variant.as_str() {
         "" | "none" => "none".to_string(),
-        "fai_cursor_reset_before_query_rows" => variant,
+        "fai_cursor_reset_before_query_rows" | "synthetic_elc_findrow_not_found" => variant,
         _ => format!("unknown:{variant}"),
     }
 }

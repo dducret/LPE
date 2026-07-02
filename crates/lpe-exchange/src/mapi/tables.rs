@@ -10,11 +10,13 @@ use crate::mapi::identity::{
     RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID, RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
     RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
+use crate::mapi::outlook_startup::configured_smart_input_variant;
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiCommonViewsMessage,
     MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiMessage,
     MapiNavigationShortcutMessage, MapiTask,
 };
+use lpe_domain::crypto::hex_lower;
 use lpe_storage::SearchFolderDefinition;
 
 mod associated_contents;
@@ -376,6 +378,36 @@ pub(in crate::mapi) fn rop_find_row_response(
                         associated_table_row_matches(message, Some(&restriction), mailbox_guid)
                     })
                 {
+                    let exact_virtual_elc_probe =
+                        exact_virtual_elc_find_row_probe(*folder_id, message);
+                    if exact_virtual_elc_probe {
+                        log_exact_virtual_elc_find_row_probe(
+                            *folder_id,
+                            index,
+                            message,
+                            mailbox_guid,
+                            &columns,
+                            table_restriction.as_ref(),
+                        );
+                        if configured_smart_input_variant() == "synthetic_elc_findrow_not_found" {
+                            tracing::warn!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                request_type = "Execute",
+                                request_rop_id = "0x4f",
+                                folder_id = %format!("0x{folder_id:016x}"),
+                                folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                                associated = true,
+                                matched_row_index = index,
+                                matched_message_class = %associated_table_row_message_class(message),
+                                outlook_smart_input_variant = "synthetic_elc_findrow_not_found",
+                                response_return_value = "0x8004010f",
+                                "rca debug outlook associated config exact virtual elc find row variant returning not found"
+                            );
+                            return rop_find_row_no_match_response(request);
+                        }
+                    }
                     let exact_virtual_row_probe = *folder_id == INBOX_FOLDER_ID
                         && associated_table_row_config(message).is_some_and(|config| {
                             crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(
@@ -876,6 +908,98 @@ pub(in crate::mapi) fn rop_find_row_response(
     }
 
     response
+}
+
+fn exact_virtual_elc_find_row_probe(folder_id: u64, row: &AssociatedTableRow) -> bool {
+    folder_id == INBOX_FOLDER_ID
+        && associated_table_row_config(row).is_some_and(|message| {
+            message.message_class == "IPM.Configuration.ELC"
+                && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+        })
+}
+
+fn log_exact_virtual_elc_find_row_probe(
+    folder_id: u64,
+    matched_row_index: usize,
+    row: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+    table_restriction: Option<&MapiRestriction>,
+) {
+    let Some(message) = associated_table_row_config(row) else {
+        return;
+    };
+    let row_bytes = serialize_associated_table_row(row, mailbox_guid, columns);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        request_rop_id = "0x4f",
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+        associated = true,
+        matched_row_index,
+        matched_message_class = %message.message_class,
+        matched_message_id = %format!("0x{:016x}", message.id),
+        matched_canonical_id = %message.canonical_id,
+        selected_property_tags = %format_table_property_tags(columns),
+        table_restriction_present = table_restriction.is_some(),
+        serialized_row_bytes = row_bytes.len(),
+        serialized_row_preview = %hex_preview_for_log(&row_bytes, 96),
+        selected_property_values = %format_associated_config_selected_values(message, mailbox_guid, columns),
+        "rca debug outlook associated config exact virtual elc find row row shape"
+    );
+}
+
+fn format_associated_config_selected_values(
+    message: &MapiAssociatedConfigMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> String {
+    columns
+        .iter()
+        .map(|tag| {
+            let value =
+                associated_config_property_value_with_mailbox_guid(message, mailbox_guid, *tag)
+                    .map(format_mapi_value_for_log)
+                    .unwrap_or_else(|| "default".to_string());
+            format!("0x{tag:08x}={value}")
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_mapi_value_for_log(value: MapiValue) -> String {
+    match value {
+        MapiValue::Binary(bytes) => {
+            format!(
+                "binary:bytes={};preview={}",
+                bytes.len(),
+                hex_preview_for_log(&bytes, 48)
+            )
+        }
+        MapiValue::String(value) => format!("string:{value}"),
+        MapiValue::U64(value) => format!("u64:0x{value:016x}"),
+        MapiValue::U32(value) => format!("u32:0x{value:08x}"),
+        MapiValue::I64(value) => format!("i64:{value}"),
+        MapiValue::I32(value) => format!("i32:{value}"),
+        MapiValue::I16(value) => format!("i16:{value}"),
+        MapiValue::Bool(value) => format!("bool:{value}"),
+        MapiValue::Guid(bytes) => format!("guid:{}", hex_lower(&bytes)),
+        MapiValue::Error(value) => format!("error:0x{value:08x}"),
+        MapiValue::F64(value) => format!("f64bits:0x{value:016x}"),
+        MapiValue::MultiI16(values) => format!("multi_i16:count={}", values.len()),
+        MapiValue::MultiI32(values) => format!("multi_i32:count={}", values.len()),
+        MapiValue::MultiI64(values) => format!("multi_i64:count={}", values.len()),
+        MapiValue::MultiString(values) => format!("multi_string:count={}", values.len()),
+        MapiValue::MultiBinary(values) => format!("multi_binary:count={}", values.len()),
+        MapiValue::MultiGuid(values) => format!("multi_guid:count={}", values.len()),
+    }
+}
+
+fn hex_preview_for_log(bytes: &[u8], max_len: usize) -> String {
+    hex_lower(&bytes[..bytes.len().min(max_len)])
 }
 
 #[cfg(test)]

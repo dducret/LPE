@@ -4304,7 +4304,45 @@ fn inbox_associated_find_row_suppresses_outlook_eas_config() {
 
 #[test]
 fn inbox_associated_find_row_returns_outlook_elc_config() {
+    let _guard = outlook_smart_input_variant_test_lock();
+    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
+    std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT");
+
     assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
+
+    if let Some(value) = previous {
+        std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value);
+    }
+}
+
+#[test]
+fn inbox_associated_find_row_variant_returns_not_found_for_synthetic_elc_config() {
+    let _guard = outlook_smart_input_variant_test_lock();
+    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
+    std::env::set_var(
+        "LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT",
+        "synthetic_elc_findrow_not_found",
+    );
+
+    let response = inbox_associated_find_row_response_for_message_class("IPM.Configuration.ELC");
+
+    match previous {
+        Some(value) => std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value),
+        None => std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT"),
+    }
+    assert_eq!(response[0], RopId::FindRow.as_u8());
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
+}
+
+fn outlook_smart_input_variant_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("Outlook smart input variant test lock poisoned")
 }
 
 #[test]
