@@ -217,6 +217,174 @@ where
         }
     }
 
+    pub(in crate::service) async fn update_item(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let ids = requested_item_ids(request);
+            let contact_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("contact:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let event_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("event:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let task_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("task:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let public_folder_item_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("public-folder-item:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            if ids.is_empty()
+                || contact_ids.len()
+                    + event_ids.len()
+                    + task_ids.len()
+                    + message_ids.len()
+                    + public_folder_item_ids.len()
+                    != ids.len()
+            {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorInvalidOperation",
+                    "UpdateItem currently supports only contact, calendar, task, public folder item, and read/flag message item ids.",
+                ));
+            }
+
+            let mut items = String::new();
+            if !message_ids.is_empty() {
+                let Some((unread, flagged)) = parse_update_message_flags(request)? else {
+                    return Ok(operation_error_response(
+                        "UpdateItem",
+                        "ErrorInvalidOperation",
+                        "UpdateItem message updates currently support only IsRead and FlagStatus.",
+                    ));
+                };
+                for message_id in message_ids {
+                    let updated = self
+                        .store
+                        .update_jmap_email_flags(
+                            principal.account_id,
+                            message_id,
+                            unread,
+                            flagged,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-update-message-flags".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                    items.push_str(&message_item_xml(&updated));
+                }
+            }
+            for contact_id in contact_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_contacts_by_ids(principal.account_id, &[contact_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("contact not found"))?;
+                let updated = self
+                    .store
+                    .update_accessible_contact(
+                        principal.account_id,
+                        contact_id,
+                        parse_update_contact_input(principal, &existing, request),
+                    )
+                    .await?;
+                items.push_str(&contact_item_xml(&updated));
+            }
+            for event_id in event_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[event_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("event not found"))?;
+                let updated = self
+                    .store
+                    .update_accessible_event(
+                        principal.account_id,
+                        event_id,
+                        parse_update_event_input(principal, &existing, request)?,
+                    )
+                    .await?;
+                items.push_str(&calendar_item_xml(&updated));
+            }
+            for task_id in task_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_tasks_by_ids(principal.account_id, &[task_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("task not found"))?;
+                let updated = self
+                    .store
+                    .update_accessible_task(
+                        principal.account_id,
+                        task_id,
+                        parse_update_task_input(principal, &existing, request)?,
+                    )
+                    .await?;
+                items.push_str(&task_item_xml(&updated));
+            }
+            let public_folder_items = self
+                .store
+                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                .await?;
+            if public_folder_items.len() != public_folder_item_ids.len() {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorItemNotFound",
+                    "public folder item not found",
+                ));
+            }
+            for existing in public_folder_items {
+                let updated = self
+                    .store
+                    .upsert_public_folder_item(
+                        parse_update_public_folder_item_input(principal, &existing, request),
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-public-folder-item".to_string(),
+                            subject: existing.id.to_string(),
+                        },
+                    )
+                    .await?;
+                items.push_str(&public_folder_item_xml(&updated));
+            }
+
+            Ok(update_item_success_response(items))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "UpdateItem",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
     pub(in crate::service) async fn create_item(
         &self,
         principal: &AccountPrincipal,

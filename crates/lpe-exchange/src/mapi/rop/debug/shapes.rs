@@ -1,6 +1,7 @@
 use crate::mapi::properties::MapiValue;
 use crate::mapi::rop::utf16le_bytes;
 use crate::mapi::session::MapiObject;
+pub(in crate::mapi) use lpe_domain::crypto::hex_lower as format_bytes_hex;
 use lpe_domain::crypto::{hex_lower, sha256_hex_prefix};
 
 pub(in crate::mapi) fn view_descriptor_value_shape_for_debug(value: &MapiValue) -> String {
@@ -319,8 +320,4 @@ pub(in crate::mapi) fn hex_preview_for_debug(bytes: &[u8], max_bytes: usize) -> 
         preview.push_str("...");
     }
     preview
-}
-
-pub(in crate::mapi) fn format_bytes_hex(bytes: &[u8]) -> String {
-    hex_lower(bytes)
 }

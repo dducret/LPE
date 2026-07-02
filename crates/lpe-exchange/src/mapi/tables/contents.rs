@@ -82,25 +82,15 @@ fn category_value_to_string(value: &MapiValue) -> String {
         MapiValue::U64(value) => value.to_string(),
         MapiValue::String(value) => value.clone(),
         MapiValue::MultiString(values) => values.first().cloned().unwrap_or_default(),
-        MapiValue::Binary(value) => format_bytes_hex(value),
-        MapiValue::Guid(value) => format_bytes_hex(value),
+        MapiValue::Binary(value) => hex_lower(value),
+        MapiValue::Guid(value) => hex_lower(value),
         MapiValue::Error(value) => format!("{value:#010x}"),
         MapiValue::MultiI16(values) => values.first().map(i16::to_string).unwrap_or_default(),
         MapiValue::MultiI32(values) => values.first().map(i32::to_string).unwrap_or_default(),
         MapiValue::MultiI64(values) => values.first().map(i64::to_string).unwrap_or_default(),
-        MapiValue::MultiBinary(values) => values
-            .first()
-            .map(|value| format_bytes_hex(value))
-            .unwrap_or_default(),
-        MapiValue::MultiGuid(values) => values
-            .first()
-            .map(|value| format_bytes_hex(value))
-            .unwrap_or_default(),
+        MapiValue::MultiBinary(values) => values.first().map(hex_lower).unwrap_or_default(),
+        MapiValue::MultiGuid(values) => values.first().map(hex_lower).unwrap_or_default(),
     }
-}
-
-fn format_bytes_hex(bytes: &[u8]) -> String {
-    hex_lower(bytes)
 }
 
 pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {

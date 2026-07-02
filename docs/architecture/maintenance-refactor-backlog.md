@@ -52,6 +52,13 @@ Read with:
 | MR-025 | Oversized-source check adoption | `tools/check_oversized_sources.py`, documentation | Existing tool plus documentation for warn/fail modes | Low-medium: process hardening only. | `python tools/check_oversized_sources.py`; `python tools/check_oversized_sources.py --fail` should fail while offenders remain. | Indirect; prevents future Outlook-critical file growth. | Harden and document oversized-source check. |
 | MR-026 | Maintenance backlog tracking | `docs/audits/lpe-maintenance-outlook-architecture-audit-2026-06-27.md` | This file | Low: documentation only. | `rg` every “Next Highest-Risk Files” entry in this backlog. | Indirect. | Maintain this backlog and keep prompt mappings current. |
 | MR-027 | Verification sweep | Updated audit and command outputs | Audit “Verification Sweep” subsection | Medium: test suite currently has known red/hanging areas that must be recorded accurately. | Oversized check, `rg` commands from audit, attempted cargo tests and exact outcomes. | Indirect unless a gate test fails. | Run and document full post-refactor verification sweep. |
+| MR-028 | LPE-CT admin UI script | `LPE-CT/web/app.js` | `web/modules/` feature modules for dashboard state, API client, routing, forms, tables, diagnostics, and trace/quarantine actions | Medium: runtime admin UI behavior and LPE-CT custody operations are visible to operators. | Browser/admin UI smoke tests where available; `python tools/check_repository.py`; report line count. | No direct MAPI gate impact; protects perimeter operations after canonical handoff. | Split `LPE-CT/web/app.js` into focused browser modules without changing API paths, visible text, queue/quarantine actions, auth behavior, or canonical-state boundaries. |
+| MR-029 | Storage SQL schema source | `crates/lpe-storage/sql/schema.sql` | Documented dense-schema exception or schema-domain split if tooling supports it | Medium-high: canonical database schema defines mailbox/collaboration state. | `cargo test -p lpe-storage`; schema drift tests; `python tools/check_repository.py`; migration/install checks if touched. | Indirect but high risk if canonical schema changes. | Audit `schema.sql` as either a documented dense schema exception or split it mechanically by schema domain without changing SQL semantics. |
+| MR-030 | LPE-CT admin UI stylesheet | `LPE-CT/web/styles.css` | `web/styles/` base, layout, components, tables, forms, diagnostics, and responsive modules | Medium: operator UI regressions can hide queue/quarantine/security state. | UI smoke/screenshot checks where available; `python tools/check_repository.py`; report line count. | No direct MAPI gate impact. | Split `LPE-CT/web/styles.css` into focused stylesheet modules without changing selectors, responsive behavior, or runtime UI semantics. |
+| MR-031 | Web client stylesheet | `web/client/src/styles.css` | Shared design-system/component stylesheet modules | Medium: mailbox UI behavior is user-visible. | Web client build/tests if available; visual smoke checks; `python tools/check_repository.py`; report line count. | Indirect through Outlook-adjacent user-visible mailbox workflows. | Split `web/client/src/styles.css` along the shared design-system/component boundary without changing UI behavior. |
+| MR-032 | LPE-CT i18n messages | `LPE-CT/web/modules/i18n/messages.js` | Locale/domain message modules or documented dense-message exception | Low-medium: text bundles are runtime-visible but mostly data. | UI/i18n smoke tests where available; `python tools/check_repository.py`; report line count. | No direct MAPI gate impact. | Split or document `LPE-CT` admin i18n message bundles without changing message keys or fallback behavior. |
+| MR-033 | Debian Trixie update script | `installation/debian-trixie/update-lpe.sh` | Update helpers split by preflight, service control, database, assets, rollback, and verification | Medium-high: update flow affects deployments. | Shell syntax check; Debian Trixie dry-run/smoke where available; `python tools/check_repository.py`; report line count. | Indirect; deployment correctness gates real-client testing. | Split `update-lpe.sh` into sourced helper scripts without changing install/update semantics, service names, paths, or rollback behavior. |
+| MR-034 | Outlook RCA tooling | `tools/rca_outlook_connectivity_check.py` | RCA modules for DNS, autodiscover, HTTP, MAPI/RPC probes, TLS, and reporting | Medium: diagnostic output informs Outlook publication decisions. | Tool self-tests or representative dry-runs; `python tools/check_repository.py`; report line count. | Directly informs public MAPI autodiscover readiness evidence, but does not change runtime behavior. | Split `rca_outlook_connectivity_check.py` into focused modules without changing command-line flags, probe behavior, output fields, or readiness interpretation. |
 
 ## Status Summary
 
@@ -60,13 +67,13 @@ working tree proves, not the desired end state.
 
 | ID | Status | Evidence | Remaining work |
 | --- | --- | --- | --- |
-| MR-001 | Partial | Dispatch diagnostics and helper-only modules exist under `crates/lpe-exchange/src/mapi/dispatch/`; focused tests are recorded in progress notes. | `dispatch.rs` remains the largest source file; more helper/error extraction is still needed. |
-| MR-002 | Partial | Folder, message, logon, public-folder, recipient, rule, attachment, table-validation, execute, and sync-import helper slices are recorded in progress notes. | ROP execution branches, submission, properties, tables, associated config, and more mutation routing still need extraction. |
-| MR-003 | Partial | Spooler/advisory behavior is documented in `docs/architecture/mapi-spooler-advisory-model.md`, and `dispatch/submission.rs` now owns submission response-policy helpers. | Full submission ROP execution extraction into `dispatch/submission.rs` is not yet complete. |
-| MR-004 | Partial | `service/http_routes.rs` now owns endpoint path constants, RPC proxy path list, and top-level route assembly, with focused route/RPC/MAPI verification recorded in progress notes. | Extract EWS SOAP operation dispatch without endpoint, auth, or response changes. |
-| MR-005 | Partial | EWS mail, contact, calendar recurrence, task, reminder, room, rules, attachment, OOF, user-configuration, MailTips, Mail Apps, and ConvertId parser/helper slices are recorded in progress notes. | Continue extracting EWS item-family parsers and handlers while preserving canonical mutations and SOAP responses. |
+| MR-001 | Complete for dispatch diagnostics/source-size split | `crates/lpe-exchange/src/mapi/dispatch.rs` is below the 1,500-line production-source threshold. Diagnostic, unsupported/error, execute-loop, and table/folder/message/property helper code now lives in focused `mapi/dispatch/` modules, and the largest current dispatch module is below the threshold. | Keep future dispatch diagnostics and unsupported/error behavior in focused modules; preserve terminal unsupported/reserved ROP behavior. |
+| MR-002 | Complete for dispatch object-family split | `dispatch.rs` now delegates ROP execution to focused object-family modules for release, folder open/mutation, messages, table open/control, properties, recipients, attachments, streams, submission, receive folders, search criteria, sync transfer/import, object IDs, public-folder metadata, logon, named properties, notifications, permissions, rules, and status/bookmark routing. All current dispatch source/test modules are below the production-source threshold. | Keep future ROP family behavior additions in the focused modules; deeper semantic splits inside large family modules remain optional follow-up work. |
+| MR-003 | Complete for submission extraction | `dispatch/submission.rs` owns `RopSubmitMessage`, `RopTransportSend`, `RopAbortSubmit`, `RopGetTransportFolder`, `RopOptionsData`, `RopSetSpooler`, `RopSpoolerLockMessage`, `RopTransportNewMail`, and `RopUpdateDeferredActionMessages` dispatch handling. Canonical submit, Sent visibility, protected Bcc handling, duplicate execute replay, bounded abort-submit cancellation, transport-folder projection, and unsupported advisory behavior remain covered by focused MAPI-over-HTTP tests. | Keep future submission behavior additions in `dispatch/submission.rs`; broader dispatch reduction remains under MR-001 and MR-002. |
+| MR-004 | Complete for route/dispatch split | `service/http_routes.rs` owns endpoint path constants, RPC proxy path list, and top-level route assembly; `service/ews/dispatch.rs` owns EWS SOAP operation dispatch, authentication/body decoding, SOAP envelope wrapping, and response-debug extension wiring. Focused EWS and full `lpe-exchange` verification is recorded in progress notes. | Keep future endpoint-path and SOAP dispatch changes in the focused modules; preserve auth behavior, endpoint paths, SOAP envelopes, and canonical operation calls. |
+| MR-005 | Complete for item-operation split | EWS item-family operation methods now live in focused `service/ews/` modules. `service/ews/items.rs` owns `GetItem`, `FindItem`, `CreateItem`, `UpdateItem`, `SendItem`, `ArchiveItem`, `CopyItem`, `MoveItem`, `DeleteItem`, and `MarkAllItemsAsRead`; related contact, calendar, task, attachment, reminder, room, rule, notification, MailTips, ConvertId, compliance, message tracking, and bulk-transfer slices are recorded in progress notes. `service.rs` is below the production-source threshold and keeps router arms/wiring. | Keep future EWS item behavior additions in focused modules; preserve canonical mutations and SOAP responses. |
 | MR-006 | Complete for threshold split | `crates/lpe-exchange/src/store.rs` is below the 1,500-line production-source threshold. `store/types.rs` owns Exchange/MAPI/EWS store DTOs, `store/implementation.rs` keeps the `Storage` trait implementation wiring, and `store/storage_impl/` contains focused method/helper fragments split at existing method boundaries. Canonical mutation calls still delegate to the same `lpe-storage` APIs; no trait method semantics changed. | Keep future Exchange storage behavior additions in focused store implementation fragments; a future semantic pass can replace the compile-in fragments with narrower storage-family traits only if fake stores and protocol adapters stay aligned. |
-| MR-007 | Partial | `mapi/tables/columns.rs` now owns pure default table column/property-tag lists, while row serialization and table behavior remain in `mapi/tables.rs`. Focused table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `tables.rs` by row families and prove table row output is unchanged. |
+| MR-007 | Complete for `tables.rs` hub split | `mapi/tables.rs` is below the 1,500-line production-source threshold. Focused modules now own default columns, diagnostics, search/reminder rows, categorized contents, rules, public-folder/recoverable rows, collaboration item rows, recipients, time/flag/folder helpers, sorting, validation, collapse, row codecs, pending rows, hierarchy rows, contents rows, associated rows, cursor/count/filter/query/find helpers, and query-row response construction. Focused table tests and full `lpe-exchange` verification are recorded in progress notes. | Keep future table behavior additions in focused modules; large focused table-family modules and table tests remain candidates for later semantic/test splits. |
 | MR-008 | Complete for threshold split | `mapi/properties.rs` is below the 1,500-line production-source threshold. `mapi/properties/named.rs` owns named-property data shapes and well-known ID mapping, `folder.rs` owns folder/logon bootstrap and hierarchy-import property helpers, `values.rs` owns `MapiValue`, `restrictions.rs` owns `MapiSortOrder`/`MapiRestriction`, `recurrence.rs` owns MAPI appointment recurrence parser/projection helpers, `reminders.rs` owns shared reminder property splitting, `streams.rs` owns property stream open/read/write helpers, `message.rs` owns message property projection plus MAPI message import/submission/follow-up mapping, `contact.rs` owns contact property projection plus MAPI-to-contact input mapping, `task.rs` owns task property projection plus MAPI-to-task input mapping, `notes.rs` owns note/journal projection plus MAPI input mapping, `calendar.rs` owns calendar projection plus MAPI input mapping, `attachments.rs` owns attachment projection plus pending-attachment import helpers, `search_folders.rs` owns search-folder property projection, and `views.rs` owns Outlook view definitions/descriptors. Focused property/restriction/table tests and full `lpe-exchange` verification are recorded in progress notes. | Keep future property behavior additions in focused modules; preserve property IDs, encoding, named properties, custom values, stream bytes, canonical message updates, audit actions, and protected-recipient handling. |
 | MR-009 | Complete for hub split | `mapi/rop.rs` and `mapi/rop/parse.rs` are now below the 1,500-line production target, with parser, typed request, request-reader, response, restriction, recipient, property-row, debug, error, object-id, receive-folder, logon, named-property, attachment, and buffer helpers in focused modules. | Keep future ROP behavior additions in focused modules; preserve unsupported/reserved ROP behavior. |
 | MR-010 | Complete for threshold split | `crates/lpe-exchange/src/mapi_mailstore.rs` and `crates/lpe-exchange/src/mapi_store.rs` are below the 1,500-line production-source threshold. Manifest/type/source-key/sync-state helpers now live in `mapi_mailstore/manifest.rs`, pure hierarchy folder projection helpers live in `mapi_mailstore/folders.rs`, RCA/debug logging and decoders live in `mapi_mailstore/diagnostics.rs` and `mapi_mailstore/diagnostics/codec.rs`, `mapi_store/associated_config.rs` owns pure Outlook associated-config, Common Views, navigation shortcut default, conversation-action default, free/busy placeholder, and placeholder-suppression helpers, `mapi_store/snapshot.rs` owns the snapshot impl methods, and test modules are split out. Canonical mailbox/message inputs, source keys, change keys, sync facts, FastTransfer/ICS byte construction, durable Outlook metadata reads, and canonical mutation paths are preserved. | Keep future snapshot/projection additions in focused modules; a deeper semantic pass can still split identity, search-folder, navigation, permission, and load orchestration helpers if needed. |
@@ -75,18 +82,25 @@ working tree proves, not the desired end state.
 | MR-013 | Complete for threshold split | `crates/lpe-activesync/src/service.rs` is no longer reported by the oversized-source check. Focused modules now own Ping, Search, MoveItems, ItemOperations, GetItemEstimate, SendMail/SmartReply/SmartForward, FolderSync/Create/Delete/Update, Provision, application-data parsing, body-preference parsing, MIME validation, and shared sync-state helpers. Canonical mutation calls remain in shared storage paths, including `move_jmap_email_from_mailbox`, `submit_message`, mailbox create/update/delete APIs, contact/calendar upsert APIs, draft APIs, read-state updates, and delete/trash APIs. | Keep future ActiveSync behavior additions in focused modules; a future semantic pass can still split the remaining Sync mutation methods further if needed. |
 | MR-014 | Complete for threshold split | `mapi/transport.rs` is below the 1,500-line production target. `mapi/transport/headers.rs` owns pure request/header helpers, `mapi/transport/cookies.rs` owns cookie and sequence-cookie helpers, `mapi/transport/diagnostics.rs` owns Connect, post-hierarchy/bootstrap, and disconnect diagnostics, and `mapi/transport/tests.rs` owns the transport unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep future session, replay, request-validation, and response-envelope behavior in focused modules instead of growing the hub again. |
 | MR-015 | Complete for threshold split | `mapi/nspi.rs` is below the 1,500-line production target. `mapi/nspi/special_tables.rs` owns GetSpecialTable/GetHierarchyInfo row projection, `mapi/nspi/diagnostics.rs` owns RCA/debug summaries, `mapi/nspi/property_values.rs` owns property tags/value encoding and NSPI identity projection helpers, and `mapi/nspi/tests.rs` owns the NSPI unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep Microsoft-specific lookup and matching local unless a future split can preserve those rules exactly. |
-| MR-016 | Partial | `smtp/outbound.rs` owns outbound handoff RFC822/MIME composition and quoted-printable encoding, `smtp/dsn.rs` owns pure SMTP deferral/rejection reply and outbound DSN classification helpers, `smtp/policy.rs` owns accepted-domain/domain-match predicates plus inbound domain policy aggregation, `smtp/tls.rs` owns STARTTLS stream buffering plus certificate/key acceptor loading, `smtp/trace.rs` owns pure quarantine/trace summary projection and filtering helpers, and `smtp/antivirus.rs` owns Magika attachment classification plus antivirus provider loading/scanning/output parsing. `LPE-CT/src/smtp.rs` still owns queue custody, quarantine persistence, relay, reputation/Bayes scoring, and trace action transitions. | Continue splitting `LPE-CT/src/smtp.rs`, starting with remaining policy/scoring helpers before touching custody or relay behavior. |
-| MR-017 | Pending | No completed `LPE-CT/src/main.rs` split is recorded. | Split main wiring without CLI/env/routes/auth/startup changes. |
-| MR-018 | Partial | Primitive crypto helpers are centralized, MAPI diagnostic lowerhex wrappers delegate to `lpe_domain::crypto::hex_lower`, ROP debug shape/hex rendering now lives in focused `mapi/rop/debug/` submodules, and NSPI RCA/debug summaries now live in `mapi/nspi/diagnostics.rs`. NSPI/test parsers and validation helpers remain local. | Continue centralizing only identical diagnostic helpers and preserve debug output/protocol bytes. |
+| MR-016 | Complete for threshold split | `LPE-CT/src/smtp.rs` is below the 1,500-line production-source threshold. Focused modules now own outbound MIME composition, DSN helpers, domain policy helpers, STARTTLS helpers, trace projection, antivirus scanning, Bayes scoring, reputation scoring, DNS adapter behavior, authentication scoring, DNSBL/greylist anti-abuse state, outbound route/throttle policy, outbound relay delivery, queue JSON file helpers, quarantine listing/metadata persistence, trace actions, and inbound policy arbitration. `LPE-CT/src/smtp.rs` remains the SMTP service hub for runtime wiring, queue custody decision points, and shared DTOs. | Keep future SMTP behavior additions in focused modules; preserve replies, custody semantics, quarantine behavior, bridge behavior, relay semantics, and canonical mailbox state. |
+| MR-017 | Complete for threshold split | `LPE-CT/src/main.rs` is below the 1,500-line production-source threshold. Management/integration auth lives in `LPE-CT/src/management_auth.rs`, readiness checks live in `LPE-CT/src/readiness.rs`, dashboard configuration/default normalization lives in `LPE-CT/src/dashboard_config.rs`, and HTTP route handlers live in `LPE-CT/src/http_routes.rs`. CLI/env/routes/auth/startup/logging behavior and the LPE-CT canonical-state boundary are preserved. | Keep future route, config, state-store, startup, and TLS behavior additions in focused modules instead of growing `main.rs`. |
+| MR-018 | Complete for identical primitive wrappers | Primitive crypto helpers are centralized, MAPI diagnostic lowerhex wrappers now delegate directly to `lpe_domain::crypto::hex_lower`, ROP debug shape/hex rendering lives in focused `mapi/rop/debug/` submodules, and NSPI RCA/debug summaries live in `mapi/nspi/diagnostics.rs`. `rg` now shows no remaining local full-byte MAPI formatter functions; NSPI/test hex parsers and shaped preview helpers remain local because they have different semantics. | Keep future diagnostic hex/preview additions on shared primitives when semantics are identical; leave parser and shaped-preview helpers local. |
 | MR-019 | Complete for documentation | `docs/architecture/exchange-rule-deferred-action-canonical-model.md` exists and is referenced in progress notes. | Implementation of wider rule/deferred-action semantics remains future work. |
 | MR-020 | Complete for documentation | `docs/architecture/mapi-receive-folder-routing.md` exists and stale broad unsupported wording was updated. | Arbitrary receive-folder routing still needs a canonical model before implementation. |
 | MR-021 | Complete for documentation | `docs/architecture/mapi-spooler-advisory-model.md` exists and is referenced in progress notes. | Advisory ROP support remains gated on canonical advisory state and Outlook evidence. |
 | MR-022 | Complete for documentation | `docs/audits/public-folder-outlook-parity-follow-up-2026-06-28.md` exists and is referenced in progress notes. | Public-folder parity implementation gaps remain staged future work. |
 | MR-023 | Complete for documentation | `docs/audits/mapi-search-folder-common-views-parity-2026-06-28.md` exists and is referenced in progress notes. | Search Folder/Common Views parity implementation gaps remain staged future work. |
 | MR-024 | Complete for documentation | `docs/audits/outlook-notification-replay-parity-2026-06-28.md` exists and is referenced in progress notes. | Notification replay implementation gaps remain staged future work. |
-| MR-025 | Partial | `README.md` documents `tools/check_oversized_sources.py` warn/fail/include-tests modes; check outputs are recorded. | CI/adoption policy is not yet added, and offenders remain above threshold. |
-| MR-026 | Partial | This backlog now maps the primary high-risk files and records coverage gaps for additional oversized files. | Keep mappings current as refactors land; future backlog items are needed for uncovered oversized files. |
-| MR-027 | Partial | The maintenance audit contains a 2026-06-28 non-cargo verification sweep. | Full cargo verification is not current because the previous lpe-exchange test process remains alive and had visible failures. |
+| MR-025 | Complete for check adoption | `README.md` documents `tools/check_oversized_sources.py` warn/fail/include-tests modes, and `tools/check_repository.py` provides the repository-level local/CI entry point with warning and fail-on-oversized modes. Current offenders remain visible in check output. | Track remaining oversized offender reductions in focused follow-up items; keep the repository wrapper as the stable check entry point. |
+| MR-026 | Complete for current coverage | This backlog maps the primary high-risk files and assigns current oversized-source coverage gaps to MR-028 through MR-034. | Keep mappings current as refactors land and as `python tools/check_repository.py` output changes. |
+| MR-027 | Complete for current verification | The maintenance audit now contains a 2026-07-02 verification sweep with current repository-check, helper-centralization, parity-gap, `LPE-CT`, and `lpe-exchange` cargo results. | Re-run the sweep when future refactors change the offender list, helper ownership, or protocol/canonical-state behavior. |
+| MR-028 | Complete for threshold split | `LPE-CT/web/app.js` is below the 1,500-line production-source threshold. Browser context, API helpers, formatting/table helpers, dashboard rendering, list rendering, system/log rendering, trace/quarantine/diagnostic actions, and policy/digest drawer workflows now live under `LPE-CT/web/modules/app/`. The admin UI smoke test passes with the same API paths, visible text, queue/quarantine actions, auth behavior, and LPE-CT custody boundary. | Keep future admin UI behavior in focused browser modules instead of growing `app.js`. |
+| MR-029 | Deliberate exception | `crates/lpe-storage/sql/schema.sql` remains a single 3,455-line canonical schema file by request. It is consumed as one SQL program by install/update tooling and Rust schema-drift paths, so it was left unchanged. | Keep schema changes behavior-driven and covered by schema drift/install checks; do not split unless the SQL execution model is changed deliberately. |
+| MR-030 | Complete for threshold split | `LPE-CT/web/styles.css` is now a 7-line stylesheet hub importing focused modules under `LPE-CT/web/styles/`. The selector order is preserved and no runtime UI semantics changed. | Keep future LPE-CT admin styles in focused CSS modules. |
+| MR-031 | Complete for threshold split | `web/client/src/styles.css` is now a 5-line stylesheet hub importing focused modules under `web/client/src/styles/`. Shared theme/Tailwind imports remain first and the existing cascade order is preserved. | Keep future web client styles in focused CSS modules aligned with the shared design-system boundary. |
+| MR-032 | Complete for threshold split | `LPE-CT/web/modules/i18n/messages.js` is below the 1,500-line production-source threshold. Base/default messages remain in `messages.js`; locale override data lives in `LPE-CT/web/modules/i18n/localized-messages.js`; `messages.js` re-exports `localizedMessages` so existing imports keep the same surface. | Keep future i18n keys and fallback behavior stable; place large locale-only data in focused locale modules. |
+| MR-033 | Complete for threshold split | `installation/debian-trixie/update-lpe.sh` is below the 1,500-line production-source threshold. The idempotent LPE 0.4 schema compatibility SQL now lives in `installation/debian-trixie/update-lpe-0.4-compat.sql`, and `update-lpe.sh` applies it through `psql -f` at the same point in the update flow. | Keep future Debian Trixie update orchestration in `update-lpe.sh`; place large documented compatibility SQL in focused files that preserve ordering, idempotency, and validation checks. |
+| MR-034 | Complete for threshold split | `tools/rca_outlook_connectivity_check.py` is below the 1,500-line production-source threshold. Primitive HTTP/cookie helpers live in `tools/rca_outlook/http.py`, EWS envelope/call helpers live in `tools/rca_outlook/ews.py`, MAPI/RPC/NSPI binary helpers live in `tools/rca_outlook/mapi.py`, and CLI parser construction lives in `tools/rca_outlook/cli.py`. | Keep future RCA probe flows and readiness decisions in the main checker unless a focused module boundary preserves CLI flags, probe behavior, and publication-gate interpretation. |
 
 ## Current Highest-Risk File Coverage
 
@@ -108,25 +122,26 @@ follows:
 | `crates/lpe-activesync/src/service.rs` | MR-013 |
 | `crates/lpe-exchange/src/mapi/transport.rs` | MR-014 |
 | `crates/lpe-exchange/src/mapi/nspi.rs` | MR-015 |
-| `LPE-CT/src/smtp.rs` | MR-016 |
 | `LPE-CT/src/main.rs` | MR-017 |
 
-## Oversized Check Coverage Gaps
+## Oversized Check Follow-Up Coverage
 
-The 2026-06-28 oversized-source check reports additional production hotspots
-outside the original MR-001 through MR-027 prompt set. They are recorded here so
-MR-026 can distinguish covered recommendations from future backlog work instead
-of silently losing them.
+The 2026-07-02 repository check initially reported additional production
+hotspots outside the original MR-001 through MR-027 prompt set. They were
+assigned to MR-028 through MR-034 so MR-026 can distinguish the original
+maintenance prompt set from explicit follow-up backlog work instead of silently
+losing them. The current repository check now reports only the intentionally
+unchanged canonical schema file.
 
 | Current oversized file | Lines | Current backlog coverage |
 | --- | ---: | --- |
-| `LPE-CT/web/app.js` | 5,593 | Not covered by MR-001 through MR-027. Needs a future LPE-CT admin UI module split plan. |
-| `crates/lpe-storage/sql/schema.sql` | 3,455 | Not covered. Likely acceptable only if treated as dense schema source; otherwise needs schema documentation or split policy. |
-| `LPE-CT/web/styles.css` | 2,765 | Not covered. Needs a future LPE-CT admin UI stylesheet/design-system split. |
-| `web/client/src/styles.css` | 2,348 | Not covered. Needs a future web client stylesheet/design-system split. |
-| `LPE-CT/web/modules/i18n/messages.js` | 2,115 | Not covered. May be acceptable as dense message data if documented; otherwise split by locale/domain. |
-| `installation/debian-trixie/update-lpe.sh` | 1,847 | Not covered. Needs a future installer/update script split or documented exception. |
-| `tools/rca_outlook_connectivity_check.py` | 1,844 | Not covered. Needs a future RCA tooling split or documented exception. |
+| `crates/lpe-storage/sql/schema.sql` | 3,455 | MR-029 documented exception |
+| `LPE-CT/web/app.js` | 5,593 | MR-028 resolved |
+| `LPE-CT/web/styles.css` | 2,765 | MR-030 resolved |
+| `web/client/src/styles.css` | 2,348 | MR-031 resolved |
+| `LPE-CT/web/modules/i18n/messages.js` | 2,115 | MR-032 |
+| `installation/debian-trixie/update-lpe.sh` | 1,847 | MR-033 |
+| `tools/rca_outlook_connectivity_check.py` | 1,844 | MR-034 |
 
 Resolved coverage-gap notes:
 
@@ -729,6 +744,17 @@ Resolved coverage-gap notes:
   production offenders; `python tools/check_oversized_sources.py --fail`
   exited 1 while offenders remain; `python tools/check_oversized_sources.py
   --include-tests` reported test-file hotspots for scenario split planning.
+- 2026-07-02: Completed MR-025's check-adoption slice by adding
+  `tools/check_repository.py` as the stable lightweight repository check
+  entry point. The wrapper delegates to `tools/check_oversized_sources.py`,
+  preserves warning-mode output by default, supports `--fail-oversized` for
+  CI enforcement once the current offender list is acceptable, and forwards
+  `--include-tests` for test-module split planning. `README.md` now documents
+  the repository wrapper as the pre-review command. Verification:
+  `python tools/check_repository.py` exited 0 and reported the current
+  production offenders; `python tools/check_repository.py --fail-oversized`
+  exited 1 while offenders remain; `python tools/check_repository.py
+  --include-tests` exited 0 and reported production plus test-file hotspots.
 - 2026-06-28: Completed MR-022 as documentation-only follow-up in
   `docs/audits/public-folder-outlook-parity-follow-up-2026-06-28.md`. The
   audit separates current bounded canonical public-folder behavior from
@@ -763,12 +789,33 @@ Resolved coverage-gap notes:
   remaining Outlook gaps, and records that full cargo verification remains
   unavailable while the prior `cargo test -p lpe-exchange` process is still
   alive.
+- 2026-07-02: Completed MR-027 for current verification by adding a fresh
+  verification sweep to
+  `docs/audits/lpe-maintenance-outlook-architecture-audit-2026-06-27.md`.
+  The sweep records that no stale cargo/rustc test process was alive, `python
+  tools/check_repository.py` reports the seven current production offenders,
+  primitive crypto helpers remain centralized in `lpe-domain`, storage
+  normalization leftovers are delegated compatibility wrappers, and parity-gap
+  searches still resolve to canonical-model or unsupported-without-state
+  boundaries. Verification commands: `cargo test --quiet` in `LPE-CT` passed
+  85 tests with 19 ignored env-sensitive/benchmark tests, and `cargo test -p
+  lpe-exchange --quiet` passed 1,594 tests and doc tests.
 - 2026-06-28: Advanced MR-026 by reconciling
   `docs/architecture/maintenance-refactor-backlog.md` with the current
   oversized-source output. The high-risk coverage table now includes MR-012,
   MR-013, MR-014, and MR-015 mappings, and a new coverage-gap table records
   oversized files that remain outside MR-001 through MR-027 so they are not
   mistaken for completed maintenance work.
+- 2026-07-02: Completed MR-026 for current backlog coverage by assigning every
+  current production offender from `python tools/check_repository.py` to an
+  explicit follow-up item: MR-028 for `LPE-CT/web/app.js`, MR-029 for
+  `crates/lpe-storage/sql/schema.sql`, MR-030 for `LPE-CT/web/styles.css`,
+  MR-031 for `web/client/src/styles.css`, MR-032 for
+  `LPE-CT/web/modules/i18n/messages.js`, MR-033 for
+  `installation/debian-trixie/update-lpe.sh`, and MR-034 for
+  `tools/rca_outlook_connectivity_check.py`. The original MR-001 through
+  MR-027 prompt set remains intact; the new items cover follow-up oversized
+  files surfaced by the repository check.
 - 2026-06-28: Started MR-003 with a small submission helper extraction into
   `crates/lpe-exchange/src/mapi/dispatch/submission.rs`. The slice moves only
   response-policy helpers for `RopSubmitMessage` / `RopTransportSend` success
@@ -3783,6 +3830,25 @@ Resolved coverage-gap notes:
   tools/check_oversized_sources.py` passed in warning mode and now reports
   `mapi/rop.rs` at 7,941 lines; `git diff --check` exited 0 with CRLF
   warnings only.
+- 2026-07-02: Completed the current MR-018 identical-wrapper cleanup by
+  replacing the remaining local full-byte MAPI hex formatter wrappers with
+  direct `lpe_domain::crypto::hex_lower` calls or module-local aliases. The
+  touched paths are `mapi/dispatch/diagnostics.rs::bytes_to_hex`,
+  `mapi/properties/values.rs` JSON serialization, `mapi/tables/contents.rs`
+  categorized value rendering, and `mapi/rop/debug/shapes.rs::format_bytes_hex`.
+  Hex parsers (`hex_to_bytes`, `hex_digit`, NSPI/test fixture readers) and
+  shaped previews such as bounded payload previews and binary-present summaries
+  remain local because they parse, truncate, append markers, or include length
+  metadata rather than performing identical primitive rendering.
+- 2026-07-02 verification for the MR-018 identical-wrapper cleanup:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange --quiet`
+  exposed the existing order-sensitive
+  `mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest`
+  failure, the exact isolated test passed, and
+  `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange --quiet` passed
+  1,594 tests. `rg` confirmed no remaining local full-byte MAPI
+  `bytes_to_hex` or `format_bytes_hex` formatter functions, while parser/test
+  helpers remain local.
 - 2026-06-29: Extended the ROP debug extraction by moving
   `view_descriptor_value_shape_for_debug`, `mapi_value_shape_for_debug`, and
   `text_preview_for_debug` into `mapi/rop/debug.rs`. This is still
@@ -4856,6 +4922,18 @@ Resolved coverage-gap notes:
   `RopSetSpooler | RopSpoolerLockMessage | RopTransportNewMail`,
   `RopUpdateDeferredActionMessages`, `RopSubmitMessage | RopTransportSend`,
   and `RopAbortSubmit`.
+- 2026-07-02: Reconciled MR-003's stale status summary with the current code.
+  `rg` confirms `RopSubmitMessage`, `RopTransportSend`, `RopAbortSubmit`,
+  `RopSetSpooler`, `RopSpoolerLockMessage`, `RopTransportNewMail`,
+  `RopUpdateDeferredActionMessages`, `RopGetTransportFolder`, and
+  `RopOptionsData` handling now lives in `mapi/dispatch/submission.rs`;
+  `mapi/dispatch.rs` only calls `is_submission_dispatch_rop` and
+  `append_submission_dispatch_response`. Verification: `cargo test -p
+  lpe-exchange mapi_over_http::submission --quiet` passed 23 focused
+  submission tests covering canonical submit, transport send, duplicate
+  execute replay, Bcc guards, transport folder, spooler/advisory alignment,
+  and abort-submit behavior; `cargo test -p lpe-exchange --quiet` passed
+  1,594 tests and doc tests.
 - 2026-06-30: Advanced MR-002/MR-003 by moving the small
   `RopGetTransportFolder`, `RopOptionsData`, and `RopGetReceiveFolderTable`
   routing logic out of `mapi/dispatch.rs`. Transport-folder and options-data
@@ -7246,6 +7324,22 @@ Resolved coverage-gap notes:
   1,416 lines, `mapi/dispatch/tests/folders.rs` at 1,407 lines,
   `mapi/dispatch/tests/associated_config.rs` at 941 lines, and
   `mapi/dispatch/tests/execute.rs` at 751 lines.
+- 2026-07-02: Closed the stale MR-001/MR-002 status entries against the current
+  worktree evidence. `mapi/dispatch.rs` is now a 990-line router/hub that
+  delegates all ROP families through focused predicates and dispatch wrappers,
+  including release, folder, message, table, property, recipient, attachment,
+  stream, submission, receive-folder, search, sync, object-id, public-folder,
+  logon, named-property, notification, permission, rule, status/bookmark, and
+  unsupported fallback paths. Direct physical line counts show every current
+  `mapi/dispatch/` source and split test module below the 1,500-line production
+  threshold; the largest is `message_save.rs` at 1,486 lines.
+- 2026-07-02 verification for the MR-001/MR-002 dispatch closure sweep:
+  `cargo test -p lpe-exchange --quiet` passed 1,594 tests in a single-threaded
+  run used for this repository's order-sensitive MAPI tests; `python
+  tools/check_repository.py` passed in warning mode and no longer reports any
+  `lpe-exchange` dispatch source file; `rg` confirms `execute_rops` delegates
+  through focused `append_*_dispatch_response` helpers and the unsupported
+  fallback stays in `mapi/dispatch/unsupported.rs`.
 - 2026-07-01: Advanced MR-004 by moving top-level Exchange HTTP route assembly
   from `crates/lpe-exchange/src/service.rs` into
   `crates/lpe-exchange/src/service/http_routes.rs` as `exchange_router`.
@@ -8948,6 +9042,27 @@ Resolved coverage-gap notes:
   and no longer reports `crates/lpe-exchange/src/service.rs`. Direct physical
   line counts report `service.rs` at 1,432 lines, `service/ews/folders.rs` at
   752 lines, and `service/ews/items.rs` at 929 lines.
+- 2026-07-02: Completed MR-005's EWS item-operation split by moving the
+  remaining EWS `UpdateItem` operation method from
+  `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/items.rs`, beside the other EWS item
+  handlers. The move preserves contact/event/task/public-folder item update
+  parsing, read/flag message updates through canonical JMAP email flags,
+  public-folder write-access enforcement through the store, audit subjects,
+  SOAP routing, error mapping, and response XML.
+- 2026-07-02 verification for the EWS `UpdateItem` operation split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange update_item --quiet`
+  passed 4 focused tests covering unsupported ids, message read/flag updates,
+  public-folder item updates, and public-folder write-access rejection. A
+  parallel `cargo test -p lpe-exchange --quiet` run produced one order-sensitive
+  hierarchy hard-delete failure that passed immediately in isolation; the
+  single-threaded full suite `$env:RUST_TEST_THREADS='1'; cargo test -p
+  lpe-exchange --quiet` passed 1,594 tests and doc tests. `rg` confirms
+  `update_item` now lives in `service/ews/items.rs` and `service.rs` only
+  retains the `"UpdateItem"` router arm. `python tools/check_repository.py`
+  passed in warning mode and does not report `crates/lpe-exchange/src/service.rs`.
+  Direct physical line counts report `service.rs` at 1,273 lines and
+  `service/ews/items.rs` at 1,092 lines.
 - 2026-07-01: Advanced MR-009/MR-018 by splitting ROP debug diagnostics below
   the production-source threshold. `crates/lpe-exchange/src/mapi/rop/debug.rs`
   now keeps the diagnostics hub and re-exports `debug/folders.rs` for
@@ -9949,6 +10064,19 @@ Resolved coverage-gap notes:
   and `mapi/tables/filters.rs` at 51 lines. `git diff --check` reported only
   CRLF normalization warnings, and a process poll found no lingering cargo/rustc
   processes.
+- 2026-07-02: Advanced MR-007 by moving `RopQueryRows` response construction
+  from `crates/lpe-exchange/src/mapi/tables.rs` into
+  `crates/lpe-exchange/src/mapi/tables/query_rows.rs`. The move is a
+  behavior-preserving table hub extraction: query validation, row family
+  selection, canonical snapshot reads, cursor advancement, categorized content
+  handling, associated/Common Views diagnostics, and row serialization calls
+  remain byte-for-byte equivalent to the prior function body through the same
+  table module API.
+- 2026-07-02 verification for the MAPI query-rows extraction: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange tables --quiet` passed
+  194 focused table tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests. Direct physical line counts report `mapi/tables.rs` at 871 lines and
+  `mapi/tables/query_rows.rs` at 617 lines.
 - 2026-07-01: Started the current MR-008 split by moving named-property data
   shapes and well-known named-property ID mapping from
   `crates/lpe-exchange/src/mapi/properties.rs` into
@@ -10758,3 +10886,290 @@ Resolved coverage-gap notes:
   Direct physical line counts after extraction: `LPE-CT/src/smtp.rs` 3,675
   lines, `LPE-CT/src/smtp/antivirus.rs` 492 lines, and
   `LPE-CT/src/smtp/trace.rs` 247 lines.
+- 2026-07-02: Advanced MR-016 by moving Bayes spam corpus persistence,
+  tokenization, token probability scoring, weighted contribution calculation,
+  and auto-learning from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/bayes.rs`. The slice preserves local-DB versus JSON-file
+  corpus fallback, corpus key, token de-duplication and length/count limits,
+  minimum learned-token threshold, probability clamping, contribution formula,
+  disabled/auto-learn gates, and the existing `Subject`/visible-text training
+  inputs. It deliberately does not move queue writes, custody transitions,
+  quarantine metadata persistence, LPE bridge calls, relay socket I/O,
+  direct-MX target resolution, reputation scoring, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 Bayes split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including Bayes learning, minimum evidence,
+  outbound Bayes quarantine, custody/replay, and bridge tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 3,665 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 3,479 lines,
+  `LPE-CT/src/smtp/bayes.rs` 205 lines, and
+  `LPE-CT/src/smtp/antivirus.rs` 492 lines.
+- 2026-07-02: Advanced MR-016 by moving local reputation store/entry DTOs,
+  reputation key/domain helpers, local-DB/file-backed score loading, and
+  action-based reputation update helpers from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/reputation.rs`. The slice preserves local-DB versus
+  JSON-file fallback, `reputation_entries` key/state behavior,
+  `policy/reputation.json` fallback path, the score formula
+  `accepted - deferred - 2*quarantined - 3*rejected`, sender-domain fallback,
+  and action counters. It deliberately does not move queue writes, custody
+  transitions, quarantine metadata persistence, LPE bridge calls, relay socket
+  I/O, direct-MX target resolution, Bayes scoring, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 reputation split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including reputation score, quarantine/custody,
+  bridge, and outbound handoff tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and still reports `LPE-CT/src/smtp.rs` at 3,547
+  counted source lines. Direct physical line counts after extraction:
+  `LPE-CT/src/smtp.rs` 3,369 lines and `LPE-CT/src/smtp/reputation.rs` 113
+  lines.
+- 2026-07-02: Advanced MR-016 by moving the Hickory-backed
+  `email_auth::DnsResolver` adapter from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/dns.rs`. The slice preserves system resolver construction,
+  TXT/A/AAAA/MX/PTR/existence queries, MX record projection, and the existing
+  textual resolver-error mapping to `NxDomain`, `NoRecords`, or `TempFail`.
+  It deliberately does not move DNSBL policy scoring, direct-MX routing,
+  relay socket I/O, queue writes, custody transitions, quarantine persistence,
+  or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 DNS adapter split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including authentication, DNSBL-adjacent,
+  outbound handoff, custody/replay, and bridge tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 3,469 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 3,300 lines,
+  `LPE-CT/src/smtp/dns.rs` 74 lines, and
+  `LPE-CT/src/smtp/reputation.rs` 113 lines.
+- 2026-07-02: Advanced MR-016 by moving SPF/DKIM/DMARC summary DTOs,
+  disposition mapping, authentication score contribution helpers, and
+  authentication trace construction from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/auth.rs`. The slice preserves the existing
+  `email_auth` evaluation path, SPF/DKIM/DMARC summary strings, temporary
+  failure detection, score contribution values, alignment trace text, and
+  authentication decision-trace entries. It deliberately does not move final
+  inbound policy arbitration, DNSBL/greylist decisions, queue writes, custody
+  transitions, quarantine persistence, relay socket I/O, or canonical mailbox
+  state.
+- 2026-07-02 verification for the MR-016 auth split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including SPF/DKIM disposition mapping,
+  authentication scoring, DMARC final-policy behavior, DNSBL-adjacent policy,
+  outbound handoff, custody/replay, and bridge tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 3,196 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 3,045 lines and
+  `LPE-CT/src/smtp/auth.rs` 265 lines.
+- 2026-07-02: Advanced MR-016 by moving DNSBL query-name construction,
+  DNSBL existence lookup aggregation, greylist entry DTOs, and local-DB/file
+  backed greylist state transitions from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/anti_abuse.rs`. The slice preserves IPv4/IPv6 DNSBL query
+  formatting, resolver failure handling, tempfail-zone tracking, greylist
+  triplet hashing, release-delay behavior, pass-count incrementing, and
+  `greylist_entries` versus `greylist/*.json` fallback behavior. It
+  deliberately does not move final inbound policy arbitration, queue writes,
+  custody transitions, quarantine persistence, relay socket I/O, or canonical
+  mailbox state.
+- 2026-07-02 verification for the MR-016 anti-abuse split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including DNSBL query-name, greylist,
+  inbound policy, outbound handoff, custody/replay, and bridge tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 3,050 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 2,906 lines and
+  `LPE-CT/src/smtp/anti_abuse.rs` 144 lines.
+- 2026-07-02: Advanced MR-016 by moving outbound handoff status projection,
+  custody-replay response reconstruction, outbound route selection, throttle
+  window DTOs, and local-DB/file-backed outbound throttle-window updates from
+  `LPE-CT/src/smtp.rs` into `LPE-CT/src/smtp/outbound_policy.rs`. The slice
+  preserves queue/status mapping, throttle retry-advice text, primary versus
+  secondary upstream fallback, routing-rule sender/recipient matching,
+  `throttle_windows` persistence, and `policy/throttle-*.json` fallback
+  behavior. It deliberately does not move outbound relay socket I/O, direct-MX
+  target delivery, queue writes, custody transitions, quarantine persistence,
+  LPE bridge calls, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 outbound-policy split: `cargo fmt`
+  in `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19
+  ignored env-sensitive/benchmark tests, including outbound throttle,
+  route-selection, outbound handoff, custody/replay, DSN, direct-MX, and bridge
+  tests. `python tools/check_oversized_sources.py` passed in warning mode and
+  still reports `LPE-CT/src/smtp.rs` at 2,836 counted source lines. Direct
+  physical line counts after extraction: `LPE-CT/src/smtp.rs` 2,708 lines and
+  `LPE-CT/src/smtp/outbound_policy.rs` 204 lines.
+- 2026-07-02: Advanced MR-016 by moving outbound relay delivery from
+  `LPE-CT/src/smtp.rs` into `LPE-CT/src/smtp/outbound_delivery.rs`. The slice
+  preserves mutual-TLS unsupported failure shape, upstream target fallback,
+  direct-MX DNS resolution execution, accepted-domain local-core delivery,
+  remote SMTP EHLO/MAIL/RCPT/DATA/final-response handling, enhanced-status
+  parsing, retry advice, DSN projection, and target normalization. It
+  deliberately does not move outbound handoff custody, queue writes, quarantine
+  persistence, trace actions, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 outbound-delivery split:
+  `cargo fmt` in `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests
+  with 19 ignored env-sensitive/benchmark tests, including outbound handoff,
+  direct-MX, DSN, custody/replay, bridge, and quarantine tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 2,219 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 2,112 lines and
+  `LPE-CT/src/smtp/outbound_delivery.rs` 599 lines.
+- 2026-07-02: Advanced MR-016 by moving queue JSON file/path helpers from
+  `LPE-CT/src/smtp.rs` into `LPE-CT/src/smtp/queue_store.rs`. The slice
+  preserves spool path construction, atomic write temp-file naming, queue-file
+  move semantics, JSON load behavior, corrupt queue inspection counting, and
+  trace lookup across `SPOOL_QUEUES`. It deliberately does not move the
+  decisions that choose when a message changes custody, trace action policy,
+  quarantine persistence, relay behavior, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 queue-store split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including queue persistence, custody/replay,
+  trace actions, quarantine listing, outbound handoff, and bridge tests.
+  `python tools/check_oversized_sources.py` passed in warning mode and still
+  reports `LPE-CT/src/smtp.rs` at 2,149 counted source lines. Direct physical
+  line counts after extraction: `LPE-CT/src/smtp.rs` 2,051 lines and
+  `LPE-CT/src/smtp/queue_store.rs` 73 lines.
+- 2026-07-02: Advanced MR-016 by moving quarantine listing and local
+  quarantine metadata projection/persistence/removal from `LPE-CT/src/smtp.rs`
+  into `LPE-CT/src/smtp/quarantine.rs`. The slice preserves DB-first listing
+  with spool fallback, query normalization and filtering, quarantine summary
+  ordering/limits, `quarantine_messages` insert/update/delete SQL, search-text
+  construction, and warning-only metadata persistence failures. It
+  deliberately does not move trace retry/release/delete policy, queue custody
+  decisions, relay behavior, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 quarantine split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including quarantine listing, trace actions,
+  custody/replay, outbound handoff, bridge, and queue persistence tests.
+  `python tools/check_oversized_sources.py` passed in warning mode and still
+  reports `LPE-CT/src/smtp.rs` at 1,815 counted source lines. Direct physical
+  line counts after extraction: `LPE-CT/src/smtp.rs` 1,732 lines and
+  `LPE-CT/src/smtp/quarantine.rs` 329 lines.
+- 2026-07-02: Advanced MR-016 by moving trace detail lookup and
+  retry/release/delete trace action policy from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/trace_actions.rs`. The slice preserves trace eligibility
+  rules, target queue mapping, stale execution-state clearing, audit appends,
+  quarantine metadata removal on quarantine exits, and delete restrictions for
+  historical queues. It deliberately does not move queue JSON file helpers,
+  quarantine metadata persistence SQL, relay behavior, or canonical mailbox
+  state.
+- 2026-07-02 verification for the MR-016 trace-action split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including retry/release/delete trace action,
+  quarantine, custody/replay, outbound handoff, and bridge tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reported
+  `LPE-CT/src/smtp.rs` at 1,679 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 1,604 lines and
+  `LPE-CT/src/smtp/trace_actions.rs` 131 lines.
+- 2026-07-02: Completed MR-016's `smtp.rs` source-size target by moving
+  inbound policy evaluation from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/inbound_policy.rs`. The slice preserves reputation, Magika,
+  antivirus, Bayes, DNSBL, greylist, SPF/DKIM/DMARC score accumulation, final
+  defer/reject/quarantine/accept arbitration, decision-trace text, and verdict
+  application to queued messages. It deliberately leaves SMTP command handling,
+  queue custody decisions, outbound handoff custody, relay behavior, and
+  canonical mailbox state outside the policy module.
+- 2026-07-02 verification for the MR-016 inbound-policy split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including inbound policy, SPF/DKIM/DMARC
+  scoring, DNSBL/greylist, quarantine, custody/replay, outbound handoff, and
+  bridge tests. `python tools/check_oversized_sources.py` passed in warning
+  mode and no longer reports `LPE-CT/src/smtp.rs`; direct physical line counts:
+  `LPE-CT/src/smtp.rs` 1,214 lines and `LPE-CT/src/smtp/inbound_policy.rs`
+  393 lines.
+- 2026-07-02: Started MR-017 by extracting management and integration request
+  authentication from `LPE-CT/src/main.rs` into
+  `LPE-CT/src/management_auth.rs`, extracting readiness and HA probe helpers
+  into `LPE-CT/src/readiness.rs`, and extracting dashboard environment
+  overrides, validation/defaults, accepted-domain normalization, LPE probe
+  helpers, local technical-store normalization, and management bootstrap into
+  `LPE-CT/src/dashboard_config.rs`. The slice preserves CLI/env variable
+  names, HTTP routes, bearer/session auth, integration signing/replay checks,
+  readiness response shape, dashboard default values, LPE bridge probes, and
+  the LPE-CT boundary that forbids canonical mailbox/collaboration state in
+  perimeter technical stores.
+- 2026-07-02 verification for the MR-017 auth/readiness/config split:
+  `cargo fmt` in `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests
+  with 19 ignored env-sensitive/benchmark tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/main.rs` at 2,698 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/main.rs` 2,518 lines,
+  `LPE-CT/src/dashboard_config.rs` 1,038 lines,
+  `LPE-CT/src/readiness.rs` 367 lines, and
+  `LPE-CT/src/management_auth.rs` 179 lines.
+- 2026-07-02: Completed MR-017's `main.rs` source-size target by moving the
+  HTTP route handler block from `LPE-CT/src/main.rs` into
+  `LPE-CT/src/http_routes.rs`. The route table, endpoint paths, management
+  authorization checks, integration outbound handoff path, audit events,
+  quarantine/trace actions, reporting endpoints, system diagnostic endpoints,
+  public TLS upload/select/delete behavior, and LPE-CT perimeter custody
+  boundary are preserved; startup wiring, state persistence, TLS parsing, and
+  scheduler wiring remain in `main.rs` for a later semantic split if needed.
+- 2026-07-02 verification for the MR-017 route-handler split: `cargo fmt` in
+  `LPE-CT`; `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and no longer reports `LPE-CT/src/main.rs`; direct
+  physical line counts: `LPE-CT/src/main.rs` 1,373 lines,
+  `LPE-CT/src/http_routes.rs` 1,170 lines, and
+  `LPE-CT/src/dashboard_config.rs` 1,038 lines.
+- 2026-07-02: Completed MR-004's EWS route/dispatch target by moving the EWS
+  SOAP operation router from `crates/lpe-exchange/src/service.rs` into
+  `crates/lpe-exchange/src/service/ews/dispatch.rs`. The slice preserves the
+  existing `ExchangeService::handle` entry point, EWS authentication, request
+  body decoding, operation-name extraction, every operation dispatch arm,
+  unsupported-operation behavior, SOAP response wrapping, and
+  `EwsResponseDebug` response metadata. Canonical mailbox, contact, calendar,
+  task, submission, and durable Outlook metadata mutations remain in the
+  existing focused operation/storage modules.
+- 2026-07-02 verification for the MR-004 EWS dispatch split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange ews --quiet` passed 215
+  focused EWS tests; `$env:RUST_TEST_THREADS='1'; cargo test -p lpe-exchange
+  --quiet` passed 1,594 tests. `python tools/check_repository.py` passed in
+  warning mode and no longer reports `crates/lpe-exchange/src/service.rs`;
+  direct physical line counts: `crates/lpe-exchange/src/service.rs` 1,018
+  lines and `crates/lpe-exchange/src/service/ews/dispatch.rs` 263 lines.
+- 2026-07-02: Completed MR-034's RCA tooling source-size target by moving
+  primitive helpers from `tools/rca_outlook_connectivity_check.py` into focused
+  standard-library-only modules under `tools/rca_outlook/`. The split keeps
+  Autodiscover/JMAP/EWS/MAPI/RPC probe flow, mutating-fixture gates, output
+  messages, and Outlook publication-readiness interpretation in the main
+  checker while moving HTTP/cookie helpers, EWS envelope/call helpers,
+  MAPI/RPC/NSPI byte codecs, and CLI parser construction.
+- 2026-07-02 verification for the MR-034 RCA tooling split: `python -m
+  py_compile tools/rca_outlook_connectivity_check.py tools/rca_outlook/cli.py
+  tools/rca_outlook/http.py tools/rca_outlook/ews.py tools/rca_outlook/mapi.py`
+  passed; `python tools/rca_outlook_connectivity_check.py --help` printed the
+  expected CLI options; `python tools/check_repository.py` passed in warning
+  mode and no longer reports `tools/rca_outlook_connectivity_check.py`. Raw
+  file-line counts after extraction: `tools/rca_outlook_connectivity_check.py`
+  1,454 lines, `tools/rca_outlook/mapi.py` 206 lines,
+  `tools/rca_outlook/http.py` 130 lines, `tools/rca_outlook/cli.py` 109 lines,
+  and `tools/rca_outlook/ews.py` 57 lines.
+- 2026-07-02: Completed MR-033's Debian update-script source-size target by
+  moving the inline idempotent LPE 0.4 schema compatibility SQL from
+  `installation/debian-trixie/update-lpe.sh` into
+  `installation/debian-trixie/update-lpe-0.4-compat.sql`. The update script
+  still performs the same baseline schema/version/table checks before applying
+  compatibility SQL, still runs the same post-update shape validation queries
+  afterward, and still rebuilds Rust, Magika, web assets, systemd, and nginx in
+  the original order. The extracted SQL body is unchanged except for being read
+  by `psql -f` instead of a shell heredoc.
+- 2026-07-02 verification for the MR-033 Debian update-script split: `python
+  tools/check_repository.py` passed in warning mode and no longer reports
+  `installation/debian-trixie/update-lpe.sh`; direct physical line counts:
+  `installation/debian-trixie/update-lpe.sh` 328 lines and
+  `installation/debian-trixie/update-lpe-0.4-compat.sql` 1,347 lines. `bash -n
+  installation/debian-trixie/update-lpe.sh` could not run in this Windows
+  workspace because the only available `bash.exe` is the WindowsApps shim and
+  returned `Bash/Service/CreateInstance/E_ACCESSDENIED`.
+- 2026-07-02: Completed MR-032's LPE-CT i18n source-size target by moving the
+  large localized override catalog from `LPE-CT/web/modules/i18n/messages.js`
+  into `LPE-CT/web/modules/i18n/localized-messages.js`. The base English
+  catalog, locale labels, supported-locale list, storage key, and public
+  `localizedMessages` export from `messages.js` are preserved, so
+  `modules/i18n/index.js` keeps the same import surface and fallback behavior.
+- 2026-07-02 verification for the MR-032 i18n split: `node --check
+  LPE-CT/web/modules/i18n/messages.js`; `node --check
+  LPE-CT/web/modules/i18n/localized-messages.js`; and a dynamic Node module
+  import of `messages.js` confirmed `baseMessages` plus `localizedMessages`
+  still export `fr,de,it,es`. `python tools/check_repository.py` passed in
+  warning mode and no longer reports `LPE-CT/web/modules/i18n/messages.js`.
+  Direct physical line counts: `messages.js` 722 lines and
+  `localized-messages.js` 1,390 lines.

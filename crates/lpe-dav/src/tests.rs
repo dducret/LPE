@@ -197,6 +197,7 @@ impl FakeStore {
             phone: String::new(),
             team: String::new(),
             notes: String::new(),
+            ..AccessibleContact::default()
         }
     }
 
@@ -450,6 +451,7 @@ impl DavStore for FakeStore {
                 phone: input.phone,
                 team: input.team,
                 notes: input.notes,
+                ..AccessibleContact::default()
             };
             contacts.retain(|entry| entry.id != contact.id);
             contacts.push(contact.clone());
@@ -546,6 +548,7 @@ impl DavStore for FakeStore {
                     phone: input.phone,
                     team: input.team,
                     notes: input.notes,
+                    ..AccessibleContact::default()
                 };
                 contacts.retain(|entry| entry.id != contact.id);
                 contacts.push(contact.clone());

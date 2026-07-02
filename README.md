@@ -70,6 +70,12 @@ For installation and reset workflows on `Debian Trixie`, see [installation/READM
 
 ## Repository Checks
 
+Run the lightweight repository maintenance checks before review:
+
+```sh
+python3 tools/check_repository.py
+```
+
 Report tracked production source files above the 1,500-line threshold:
 
 ```sh
@@ -84,6 +90,13 @@ Use `--fail` when the check should exit non-zero for CI enforcement:
 
 ```sh
 python3 tools/check_oversized_sources.py --fail
+```
+
+The repository wrapper exposes the same enforcement mode as
+`--fail-oversized`:
+
+```sh
+python3 tools/check_repository.py --fail-oversized
 ```
 
 Use `--include-tests` when reviewing oversized test files as part of a planned

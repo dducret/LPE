@@ -168,6 +168,29 @@ function createForm(id, fields) {
 }
 
 function createFetchStub() {
+  const localIsoDaysAgo = (daysAgo, hour, minute, second = 0) => {
+    const date = new Date();
+    date.setHours(hour, minute, second, 0);
+    date.setDate(date.getDate() - daysAgo);
+    return date.toISOString();
+  };
+  const formatHistoryExpectation = (value) => {
+    const date = new Date(value);
+    const pad = (part) => String(part).padStart(2, "0");
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate()),
+    ].join("-") + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  };
+  const digestRunAt = localIsoDaysAgo(1, 10, 0);
+  const digestNextAt = localIsoDaysAgo(1, 10, 30);
+  const hostTime = localIsoDaysAgo(1, 10, 6);
+  const auditTime = localIsoDaysAgo(1, 10, 5);
+  const quarantineReceivedAt = localIsoDaysAgo(1, 10, 3);
+  const historyLatestAt = localIsoDaysAgo(1, 9, 50);
+  const spamLatestAt = localIsoDaysAgo(2, 9, 50);
+  const traceEventAt = localIsoDaysAgo(1, 10, 4);
   const dashboard = {
     site: {
       node_name: "ct-node-1",
@@ -182,6 +205,7 @@ function createFetchStub() {
     relay: {
       primary_upstream: "lpe-core-a",
       secondary_upstream: "lpe-core-b",
+      outbound_ehlo_name: "mx.example.test",
       core_delivery_base_url: "https://lpe-core.internal",
       mutual_tls_required: false,
       fallback_to_hold_queue: true,
@@ -209,8 +233,8 @@ function createFetchStub() {
       digest_interval_minutes: 30,
       digest_max_items: 25,
       history_retention_days: 14,
-      last_digest_run_at: "2026-05-01T10:00:00Z",
-      next_digest_run_at: "2026-05-01T10:30:00Z",
+      last_digest_run_at: digestRunAt,
+      next_digest_run_at: digestNextAt,
       domain_defaults: [{ domain: "example.test", recipients: ["ops@example.test"] }],
       user_overrides: [{ mailbox: "security@example.test", recipient: "security@example.test", enabled: true }],
     },
@@ -267,7 +291,7 @@ function createFetchStub() {
       delivery_attempts_last_hour: 12,
     },
     system: {
-      host_time: "2026-05-01T10:06:00Z",
+      host_time: hostTime,
       hostname: "ct-node-1",
       uptime_seconds: 172800,
       cpu_utilization_percent: 18.5,
@@ -288,7 +312,7 @@ function createFetchStub() {
         },
       ],
     },
-    audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: "2026-05-01T10:05:00Z", details: "Updated policy." }],
+    audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: auditTime, details: "Updated policy." }],
   };
 
   const routes = { relay_targets: ["lpe-core-a"] };
@@ -342,7 +366,7 @@ function createFetchStub() {
     {
       trace_id: "trace-1",
       subject: "Suspicious inbound",
-      received_at: "2026-05-01T10:03:00Z",
+      received_at: quarantineReceivedAt,
       mail_from: "sender@example.test",
       rcpt_to: ["user@example.test"],
       status: "quarantined",
@@ -370,7 +394,7 @@ function createFetchStub() {
       {
         trace_id: "lpe-ct-in-177764830abcdef",
         subject: "Outbound delivery",
-        latest_event_at: "2026-05-01T09:50:00Z",
+        latest_event_at: historyLatestAt,
         mail_from: "<ops@example.test> SIZE=2048",
         rcpt_to: ["dest@example.org"],
         peer: "203.0.113.44:587",
@@ -387,7 +411,7 @@ function createFetchStub() {
       {
         trace_id: "trace-3",
         subject: "Spam inbound",
-        latest_event_at: "2026-04-30T09:50:00Z",
+        latest_event_at: spamLatestAt,
         mail_from: "spam@example.test",
         rcpt_to: ["dest@example.org"],
         queue: "quarantine",
@@ -409,7 +433,7 @@ function createFetchStub() {
     current: quarantine[0],
     history: [
       {
-        timestamp: "2026-05-01T10:04:00Z",
+        timestamp: traceEventAt,
         queue: "quarantine",
         status: "quarantined",
         reason: "spam threshold",
@@ -453,6 +477,7 @@ function createFetchStub() {
     throw new Error(`Unexpected fetch url: ${url}`);
   }
   fetchStub.requests = requests;
+  fetchStub.expectedHistoryTimestamp = formatHistoryExpectation(historyLatestAt);
   return fetchStub;
 }
 
@@ -718,7 +743,7 @@ async function main() {
   assert.match(elements["history-list"].innerHTML, /Client Address/);
   assert.match(elements["history-list"].innerHTML, /data-sort-key="date"/);
   assert.match(elements["history-list"].innerHTML, /data-history-resizer/);
-  assert.match(elements["history-list"].innerHTML, /2026-05-01 \d{2}:50:00/);
+  assert.match(elements["history-list"].innerHTML, new RegExp(fetchStub.expectedHistoryTimestamp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(elements["history-list"].innerHTML, /203\.0\.113\.44/);
   assert.doesNotMatch(elements["history-list"].innerHTML, /203\.0\.113\.44:587/);
   assert.match(elements["history-list"].innerHTML, /ops@example\.test/);

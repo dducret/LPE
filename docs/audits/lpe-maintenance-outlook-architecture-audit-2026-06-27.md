@@ -245,6 +245,36 @@ still incomplete but better tracked:
   already shown failures before hanging, so this sweep deliberately avoided
   launching another cargo test until that process contention is cleared.
 
+### Verification Sweep - 2026-07-02
+
+The current sweep refreshes the earlier non-cargo audit and clears the old
+`lpe-exchange` cargo-test blocker:
+
+- No `cargo`, `rustc`, `rustdoc`, `lpe_ct`, `lpe_exchange`, or `lpe_domain`
+  test process was alive before the cargo sweep.
+- `python tools/check_repository.py` exits successfully in warning mode and
+  reports 540 checked production source files. The current oversized production
+  offender list contains only `crates/lpe-storage/sql/schema.sql` at 3,455
+  lines. That schema file was deliberately left as one canonical SQL program
+  because install/update tooling and Rust schema-drift paths consume it as a
+  single ordered schema source.
+- The primitive helper scan still finds SHA-256, HMAC, and lowercase-hex
+  helper definitions centralized in `crates/lpe-domain/src/crypto.rs`.
+- The normalization helper scan still shows canonical definitions in
+  `crates/lpe-domain/src/normalization.rs`. Remaining
+  `crates/lpe-storage/src/util.rs` and `crates/lpe-storage/src/calendar.rs`
+  functions are delegated compatibility wrappers over `lpe-domain`, not
+  independent normalization logic.
+- The parity-gap scan still finds receive-folder, spooler advisory,
+  rule/deferred-action, and auxiliary stream gaps documented as canonical-model
+  or unsupported-without-state boundaries, with tests covering those parseable
+  protocol behaviors.
+- `cargo test --quiet` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive or benchmark tests.
+- `cargo test -p lpe-exchange --quiet` passed 1,594 tests and doc tests. This
+  replaces the earlier stale note that full `lpe-exchange` cargo verification
+  was unavailable because of a live prior test process.
+
 ## Instructions Or Documentation That Conflict With Full Outlook Functionality
 
 These do not all mean the current behavior is wrong. Some are prudent current
@@ -267,7 +297,9 @@ classic Outlook desktop Exchange route.
 
 ## Oversized Files
 
-The largest files are concentrated in the Outlook-critical path:
+This table is the original audit baseline. The current oversized-source state
+is recorded in the 2026-07-02 verification sweep above; several entries below
+have since been split below the production-source threshold.
 
 | Lines | File | Audit note |
 | ---: | --- | --- |

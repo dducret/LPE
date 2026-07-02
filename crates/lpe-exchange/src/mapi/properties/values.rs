@@ -62,9 +62,9 @@ fn mapi_value_to_json(value: &MapiValue) -> serde_json::Value {
         }
         MapiValue::String(value) => serde_json::json!({"type": "string", "value": value}),
         MapiValue::Binary(value) => {
-            serde_json::json!({"type": "binary", "value": bytes_to_hex(value)})
+            serde_json::json!({"type": "binary", "value": hex_lower(value)})
         }
-        MapiValue::Guid(value) => serde_json::json!({"type": "guid", "value": bytes_to_hex(value)}),
+        MapiValue::Guid(value) => serde_json::json!({"type": "guid", "value": hex_lower(value)}),
         MapiValue::Error(value) => serde_json::json!({"type": "error", "value": value}),
         MapiValue::MultiI16(values) => serde_json::json!({"type": "multi_i16", "value": values}),
         MapiValue::MultiI32(values) => serde_json::json!({"type": "multi_i32", "value": values}),
@@ -74,11 +74,11 @@ fn mapi_value_to_json(value: &MapiValue) -> serde_json::Value {
         }
         MapiValue::MultiBinary(values) => serde_json::json!({
             "type": "multi_binary",
-            "value": values.iter().map(|value| bytes_to_hex(value)).collect::<Vec<_>>()
+            "value": values.iter().map(hex_lower).collect::<Vec<_>>()
         }),
         MapiValue::MultiGuid(values) => serde_json::json!({
             "type": "multi_guid",
-            "value": values.iter().map(|value| bytes_to_hex(value)).collect::<Vec<_>>()
+            "value": values.iter().map(hex_lower).collect::<Vec<_>>()
         }),
     }
 }
@@ -144,10 +144,6 @@ fn json_hex_values(value: &serde_json::Value) -> Option<Vec<Vec<u8>>> {
         .iter()
         .map(|value| hex_to_bytes(value.as_str()?))
         .collect()
-}
-
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    hex_lower(bytes)
 }
 
 pub(super) fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {

@@ -33,6 +33,10 @@ const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const ADMIN_PROVISIONING_STORAGE: &str = include_str!("admin/provisioning.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
+const EXCHANGE_STORE_MAPI_METADATA: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
+const EXCHANGE_STORE_HELPERS_MAPI: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/helpers_mapi.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
 const EXCHANGE_MAPI_CALENDAR_TESTS: &str =
     include_str!("../../lpe-exchange/src/tests/mapi_over_http/calendar.rs");
@@ -54,6 +58,8 @@ const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
+const UPDATE_LPE_COMPAT_SQL: &str =
+    include_str!("../../../installation/debian-trixie/update-lpe-0.4-compat.sql");
 const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
@@ -108,6 +114,15 @@ fn assert_source_contains_all(name: &str, source: &str, needles: &[&str]) {
     for needle in needles {
         assert!(
             source.contains(needle),
+            "{name} is missing expected canonical adapter coverage: {needle}"
+        );
+    }
+}
+
+fn assert_sources_contain_all(name: &str, sources: &[&str], needles: &[&str]) {
+    for needle in needles {
+        assert!(
+            sources.iter().any(|source| source.contains(needle)),
             "{name} is missing expected canonical adapter coverage: {needle}"
         );
     }
@@ -421,8 +436,12 @@ fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
         "MAPI folder permission writes must use canonical mailbox_delegation_grants with audit and change-log rows"
     );
     assert!(
-        EXCHANGE_STORE.contains("set_mailbox_folder_delegation_grant")
-            && EXCHANGE_STORE.contains("fetch_mapi_folder_permissions")
+        [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA]
+            .iter()
+            .any(|source| source.contains("set_mailbox_folder_delegation_grant"))
+            && [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA]
+                .iter()
+                .any(|source| source.contains("fetch_mapi_folder_permissions"))
             && EXCHANGE_MAPI_PERMISSIONS_TESTS
                 .contains("mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants"),
         "MAPI permission ROPs must call the canonical mailbox delegation store path"
@@ -811,9 +830,13 @@ fn mapi_named_properties_and_custom_values_are_durable() {
 
 #[test]
 fn mapi_property_store_runtime_sql_matches_durable_schema() {
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "lpe-exchange store",
-        EXCHANGE_STORE,
+        &[
+            EXCHANGE_STORE,
+            EXCHANGE_STORE_MAPI_METADATA,
+            EXCHANGE_STORE_HELPERS_MAPI,
+        ],
         &[
             "fn fetch_or_allocate_mapi_named_property_ids",
             "fn fetch_mapi_named_properties_by_ids",
@@ -825,7 +848,10 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
             "fn fetch_mapi_custom_property_values",
             "fn delete_mapi_custom_property_values",
             "INSERT INTO mapi_custom_property_values",
-            "ON CONFLICT (\n                        tenant_id,\n                        account_id,\n                        object_kind,\n                        canonical_id,\n                        property_tag,\n                        property_type",
+            "ON CONFLICT (",
+            "canonical_id,",
+            "property_tag,",
+            "property_type",
             "SELECT property_tag, property_type, property_value",
             "DELETE FROM mapi_custom_property_values",
         ],
@@ -860,9 +886,9 @@ fn mapi_profile_settings_are_canonical_account_settings() {
         ],
     );
 
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "lpe-exchange store",
-        EXCHANGE_STORE,
+        &[EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA],
         &[
             "fn fetch_mapi_ipm_subtree_ost_id",
             "Storage::fetch_mapi_ipm_subtree_ost_id",
@@ -889,9 +915,9 @@ fn mapi_folder_profile_properties_are_bounded_profile_state() {
         );
     }
 
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "lpe-exchange folder profile property store",
-        EXCHANGE_STORE,
+        &[EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA],
         &[
             "fn fetch_mapi_folder_profile_property_values",
             "fn upsert_mapi_folder_profile_property_values",
@@ -920,8 +946,17 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
     }
 
     assert_source_contains_all(
-        "update-lpe.sh recoverable-items compatibility patch",
+        "update-lpe.sh compatibility SQL dispatcher",
         UPDATE_LPE_SCRIPT,
+        &[
+            "update-lpe-0.4-compat.sql",
+            "psql \"${DATABASE_URL}\" -v ON_ERROR_STOP=1 -f",
+        ],
+    );
+
+    assert_sources_contain_all(
+        "update-lpe.sh recoverable-items compatibility patch",
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "CREATE TABLE IF NOT EXISTS public.recoverable_items",
             "ADD COLUMN IF NOT EXISTS recoverable_items_retention_days",
@@ -948,18 +983,18 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "recoverable_item",
         ],
     );
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "update-lpe.sh MAPI custom property object-kind compatibility patch",
-        UPDATE_LPE_SCRIPT,
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "mapi_custom_property_values_object_kind_check",
             "public_folder_item",
             "ALTER TABLE public.mapi_custom_property_values",
         ],
     );
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "update-lpe.sh MAPI associated configuration compatibility patch",
-        UPDATE_LPE_SCRIPT,
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "ADD COLUMN IF NOT EXISTS save_stamp BIGINT NOT NULL DEFAULT 0",
             "mapi_navigation_shortcuts_save_stamp_check",
@@ -975,9 +1010,9 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "IPM.Microsoft.PendingChange.MigrateFlags",
         ],
     );
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "update-lpe.sh MAPI source key uniqueness compatibility patch",
-        UPDATE_LPE_SCRIPT,
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "mapi_object_identities_active_source_key_uidx",
             "decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')",
@@ -1025,9 +1060,9 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         ],
     );
 
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "update-lpe.sh public-folder compatibility patch",
-        UPDATE_LPE_SCRIPT,
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "CREATE TABLE IF NOT EXISTS public.public_folder_trees",
             "CREATE TABLE IF NOT EXISTS public.public_folders",
@@ -1042,9 +1077,9 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "canonical_change_journal_category_check",
         ],
     );
-    assert_source_contains_all(
+    assert_sources_contain_all(
         "update-lpe.sh EWS compatibility SQL model patch",
-        UPDATE_LPE_SCRIPT,
+        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
         &[
             "CREATE TABLE IF NOT EXISTS public.account_client_configurations",
             "CREATE TABLE IF NOT EXISTS public.delegate_preferences",
@@ -1936,8 +1971,12 @@ fn recipient_suggestions_contact_delete_clears_only_contact_id() {
         "recipient_suggestions contact FK must not use composite-column SET NULL"
     );
     assert!(
-        UPDATE_LPE_SCRIPT.contains("ADD CONSTRAINT recipient_suggestions_contact_fk")
-            && UPDATE_LPE_SCRIPT.contains("ON DELETE SET NULL (contact_id)"),
+        [UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL]
+            .iter()
+            .any(|source| source.contains("ADD CONSTRAINT recipient_suggestions_contact_fk"))
+            && [UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL]
+                .iter()
+                .any(|source| source.contains("ON DELETE SET NULL (contact_id)")),
         "update-lpe.sh must replace existing recipient_suggestions contact FKs with the column-specific SET NULL action"
     );
 }
