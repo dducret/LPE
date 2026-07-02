@@ -458,3 +458,137 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
         }
     }
 }
+
+impl MapiValue {
+    pub(in crate::mapi) fn as_i64(&self) -> Option<i64> {
+        match self {
+            MapiValue::Bool(value) => Some(i64::from(*value)),
+            MapiValue::I16(value) => Some(i64::from(*value)),
+            MapiValue::I32(value) => Some(i64::from(*value)),
+            MapiValue::I64(value) => Some(*value),
+            MapiValue::U32(value) => Some(i64::from(*value)),
+            MapiValue::U64(value) => i64::try_from(*value).ok(),
+            MapiValue::F64(_)
+            | MapiValue::String(_)
+            | MapiValue::Binary(_)
+            | MapiValue::Guid(_)
+            | MapiValue::Error(_)
+            | MapiValue::MultiI16(_)
+            | MapiValue::MultiI32(_)
+            | MapiValue::MultiI64(_)
+            | MapiValue::MultiString(_)
+            | MapiValue::MultiBinary(_)
+            | MapiValue::MultiGuid(_) => None,
+        }
+    }
+
+    pub(in crate::mapi) fn as_bool(&self) -> Option<bool> {
+        match self {
+            MapiValue::Bool(value) => Some(*value),
+            MapiValue::I16(value) => Some(*value != 0),
+            MapiValue::I32(value) => Some(*value != 0),
+            MapiValue::I64(value) => Some(*value != 0),
+            MapiValue::U32(value) => Some(*value != 0),
+            MapiValue::U64(value) => Some(*value != 0),
+            MapiValue::F64(value) => Some(f64::from_bits(*value) != 0.0),
+            MapiValue::String(_)
+            | MapiValue::Binary(_)
+            | MapiValue::Guid(_)
+            | MapiValue::Error(_)
+            | MapiValue::MultiI16(_)
+            | MapiValue::MultiI32(_)
+            | MapiValue::MultiI64(_)
+            | MapiValue::MultiString(_)
+            | MapiValue::MultiBinary(_)
+            | MapiValue::MultiGuid(_) => None,
+        }
+    }
+
+    pub(in crate::mapi) fn as_text(&self) -> Option<&str> {
+        match self {
+            MapiValue::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(in crate::mapi) fn into_text(self) -> Option<String> {
+        match self {
+            MapiValue::Bool(value) => Some(value.to_string()),
+            MapiValue::I16(value) => Some(value.to_string()),
+            MapiValue::I32(value) => Some(value.to_string()),
+            MapiValue::I64(value) => Some(value.to_string()),
+            MapiValue::U32(value) => Some(value.to_string()),
+            MapiValue::U64(value) => Some(value.to_string()),
+            MapiValue::F64(value) => Some(f64::from_bits(value).to_string()),
+            MapiValue::String(value) => Some(value),
+            MapiValue::Binary(_)
+            | MapiValue::Guid(_)
+            | MapiValue::Error(_)
+            | MapiValue::MultiI16(_)
+            | MapiValue::MultiI32(_)
+            | MapiValue::MultiI64(_)
+            | MapiValue::MultiString(_)
+            | MapiValue::MultiBinary(_)
+            | MapiValue::MultiGuid(_) => None,
+        }
+    }
+
+    pub(in crate::mapi) fn into_u32(self) -> Option<u32> {
+        match self {
+            MapiValue::Bool(value) => Some(u32::from(value)),
+            MapiValue::I16(value) => u32::try_from(value).ok(),
+            MapiValue::I32(value) => u32::try_from(value).ok(),
+            MapiValue::I64(value) => u32::try_from(value).ok(),
+            MapiValue::U32(value) => Some(value),
+            MapiValue::U64(value) => u32::try_from(value).ok(),
+            MapiValue::Error(value) => Some(value),
+            MapiValue::F64(value) => {
+                let value = f64::from_bits(value);
+                if value.is_finite() && value >= 0.0 && value <= f64::from(u32::MAX) {
+                    Some(value as u32)
+                } else {
+                    None
+                }
+            }
+            MapiValue::String(_)
+            | MapiValue::Binary(_)
+            | MapiValue::Guid(_)
+            | MapiValue::MultiI16(_)
+            | MapiValue::MultiI32(_)
+            | MapiValue::MultiI64(_)
+            | MapiValue::MultiString(_)
+            | MapiValue::MultiBinary(_)
+            | MapiValue::MultiGuid(_) => None,
+        }
+    }
+
+    pub(in crate::mapi) fn size(&self) -> usize {
+        match self {
+            MapiValue::Bool(_) => 1,
+            MapiValue::I16(_) => 2,
+            MapiValue::I32(_) | MapiValue::U32(_) => 4,
+            MapiValue::I64(_) | MapiValue::U64(_) | MapiValue::F64(_) => 8,
+            MapiValue::String(value) => value.encode_utf16().count() * 2,
+            MapiValue::Binary(value) => value.len(),
+            MapiValue::Guid(_) => 16,
+            MapiValue::Error(_) => 4,
+            MapiValue::MultiI16(values) => 4 + values.len() * 2,
+            MapiValue::MultiI32(values) => 4 + values.len() * 4,
+            MapiValue::MultiI64(values) => 4 + values.len() * 8,
+            MapiValue::MultiString(values) => {
+                4 + values
+                    .iter()
+                    .map(|value| value.encode_utf16().count() * 2 + 2)
+                    .sum::<usize>()
+            }
+            MapiValue::MultiBinary(values) => {
+                4 + values.iter().map(|value| 2 + value.len()).sum::<usize>()
+            }
+            MapiValue::MultiGuid(values) => 4 + values.len() * 16,
+        }
+    }
+
+    pub(in crate::mapi) fn cmp_value(&self, other: &MapiValue) -> Ordering {
+        format!("{self:?}").cmp(&format!("{other:?}"))
+    }
+}

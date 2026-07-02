@@ -262,3 +262,67 @@ pub(in crate::mapi) fn sent_representing_entry_id(email: &JmapEmail) -> Vec<u8> 
     };
     super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
+
+pub(in crate::mapi) fn hierarchy_display_name(
+    hierarchy_values: &[(u32, MapiValue)],
+    property_values: &[(u32, MapiValue)],
+) -> Option<String> {
+    hierarchy_values
+        .iter()
+        .chain(property_values.iter())
+        .rev()
+        .find_map(|(tag, value)| {
+            (*tag == PID_TAG_DISPLAY_NAME_W)
+                .then(|| value.as_text().map(str::trim).map(str::to_string))
+                .flatten()
+        })
+        .filter(|value| !value.is_empty())
+}
+
+pub(in crate::mapi) fn imported_hierarchy_existing_mailbox<'a>(
+    hierarchy_values: &[(u32, MapiValue)],
+    display_name: &str,
+    mailboxes: &'a [JmapMailbox],
+) -> Option<&'a JmapMailbox> {
+    let source_key = hierarchy_values
+        .iter()
+        .find_map(|(tag, value)| match (tag, value) {
+            (tag, MapiValue::Binary(value)) if *tag == PID_TAG_SOURCE_KEY => Some(value.as_slice()),
+            _ => None,
+        });
+    if let Some(source_key) = source_key {
+        if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
+            mapi_mailstore::source_key_for_mailbox_folder(mailbox) == source_key
+                || mapi_mailstore::source_key_for_uuid(&mailbox.id) == source_key
+        }) {
+            return Some(mailbox);
+        }
+    }
+
+    mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name.eq_ignore_ascii_case(display_name))
+}
+
+pub(in crate::mapi) fn system_folder_display_name(display_name: &str) -> bool {
+    matches!(
+        display_name.trim().to_ascii_lowercase().as_str(),
+        "inbox"
+            | "drafts"
+            | "sent"
+            | "sent items"
+            | "deleted"
+            | "deleted items"
+            | "trash"
+            | "outbox"
+            | "sync issues"
+            | "conflicts"
+            | "local failures"
+            | "server failures"
+            | "junk e-mail"
+            | "junk email"
+            | "rss feeds"
+            | "archive"
+            | "conversation history"
+    )
+}

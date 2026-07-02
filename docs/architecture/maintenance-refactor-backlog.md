@@ -67,15 +67,15 @@ working tree proves, not the desired end state.
 | MR-005 | Partial | EWS mail, contact, calendar recurrence, task, reminder, room, rules, attachment, OOF, user-configuration, MailTips, Mail Apps, and ConvertId parser/helper slices are recorded in progress notes. | Continue extracting EWS item-family parsers and handlers while preserving canonical mutations and SOAP responses. |
 | MR-006 | Complete for threshold split | `crates/lpe-exchange/src/store.rs` is below the 1,500-line production-source threshold. `store/types.rs` owns Exchange/MAPI/EWS store DTOs, `store/implementation.rs` keeps the `Storage` trait implementation wiring, and `store/storage_impl/` contains focused method/helper fragments split at existing method boundaries. Canonical mutation calls still delegate to the same `lpe-storage` APIs; no trait method semantics changed. | Keep future Exchange storage behavior additions in focused store implementation fragments; a future semantic pass can replace the compile-in fragments with narrower storage-family traits only if fake stores and protocol adapters stay aligned. |
 | MR-007 | Partial | `mapi/tables/columns.rs` now owns pure default table column/property-tag lists, while row serialization and table behavior remain in `mapi/tables.rs`. Focused table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `tables.rs` by row families and prove table row output is unchanged. |
-| MR-008 | Partial | `mapi/properties/named.rs` owns named-property data shapes and well-known ID mapping, `folder.rs` owns folder/logon bootstrap property helpers, `values.rs` owns `MapiValue`, and `restrictions.rs` owns `MapiSortOrder`/`MapiRestriction`. Focused property/restriction/table tests and full `lpe-exchange` verification are recorded in progress notes. | Continue splitting `properties.rs` and preserve property IDs, encoding, named properties, and custom values. |
+| MR-008 | Complete for threshold split | `mapi/properties.rs` is below the 1,500-line production-source threshold. `mapi/properties/named.rs` owns named-property data shapes and well-known ID mapping, `folder.rs` owns folder/logon bootstrap and hierarchy-import property helpers, `values.rs` owns `MapiValue`, `restrictions.rs` owns `MapiSortOrder`/`MapiRestriction`, `recurrence.rs` owns MAPI appointment recurrence parser/projection helpers, `reminders.rs` owns shared reminder property splitting, `streams.rs` owns property stream open/read/write helpers, `message.rs` owns message property projection plus MAPI message import/submission/follow-up mapping, `contact.rs` owns contact property projection plus MAPI-to-contact input mapping, `task.rs` owns task property projection plus MAPI-to-task input mapping, `notes.rs` owns note/journal projection plus MAPI input mapping, `calendar.rs` owns calendar projection plus MAPI input mapping, `attachments.rs` owns attachment projection plus pending-attachment import helpers, `search_folders.rs` owns search-folder property projection, and `views.rs` owns Outlook view definitions/descriptors. Focused property/restriction/table tests and full `lpe-exchange` verification are recorded in progress notes. | Keep future property behavior additions in focused modules; preserve property IDs, encoding, named properties, custom values, stream bytes, canonical message updates, audit actions, and protected-recipient handling. |
 | MR-009 | Complete for hub split | `mapi/rop.rs` and `mapi/rop/parse.rs` are now below the 1,500-line production target, with parser, typed request, request-reader, response, restriction, recipient, property-row, debug, error, object-id, receive-folder, logon, named-property, attachment, and buffer helpers in focused modules. | Keep future ROP behavior additions in focused modules; preserve unsupported/reserved ROP behavior. |
-| MR-010 | Pending | No completed MAPI mailstore/store projection split is recorded in this backlog. | Split projection and Outlook metadata boundaries while preserving IDs, source keys, change keys, and sync facts. |
+| MR-010 | Complete for threshold split | `crates/lpe-exchange/src/mapi_mailstore.rs` and `crates/lpe-exchange/src/mapi_store.rs` are below the 1,500-line production-source threshold. Manifest/type/source-key/sync-state helpers now live in `mapi_mailstore/manifest.rs`, pure hierarchy folder projection helpers live in `mapi_mailstore/folders.rs`, RCA/debug logging and decoders live in `mapi_mailstore/diagnostics.rs` and `mapi_mailstore/diagnostics/codec.rs`, `mapi_store/associated_config.rs` owns pure Outlook associated-config, Common Views, navigation shortcut default, conversation-action default, free/busy placeholder, and placeholder-suppression helpers, `mapi_store/snapshot.rs` owns the snapshot impl methods, and test modules are split out. Canonical mailbox/message inputs, source keys, change keys, sync facts, FastTransfer/ICS byte construction, durable Outlook metadata reads, and canonical mutation paths are preserved. | Keep future snapshot/projection additions in focused modules; a deeper semantic pass can still split identity, search-folder, navigation, permission, and load orchestration helpers if needed. |
 | MR-011 | Complete for threshold split | IMAP flag, IMAP expunge, and JMAP/EWS/MAPI/ActiveSync hard-delete membership mutation SQL now lives in `crates/lpe-storage/src/mail_items.rs`; message attachment add/delete mutation SQL now lives in `crates/lpe-storage/src/attachments.rs`; canonical Outlook search-folder definitions and CRUD now live in `crates/lpe-storage/src/search_folders.rs`; mailbox hierarchy, subscription, system-folder bootstrap, create/update/rename/delete, and retention-folder storage now live in `crates/lpe-storage/src/mailboxes.rs`; ActiveSync device state, sync cursor state, item fingerprint projections, and attachment read helpers now live in `crates/lpe-storage/src/activesync.rs`; IMAP message projection DTOs and visible-message fetch SQL now live in `crates/lpe-storage/src/imap.rs`; JMAP stored-query state and Email/Thread ID query projection now live in `crates/lpe-storage/src/jmap_queries.rs`; JMAP quota/blob projection, protected Bcc raw-message stripping, and temporary upload blob storage now live in `crates/lpe-storage/src/jmap_blobs.rs`. This preserves IMAP `Deleted`, CONDSTORE, tombstones, recoverable items, attachment metadata changes, search-folder change-log rows, mailbox change-log rows, modseq allocation, count recalculation, mail change-log, audit, change emission behavior, ActiveSync cursor/projection semantics, IMAP visible-message ordering, JMAP query-state/hash semantics, quota accounting SQL, protected Bcc projection behavior, and temporary upload blob behavior while moving canonical mutations out of protocol projection code and separating adapter session/projection state. `crates/lpe-storage/src/protocols.rs` is now below the 1,500-line production-source threshold. | Keep future storage protocol projection additions in focused modules; preserve public exports and serialized output. |
 | MR-012 | Complete for threshold split | `crates/lpe-storage/src/blob_store.rs` is below the 1,500-line production-source threshold. `blob_store/types.rs` owns blob-store data shapes and small conversion helpers; `blob_store/io.rs` owns durable read/stat/verify and placement byte I/O helpers; `blob_store/tests.rs` owns the focused blob-store tests. Placement routing, migration state transitions, cleanup guards, quota accounting, rollback windows, and hash semantics are preserved. | Keep future blob lifecycle behavior additions in focused modules; deeper metadata, placement, migration, cleanup, and verification splits remain useful but are no longer required for the production line-count threshold. |
 | MR-013 | Complete for threshold split | `crates/lpe-activesync/src/service.rs` is no longer reported by the oversized-source check. Focused modules now own Ping, Search, MoveItems, ItemOperations, GetItemEstimate, SendMail/SmartReply/SmartForward, FolderSync/Create/Delete/Update, Provision, application-data parsing, body-preference parsing, MIME validation, and shared sync-state helpers. Canonical mutation calls remain in shared storage paths, including `move_jmap_email_from_mailbox`, `submit_message`, mailbox create/update/delete APIs, contact/calendar upsert APIs, draft APIs, read-state updates, and delete/trash APIs. | Keep future ActiveSync behavior additions in focused modules; a future semantic pass can still split the remaining Sync mutation methods further if needed. |
 | MR-014 | Complete for threshold split | `mapi/transport.rs` is below the 1,500-line production target. `mapi/transport/headers.rs` owns pure request/header helpers, `mapi/transport/cookies.rs` owns cookie and sequence-cookie helpers, `mapi/transport/diagnostics.rs` owns Connect, post-hierarchy/bootstrap, and disconnect diagnostics, and `mapi/transport/tests.rs` owns the transport unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep future session, replay, request-validation, and response-envelope behavior in focused modules instead of growing the hub again. |
 | MR-015 | Complete for threshold split | `mapi/nspi.rs` is below the 1,500-line production target. `mapi/nspi/special_tables.rs` owns GetSpecialTable/GetHierarchyInfo row projection, `mapi/nspi/diagnostics.rs` owns RCA/debug summaries, `mapi/nspi/property_values.rs` owns property tags/value encoding and NSPI identity projection helpers, and `mapi/nspi/tests.rs` owns the NSPI unit tests. Focused and full `lpe-exchange` verification is recorded in progress notes. | Keep Microsoft-specific lookup and matching local unless a future split can preserve those rules exactly. |
-| MR-016 | Pending | The audit records prior SMTP reductions, but this backlog does not record a completed current slice. | Continue splitting `LPE-CT/src/smtp.rs` and verify SMTP semantics. |
+| MR-016 | Partial | `smtp/outbound.rs` owns outbound handoff RFC822/MIME composition and quoted-printable encoding, `smtp/dsn.rs` owns pure SMTP deferral/rejection reply and outbound DSN classification helpers, `smtp/policy.rs` owns accepted-domain/domain-match predicates plus inbound domain policy aggregation, `smtp/tls.rs` owns STARTTLS stream buffering plus certificate/key acceptor loading, `smtp/trace.rs` owns pure quarantine/trace summary projection and filtering helpers, and `smtp/antivirus.rs` owns Magika attachment classification plus antivirus provider loading/scanning/output parsing. `LPE-CT/src/smtp.rs` still owns queue custody, quarantine persistence, relay, reputation/Bayes scoring, and trace action transitions. | Continue splitting `LPE-CT/src/smtp.rs`, starting with remaining policy/scoring helpers before touching custody or relay behavior. |
 | MR-017 | Pending | No completed `LPE-CT/src/main.rs` split is recorded. | Split main wiring without CLI/env/routes/auth/startup changes. |
 | MR-018 | Partial | Primitive crypto helpers are centralized, MAPI diagnostic lowerhex wrappers delegate to `lpe_domain::crypto::hex_lower`, ROP debug shape/hex rendering now lives in focused `mapi/rop/debug/` submodules, and NSPI RCA/debug summaries now live in `mapi/nspi/diagnostics.rs`. NSPI/test parsers and validation helpers remain local. | Continue centralizing only identical diagnostic helpers and preserve debug output/protocol bytes. |
 | MR-019 | Complete for documentation | `docs/architecture/exchange-rule-deferred-action-canonical-model.md` exists and is referenced in progress notes. | Implementation of wider rule/deferred-action semantics remains future work. |
@@ -145,7 +145,57 @@ Resolved coverage-gap notes:
   doc tests. `python tools/check_oversized_sources.py` passed in warning mode
   and no longer lists `crates/lpe-exchange/src/mapi/store_adapter.rs`; the
   remaining oversized offender list starts with
-  `crates/lpe-exchange/src/mapi_mailstore.rs`.
+  `crates/lpe-exchange/src/mapi/properties.rs`.
+- 2026-07-01: `crates/lpe-exchange/src/mapi_mailstore.rs` no longer appears
+  in `python tools/check_oversized_sources.py` after moving
+  manifest/type/source-key/sync-state helpers to `mapi_mailstore/manifest.rs`,
+  pure hierarchy folder projection helpers to `mapi_mailstore/folders.rs`,
+  RCA/debug logging and decoders to `mapi_mailstore/diagnostics.rs` and
+  `mapi_mailstore/diagnostics/codec.rs`, and inline tests to
+  `mapi_mailstore/tests.rs`. The split preserves canonical mailbox/message
+  inputs, source keys, change keys, sync facts, folder/message projection, and
+  FastTransfer/ICS byte construction; no canonical mutation path changed.
+- 2026-07-01 verification for the MAPI mailstore split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange mapi_mailstore --quiet` passed 50
+  focused tests; `cargo test -p lpe-exchange --quiet` passed 1,594 tests and
+  doc tests. `python tools/check_oversized_sources.py` passed in warning mode
+  and no longer lists `crates/lpe-exchange/src/mapi_mailstore.rs`; an
+  include-untracked production-source scan confirms the new production modules
+  are below 1,500 lines. Current direct line counts: `mapi_mailstore.rs` 1,201,
+  `mapi_mailstore/diagnostics.rs` 1,301,
+  `mapi_mailstore/diagnostics/codec.rs` 1,210,
+  `mapi_mailstore/manifest.rs` 893, and `mapi_mailstore/folders.rs` 574.
+- 2026-07-01: Advanced MR-010 by moving pure Outlook associated-config,
+  Common Views named-view defaults, default navigation shortcuts, default
+  conversation-action/freebusy placeholder projection, and empty placeholder
+  suppression helpers from `crates/lpe-exchange/src/mapi_store.rs` to
+  `crates/lpe-exchange/src/mapi_store/associated_config.rs`. This keeps the
+  existing `crate::mapi_store` re-export surface for callers and does not move
+  durable Outlook metadata reads, canonical snapshot loading, or any canonical
+  mutation path.
+- 2026-07-01 verification for the MAPI store associated-config extraction:
+  `cargo fmt --package lpe-exchange`; `cargo test -p lpe-exchange mapi_store
+  --quiet` passed 45 focused tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi_store.rs`
+  at 5,775 lines, down from the prior 6,471-line offender entry; it remains an
+  MR-010 oversized file.
+- 2026-07-01: Completed the MR-010 threshold split for
+  `crates/lpe-exchange/src/mapi_store.rs` by moving inline tests to
+  `mapi_store/tests.rs` and moving the intact `MapiMailStoreSnapshot` impl to
+  `mapi_store/snapshot.rs`. The parent module now remains a type/helper/trait
+  hub plus identity and loader helpers; snapshot methods retain the same method
+  bodies and canonical storage/mutation boundaries.
+- 2026-07-01 verification for the MAPI store threshold split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange mapi_store --quiet`
+  passed 45 focused tests; `cargo test -p lpe-exchange --quiet` ultimately
+  passed 1,594 tests and doc tests. Two immediately preceding full-suite runs
+  failed different MAPI-over-HTTP tests that each passed in isolation, so the
+  final passing full run is recorded alongside that order-sensitivity evidence.
+  `python tools/check_oversized_sources.py` passed in warning mode and no
+  longer lists `crates/lpe-exchange/src/mapi_store.rs`. Current direct line
+  counts: `mapi_store.rs` 1,210, `mapi_store/snapshot.rs` 1,361,
+  `mapi_store/associated_config.rs` 704, and `mapi_store/tests.rs` 2,923.
 - 2026-07-01: `crates/lpe-exchange/src/store.rs` no longer appears in
   `python tools/check_oversized_sources.py` after moving Exchange/MAPI/EWS
   store DTOs to `store/types.rs`, keeping the trait implementation hub in
@@ -9981,6 +10031,203 @@ Resolved coverage-gap notes:
   Direct physical line counts report `mapi/properties.rs` at 7,374 lines and
   `mapi/properties/restrictions.rs` at 50 lines. A process poll found no
   lingering cargo/rustc processes.
+- 2026-07-01: Advanced MR-008 by moving MAPI appointment recurrence
+  parser/projection helpers from `crates/lpe-exchange/src/mapi/properties.rs`
+  into `crates/lpe-exchange/src/mapi/properties/recurrence.rs`. The move keeps
+  the same recurrence blob bytes, canonical recurrence JSON/RRULE mapping,
+  unsupported recurrence rejection behavior, and parent-module call sites; no
+  property IDs, named-property allocation, stream bytes, custom property
+  persistence, or canonical mutation semantics changed.
+- 2026-07-01 verification for the MAPI recurrence split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange
+  mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest
+  --quiet` passed after a transient full-suite failure in that isolated-pass
+  MAPI-over-HTTP sync test; a subsequent `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 6,863 tracked source lines. Direct physical line counts report
+  `mapi/properties.rs` at 6,554 lines and `mapi/properties/recurrence.rs` at
+  823 lines.
+- 2026-07-01: Advanced MR-008 by moving the remaining `MapiValue` method impl
+  from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/values.rs`, where the enum already
+  lives. The move keeps numeric/text conversion, boolean coercion, value size,
+  comparison fallback, and property-row serialization call sites unchanged.
+- 2026-07-01 verification for the `MapiValue` impl move: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange
+  mapi_over_http_microsoft_empty_folder_rops_accept_nonzero_boolean_fields
+  --quiet` passed after a transient full-suite failure in that isolated-pass
+  MAPI-over-HTTP hierarchy test; a subsequent `cargo test -p lpe-exchange
+  --quiet` passed 1,594 tests and doc tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and reports
+  `crates/lpe-exchange/src/mapi/properties.rs` at 6,729 tracked source lines.
+  Direct physical line counts report `mapi/properties.rs` at 6,427 lines and
+  `mapi/properties/values.rs` at 566 lines.
+- 2026-07-01: Advanced MR-008 by moving property stream open/read/write helpers
+  from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/streams.rs`. The move preserves
+  stream byte projection, stream target decoding, associated-config stream
+  writes, pending message stream application, attachment/public-folder stream
+  behavior, property tag typing, and the existing canonical storage write
+  paths. It does not change property IDs, named-property allocation,
+  custom-property persistence, or canonical mutation ownership.
+- 2026-07-01 verification for the property stream split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange
+  mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest
+  --quiet` passed after a transient full-suite failure in that isolated-pass
+  MAPI-over-HTTP sync test; a subsequent `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 6,014 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 5,747 lines and `mapi/properties/streams.rs` at 686
+  lines.
+- 2026-07-01: Advanced MR-008 and the canonical-state cleanup by moving contact
+  property projection, contact default mapping, MAPI-to-contact input mapping,
+  and canonical contact property application from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/contact.rs`. The move keeps the
+  unsupported contact property guard adjacent to the canonical
+  `update_accessible_contact` call and preserves the existing accepted MAPI
+  contact property subset, labeled email/phone/URL JSON projection, contact
+  display-name fallback, and canonical contact storage write path.
+- 2026-07-01 verification for the contact property split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests and doc tests. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs` at
+  5,446 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 5,201 lines and `mapi/properties/contact.rs` at 549
+  lines.
+- 2026-07-01: Advanced MR-008 and the canonical-state cleanup by moving task
+  property projection, task default mapping, MAPI-to-task input mapping, and
+  canonical task property application from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/task.rs`. The move preserves the
+  existing accepted MAPI task property subset, task status/percent-complete
+  projection, reminder and follow-up handling, and the canonical
+  `update_task`/reminder storage write paths. Calendar reminder projection still
+  reuses the same delta helper; no calendar property IDs, values, or mutation
+  semantics changed.
+- 2026-07-01 verification for the task property split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests and doc tests. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs` at
+  5,191 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 4,956 lines and `mapi/properties/task.rs` at 248
+  lines.
+- 2026-07-01: Advanced MR-008 and the canonical-state cleanup by moving note
+  and journal property projection, named-property projection, default mapping,
+  MAPI input mapping, unsupported-property guards, and canonical property
+  application from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/notes.rs`. The move preserves note
+  color mapping, journal date/type/company/contact JSON mapping, contact-link
+  placeholder blob projection, and the canonical `upsert_mapi_note` and
+  `upsert_mapi_journal_entry` storage write paths.
+- 2026-07-01 verification for the note/journal property split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties --quiet`
+  passed 247 focused property tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 4,720 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 4,507 lines and `mapi/properties/notes.rs` at 452
+  lines.
+- 2026-07-01: Advanced MR-008 and the canonical-state cleanup by moving
+  calendar/event property projection, calendar participant and time-zone
+  helpers, event default mapping, MAPI event input mapping, meeting
+  response/cancellation guards, and canonical event property application from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/calendar.rs`. The move preserves
+  attendee/organizer normalization, recurrence blob parsing/projection,
+  reminder handling, accepted calendar property subsets, guarded calendar
+  mutation suppression, and the canonical `update_accessible_event`,
+  `delete_accessible_event`, and `update_accessible_event_reminder` storage
+  write paths.
+- 2026-07-01 verification for the calendar property split: `cargo fmt --package
+  lpe-exchange`; `cargo test -p lpe-exchange properties --quiet` passed 247
+  focused property tests; `cargo test -p lpe-exchange --quiet` passed 1,594
+  tests and doc tests. `python tools/check_oversized_sources.py` passed in
+  warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs` at
+  3,752 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 3,583 lines and `mapi/properties/calendar.rs` at 927
+  lines.
+- 2026-07-01: Advanced MR-008 by moving attachment property projection,
+  embedded-message/inline detection, attachment filename and media-type
+  fallback helpers, pending attachment upload construction, and MAPI attachment
+  expected-kind selection from `crates/lpe-exchange/src/mapi/properties.rs`
+  into `crates/lpe-exchange/src/mapi/properties/attachments.rs`. The move
+  preserves attachment numbering, attachment property values, hidden/inline
+  handling, `.msg` embedded-message detection, file-extension projection,
+  supported attachment text-kind checks, and the existing canonical message
+  import/upload flow.
+- 2026-07-01 verification for the attachment property split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties --quiet`
+  passed 247 focused property tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 3,599 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 3,441 lines and `mapi/properties/attachments.rs` at
+  145 lines.
+- 2026-07-01: Advanced MR-008 by moving search-folder definition property
+  projection, Common Views search-folder associated-message projection, and
+  pure Search Folder definition blob/template helpers from
+  `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/search_folders.rs`. The move
+  preserves canonical `SearchFolderDefinition` inputs, generated Search Folder
+  IDs/tags, template/storage-type fallback behavior, `[MS-OXOSRCH]` definition
+  blob bytes, Common Views associated-message properties, and extended
+  folder-flag search-folder tags.
+- 2026-07-01 verification for the search-folder property split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties --quiet`
+  passed 247 focused property tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 3,277 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 3,133 lines and `mapi/properties/search_folders.rs`
+  at 311 lines.
+- 2026-07-01: Advanced MR-008 by moving default Outlook view support checks,
+  Outlook folder/mail/contact/calendar/task/note/journal view definitions, view
+  descriptor binary/string encoders, view diagnostics, and descriptor property
+  tag parsers from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/views.rs`. The move preserves the
+  default view folder gate, Common Views/default view entry-id selection,
+  descriptor column tags, named property column identifiers, string8 tag
+  coercion, descriptor bytes, descriptor strings, and diagnostic output shape.
+- 2026-07-01 verification for the Outlook view descriptor split: `cargo fmt
+  --package lpe-exchange`; `cargo test -p lpe-exchange properties --quiet`
+  passed 247 focused property tests; `cargo test -p lpe-exchange --quiet`
+  passed 1,594 tests and doc tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and reports `crates/lpe-exchange/src/mapi/properties.rs`
+  at 2,505 counted source lines. Direct physical line counts report
+  `mapi/properties.rs` at 2,394 lines and `mapi/properties/views.rs` at 742
+  lines.
+- 2026-07-02: Advanced MR-008 and the canonical-state cleanup by moving
+  message property projection, body/HTML/RTF/header helpers, MAPI pending
+  message import DTO construction, MAPI submit DTO construction, canonical
+  message property application, follow-up/category parsing, and swapped To-Do
+  validation from `crates/lpe-exchange/src/mapi/properties.rs` into
+  `crates/lpe-exchange/src/mapi/properties/message.rs`, moving hierarchy
+  import display/source-key helpers into `mapi/properties/folder.rs`, and
+  moving shared reminder property splitting into `mapi/properties/reminders.rs`.
+  The move preserves property tags and values, native body selection, RTF
+  container bytes, source strings (`mapi-save-message`,
+  `mapi-submit-message`), protected Bcc grouping through pending-recipient
+  import/submission, canonical storage calls (`update_jmap_email_content`,
+  `update_jmap_email_followup_flags`), audit action strings, follow-up and
+  reminder semantics, category normalization, swapped To-Do validation, and
+  hierarchy source-key/name matching.
+- 2026-07-02 verification for the message property/canonical-state and final
+  MR-008 threshold split: `cargo fmt --package lpe-exchange`; `cargo test -p
+  lpe-exchange properties --quiet` passed 247 focused property tests; `cargo
+  test -p lpe-exchange --quiet` passed 1,594 tests and doc tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and no longer
+  reports `crates/lpe-exchange/src/mapi/properties.rs`. Direct physical line
+  counts report `mapi/properties.rs` at 1,436 lines,
+  `mapi/properties/message.rs` at 873 lines, `mapi/properties/folder.rs` at
+  310 lines, and `mapi/properties/reminders.rs` at 31 lines.
 - 2026-07-01: Advanced MR-011 and the canonical-state cleanup by moving the
   IMAP flag mutation implementation from `crates/lpe-storage/src/protocols.rs`
   into `crates/lpe-storage/src/mail_items.rs`. `Storage::update_imap_flags`
@@ -10404,3 +10651,110 @@ Resolved coverage-gap notes:
   `crates/lpe-activesync/src/service/search.rs` 144 lines,
   `crates/lpe-activesync/src/service/submission.rs` 333 lines, and
   `crates/lpe-activesync/src/service/sync_helpers.rs` 126 lines.
+- 2026-07-02: Started MR-016 by moving outbound handoff RFC822/MIME
+  composition helpers from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/outbound.rs`. The slice preserves the generated From,
+  Sender, To, Cc, Subject, Message-Id, MIME-Version, multipart/alternative
+  boundary, content-transfer encoding, and quoted-printable output used by
+  outbound handoff. It deliberately does not move or change SMTP replies,
+  spool custody transitions, quarantine decisions, LPE bridge calls, relay
+  routing, DSN classification, or direct-MX delivery.
+- 2026-07-02 verification for the MR-016 outbound MIME split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including outbound handoff, replay/custody,
+  quarantine, SMTP reply, and bridge custody tests. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 5,070 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 4,794 lines and
+  `LPE-CT/src/smtp/outbound.rs` 124 lines.
+- 2026-07-02: Advanced MR-016 by moving pure DSN/reply helpers from
+  `LPE-CT/src/smtp.rs` into `LPE-CT/src/smtp/dsn.rs`. The slice preserves
+  SMTP deferral/rejection reply text, reply-detail sanitization, direct-MX
+  deferred/bounced status mapping, retry advice, DSN action/status/diagnostic
+  fields, technical-status fields, enhanced-status parsing, and the permanent
+  relay/direct-MX classification strings. It deliberately does not move queue
+  writes, custody transitions, quarantine metadata, bridge delivery, relay
+  socket I/O, or direct-MX target resolution.
+- 2026-07-02 verification for the MR-016 DSN/reply split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and still reports `LPE-CT/src/smtp.rs` at 4,910
+  counted source lines. Direct physical line counts after extraction:
+  `LPE-CT/src/smtp.rs` 4,642 lines, `LPE-CT/src/smtp/outbound.rs` 124 lines,
+  and `LPE-CT/src/smtp/dsn.rs` 165 lines.
+- 2026-07-02: Advanced MR-016 by moving accepted-domain/domain-match
+  predicates and inbound domain policy aggregation from `LPE-CT/src/smtp.rs`
+  into `LPE-CT/src/smtp/policy.rs`. The slice preserves exact-case-insensitive
+  accepted-domain checks, null reverse-path allowance checks, sender/recipient
+  routing-domain matching, normalized query/domain filtering, and the fallback
+  behavior that enables RBL/SPF/greylisting checks when no accepted-domain rule
+  matches. It deliberately does not move queue writes, custody transitions,
+  quarantine metadata, LPE bridge calls, relay socket I/O, direct-MX target
+  resolution, or SMTP command/session state.
+- 2026-07-02 verification for the MR-016 policy-helper split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests. `python tools/check_oversized_sources.py`
+  passed in warning mode and still reports `LPE-CT/src/smtp.rs` at 4,797
+  counted source lines. Direct physical line counts after extraction:
+  `LPE-CT/src/smtp.rs` 4,542 lines, `LPE-CT/src/smtp/policy.rs` 113 lines,
+  `LPE-CT/src/smtp/dsn.rs` 165 lines, and `LPE-CT/src/smtp/outbound.rs` 124
+  lines.
+- 2026-07-02: Advanced MR-016 by moving STARTTLS stream buffering and public
+  TLS acceptor construction helpers from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/tls.rs`. The slice preserves the buffered bytes handed to
+  the TLS stream after the `220 ready to start TLS` reply, active dashboard TLS
+  profile selection, missing-cert/key error text, certificate loading, PKCS#8
+  then RSA private-key fallback order, and `rustls` no-client-auth server
+  configuration. It deliberately does not move SMTP command state, listener
+  startup, queue writes, custody transitions, quarantine metadata, LPE bridge
+  calls, relay socket I/O, or direct-MX target resolution.
+- 2026-07-02 verification for the MR-016 STARTTLS split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including STARTTLS advertisement, invalid TLS
+  config, EHLO requirement, and TLS upgrade coverage. `python
+  tools/check_oversized_sources.py` passed in warning mode and still reports
+  `LPE-CT/src/smtp.rs` at 4,636 counted source lines. Direct physical line
+  counts after extraction: `LPE-CT/src/smtp.rs` 4,393 lines,
+  `LPE-CT/src/smtp/tls.rs` 161 lines, `LPE-CT/src/smtp/policy.rs` 113 lines,
+  `LPE-CT/src/smtp/dsn.rs` 165 lines, and `LPE-CT/src/smtp/outbound.rs` 124
+  lines.
+- 2026-07-02: Advanced MR-016 by moving pure quarantine/trace projection
+  helpers from `LPE-CT/src/smtp.rs` into `LPE-CT/src/smtp/trace.rs`. The slice
+  preserves quarantine summary fields, trace detail fields, selected header
+  extraction, visible body extraction with fallback excerpting, attachment
+  summaries, query filtering, and latest-decision summary strings used by
+  transport audit search text. It deliberately does not move DB/spool listing,
+  message loading, trace retry/release/delete transitions, queue writes,
+  custody transitions, quarantine metadata persistence, LPE bridge calls, relay
+  socket I/O, or direct-MX target resolution.
+- 2026-07-02 verification for the MR-016 trace projection split: `cargo fmt`
+  in `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including trace-details, quarantine recovery,
+  release/retry/delete, audit, bridge custody, and terminal custody tests.
+  `python tools/check_oversized_sources.py` passed in warning mode and still
+  reports `LPE-CT/src/smtp.rs` at 4,395 counted source lines. Direct physical
+  line counts after extraction: `LPE-CT/src/smtp.rs` 4,160 lines,
+  `LPE-CT/src/smtp/trace.rs` 247 lines, `LPE-CT/src/smtp/tls.rs` 161 lines,
+  and `LPE-CT/src/smtp/policy.rs` 113 lines.
+- 2026-07-02: Advanced MR-016 by moving Magika attachment classification,
+  antivirus provider loading, temporary scan artifact preparation/cleanup,
+  provider execution, Takeri/default provider configuration, provider output
+  parsing, positive/negative marker handling, and antivirus fail-open/fail-closed
+  verdict mapping from `LPE-CT/src/smtp.rs` into
+  `LPE-CT/src/smtp/antivirus.rs`. The slice preserves provider env names and
+  defaults, `{path}` argument binding, message/attachment artifact filenames,
+  scan cleanup, infected/suspicious/clean marker semantics, Takeri count
+  parsing, Magika reject/quarantine wording, spam/security score deltas, and
+  decision-trace stage/outcome/detail strings. It deliberately does not move
+  inbound/outbound queue writes, custody transitions, quarantine metadata
+  persistence, LPE bridge calls, relay socket I/O, direct-MX target resolution,
+  reputation/Bayes scoring, or canonical mailbox state.
+- 2026-07-02 verification for the MR-016 antivirus split: `cargo fmt` in
+  `LPE-CT`; `cargo test` in `LPE-CT` passed 85 tests with 19 ignored
+  env-sensitive/benchmark tests, including Magika quarantine, Takeri provider
+  loading, antivirus output parser, quarantine/custody, bridge, and outbound
+  handoff tests. `python tools/check_oversized_sources.py` passed in warning
+  mode and still reports `LPE-CT/src/smtp.rs` at 3,878 counted source lines.
+  Direct physical line counts after extraction: `LPE-CT/src/smtp.rs` 3,675
+  lines, `LPE-CT/src/smtp/antivirus.rs` 492 lines, and
+  `LPE-CT/src/smtp/trace.rs` 247 lines.

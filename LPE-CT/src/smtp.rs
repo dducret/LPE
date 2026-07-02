@@ -24,43 +24,55 @@ use serde_json::Value;
 use sqlx::{types::Json, PgPool, Row};
 use std::{
     collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet},
-    env,
-    fs::{self, File},
+    env, fs,
     hash::{Hash, Hasher},
-    io::{BufReader as StdBufReader, Cursor},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    pin::Pin,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
     },
-    task::{Context as TaskContext, Poll},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
     process::Command,
 };
-use tokio_rustls::{
-    rustls::{
-        pki_types::{CertificateDer, PrivateKeyDer},
-        ServerConfig,
-    },
-    TlsAcceptor,
-};
+use tokio_rustls::TlsAcceptor;
 use tracing::{info, warn};
 
 use crate::{dkim_signing, integration_shared_secret, observability, storage, transport_policy};
 
+mod antivirus;
 mod audit;
+mod bayes;
+use antivirus::{
+    classify_inbound_message, evaluate_antivirus_policy, load_antivirus_providers,
+    parse_antivirus_output, AntivirusProviderConfig, AntivirusProviderDecision,
+    InboundMagikaOutcome,
+};
 use audit::{
     append_transport_audit, postfix_style_mail_log_line, quarantine_search_text,
     TransportAuditEvent,
 };
+use bayes::train_bayespam;
+pub(crate) use bayes::{
+    load_bayespam_corpus, score_bayespam, BayesLabel, BAYESPAM_MIN_SCORING_TOKENS,
+};
 mod delivery_bridge;
 use delivery_bridge::deliver_inbound_message;
+mod dsn;
+use dsn::{
+    deferred_smtp_reply, direct_mx_failure, is_permanent_direct_mx_error, is_permanent_relay_error,
+    parse_enhanced_status, rejected_smtp_reply,
+};
+mod policy;
+use policy::{
+    accepted_domain_is_verified, domain_part, inbound_domain_policy, matches_any_domain,
+    matches_domain, normalized, recipient_domain_accepts_null_reverse_path,
+    recipient_domain_is_accepted,
+};
 mod protocol;
 
 use protocol::{
@@ -71,13 +83,23 @@ pub(crate) use protocol::{
     SmtpPathError, SmtpPathKind,
 };
 
+mod outbound;
+pub(crate) use outbound::{compose_rfc822_message, encode_quoted_printable};
+
 mod session;
 use session::{
     handle_smtp_command, handle_smtp_session, receive_message, receive_message_with_validator,
     SmtpCommandOutcome, SmtpTransaction,
 };
+mod tls;
+mod trace;
+pub(crate) use tls::smtp_starttls_acceptor_for_paths;
+use tls::{smtp_starttls_acceptor_from_store, StartTlsStream};
+use trace::{
+    latest_decision_summary, quarantine_matches, quarantine_summary_from_message,
+    trace_details_from_message,
+};
 
-const BAYESPAM_MIN_SCORING_TOKENS: usize = 3;
 const MAX_SMTP_COMMAND_LINE_LEN: usize = 510;
 const MAX_SMTP_RCPT_PER_TRANSACTION: usize = 25;
 
@@ -136,13 +158,6 @@ pub(crate) struct AcceptedDomainConfig {
     pub(crate) greylisting: bool,
     pub(crate) accept_null_reverse_path: bool,
     pub(crate) verified: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct InboundDomainPolicy {
-    rbl_checks: bool,
-    spf_checks: bool,
-    greylisting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -345,47 +360,6 @@ struct ThrottleState {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct AntivirusProviderConfig {
-    id: String,
-    display_name: String,
-    command: String,
-    args: Vec<String>,
-    infected_markers: Vec<String>,
-    suspicious_markers: Vec<String>,
-    clean_markers: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct AntivirusVerdict {
-    action: FilterAction,
-    reason: Option<String>,
-    spam_score_delta: f32,
-    security_score_delta: f32,
-    decision_trace: Vec<DecisionTraceEntry>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AntivirusProviderDecision {
-    Clean,
-    Suspicious,
-    Infected,
-}
-
-#[derive(Debug, Clone)]
-struct AntivirusScanTarget {
-    root: PathBuf,
-    attachment_count: usize,
-}
-
-#[derive(Debug, Clone)]
-struct AntivirusScanOutcome {
-    provider_id: String,
-    provider_name: String,
-    decision: AntivirusProviderDecision,
-    summary: String,
-}
-
-#[derive(Debug, Clone)]
 struct OutboundExecution {
     status: TransportDeliveryStatus,
     detail: Option<String>,
@@ -395,13 +369,6 @@ struct OutboundExecution {
     technical: Option<TransportTechnicalStatus>,
     route: Option<TransportRouteDecision>,
     throttle: Option<TransportThrottleStatus>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum InboundMagikaOutcome {
-    Accept,
-    Quarantine(String),
-    Reject(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,27 +454,6 @@ struct ReputationEntry {
     quarantined: u32,
     rejected: u32,
     deferred: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct BayesCorpus {
-    ham_messages: u32,
-    spam_messages: u32,
-    ham_tokens: HashMap<String, u32>,
-    spam_tokens: HashMap<String, u32>,
-}
-
-#[derive(Debug, Clone)]
-struct BayesOutcome {
-    probability: f32,
-    matched_tokens: usize,
-    contribution: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BayesLabel {
-    Ham,
-    Spam,
 }
 
 const DEFAULT_GREYLIST_DELAY_SECONDS: u64 = 30;
@@ -820,83 +766,6 @@ pub(crate) fn runtime_config_from_store(
         .map_err(|_| anyhow!("dashboard state lock poisoned"))?
         .clone();
     Ok(runtime_config_from_dashboard(&dashboard))
-}
-
-fn load_antivirus_providers(provider_chain: &[String]) -> Vec<AntivirusProviderConfig> {
-    provider_chain
-        .iter()
-        .filter_map(|provider_id| antivirus_provider_from_env(provider_id))
-        .collect()
-}
-
-fn antivirus_provider_from_env(provider_id: &str) -> Option<AntivirusProviderConfig> {
-    let normalized = provider_id.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return None;
-    }
-
-    if normalized == "takeri" {
-        return Some(AntivirusProviderConfig {
-            id: normalized,
-            display_name: "takeri".to_string(),
-            command: env::var("LPE_CT_ANTIVIRUS_TAKERI_BIN")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI".to_string()),
-            args: env::var("LPE_CT_ANTIVIRUS_TAKERI_ARGS")
-                .ok()
-                .map(|value| parse_csv_env(&value))
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| vec!["takeri".to_string(), "scan".to_string()]),
-            infected_markers: vec![
-                "status: infected".to_string(),
-                "infected files detected".to_string(),
-                "infected files:".to_string(),
-                "critical: malware detected".to_string(),
-            ],
-            suspicious_markers: vec![
-                "status: suspicious".to_string(),
-                "suspicious files:".to_string(),
-            ],
-            clean_markers: vec![
-                "status: clean".to_string(),
-                "no threats detected".to_string(),
-            ],
-        });
-    }
-
-    let env_key = normalized.replace('-', "_").to_ascii_uppercase();
-    let command = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_BIN"))
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())?;
-    let args = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_ARGS"))
-        .ok()
-        .map(|value| parse_csv_env(&value))
-        .unwrap_or_default();
-    let infected_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_INFECTED_MARKERS"))
-        .ok()
-        .map(|value| parse_csv_env(&value))
-        .unwrap_or_else(|| vec!["infected".to_string(), "malware".to_string()]);
-    let suspicious_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_SUSPICIOUS_MARKERS"))
-        .ok()
-        .map(|value| parse_csv_env(&value))
-        .unwrap_or_else(|| vec!["suspicious".to_string()]);
-    let clean_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_CLEAN_MARKERS"))
-        .ok()
-        .map(|value| parse_csv_env(&value))
-        .unwrap_or_else(|| vec!["clean".to_string(), "ok".to_string()]);
-
-    Some(AntivirusProviderConfig {
-        id: normalized.clone(),
-        display_name: normalized,
-        command,
-        args,
-        infected_markers,
-        suspicious_markers,
-        clean_markers,
-    })
 }
 
 fn parse_csv_env(value: &str) -> Vec<String> {
@@ -1572,486 +1441,6 @@ fn default_queue_for_status(status: &TransportDeliveryStatus) -> &'static str {
         TransportDeliveryStatus::Queued => "outbound",
         TransportDeliveryStatus::Failed => "held",
     }
-}
-
-fn domain_part(address: &str) -> Option<String> {
-    address
-        .rsplit_once('@')
-        .map(|(_, domain)| domain.trim().to_ascii_lowercase())
-        .filter(|domain| !domain.is_empty())
-}
-
-fn normalized(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase())
-}
-
-fn matches_domain(expected: Option<&str>, actual: Option<&str>) -> bool {
-    match expected.map(|value| value.trim().to_ascii_lowercase()) {
-        Some(expected) if !expected.is_empty() => actual == Some(expected.as_str()),
-        _ => true,
-    }
-}
-
-fn matches_any_domain(expected: Option<&str>, actual: &[String]) -> bool {
-    match expected.map(|value| value.trim().to_ascii_lowercase()) {
-        Some(expected) if !expected.is_empty() => actual.iter().any(|value| value == &expected),
-        _ => true,
-    }
-}
-
-struct StartTlsStream {
-    stream: TcpStream,
-    prefix: Cursor<Vec<u8>>,
-}
-
-impl StartTlsStream {
-    fn new(stream: TcpStream, buffered: Vec<u8>) -> Self {
-        Self {
-            stream,
-            prefix: Cursor::new(buffered),
-        }
-    }
-}
-
-impl AsyncRead for StartTlsStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let prefix_position = self.prefix.position() as usize;
-        let prefix_len = self.prefix.get_ref().len();
-        if prefix_position < prefix_len {
-            let available = &self.prefix.get_ref()[prefix_position..];
-            let to_copy = available.len().min(buf.remaining());
-            buf.put_slice(&available[..to_copy]);
-            self.prefix.set_position((prefix_position + to_copy) as u64);
-            return Poll::Ready(Ok(()));
-        }
-        Pin::new(&mut self.stream).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for StartTlsStream {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        data: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        Pin::new(&mut self.stream).poll_write(cx, data)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.stream).poll_flush(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.stream).poll_shutdown(cx)
-    }
-}
-
-fn classify_inbound_message<D: Detector>(
-    validator: &Validator<D>,
-    message_bytes: &[u8],
-) -> Result<InboundMagikaOutcome> {
-    let attachments = collect_mime_attachment_parts(message_bytes)?;
-    for attachment in attachments {
-        let outcome = validator.validate_bytes(
-            ValidationRequest {
-                ingress_context: IngressContext::LpeCtInboundSmtp,
-                declared_mime: attachment.declared_mime.clone(),
-                filename: attachment.filename.clone(),
-                expected_kind: ExpectedKind::Any,
-            },
-            &attachment.bytes,
-        )?;
-        match outcome.policy_decision {
-            PolicyDecision::Accept => {}
-            PolicyDecision::Reject => {
-                return Ok(InboundMagikaOutcome::Reject(format!(
-                    "attachment {:?} rejected: {}",
-                    attachment.filename, outcome.reason
-                )));
-            }
-            PolicyDecision::Quarantine | PolicyDecision::Restrict => {
-                return Ok(InboundMagikaOutcome::Quarantine(format!(
-                    "attachment {:?} quarantined: {}",
-                    attachment.filename, outcome.reason
-                )));
-            }
-        }
-    }
-    Ok(InboundMagikaOutcome::Accept)
-}
-
-async fn evaluate_antivirus_policy(
-    config: &RuntimeConfig,
-    direction: &str,
-    message_bytes: &[u8],
-) -> Result<AntivirusVerdict> {
-    let mut decision_trace = Vec::new();
-    if !config.antivirus_enabled {
-        decision_trace.push(DecisionTraceEntry {
-            stage: "virus-scan".to_string(),
-            outcome: "disabled".to_string(),
-            detail: "antivirus chain disabled by local policy".to_string(),
-        });
-        return Ok(AntivirusVerdict {
-            action: FilterAction::Accept,
-            reason: None,
-            spam_score_delta: 0.0,
-            security_score_delta: 0.0,
-            decision_trace,
-        });
-    }
-
-    if config.antivirus_provider_chain.is_empty() {
-        let detail =
-            "antivirus chain enabled but no providers are configured in LPE_CT_ANTIVIRUS_PROVIDER_CHAIN"
-                .to_string();
-        decision_trace.push(DecisionTraceEntry {
-            stage: "virus-scan".to_string(),
-            outcome: if config.antivirus_fail_closed {
-                "quarantine"
-            } else {
-                "skipped"
-            }
-            .to_string(),
-            detail: detail.clone(),
-        });
-        return Ok(AntivirusVerdict {
-            action: if config.antivirus_fail_closed {
-                FilterAction::Quarantine
-            } else {
-                FilterAction::Accept
-            },
-            reason: config.antivirus_fail_closed.then_some(detail),
-            spam_score_delta: 0.0,
-            security_score_delta: if config.antivirus_fail_closed {
-                2.0
-            } else {
-                0.0
-            },
-            decision_trace,
-        });
-    }
-
-    if config.antivirus_providers.is_empty() {
-        let detail = format!(
-            "antivirus chain references unsupported or incomplete providers: {}",
-            config.antivirus_provider_chain.join(", ")
-        );
-        decision_trace.push(DecisionTraceEntry {
-            stage: "virus-scan".to_string(),
-            outcome: if config.antivirus_fail_closed {
-                "quarantine"
-            } else {
-                "skipped"
-            }
-            .to_string(),
-            detail: detail.clone(),
-        });
-        return Ok(AntivirusVerdict {
-            action: if config.antivirus_fail_closed {
-                FilterAction::Quarantine
-            } else {
-                FilterAction::Accept
-            },
-            reason: config.antivirus_fail_closed.then_some(detail),
-            spam_score_delta: 0.0,
-            security_score_delta: if config.antivirus_fail_closed {
-                2.0
-            } else {
-                0.0
-            },
-            decision_trace,
-        });
-    }
-
-    let target = prepare_antivirus_scan_target(direction, message_bytes)?;
-    for provider in &config.antivirus_providers {
-        match run_antivirus_provider(provider, &target).await {
-            Ok(outcome) => {
-                decision_trace.push(DecisionTraceEntry {
-                    stage: "virus-scan".to_string(),
-                    outcome: match outcome.decision {
-                        AntivirusProviderDecision::Clean => "clean",
-                        AntivirusProviderDecision::Suspicious => "suspicious",
-                        AntivirusProviderDecision::Infected => "infected",
-                    }
-                    .to_string(),
-                    detail: format!("{}: {}", outcome.provider_name, outcome.summary),
-                });
-                match outcome.decision {
-                    AntivirusProviderDecision::Clean => {}
-                    AntivirusProviderDecision::Suspicious => {
-                        cleanup_antivirus_scan_target(&target);
-                        return Ok(AntivirusVerdict {
-                            action: FilterAction::Quarantine,
-                            reason: Some(format!(
-                                "antivirus provider {} flagged suspicious content",
-                                outcome.provider_id
-                            )),
-                            spam_score_delta: 0.5,
-                            security_score_delta: 4.0,
-                            decision_trace,
-                        });
-                    }
-                    AntivirusProviderDecision::Infected => {
-                        cleanup_antivirus_scan_target(&target);
-                        return Ok(AntivirusVerdict {
-                            action: FilterAction::Quarantine,
-                            reason: Some(format!(
-                                "antivirus provider {} detected malware",
-                                outcome.provider_id
-                            )),
-                            spam_score_delta: 1.0,
-                            security_score_delta: 8.0,
-                            decision_trace,
-                        });
-                    }
-                }
-            }
-            Err(error) => {
-                let detail = format!(
-                    "{} execution failed for {} attachment artifact(s): {error}",
-                    provider.display_name, target.attachment_count
-                );
-                decision_trace.push(DecisionTraceEntry {
-                    stage: "virus-scan".to_string(),
-                    outcome: if config.antivirus_fail_closed {
-                        "quarantine"
-                    } else {
-                        "error"
-                    }
-                    .to_string(),
-                    detail: detail.clone(),
-                });
-                if config.antivirus_fail_closed {
-                    cleanup_antivirus_scan_target(&target);
-                    return Ok(AntivirusVerdict {
-                        action: FilterAction::Quarantine,
-                        reason: Some(detail),
-                        spam_score_delta: 0.0,
-                        security_score_delta: 3.0,
-                        decision_trace,
-                    });
-                }
-            }
-        }
-    }
-
-    cleanup_antivirus_scan_target(&target);
-    Ok(AntivirusVerdict {
-        action: FilterAction::Accept,
-        reason: None,
-        spam_score_delta: 0.0,
-        security_score_delta: 0.0,
-        decision_trace,
-    })
-}
-
-fn prepare_antivirus_scan_target(
-    direction: &str,
-    message_bytes: &[u8],
-) -> Result<AntivirusScanTarget> {
-    let root = env::temp_dir().join(format!("lpe-ct-av-{}-{}", direction, uuid::Uuid::new_v4()));
-    fs::create_dir_all(&root)
-        .with_context(|| format!("unable to create antivirus scan target {}", root.display()))?;
-    fs::write(root.join("message.eml"), message_bytes).with_context(|| {
-        format!(
-            "unable to write antivirus message artifact {}",
-            root.display()
-        )
-    })?;
-
-    let attachments = collect_mime_attachment_parts(message_bytes)?;
-    for (index, attachment) in attachments.iter().enumerate() {
-        let original_name = attachment.filename.as_deref().unwrap_or("attachment");
-        let extension = attachment
-            .filename
-            .as_deref()
-            .and_then(|filename| Path::new(filename).extension())
-            .and_then(|value| value.to_str())
-            .map(|value| format!(".{}", sanitize_attachment_component(value)))
-            .unwrap_or_default();
-        let file_name = Path::new(original_name)
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .map(sanitize_attachment_component)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| format!("attachment-{}", index + 1));
-        fs::write(
-            root.join(format!("{:02}-{}{}", index + 1, file_name, extension)),
-            &attachment.bytes,
-        )
-        .with_context(|| {
-            format!(
-                "unable to write antivirus attachment artifact {}",
-                root.display()
-            )
-        })?;
-    }
-
-    Ok(AntivirusScanTarget {
-        root,
-        attachment_count: attachments.len(),
-    })
-}
-
-fn sanitize_attachment_component(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn cleanup_antivirus_scan_target(target: &AntivirusScanTarget) {
-    let _ = fs::remove_dir_all(&target.root);
-}
-
-async fn run_antivirus_provider(
-    provider: &AntivirusProviderConfig,
-    target: &AntivirusScanTarget,
-) -> Result<AntivirusScanOutcome> {
-    let mut command = Command::new(&provider.command);
-    let target_path = target.root.to_string_lossy().to_string();
-    let mut path_explicitly_bound = false;
-    for arg in &provider.args {
-        if arg.contains("{path}") {
-            path_explicitly_bound = true;
-        }
-        command.arg(arg.replace("{path}", &target_path));
-    }
-    if !path_explicitly_bound {
-        command.arg(&target.root);
-    }
-    let output = command.output().await.with_context(|| {
-        format!(
-            "unable to execute antivirus provider {}",
-            provider.display_name
-        )
-    })?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    parse_antivirus_output(provider, &stdout, &stderr, output.status.code())
-}
-
-fn parse_antivirus_output(
-    provider: &AntivirusProviderConfig,
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-) -> Result<AntivirusScanOutcome> {
-    let combined = format!("{stdout}\n{stderr}");
-    let normalized = combined.to_ascii_lowercase();
-    let infected = marker_matches(&normalized, &provider.infected_markers)
-        || takeri_summary_count(&normalized, "infected files:") > 0;
-    let suspicious = marker_matches(&normalized, &provider.suspicious_markers)
-        || takeri_summary_count(&normalized, "suspicious files:") > 0;
-    let clean = marker_matches(&normalized, &provider.clean_markers);
-
-    let decision = if infected {
-        AntivirusProviderDecision::Infected
-    } else if suspicious {
-        AntivirusProviderDecision::Suspicious
-    } else if clean || exit_code == Some(0) {
-        AntivirusProviderDecision::Clean
-    } else {
-        anyhow::bail!(
-            "provider {} returned exit code {:?} without a parsable verdict",
-            provider.display_name,
-            exit_code
-        );
-    };
-
-    let summary = combined
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("provider produced no output")
-        .to_string();
-
-    Ok(AntivirusScanOutcome {
-        provider_id: provider.id.clone(),
-        provider_name: provider.display_name.clone(),
-        decision,
-        summary,
-    })
-}
-
-fn marker_matches(output: &str, markers: &[String]) -> bool {
-    markers
-        .iter()
-        .map(|marker| marker.trim().to_ascii_lowercase())
-        .filter(|marker| !marker.is_empty())
-        .any(|marker| marker_has_positive_match(output, &marker))
-}
-
-fn marker_has_positive_match(output: &str, marker: &str) -> bool {
-    let mut search_from = 0;
-    while let Some(relative_index) = output[search_from..].find(marker) {
-        let marker_start = search_from + relative_index;
-        let marker_end = marker_start + marker.len();
-        if !marker_match_is_explicitly_negative(output, marker_start, marker_end) {
-            return true;
-        }
-        search_from = marker_end;
-    }
-    false
-}
-
-fn marker_match_is_explicitly_negative(
-    output: &str,
-    marker_start: usize,
-    marker_end: usize,
-) -> bool {
-    let line_start = output[..marker_start]
-        .rfind('\n')
-        .map_or(0, |index| index + 1);
-    let line_end = output[marker_end..]
-        .find('\n')
-        .map_or(output.len(), |index| marker_end + index);
-    let before_marker = output[line_start..marker_start]
-        .trim_end_matches(|ch: char| ch.is_whitespace() || matches!(ch, ':' | '=' | '-' | '>'));
-    if before_marker.ends_with("no") || before_marker.ends_with("not") {
-        return true;
-    }
-
-    let after_marker = output[marker_end..line_end].trim_start_matches(|ch: char| {
-        ch.is_whitespace() || matches!(ch, ':' | '=' | '-' | '>' | '"' | '\'')
-    });
-    !after_marker.is_empty()
-        && (after_marker.starts_with('0')
-            || after_marker.starts_with("false")
-            || after_marker.starts_with("no")
-            || after_marker.starts_with("none")
-            || after_marker.starts_with("not "))
-}
-
-fn takeri_summary_count(output: &str, prefix: &str) -> usize {
-    output
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            let normalized = trimmed.to_ascii_lowercase();
-            normalized
-                .strip_prefix(prefix)
-                .and_then(|value| value.trim().parse::<usize>().ok())
-        })
-        .unwrap_or(0)
 }
 
 async fn evaluate_inbound_policy(
@@ -2749,59 +2138,6 @@ fn parse_peer_ip(peer: &str) -> Option<IpAddr> {
     peer.parse::<IpAddr>().ok()
 }
 
-fn inbound_domain_policy(config: &RuntimeConfig, rcpt_to: &[String]) -> InboundDomainPolicy {
-    if config.accepted_domains.is_empty() {
-        return InboundDomainPolicy {
-            rbl_checks: true,
-            spf_checks: true,
-            greylisting: true,
-        };
-    }
-
-    let mut policy = InboundDomainPolicy {
-        rbl_checks: false,
-        spf_checks: false,
-        greylisting: false,
-    };
-    let mut matched = false;
-
-    for recipient in rcpt_to {
-        let Some(domain) = recipient.rsplit_once('@').map(|(_, domain)| domain.trim()) else {
-            return InboundDomainPolicy {
-                rbl_checks: true,
-                spf_checks: true,
-                greylisting: true,
-            };
-        };
-        let Some(accepted) = config
-            .accepted_domains
-            .iter()
-            .find(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(domain))
-        else {
-            return InboundDomainPolicy {
-                rbl_checks: true,
-                spf_checks: true,
-                greylisting: true,
-            };
-        };
-
-        matched = true;
-        policy.rbl_checks |= accepted.rbl_checks;
-        policy.spf_checks |= accepted.spf_checks;
-        policy.greylisting |= accepted.greylisting;
-    }
-
-    if matched {
-        policy
-    } else {
-        InboundDomainPolicy {
-            rbl_checks: true,
-            spf_checks: true,
-            greylisting: true,
-        }
-    }
-}
-
 async fn evaluate_greylisting(
     spool_dir: &Path,
     config: &RuntimeConfig,
@@ -2999,202 +2335,6 @@ fn save_reputation_store(spool_dir: &Path, store: &ReputationStore) -> Result<()
     Ok(())
 }
 
-async fn load_bayespam_corpus(spool_dir: &Path, config: &RuntimeConfig) -> Result<BayesCorpus> {
-    if let Some(pool) = ensure_local_db_schema(config).await? {
-        let row = sqlx::query("SELECT corpus FROM bayespam_corpora WHERE corpus_key = $1")
-            .bind("default")
-            .fetch_optional(pool)
-            .await?;
-        return Ok(row
-            .map(|row| row.try_get::<Json<BayesCorpus>, _>("corpus"))
-            .transpose()?
-            .map(|value| value.0)
-            .unwrap_or_default());
-    }
-
-    let path = spool_dir.join("policy").join("bayespam.json");
-    if !path.exists() {
-        return Ok(BayesCorpus::default());
-    }
-    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
-}
-
-async fn save_bayespam_corpus(
-    spool_dir: &Path,
-    config: &RuntimeConfig,
-    corpus: &BayesCorpus,
-) -> Result<()> {
-    if let Some(pool) = ensure_local_db_schema(config).await? {
-        sqlx::query(
-            r#"
-            INSERT INTO bayespam_corpora (corpus_key, corpus, updated_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (corpus_key) DO UPDATE SET
-                corpus = EXCLUDED.corpus,
-                updated_at = NOW()
-            "#,
-        )
-        .bind("default")
-        .bind(Json(corpus))
-        .execute(pool)
-        .await?;
-        return Ok(());
-    }
-
-    let path = spool_dir.join("policy").join("bayespam.json");
-    fs::write(path, serde_json::to_string_pretty(corpus)?)?;
-    Ok(())
-}
-
-fn tokenize_for_bayespam(
-    subject: &str,
-    visible_text: &str,
-    min_token_length: usize,
-    max_tokens: usize,
-) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut tokens = Vec::new();
-    for token in [subject, visible_text].into_iter().flat_map(|value| {
-        value
-            .split(|ch: char| !ch.is_ascii_alphanumeric())
-            .map(str::trim)
-            .filter(|token| token.len() >= min_token_length)
-            .map(|token| token.to_ascii_lowercase())
-            .collect::<Vec<_>>()
-    }) {
-        if seen.insert(token.clone()) {
-            tokens.push(token);
-            if tokens.len() >= max_tokens {
-                break;
-            }
-        }
-    }
-    tokens
-}
-
-fn bayespam_token_probability(corpus: &BayesCorpus, token: &str) -> Option<f64> {
-    if corpus.ham_messages == 0 || corpus.spam_messages == 0 {
-        return None;
-    }
-    let spam_count = *corpus.spam_tokens.get(token).unwrap_or(&0);
-    let ham_count = *corpus.ham_tokens.get(token).unwrap_or(&0);
-    if spam_count == 0 && ham_count == 0 {
-        return None;
-    }
-    let spam = (spam_count as f64 + 1.0) / (corpus.spam_messages as f64 + 2.0);
-    let ham = (ham_count as f64 + 1.0) / (corpus.ham_messages as f64 + 2.0);
-    let probability = spam / (spam + ham);
-    Some(probability.clamp(0.01, 0.99))
-}
-
-fn score_bayespam_tokens(
-    corpus: &BayesCorpus,
-    tokens: &[String],
-    score_weight: f32,
-) -> Option<BayesOutcome> {
-    if corpus.ham_messages == 0 || corpus.spam_messages == 0 {
-        return None;
-    }
-
-    let mut log_spam = 0.0f64;
-    let mut log_ham = 0.0f64;
-    let mut matched = 0usize;
-    for token in tokens {
-        let Some(probability) = bayespam_token_probability(corpus, token) else {
-            continue;
-        };
-        log_spam += probability.ln();
-        log_ham += (1.0 - probability).ln();
-        matched += 1;
-    }
-
-    if matched == 0 {
-        return None;
-    }
-    if matched < BAYESPAM_MIN_SCORING_TOKENS {
-        return Some(BayesOutcome {
-            probability: 0.5,
-            matched_tokens: matched,
-            contribution: 0.0,
-        });
-    }
-
-    let probability = 1.0 / (1.0 + (log_ham - log_spam).exp());
-    let contribution = ((probability as f32 - 0.5).max(0.0) * 2.0) * score_weight.max(0.0);
-    Some(BayesOutcome {
-        probability: probability as f32,
-        matched_tokens: matched,
-        contribution,
-    })
-}
-
-async fn score_bayespam(
-    spool_dir: &Path,
-    config: &RuntimeConfig,
-    subject: &str,
-    visible_text: &str,
-    _mail_from: &str,
-    _helo: &str,
-) -> Result<Option<BayesOutcome>> {
-    if !config.bayespam_enabled {
-        return Ok(None);
-    }
-    let corpus = load_bayespam_corpus(spool_dir, config).await?;
-    let tokens = tokenize_for_bayespam(
-        subject,
-        visible_text,
-        config.bayespam_min_token_length.max(2) as usize,
-        config.bayespam_max_tokens.max(16) as usize,
-    );
-    Ok(score_bayespam_tokens(
-        &corpus,
-        &tokens,
-        config.bayespam_score_weight,
-    ))
-}
-
-async fn train_bayespam(
-    spool_dir: &Path,
-    config: &RuntimeConfig,
-    message: &QueuedMessage,
-    label: BayesLabel,
-) -> Result<()> {
-    if !config.bayespam_enabled || !config.bayespam_auto_learn {
-        return Ok(());
-    }
-
-    let subject = parse_rfc822_header_value(&message.data, "subject").unwrap_or_default();
-    let visible_text = extract_visible_text(&message.data)?;
-    let tokens = tokenize_for_bayespam(
-        &subject,
-        &visible_text,
-        config.bayespam_min_token_length.max(2) as usize,
-        config.bayespam_max_tokens.max(16) as usize,
-    );
-    if tokens.is_empty() {
-        return Ok(());
-    }
-
-    let mut corpus = load_bayespam_corpus(spool_dir, config).await?;
-    match label {
-        BayesLabel::Ham => {
-            corpus.ham_messages = corpus.ham_messages.saturating_add(1);
-            for token in tokens {
-                let entry = corpus.ham_tokens.entry(token).or_insert(0);
-                *entry = entry.saturating_add(1);
-            }
-        }
-        BayesLabel::Spam => {
-            corpus.spam_messages = corpus.spam_messages.saturating_add(1);
-            for token in tokens {
-                let entry = corpus.spam_tokens.entry(token).or_insert(0);
-                *entry = entry.saturating_add(1);
-            }
-        }
-    }
-    save_bayespam_corpus(spool_dir, config, &corpus).await
-}
-
 fn stable_key_id<T: Hash>(value: &T) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
@@ -3284,82 +2424,6 @@ fn map_dns_error(error: hickory_resolver::ResolveError) -> DnsError {
         DnsError::NoRecords
     } else {
         DnsError::TempFail
-    }
-}
-
-fn deferred_smtp_reply(message: &QueuedMessage) -> String {
-    format!(
-        "451 {} (trace {})",
-        deferred_smtp_reason(message),
-        message.id
-    )
-}
-
-fn deferred_smtp_reason(message: &QueuedMessage) -> &'static str {
-    if message
-        .decision_trace
-        .iter()
-        .any(|entry| entry.stage == "core-delivery")
-    {
-        "core final delivery temporarily unavailable"
-    } else if message
-        .decision_trace
-        .iter()
-        .any(|entry| entry.stage == "greylisting" && entry.outcome == "defer")
-    {
-        "message temporarily deferred by greylisting"
-    } else if message.decision_trace.iter().any(|entry| {
-        entry.stage == "policy-trigger"
-            && entry.outcome == "defer"
-            && entry.detail.contains("authentication")
-    }) {
-        "message temporarily deferred by authentication dependency"
-    } else {
-        "message temporarily deferred by perimeter policy"
-    }
-}
-
-fn rejected_smtp_reply(message: &QueuedMessage) -> String {
-    match message
-        .relay_error
-        .as_deref()
-        .map(sanitize_smtp_reply_detail)
-        .filter(|reason| !reason.is_empty())
-    {
-        Some(reason) => format!(
-            "554 message rejected by perimeter policy: {} (trace {})",
-            reason, message.id
-        ),
-        None => format!(
-            "554 message rejected by perimeter policy (trace {})",
-            message.id
-        ),
-    }
-}
-
-fn sanitize_smtp_reply_detail(detail: &str) -> String {
-    let normalized = detail
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_graphic() || ch == ' ' {
-                ch
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>();
-    let compacted = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_REPLY_DETAIL_LEN: usize = 180;
-    if compacted.len() <= MAX_REPLY_DETAIL_LEN {
-        compacted
-    } else {
-        format!(
-            "{}...",
-            compacted
-                .chars()
-                .take(MAX_REPLY_DETAIL_LEN)
-                .collect::<String>()
-        )
     }
 }
 
@@ -3729,73 +2793,6 @@ async fn direct_mx_targets(resolver: &SystemDnsResolver, domain: &str) -> Result
     }
 }
 
-fn direct_mx_failure(
-    route: &TransportRouteDecision,
-    attempt_count: u32,
-    detail: String,
-    remote_host: Option<String>,
-    permanent: bool,
-) -> OutboundExecution {
-    let status = if permanent {
-        TransportDeliveryStatus::Bounced
-    } else {
-        TransportDeliveryStatus::Deferred
-    };
-    OutboundExecution {
-        status: status.clone(),
-        detail: Some(detail.clone()),
-        remote_message_ref: None,
-        retry: if status == TransportDeliveryStatus::Deferred {
-            Some(TransportRetryAdvice {
-                retry_after_seconds: retry_after_seconds(
-                    DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS,
-                    attempt_count,
-                ),
-                policy: "direct-mx".to_string(),
-                reason: Some(detail.clone()),
-            })
-        } else {
-            None
-        },
-        dsn: Some(TransportDsnReport {
-            action: if status == TransportDeliveryStatus::Bounced {
-                "failed".to_string()
-            } else {
-                "delayed".to_string()
-            },
-            status: if status == TransportDeliveryStatus::Bounced {
-                "5.1.2".to_string()
-            } else {
-                "4.4.1".to_string()
-            },
-            diagnostic_code: Some(format!("smtp; {detail}")),
-            remote_mta: remote_host.clone(),
-        }),
-        technical: Some(TransportTechnicalStatus {
-            phase: "mx-lookup".to_string(),
-            smtp_code: None,
-            enhanced_code: None,
-            remote_host,
-            detail: Some(detail),
-        }),
-        route: Some(TransportRouteDecision {
-            rule_id: route.rule_id.clone(),
-            relay_target: Some("direct-mx".to_string()),
-            queue: default_queue_for_status(&status).to_string(),
-        }),
-        throttle: None,
-    }
-}
-
-fn is_permanent_direct_mx_error(detail: &str) -> bool {
-    let lower = detail.to_ascii_lowercase();
-    lower.contains("does not exist")
-        || lower.contains("null mx")
-        || lower.contains("does not accept mail")
-        || lower.contains("recipient address has no domain")
-        || lower.contains("no outbound recipients")
-}
-
 fn sanitize_outbound_ehlo_name(value: &str) -> String {
     let normalized = value.trim().trim_end_matches('.').to_ascii_lowercase();
     if is_valid_ehlo_hostname(&normalized) {
@@ -4049,106 +3046,6 @@ async fn relay_message_to_target_for_recipients(
     })
 }
 
-fn smtp_starttls_acceptor_from_store(
-    dashboard_store: &Arc<Mutex<super::DashboardState>>,
-) -> Result<Option<TlsAcceptor>> {
-    let (cert_path, key_path) = {
-        let snapshot = dashboard_store
-            .lock()
-            .map_err(|_| anyhow!("dashboard state lock poisoned"))?;
-        public_tls_paths_from_dashboard(&snapshot)
-    };
-    smtp_starttls_acceptor_for_paths(cert_path, key_path)
-}
-
-fn public_tls_paths_from_dashboard(
-    dashboard: &super::DashboardState,
-) -> (Option<String>, Option<String>) {
-    let Some(active_id) = dashboard
-        .network
-        .public_tls
-        .active_profile_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return (None, None);
-    };
-    let Some(profile) = dashboard
-        .network
-        .public_tls
-        .profiles
-        .iter()
-        .find(|profile| profile.id == active_id)
-    else {
-        return (None, None);
-    };
-    (
-        Some(profile.cert_path.trim().to_string()).filter(|value| !value.is_empty()),
-        Some(profile.key_path.trim().to_string()).filter(|value| !value.is_empty()),
-    )
-}
-
-fn smtp_starttls_acceptor_for_paths(
-    cert_path: Option<String>,
-    key_path: Option<String>,
-) -> Result<Option<TlsAcceptor>> {
-    match (cert_path, key_path) {
-        (Some(cert_path), Some(key_path)) => {
-            let certificates = load_certificates(&cert_path)?;
-            let key = load_private_key(&key_path)?;
-            let config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certificates, key)?;
-            Ok(Some(TlsAcceptor::from(Arc::new(config))))
-        }
-        (None, None) => Ok(None),
-        (Some(_), None) => Err(anyhow!(
-            "LPE_CT_PUBLIC_TLS_KEY_PATH must be set when LPE_CT_PUBLIC_TLS_CERT_PATH is set"
-        )),
-        (None, Some(_)) => Err(anyhow!(
-            "LPE_CT_PUBLIC_TLS_CERT_PATH must be set when LPE_CT_PUBLIC_TLS_KEY_PATH is set"
-        )),
-    }
-}
-
-fn load_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
-    let mut reader = StdBufReader::new(
-        File::open(path).with_context(|| format!("unable to open certificate {path}"))?,
-    );
-    rustls_pemfile::certs(&mut reader)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| anyhow!("unable to parse certificate {path}: {error}"))
-        .and_then(|certificates| {
-            if certificates.is_empty() {
-                anyhow::bail!("no certificate found in {path}");
-            }
-            Ok(certificates)
-        })
-}
-
-fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
-    let mut reader =
-        StdBufReader::new(File::open(path).with_context(|| format!("unable to open key {path}"))?);
-    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| anyhow!("unable to parse private key {path}: {error}"))?;
-    if let Some(key) = keys.pop() {
-        return Ok(PrivateKeyDer::Pkcs8(key));
-    }
-
-    let mut reader = StdBufReader::new(
-        File::open(path).with_context(|| format!("unable to reopen key {path}"))?,
-    );
-    let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| anyhow!("unable to parse rsa private key {path}: {error}"))?;
-    let Some(key) = keys.pop() else {
-        anyhow::bail!("no private key found in {path}");
-    };
-    Ok(PrivateKeyDer::Pkcs1(key))
-}
-
 async fn persist_message(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
     let destination = spool_path(spool_dir, queue, &message.id);
     let temp_path = spool_dir.join(queue).join(format!("{}.tmp", message.id));
@@ -4166,217 +3063,6 @@ async fn move_message(
     persist_message(spool_dir, to, message).await?;
     let _ = tokio::fs::remove_file(spool_path(spool_dir, from, &message.id)).await;
     Ok(())
-}
-
-fn quarantine_summary_from_message(message: &QueuedMessage) -> QuarantineSummary {
-    QuarantineSummary {
-        trace_id: message.id.clone(),
-        queue: "quarantine".to_string(),
-        direction: message.direction.clone(),
-        status: message.status.clone(),
-        received_at: message.received_at.clone(),
-        peer: message.peer.clone(),
-        helo: message.helo.clone(),
-        mail_from: message.mail_from.clone(),
-        rcpt_to: message.rcpt_to.clone(),
-        subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
-        internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
-        reason: message.relay_error.clone(),
-        spam_score: message.spam_score,
-        security_score: message.security_score,
-        reputation_score: message.reputation_score,
-        dnsbl_hits: message.dnsbl_hits.clone(),
-        auth_summary: serde_json::to_value(&message.auth_summary).unwrap_or(Value::Null),
-        magika_summary: message.magika_summary.clone(),
-        magika_decision: message.magika_decision.clone(),
-        remote_message_ref: message.remote_message_ref.clone(),
-        route_target: message
-            .route
-            .as_ref()
-            .and_then(|route| route.relay_target.clone()),
-        decision_summary: latest_decision_summary(&message.decision_trace),
-    }
-}
-
-fn latest_decision_summary(trace: &[DecisionTraceEntry]) -> Option<String> {
-    trace
-        .last()
-        .map(|entry| format!("{}:{}", entry.stage, entry.outcome))
-}
-
-fn quarantine_matches(item: &QuarantineSummary, query: &QuarantineQuery) -> bool {
-    if let Some(trace_id) = normalized(query.trace_id.as_deref()) {
-        if item.trace_id != trace_id {
-            return false;
-        }
-    }
-    if let Some(sender) = normalized(query.sender.as_deref()) {
-        if !item.mail_from.to_ascii_lowercase().contains(&sender) {
-            return false;
-        }
-    }
-    if let Some(recipient) = normalized(query.recipient.as_deref()) {
-        if !item
-            .rcpt_to
-            .iter()
-            .any(|value| value.to_ascii_lowercase().contains(&recipient))
-        {
-            return false;
-        }
-    }
-    if let Some(internet_message_id) = normalized(query.internet_message_id.as_deref()) {
-        if !item
-            .internet_message_id
-            .as_deref()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .contains(&internet_message_id)
-        {
-            return false;
-        }
-    }
-    if let Some(route_target) = normalized(query.route_target.as_deref()) {
-        if !item
-            .route_target
-            .as_deref()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .contains(&route_target)
-        {
-            return false;
-        }
-    }
-    if let Some(reason) = normalized(query.reason.as_deref()) {
-        if !item
-            .reason
-            .as_deref()
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .contains(&reason)
-        {
-            return false;
-        }
-    }
-    if let Some(direction) = query.direction.as_deref() {
-        if item.direction != direction {
-            return false;
-        }
-    }
-    if let Some(status) = query.status.as_deref() {
-        if item.status != status {
-            return false;
-        }
-    }
-    if let Some(min_spam_score) = query.min_spam_score {
-        if item.spam_score < min_spam_score {
-            return false;
-        }
-    }
-    if let Some(min_security_score) = query.min_security_score {
-        if item.security_score < min_security_score {
-            return false;
-        }
-    }
-    if let Some(domain) = normalized(query.domain.as_deref()) {
-        let sender_matches = domain_part(&item.mail_from).is_some_and(|value| value == domain);
-        let recipient_matches = item
-            .rcpt_to
-            .iter()
-            .filter_map(|value| domain_part(value))
-            .any(|value| value == domain);
-        if !sender_matches && !recipient_matches {
-            return false;
-        }
-    }
-    if let Some(q) = normalized(query.q.as_deref()) {
-        let haystack = [
-            item.trace_id.as_str(),
-            item.subject.as_str(),
-            item.mail_from.as_str(),
-            item.peer.as_str(),
-            item.helo.as_str(),
-            item.reason.as_deref().unwrap_or(""),
-            item.internet_message_id.as_deref().unwrap_or(""),
-            item.route_target.as_deref().unwrap_or(""),
-            item.decision_summary.as_deref().unwrap_or(""),
-        ]
-        .into_iter()
-        .chain(item.rcpt_to.iter().map(String::as_str))
-        .chain(item.dnsbl_hits.iter().map(String::as_str))
-        .map(|value| value.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-        if !haystack.iter().any(|value| value.contains(&q)) {
-            return false;
-        }
-    }
-    true
-}
-
-fn inspect_headers(data: &[u8]) -> Vec<(String, String)> {
-    let mut headers = Vec::new();
-    for line in String::from_utf8_lossy(data).lines() {
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((name, value)) = trimmed.split_once(':') {
-            let lower = name.trim().to_ascii_lowercase();
-            if matches!(
-                lower.as_str(),
-                "from" | "to" | "cc" | "subject" | "date" | "message-id" | "received"
-            ) {
-                headers.push((name.trim().to_string(), value.trim().to_string()));
-            }
-        }
-        if headers.len() >= 12 {
-            break;
-        }
-    }
-    headers
-}
-
-fn body_excerpt(data: &[u8]) -> String {
-    let raw = String::from_utf8_lossy(data);
-    let body = raw
-        .split_once("\r\n\r\n")
-        .map(|(_, value)| value)
-        .or_else(|| raw.split_once("\n\n").map(|(_, value)| value))
-        .unwrap_or("");
-    body.chars()
-        .filter(|value| !value.is_control() || matches!(value, '\n' | '\r' | '\t'))
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(280)
-        .collect()
-}
-
-fn body_content(data: &[u8]) -> String {
-    extract_visible_text(data)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| body_excerpt(data))
-}
-
-fn attachment_summaries(data: &[u8]) -> Vec<TraceAttachmentSummary> {
-    collect_mime_attachment_parts(data)
-        .map(|attachments| {
-            attachments
-                .into_iter()
-                .enumerate()
-                .map(|(index, attachment)| TraceAttachmentSummary {
-                    name: attachment
-                        .filename
-                        .filter(|value| !value.trim().is_empty())
-                        .unwrap_or_else(|| format!("attachment-{}", index + 1)),
-                    size_bytes: attachment.bytes.len() as u64,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn spool_path(spool_dir: &Path, queue: &str, id: &str) -> PathBuf {
@@ -4601,41 +3287,6 @@ pub(crate) async fn delete_trace(
     trace_id: &str,
 ) -> Result<Option<TraceActionResult>> {
     transition_trace(spool_dir, config, trace_id, TraceAction::Delete).await
-}
-
-fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDetails {
-    TraceDetails {
-        trace_id: message.id.clone(),
-        queue: queue.to_string(),
-        direction: message.direction.clone(),
-        status: message.status.clone(),
-        received_at: message.received_at.clone(),
-        peer: message.peer.clone(),
-        helo: message.helo.clone(),
-        mail_from: message.mail_from.clone(),
-        rcpt_to: message.rcpt_to.clone(),
-        subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
-        internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
-        reason: message.relay_error.clone(),
-        remote_message_ref: message.remote_message_ref.clone(),
-        spam_score: message.spam_score,
-        security_score: message.security_score,
-        reputation_score: message.reputation_score,
-        dnsbl_hits: message.dnsbl_hits.clone(),
-        auth_summary: serde_json::to_value(&message.auth_summary).unwrap_or(Value::Null),
-        magika_summary: message.magika_summary.clone(),
-        magika_decision: message.magika_decision.clone(),
-        technical_status: message.technical_status.clone(),
-        dsn: message.dsn.clone(),
-        route: message.route.clone(),
-        throttle: message.throttle.clone(),
-        message_size_bytes: message.data.len() as u64,
-        headers: inspect_headers(&message.data),
-        body_excerpt: body_excerpt(&message.data),
-        body_content: body_content(&message.data),
-        attachments: attachment_summaries(&message.data),
-        decision_trace: message.decision_trace.clone(),
-    }
 }
 
 fn load_message_from_path(path: &Path) -> Result<QueuedMessage> {
@@ -4955,37 +3606,6 @@ async fn remove_quarantine_metadata_or_warn(config: &RuntimeConfig, trace_id: &s
     }
 }
 
-fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool {
-    if config.accepted_domains.is_empty() {
-        return false;
-    }
-    let Some(domain) = domain_part(recipient) else {
-        return false;
-    };
-    accepted_domain_is_verified(config, &domain)
-}
-
-fn accepted_domain_is_verified(config: &RuntimeConfig, domain: &str) -> bool {
-    config
-        .accepted_domains
-        .iter()
-        .any(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(&domain))
-}
-
-fn recipient_domain_accepts_null_reverse_path(config: &RuntimeConfig, recipient: &str) -> bool {
-    if config.accepted_domains.is_empty() {
-        return false;
-    }
-    let Some(domain) = domain_part(recipient) else {
-        return false;
-    };
-    config.accepted_domains.iter().any(|accepted| {
-        accepted.verified
-            && accepted.accept_null_reverse_path
-            && accepted.domain.eq_ignore_ascii_case(&domain)
-    })
-}
-
 fn should_quarantine(data: &[u8]) -> bool {
     String::from_utf8_lossy(data).lines().any(|line| {
         let lower = line.to_ascii_lowercase();
@@ -4999,154 +3619,6 @@ fn normalize_smtp_target(target: &str) -> String {
         .trim_start_matches("smtp://")
         .trim_start_matches("tcp://")
         .to_string()
-}
-
-fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> Vec<u8> {
-    let mut lines = Vec::new();
-    lines.push(format!(
-        "From: {}",
-        format_address(&payload.from_address, payload.from_display.as_deref())
-    ));
-    if let Some(sender_address) = payload
-        .sender_address
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case(&payload.from_address))
-    {
-        lines.push(format!(
-            "Sender: {}",
-            format_address(sender_address, payload.sender_display.as_deref())
-        ));
-    }
-    if !payload.to.is_empty() {
-        lines.push(format!(
-            "To: {}",
-            payload
-                .to
-                .iter()
-                .map(|recipient| format_address(
-                    &recipient.address,
-                    recipient.display_name.as_deref()
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if !payload.cc.is_empty() {
-        lines.push(format!(
-            "Cc: {}",
-            payload
-                .cc
-                .iter()
-                .map(|recipient| format_address(
-                    &recipient.address,
-                    recipient.display_name.as_deref()
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    lines.push(format!("Subject: {}", payload.subject));
-    lines.push(format!(
-        "Message-Id: {}",
-        payload
-            .internet_message_id
-            .clone()
-            .unwrap_or_else(|| format!("<{}@lpe.local>", payload.message_id))
-    ));
-    lines.push("MIME-Version: 1.0".to_string());
-    if let Some(html) = payload
-        .body_html_sanitized
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        let boundary = format!("lpe-alt-{}", payload.message_id);
-        lines.push(format!(
-            "Content-Type: multipart/alternative; boundary=\"{boundary}\""
-        ));
-        lines.push(String::new());
-        lines.push(format!("--{boundary}"));
-        lines.push("Content-Type: text/plain; charset=utf-8".to_string());
-        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
-        lines.push(String::new());
-        lines.push(encode_quoted_printable(&payload.body_text));
-        lines.push(format!("--{boundary}"));
-        lines.push("Content-Type: text/html; charset=utf-8".to_string());
-        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
-        lines.push(String::new());
-        lines.push(encode_quoted_printable(html));
-        lines.push(format!("--{boundary}--"));
-    } else {
-        lines.push("Content-Type: text/plain; charset=utf-8".to_string());
-        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
-        lines.push(String::new());
-        lines.push(encode_quoted_printable(&payload.body_text));
-    }
-    lines.join("\r\n").into_bytes()
-}
-
-fn format_address(address: &str, display_name: Option<&str>) -> String {
-    match display_name
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(display_name) => format!("{display_name} <{address}>"),
-        None => address.to_string(),
-    }
-}
-
-fn encode_quoted_printable(value: &str) -> String {
-    let mut encoded = String::new();
-    let mut line_len = 0usize;
-    for &byte in value.as_bytes() {
-        match byte {
-            b'\r' => {}
-            b'\n' => {
-                encoded.push_str("\r\n");
-                line_len = 0;
-            }
-            b'\t' | b' ' | 33..=60 | 62..=126 => {
-                if line_len >= 72 {
-                    encoded.push_str("=\r\n");
-                    line_len = 0;
-                }
-                encoded.push(byte as char);
-                line_len += 1;
-            }
-            _ => {
-                if line_len >= 70 {
-                    encoded.push_str("=\r\n");
-                    line_len = 0;
-                }
-                encoded.push_str(&format!("={byte:02X}"));
-                line_len += 3;
-            }
-        }
-    }
-    encoded
-}
-
-fn is_permanent_relay_error(detail: &str) -> bool {
-    let lower = detail.to_ascii_lowercase();
-    lower.contains("mutual tls relay is configured but not implemented")
-}
-
-fn parse_enhanced_status(detail: &str) -> Option<String> {
-    detail
-        .split_whitespace()
-        .map(|token| token.trim_matches(|ch: char| matches!(ch, ';' | ',' | ':')))
-        .find(|token| {
-            let mut parts = token.split('.');
-            matches!(
-                (parts.next(), parts.next(), parts.next(), parts.next()),
-                (Some(a), Some(b), Some(c), None)
-                    if a.chars().all(|ch| ch.is_ascii_digit())
-                        && b.chars().all(|ch| ch.is_ascii_digit())
-                        && c.chars().all(|ch| ch.is_ascii_digit())
-            )
-        })
-        .map(ToString::to_string)
 }
 
 fn message_id(prefix: &str) -> String {
