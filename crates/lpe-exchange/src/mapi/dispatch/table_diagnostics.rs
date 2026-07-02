@@ -1555,22 +1555,37 @@ fn append_exact_virtual_inbox_debug_associated_config(
             }
         }
     }
+    if restriction.is_none() {
+        append_debug_modeled_inbox_exact_startup_config(
+            messages,
+            crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+                "IPM.Configuration.ELC",
+            ),
+        );
+    }
     let Some(message_class) = debug_exact_message_class_restriction_value(restriction) else {
         return;
     };
-    let Some(message) =
+    append_debug_modeled_inbox_exact_startup_config(
+        messages,
         crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
             message_class,
-        )
-    else {
-        return;
-    };
-    if !messages.iter().any(|existing| {
-        existing
-            .message_class
-            .eq_ignore_ascii_case(&message.message_class)
-    }) {
-        messages.push(message);
+        ),
+    );
+}
+
+fn append_debug_modeled_inbox_exact_startup_config(
+    messages: &mut Vec<crate::mapi_store::MapiAssociatedConfigMessage>,
+    message: Option<crate::mapi_store::MapiAssociatedConfigMessage>,
+) {
+    if let Some(message) = message {
+        if !messages.iter().any(|existing| {
+            existing
+                .message_class
+                .eq_ignore_ascii_case(&message.message_class)
+        }) {
+            messages.push(message);
+        }
     }
 }
 

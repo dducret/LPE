@@ -216,22 +216,37 @@ fn append_exact_virtual_inbox_associated_config(
     if restriction.is_none() || is_broad_outlook_configuration_restriction(restriction) {
         append_modeled_inbox_broad_startup_configs(messages);
     }
+    if restriction.is_none() {
+        append_modeled_inbox_exact_startup_config(
+            messages,
+            crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+                "IPM.Configuration.ELC",
+            ),
+        );
+    }
     let Some(message_class) = exact_message_class_restriction_value(restriction) else {
         return;
     };
-    let Some(message) =
+    append_modeled_inbox_exact_startup_config(
+        messages,
         crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
             message_class,
-        )
-    else {
-        return;
-    };
-    if !messages.iter().any(|existing| {
-        existing
-            .message_class
-            .eq_ignore_ascii_case(&message.message_class)
-    }) {
-        messages.push(message);
+        ),
+    );
+}
+
+fn append_modeled_inbox_exact_startup_config(
+    messages: &mut Vec<MapiAssociatedConfigMessage>,
+    message: Option<MapiAssociatedConfigMessage>,
+) {
+    if let Some(message) = message {
+        if !messages.iter().any(|existing| {
+            existing
+                .message_class
+                .eq_ignore_ascii_case(&message.message_class)
+        }) {
+            messages.push(message);
+        }
     }
 }
 
@@ -301,6 +316,9 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         return true;
     }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
+        if message.message_class == "IPM.Configuration.ELC" && restriction.is_none() {
+            return true;
+        }
         return matches!(
             message.message_class.as_str(),
             "IPM.Configuration.ELC"

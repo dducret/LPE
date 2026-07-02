@@ -341,7 +341,7 @@ pub(crate) fn outlook_inbox_broad_startup_associated_config_defaults(
         .filter(|message| {
             matches!(
                 message.message_class.as_str(),
-                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS | OUTLOOK_INBOX_ELC_CONFIG_CLASS
+                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS
             )
         })
         .collect()
