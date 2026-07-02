@@ -17,6 +17,7 @@ use super::rop::*;
 use super::session::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::{month_abbrev, utc_from_unix_seconds, weekday_abbrev_from_unix_days};
 
 pub(in crate::mapi) const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
@@ -1055,6 +1056,16 @@ pub(in crate::mapi) fn log_mapi_connection(
     let status = response.status().as_u16();
     let payload_bytes = mapi_response_payload_bytes(response).unwrap_or(0);
     let request_body_bytes = request_body.len();
+    trace_mapi_connection(
+        endpoint,
+        principal,
+        headers,
+        request_body,
+        request_type,
+        request_id,
+        response,
+        payload_bytes,
+    );
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
@@ -1149,6 +1160,86 @@ pub(in crate::mapi) fn log_mapi_connection(
             "{message}"
         );
     }
+}
+
+fn trace_mapi_connection(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_body: &[u8],
+    request_type: &str,
+    request_id: &str,
+    response: &Response,
+    response_payload_bytes: usize,
+) {
+    let endpoint_label = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let session_key = request_cookie(endpoint, headers)
+        .unwrap_or_else(|| format!("{endpoint_label}:{request_id}"));
+    let remote_peer = remote_peer(headers);
+    let tenant_id = principal.tenant_id.to_string();
+    let account_id = principal.account_id.to_string();
+    let status = response.status().as_u16();
+    let response_code = response_header(response, "x-responsecode").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "mapi",
+        endpoint: endpoint_label,
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Inbound,
+        phase: request_type,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: Some(&tenant_id),
+        account: Some(&principal.email),
+        status: None,
+        metadata: vec![
+            ("account_id", account_id.clone()),
+            ("mapi_request_id", request_id.to_string()),
+            ("trace_id", trace_id.clone()),
+            ("client_request_id", client_request_id.clone()),
+            ("client_info", client_info.clone()),
+            ("client_application", client_application.clone()),
+            ("user_agent", user_agent.clone()),
+        ],
+        payload: Some(request_body),
+    });
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "mapi",
+        endpoint: endpoint_label,
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Outbound,
+        phase: request_type,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: Some(&tenant_id),
+        account: Some(&principal.email),
+        status: Some(status),
+        metadata: vec![
+            ("account_id", account_id),
+            ("mapi_request_id", request_id.to_string()),
+            ("mapi_response_code", response_code),
+            ("trace_id", trace_id),
+            ("client_request_id", client_request_id),
+            ("client_info", client_info),
+            ("client_application", client_application),
+            ("user_agent", user_agent),
+            ("response_payload_bytes", response_payload_bytes.to_string()),
+        ],
+        payload: None,
+    });
+}
+
+fn remote_peer(headers: &HeaderMap) -> Option<String> {
+    safe_header(headers, "x-forwarded-for")
+        .and_then(|value| value.split(',').next().map(|part| part.trim().to_string()))
+        .filter(|value| !value.is_empty())
+        .or_else(|| safe_header(headers, "x-real-ip"))
 }
 
 pub(in crate::mapi) fn execute_success_body(

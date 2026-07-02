@@ -319,7 +319,8 @@ ensure_service_user() {
 prepare_directories() {
   install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}"
   install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}" "${ENV_DIR}"
-  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}" "${LPE_PST_IMPORT_DIR}"
+  install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
+    "${DATA_DIR}" "${LPE_PST_IMPORT_DIR}" "${INSTALL_ROOT}/logs" "${INSTALL_ROOT}/logs/outlook-traces"
 }
 
 checkout_source() {

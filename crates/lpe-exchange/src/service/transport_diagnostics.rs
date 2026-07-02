@@ -1,4 +1,5 @@
 use super::*;
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use tracing::{info, warn};
 
 pub(super) fn log_mapi_transport_connection(
@@ -186,6 +187,15 @@ pub(super) fn log_rpc_proxy_connection(
     let response_payload_preview_hex =
         rpc_proxy_response_payload_preview_hex(response).unwrap_or_default();
     let message = "rca debug rpc proxy connection";
+    trace_rpc_proxy_connection(
+        method,
+        uri,
+        headers,
+        request_body,
+        response,
+        &response_kind,
+        response_payload_bytes,
+    );
 
     if status < 400 {
         info!(
@@ -228,6 +238,70 @@ pub(super) fn log_rpc_proxy_connection(
             message
         );
     }
+}
+
+fn trace_rpc_proxy_connection(
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    request_body: &[u8],
+    response: &Response,
+    response_kind: &str,
+    response_payload_bytes: usize,
+) {
+    let session_key = mapi::safe_header(headers, "client-request-id")
+        .or_else(|| mapi::safe_header(headers, "x-requestid"))
+        .or_else(|| mapi::safe_header(headers, "x-trace-id"))
+        .unwrap_or_else(|| format!("rpcproxy:{}:{}", method, uri.path()));
+    let remote_peer = mapi::safe_header(headers, "x-forwarded-for")
+        .and_then(|value| value.split(',').next().map(|part| part.trim().to_string()))
+        .filter(|value| !value.is_empty())
+        .or_else(|| mapi::safe_header(headers, "x-real-ip"));
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_request_id = mapi::safe_header(headers, "x-requestid").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "rpcproxy",
+        endpoint: "rpcproxy.dll",
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Inbound,
+        phase: method.as_str(),
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: None,
+        account: None,
+        status: None,
+        metadata: vec![
+            ("path", uri.path().to_string()),
+            ("query", uri.query().unwrap_or_default().to_string()),
+            ("trace_id", trace_id.clone()),
+            ("client_request_id", client_request_id.clone()),
+            ("x_request_id", x_request_id.clone()),
+            ("user_agent", user_agent.clone()),
+        ],
+        payload: Some(request_body),
+    });
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "rpcproxy",
+        endpoint: "rpcproxy.dll",
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Outbound,
+        phase: response_kind,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: None,
+        account: None,
+        status: Some(response.status().as_u16()),
+        metadata: vec![
+            ("path", uri.path().to_string()),
+            ("trace_id", trace_id),
+            ("client_request_id", client_request_id),
+            ("x_request_id", x_request_id),
+            ("user_agent", user_agent),
+            ("response_payload_bytes", response_payload_bytes.to_string()),
+        ],
+        payload: None,
+    });
 }
 
 #[derive(Clone, Copy, Debug)]

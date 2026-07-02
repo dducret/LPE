@@ -1,4 +1,5 @@
 use super::super::*;
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 
 impl<S, V> ExchangeService<S, V>
 where
@@ -9,6 +10,14 @@ where
         let principal = authenticate_account(&self.store, None, headers, "ews").await?;
         let body = decode_ews_body(headers, body)?;
         let operation = operation_name(&body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
+        trace_ews_event(
+            headers,
+            &principal,
+            &operation,
+            OutlookTraceDirection::Inbound,
+            None,
+            Some(body.as_bytes()),
+        );
 
         let payload = match operation.as_str() {
             "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
@@ -256,6 +265,14 @@ where
 
         let response_code = element_text(&payload, "ResponseCode").unwrap_or_default();
         let detail = ews_payload_debug_detail(&operation, &payload);
+        trace_ews_event(
+            headers,
+            &principal,
+            &operation,
+            OutlookTraceDirection::Outbound,
+            Some(&response_code),
+            Some(payload.as_bytes()),
+        );
         let mut response = soap_response(payload);
         response.extensions_mut().insert(EwsResponseDebug {
             response_code,
@@ -263,4 +280,57 @@ where
         });
         Ok(response)
     }
+}
+
+fn trace_ews_event(
+    headers: &HeaderMap,
+    principal: &AccountPrincipal,
+    operation: &str,
+    direction: OutlookTraceDirection,
+    response_code: Option<&str>,
+    payload: Option<&[u8]>,
+) {
+    let session_key = mapi::safe_header(headers, "client-request-id")
+        .or_else(|| mapi::safe_header(headers, "x-requestid"))
+        .or_else(|| mapi::safe_header(headers, "x-trace-id"))
+        .unwrap_or_else(|| format!("ews:{}:{operation}", principal.email));
+    let remote_peer = mapi::safe_header(headers, "x-forwarded-for")
+        .and_then(|value| value.split(',').next().map(|part| part.trim().to_string()))
+        .filter(|value| !value.is_empty())
+        .or_else(|| mapi::safe_header(headers, "x-real-ip"));
+    let tenant_id = principal.tenant_id.to_string();
+    let account_id = principal.account_id.to_string();
+    let mut metadata = vec![
+        ("account_id", account_id),
+        ("operation", operation.to_string()),
+        (
+            "trace_id",
+            mapi::safe_header(headers, "x-trace-id").unwrap_or_default(),
+        ),
+        (
+            "client_request_id",
+            mapi::safe_header(headers, "client-request-id").unwrap_or_default(),
+        ),
+        (
+            "user_agent",
+            mapi::safe_header(headers, "user-agent").unwrap_or_default(),
+        ),
+    ];
+    if let Some(response_code) = response_code {
+        metadata.push(("ews_response_code", response_code.to_string()));
+    }
+
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "ews",
+        endpoint: "Exchange.asmx",
+        session_key: &session_key,
+        direction,
+        phase: operation,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: Some(&tenant_id),
+        account: Some(&principal.email),
+        status: None,
+        metadata,
+        payload,
+    });
 }

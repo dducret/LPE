@@ -724,7 +724,22 @@ a protocol-success response, temporarily set
 `LPE_RCA_DEBUG_PAYLOAD_PREVIEW_BYTES=256` to include a capped hexadecimal
 preview of MAPI/HTTP binary request and response payloads; unset it again after
 the RCA run because those previews can contain mailbox names or address-book
-lookup values. During an RCA run, capture the last few minutes with:
+lookup values.
+
+For deeper Outlook interoperability debugging, local per-connection diagnostic
+trace files can be enabled with `LPE_OUTLOOK_TRACE_ENABLED=true`. The default
+directory is `/opt/lpe/logs/outlook-traces`, provisioned service-owned by the
+install and update scripts. Sanitized mode writes Autodiscover, EWS, MAPI/HTTP
+EMSMDB, MAPI/HTTP NSPI, and RPC proxy request/reply metadata plus redacted
+payload summaries. It does not change protocol behavior and does not create
+mailbox, `Sent`, `Outbox`, or user-visible state. Keep this disabled outside a
+short troubleshooting window and rotate or delete collected files after the
+case is resolved. Full payload capture requires the separate
+`LPE_OUTLOOK_TRACE_RAW_PAYLOADS=true` opt-in and may include credentials,
+cookies, mailbox data, address-book data, and message contents; use it only on a
+restricted host for a tightly scoped run.
+
+During an RCA run, capture the last few minutes with:
 
 ```bash
 journalctl -u lpe.service --since "10 minutes ago" --no-pager | grep 'rca debug'

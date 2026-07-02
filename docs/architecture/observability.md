@@ -46,6 +46,9 @@
 | --- | --- |
 | `LPE_LOG_FORMAT` | core `LPE` |
 | `LPE_METRICS_ENABLED` | core `LPE` |
+| `LPE_OUTLOOK_TRACE_ENABLED` | core `LPE`; disabled by default local Outlook diagnostic trace files |
+| `LPE_OUTLOOK_TRACE_DIR` | core `LPE`; default `/opt/lpe/logs/outlook-traces` |
+| `LPE_OUTLOOK_TRACE_RAW_PAYLOADS` | core `LPE`; separate explicit opt-in for raw Outlook payload capture |
 | `LPE_CT_LOG_FORMAT` | `LPE-CT` |
 | `LPE_CT_METRICS_ENABLED` | `LPE-CT` |
 
@@ -64,8 +67,16 @@
 | --- | --- |
 | `/api/v1/dashboard` | management dashboard data |
 | `/api/v1/system-diagnostics/` | system diagnostics |
+| `/opt/lpe/logs/outlook-traces` | opt-in local Outlook Autodiscover, EWS, MAPI/HTTP, NSPI, and RPC proxy diagnostic trace files |
 | `/var/log/lpe-ct/mail.log` | `LPE-CT` mail log |
 | `/var/log/dmesg` | host diagnostics |
 
 `/api/v1/dashboard` is a management endpoint and requires a bearer token from
 `/api/v1/auth/login`; health and readiness probes remain unauthenticated.
+
+Outlook trace files are local server diagnostics, not user-visible state. They
+must remain disabled by default, should be retained only for the active
+troubleshooting window, and sanitized mode must redact credentials, cookies,
+authorization headers, passwords, and obvious tokens. Raw payload tracing is a
+stronger opt-in because captured payloads can contain credentials and mailbox
+contents.

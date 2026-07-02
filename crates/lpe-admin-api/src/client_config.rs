@@ -6,6 +6,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_storage::Storage;
 use serde::Deserialize;
 use serde_json::json;
@@ -82,6 +83,7 @@ async fn outlook_autodiscover_get(uri: Uri, headers: HeaderMap) -> Response {
         "pox",
         0,
         &response,
+        None,
         Some(&response_body),
         None,
     );
@@ -116,6 +118,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
                     response_kind,
                     body.len(),
                     &response,
+                    Some(body.as_ref()),
                     Some("SOAP Autodiscover is not published for the default Outlook IMAP profile.\n"),
                     Some("SOAP Exchange autodiscover is not published"),
                 );
@@ -137,6 +140,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
         response_kind,
         body.len(),
         &response,
+        Some(body.as_ref()),
         Some(&response_body),
         None,
     );
@@ -169,6 +173,7 @@ async fn outlook_autodiscover_json(
         query.protocol.as_deref().unwrap_or("AutoDiscoverV1"),
         0,
         &response,
+        None,
         None,
         None,
     );
@@ -941,6 +946,7 @@ fn log_autodiscover_connection(
     response_kind: &str,
     request_body_bytes: usize,
     response: &Response,
+    request_body: Option<&[u8]>,
     response_body: Option<&str>,
     error: Option<&str>,
 ) {
@@ -951,6 +957,16 @@ fn log_autodiscover_connection(
     let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
     let x_mapi_http_capability = safe_header(headers, "x-mapihttpcapability").unwrap_or_default();
     let message = "rca debug autodiscover connection";
+    trace_autodiscover_connection(
+        method,
+        uri,
+        headers,
+        email,
+        response_kind,
+        request_body,
+        response,
+        response_body,
+    );
 
     if status < 400 {
         info!(
@@ -1012,6 +1028,82 @@ fn log_autodiscover_connection(
             "{message}"
         );
     }
+}
+
+fn trace_autodiscover_connection(
+    method: &str,
+    uri: &Uri,
+    headers: &HeaderMap,
+    email: Option<&str>,
+    response_kind: &str,
+    request_body: Option<&[u8]>,
+    response: &Response,
+    response_body: Option<&str>,
+) {
+    let session_key = safe_header(headers, "client-request-id")
+        .or_else(|| safe_header(headers, "x-requestid"))
+        .or_else(|| safe_header(headers, "x-trace-id"))
+        .unwrap_or_else(|| {
+            format!(
+                "autodiscover:{}:{}:{}",
+                method,
+                uri.path(),
+                email.unwrap_or_default()
+            )
+        });
+    let remote_peer = safe_header(headers, "x-forwarded-for")
+        .and_then(|value| value.split(',').next().map(|part| part.trim().to_string()))
+        .filter(|value| !value.is_empty())
+        .or_else(|| safe_header(headers, "x-real-ip"));
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_request_id = safe_header(headers, "x-requestid").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let x_mapi_http_capability = safe_header(headers, "x-mapihttpcapability").unwrap_or_default();
+
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "autodiscover",
+        endpoint: "autodiscover",
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Inbound,
+        phase: response_kind,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: None,
+        account: email,
+        status: None,
+        metadata: vec![
+            ("method", method.to_string()),
+            ("path", uri.path().to_string()),
+            ("query", uri.query().unwrap_or_default().to_string()),
+            ("trace_id", trace_id.clone()),
+            ("client_request_id", client_request_id.clone()),
+            ("x_request_id", x_request_id.clone()),
+            ("x_mapi_http_capability", x_mapi_http_capability.clone()),
+            ("user_agent", user_agent.clone()),
+        ],
+        payload: request_body,
+    });
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "autodiscover",
+        endpoint: "autodiscover",
+        session_key: &session_key,
+        direction: OutlookTraceDirection::Outbound,
+        phase: response_kind,
+        remote_peer: remote_peer.as_deref(),
+        tenant_id: None,
+        account: email,
+        status: Some(response.status().as_u16()),
+        metadata: vec![
+            ("method", method.to_string()),
+            ("path", uri.path().to_string()),
+            ("trace_id", trace_id),
+            ("client_request_id", client_request_id),
+            ("x_request_id", x_request_id),
+            ("x_mapi_http_capability", x_mapi_http_capability),
+            ("user_agent", user_agent),
+        ],
+        payload: response_body.map(str::as_bytes),
+    });
 }
 
 fn host_without_port(value: &str) -> String {
