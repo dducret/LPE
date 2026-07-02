@@ -5915,6 +5915,29 @@ fn navigation_shortcut_wlink_guid_fields_follow_requested_property_type() {
 }
 
 #[test]
+fn navigation_shortcut_section_one_projects_favorites_group_name() {
+    let shortcut = MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapi_store_id(903),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x4444),
+        subject: "Inbox".to_string(),
+        target_folder_id: Some(INBOX_FOLDER_ID),
+        shortcut_type: 0,
+        flags: 0,
+        save_stamp: 0,
+        section: 1,
+        ordinal: 0x7f,
+        group_header_id: Some(default_wlink_group_uuid()),
+        group_name: "Mail".to_string(),
+    };
+
+    assert_eq!(
+        navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_WLINK_GROUP_NAME_W),
+        Some(MapiValue::String("Favorites".to_string()))
+    );
+}
+
+#[test]
 fn logon_projects_outlook_bootstrap_identity_metadata() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
