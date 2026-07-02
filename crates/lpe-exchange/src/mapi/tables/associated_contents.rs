@@ -332,7 +332,8 @@ fn is_inbox_broad_startup_config_visible(
         return !is_empty_inbox_configuration_placeholder(message);
     }
     if is_broad_outlook_configuration_restriction(restriction) {
-        return is_modeled_inbox_broad_startup_config(message);
+        return is_modeled_inbox_broad_startup_config(message)
+            || !is_empty_inbox_configuration_placeholder(message);
     }
     if restriction.is_none() {
         return is_modeled_inbox_broad_startup_config(message)

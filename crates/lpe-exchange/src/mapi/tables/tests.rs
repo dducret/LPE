@@ -5158,7 +5158,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        2
     );
     assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
@@ -5170,7 +5170,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
 }
 
 #[test]
-fn inbox_associated_broad_find_row_restricts_followup_to_modeled_startup_row() {
+fn inbox_associated_broad_find_row_keeps_persisted_followup_rows() {
     let account_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1608);
     let earlier_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1609);
     let persisted_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1610);
@@ -5281,7 +5281,7 @@ fn inbox_associated_broad_find_row_restricts_followup_to_modeled_startup_row() {
         u32::from_le_bytes(seek_response[2..6].try_into().unwrap()),
         0
     );
-    assert_eq!(table_position(&table), Some(0));
+    assert_eq!(table_position(&table), Some(1));
 
     let query_response = rop_query_rows_response(
         &RopRequest {
@@ -5303,8 +5303,8 @@ fn inbox_associated_broad_find_row_restricts_followup_to_modeled_startup_row() {
         1
     );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
-    assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
+    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
+    assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
 }
 
 #[test]
@@ -5327,7 +5327,7 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_hides_persisted_extra_outlook_configs() {
+fn inbox_associated_broad_configuration_restriction_keeps_persisted_non_empty_outlook_configs() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let autocomplete_id = Uuid::from_u128(0x6d617069_6175_746f_8000_000000000101);
     crate::mapi::identity::remember_mapi_identity(
@@ -5361,7 +5361,13 @@ fn inbox_associated_broad_configuration_restriction_hides_persisted_extra_outloo
         .map(|message| message.message_class.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(classes, vec!["IPM.Configuration.AccountPrefs"]);
+    assert_eq!(
+        classes,
+        vec![
+            "IPM.Configuration.Autocomplete",
+            "IPM.Configuration.AccountPrefs"
+        ]
+    );
 }
 
 #[test]

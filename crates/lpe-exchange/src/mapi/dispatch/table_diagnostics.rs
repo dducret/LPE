@@ -919,8 +919,18 @@ fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool
             matches!(
                 canonical_property_storage_tag(*property_tag),
                 PID_TAG_MESSAGE_CLASS_W
-            ) && value == "IPM.Configuration."
+            ) && value.eq_ignore_ascii_case("IPM.Configuration.")
                 && fuzzy_level_low & 0x0002 != 0
+        }
+        MapiRestriction::Property {
+            relop: 0x02,
+            property_tag,
+            value: MapiValue::String(value),
+        } => {
+            matches!(
+                canonical_property_storage_tag(*property_tag),
+                PID_TAG_MESSAGE_CLASS_W
+            ) && value.eq_ignore_ascii_case("IPM.Configuration.")
         }
         MapiRestriction::And(children) | MapiRestriction::Or(children) => {
             children.iter().any(is_broad_ipm_configuration_restriction)
@@ -929,6 +939,34 @@ fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool
         | MapiRestriction::Count { child, .. }
         | MapiRestriction::SubObject { child, .. } => is_broad_ipm_configuration_restriction(child),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod broad_ipm_configuration_restriction_tests {
+    use super::*;
+
+    #[test]
+    fn matches_outlook_property_prefix_restriction() {
+        let restriction = MapiRestriction::Property {
+            relop: 0x02,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String("IPM.Configuration.".to_string()),
+        };
+
+        assert!(is_broad_ipm_configuration_restriction(&restriction));
+    }
+
+    #[test]
+    fn matches_outlook_content_prefix_restriction_case_insensitively() {
+        let restriction = MapiRestriction::Content {
+            fuzzy_level_low: 0x0002,
+            fuzzy_level_high: 0,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: "ipm.configuration.".to_string(),
+        };
+
+        assert!(is_broad_ipm_configuration_restriction(&restriction));
     }
 }
 
