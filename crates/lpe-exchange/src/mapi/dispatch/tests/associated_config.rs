@@ -433,7 +433,7 @@ fn calendar_configuration_debug_contract_uses_roaming_properties() {
 }
 
 #[test]
-fn inbox_associated_config_summary_suppresses_virtual_only_rows() {
+fn inbox_associated_config_summary_reports_modeled_startup_rows() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000099999);
     let header_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
@@ -481,9 +481,10 @@ fn inbox_associated_config_summary_suppresses_virtual_only_rows() {
     let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
     assert!(
-        !summary.contains("class=IPM.Configuration.AccountPrefs"),
+        summary.contains("class=IPM.Configuration.AccountPrefs"),
         "{summary}"
     );
+    assert!(summary.contains("class=IPM.Configuration.ELC"), "{summary}");
     assert!(
         !summary.contains("class=IPM.Configuration.MessageListSettings"),
         "{summary}"
@@ -498,10 +499,6 @@ fn inbox_associated_config_summary_suppresses_virtual_only_rows() {
     );
     assert!(
         !summary.contains("class=IPM.Configuration.EAS"),
-        "{summary}"
-    );
-    assert!(
-        !summary.contains("class=IPM.Configuration.ELC"),
         "{summary}"
     );
     assert!(

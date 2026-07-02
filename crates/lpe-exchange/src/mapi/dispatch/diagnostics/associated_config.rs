@@ -164,10 +164,12 @@ pub(in crate::mapi::dispatch) fn format_inbox_associated_config_summary(
     if !associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let messages = snapshot
-        .associated_config_messages_for_folder(folder_id)
+    let messages = debug_associated_table_rows(folder_id, snapshot, None, Uuid::nil())
         .into_iter()
-        .filter(|message| associated_config_visible_in_table(folder_id, None, message))
+        .filter_map(|row| match row {
+            DebugAssociatedTableRow::Config(message) => Some(message),
+            DebugAssociatedTableRow::NamedView(_) => None,
+        })
         .collect::<Vec<_>>();
     let mut parts = Vec::new();
     for message in &messages {
