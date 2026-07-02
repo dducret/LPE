@@ -825,7 +825,11 @@ fn inbox_open_loop_summary_requires_repeated_probe_without_contents_table() {
 fn inbox_post_fai_handoff_context_points_to_missing_contents_step() {
     let mut state = PostHierarchyActionState::default();
     state.inbox_associated_contents_table_observed = true;
+    state.inbox_associated_query_rows_returned_non_empty = true;
+    state.inbox_associated_query_rows_reached_end = true;
     state.last_inbox_associated_query_context = "values=row0".to_string();
+    state.last_inbox_associated_non_empty_query_context = "returned=6".to_string();
+    state.last_inbox_associated_end_query_context = "returned=0;origin=end".to_string();
     state.last_common_views_inbox_shortcut_context = "entry_id_matches_inbox=true".to_string();
     state
         .recent_probe_actions
@@ -834,11 +838,16 @@ fn inbox_post_fai_handoff_context_points_to_missing_contents_step() {
     let context = format_inbox_post_fai_handoff_context(&state);
 
     assert!(context.contains("associated_contents_table_observed=true"));
+    assert!(context.contains("associated_query_rows_returned_non_empty=true"));
+    assert!(context.contains("associated_query_rows_reached_end=true"));
     assert!(context.contains("normal_contents_table_observed=false"));
     assert!(context.contains("last_associated_query=values=row0"));
+    assert!(context.contains("last_associated_non_empty_query=returned=6"));
+    assert!(context.contains("last_associated_end_query=returned=0;origin=end"));
     assert!(context.contains("last_common_views_inbox_shortcut=entry_id_matches_inbox=true"));
-    assert!(context
-        .contains("next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"));
+    assert!(context.contains(
+        "next_expected_client_step=open_inbox_associated_config_message_or_normal_contents_table"
+    ));
 }
 
 #[test]

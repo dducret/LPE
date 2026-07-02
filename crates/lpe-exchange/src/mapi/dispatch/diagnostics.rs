@@ -63,7 +63,7 @@ pub(super) use fast_transfer::*;
 pub(super) use message::*;
 pub(super) use named_properties::*;
 pub(super) use open_folder::*;
-pub(super) use post_hierarchy::*;
+pub(in crate::mapi) use post_hierarchy::*;
 pub(super) use probes::*;
 pub(super) use property_names::*;
 pub(super) use property_responses::*;

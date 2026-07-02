@@ -197,6 +197,24 @@ impl MapiSession {
             .inbox_associated_query_rows_returned_non_empty = true;
     }
 
+    pub(in crate::mapi) fn record_inbox_associated_non_empty_query_context(
+        &mut self,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_inbox_associated_non_empty_query_context = context;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_query_rows_reached_end(
+        &mut self,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .inbox_associated_query_rows_reached_end = true;
+        self.post_hierarchy_actions
+            .last_inbox_associated_end_query_context = context;
+    }
+
     pub(in crate::mapi) fn record_receive_folder_verification_passed(&mut self) {
         self.post_hierarchy_actions
             .receive_folder_verification_passed = true;

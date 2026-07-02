@@ -743,7 +743,8 @@ where
             }
         }
     }
-    store_session(session_id.clone(), session);
+    let post_inbox_fai_handoff_context =
+        format_inbox_post_fai_handoff_context(&session.post_hierarchy_actions);
     if event_pending
         || !events.is_empty()
         || active_during_empty_wait
@@ -773,6 +774,28 @@ where
             second_poll_cursor = ?second_poll_cursor,
             event_pending,
             event_count = events.len(),
+            inbox_associated_query_rows_returned_non_empty = session
+                .post_hierarchy_actions
+                .inbox_associated_query_rows_returned_non_empty,
+            inbox_associated_query_rows_reached_end = session
+                .post_hierarchy_actions
+                .inbox_associated_query_rows_reached_end,
+            inbox_associated_config_open_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_open_observed,
+            inbox_associated_config_stream_open_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_stream_open_observed,
+            inbox_associated_config_stream_read_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_stream_read_observed,
+            inbox_normal_contents_table_observed = session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed,
+            inbox_normal_query_rows_observed = session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed,
+            post_inbox_fai_handoff_context = %post_inbox_fai_handoff_context,
             waited_for_empty_events,
             configured_empty_wait_millis = if waited_for_empty_events {
                 MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
@@ -809,6 +832,28 @@ where
             second_poll_cursor = ?second_poll_cursor,
             event_pending,
             event_count = events.len(),
+            inbox_associated_query_rows_returned_non_empty = session
+                .post_hierarchy_actions
+                .inbox_associated_query_rows_returned_non_empty,
+            inbox_associated_query_rows_reached_end = session
+                .post_hierarchy_actions
+                .inbox_associated_query_rows_reached_end,
+            inbox_associated_config_open_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_open_observed,
+            inbox_associated_config_stream_open_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_stream_open_observed,
+            inbox_associated_config_stream_read_observed = session
+                .post_hierarchy_actions
+                .inbox_associated_config_stream_read_observed,
+            inbox_normal_contents_table_observed = session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed,
+            inbox_normal_query_rows_observed = session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed,
+            post_inbox_fai_handoff_context = %post_inbox_fai_handoff_context,
             waited_for_empty_events,
             configured_empty_wait_millis = if waited_for_empty_events {
                 MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
@@ -821,6 +866,7 @@ where
             "rca debug notification wait result"
         );
     }
+    store_session(session_id.clone(), session);
     let body = notification_wait_body_with_events(event_pending, &events);
     mapi_response_with_cookies(
         "NotificationWait",

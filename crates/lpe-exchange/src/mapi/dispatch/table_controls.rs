@@ -894,20 +894,87 @@ pub(super) fn append_query_rows_response(
             .and_then(|bytes| bytes.try_into().ok())
             .map(u16::from_le_bytes)
             .unwrap_or(0);
-        if *folder_id == INBOX_FOLDER_ID && *associated && row_count > 0 {
+        let response_origin = response.get(6).copied().unwrap_or(0xff);
+        let folder_id = *folder_id;
+        let associated = *associated;
+        let position = *position;
+        let columns = columns.clone();
+        let sort_orders = sort_orders.clone();
+        let restriction = restriction.clone();
+        if folder_id == INBOX_FOLDER_ID && associated && row_count > 0 {
             inbox_associated_query_rows_returned_non_empty = true;
         }
-        session.record_last_table_query_rows_context(format!(
+        let query_context = format!(
             "phase=query_rows;request_id={request_id};request_rops={request_rop_names};input_index={};handle={};folder=0x{folder_id:016x};role={};associated={associated};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_row_count={row_count};columns={};sort={};restriction={}",
             request.input_handle_index().unwrap_or(0),
             format_optional_debug_handle(input_handle(handle_slots, request)),
-            debug_role_for_folder_id(*folder_id),
+            debug_role_for_folder_id(folder_id),
             request.query_forward_read(),
             request.query_row_count().unwrap_or(0),
-            format_debug_property_tags(columns),
-            format_debug_sort_orders(sort_orders),
+            format_debug_property_tags(&columns),
+            format_debug_sort_orders(&sort_orders),
             format_debug_restriction_option(restriction.as_ref())
-        ));
+        );
+        session.record_last_table_query_rows_context(query_context.clone());
+        if folder_id == INBOX_FOLDER_ID && associated {
+            if row_count > 0 {
+                session.record_inbox_associated_non_empty_query_context(query_context.clone());
+            } else if response_origin == 0x02
+                && session
+                    .post_hierarchy_actions
+                    .inbox_associated_query_rows_returned_non_empty
+            {
+                session.record_inbox_associated_query_rows_reached_end(query_context.clone());
+                if !session.post_hierarchy_actions.post_inbox_fai_handoff_logged
+                    && !session
+                        .post_hierarchy_actions
+                        .inbox_associated_config_open_observed
+                    && !session
+                        .post_hierarchy_actions
+                        .inbox_normal_contents_table_observed
+                {
+                    let handoff_context =
+                        format_inbox_post_fai_handoff_context(&session.post_hierarchy_actions);
+                    let live_handle_summary = format_live_handle_debug_summary(session);
+                    record_mapi_outlook_view_inbox_fai_handoff_without_contents();
+                    record_mapi_outlook_view_bootstrap_stall(1);
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        mapi_request_id = %request_id,
+                        request_rop_id = "0x15",
+                        request_rop_names = %request_rop_names,
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                        query_rows_end_context = %query_context,
+                        handoff_context = %handoff_context,
+                        live_handle_summaries = %live_handle_summary,
+                        config_open_observed = session
+                            .post_hierarchy_actions
+                            .inbox_associated_config_open_observed,
+                        config_stream_open_observed = session
+                            .post_hierarchy_actions
+                            .inbox_associated_config_stream_open_observed,
+                        config_stream_read_observed = session
+                            .post_hierarchy_actions
+                            .inbox_associated_config_stream_read_observed,
+                        normal_contents_table_observed = session
+                            .post_hierarchy_actions
+                            .inbox_normal_contents_table_observed,
+                        normal_query_rows_observed = session
+                            .post_hierarchy_actions
+                            .inbox_normal_contents_table_query_rows_observed,
+                        next_expected_client_step =
+                            "open_inbox_associated_config_message_or_normal_contents_table",
+                        "rca debug mapi inbox associated fai exhausted without handoff"
+                    );
+                    session.mark_post_inbox_fai_handoff_logged();
+                }
+            }
+        }
     }
     if inbox_associated_query_rows_returned_non_empty {
         session.record_inbox_associated_query_rows_returned_non_empty();

@@ -861,6 +861,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                         .post_hierarchy_actions
                         .last_inbox_associated_query_context
                 ),
+            last_inbox_associated_non_empty_query_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_associated_non_empty_query_context
+                ),
+            last_inbox_associated_end_query_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_associated_end_query_context
+                ),
             last_inbox_related_release_context =
                 %debug_context_or_none(
                     &session
@@ -871,6 +883,26 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .inbox_associated_contents_table_observed,
+            inbox_associated_query_rows_returned_non_empty =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_query_rows_returned_non_empty,
+            inbox_associated_query_rows_reached_end =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_query_rows_reached_end,
+            inbox_associated_config_open_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_config_open_observed,
+            inbox_associated_config_stream_open_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_config_stream_open_observed,
+            inbox_associated_config_stream_read_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_config_stream_read_observed,
             inbox_normal_contents_table_observed =
                 session
                     .post_hierarchy_actions
