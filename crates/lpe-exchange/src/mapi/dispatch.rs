@@ -17,6 +17,7 @@ use crate::store::{
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
 };
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
@@ -272,6 +273,10 @@ where
                 &session,
                 post_hierarchy_observation,
             );
+            let response_debug = summarize_response_rop_buffer(
+                execute_success_rop_buffer(&cached.response_body).unwrap_or_default(),
+                &request_debug.ids,
+            );
             session.record_last_successful_execute_context(
                 format!(
                     "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=true",
@@ -281,6 +286,18 @@ where
                     cached.response_rop_buffer_bytes
                 ),
                 request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+            );
+            log_post_common_views_handoff_execute_response(
+                endpoint,
+                principal,
+                headers,
+                &session_id,
+                request_id,
+                &session,
+                &request_debug,
+                &response_debug,
+                cached.response_body.len(),
+                true,
             );
             store_session(session_id.clone(), session);
             return mapi_response_with_cookies(
@@ -375,6 +392,18 @@ where
                 response_debug.response_payload_bytes
             ),
             request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+        );
+        log_post_common_views_handoff_execute_response(
+            endpoint,
+            principal,
+            headers,
+            &session_id,
+            request_id,
+            &session,
+            &request_debug,
+            &response_debug,
+            response_body.len(),
+            false,
         );
         cache_execute_response(
             &mut session,
@@ -521,6 +550,18 @@ where
         ),
         request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
     );
+    log_post_common_views_handoff_execute_response(
+        endpoint,
+        principal,
+        headers,
+        &session_id,
+        request_id,
+        &session,
+        &request_debug,
+        &response_debug,
+        response_body.len(),
+        false,
+    );
     cache_execute_response(
         &mut session,
         request_id,
@@ -539,6 +580,143 @@ where
         response_body,
         session_context_cookies(endpoint, &session_id, false),
     )
+}
+
+fn log_post_common_views_handoff_execute_response(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    session_id: &str,
+    request_id: &str,
+    session: &MapiSession,
+    request: &RopRequestDebugSummary,
+    response: &RopResponseDebugSummary,
+    response_body_bytes: usize,
+    cached_execute_response: bool,
+) {
+    if endpoint != MapiEndpoint::Emsmdb {
+        return;
+    }
+    let state = &session.post_hierarchy_actions;
+    if state.last_common_views_inbox_shortcut_context.is_empty()
+        || state.inbox_associated_contents_table_observed
+        || state.inbox_normal_contents_table_observed
+    {
+        return;
+    }
+
+    let notification_registered = !state
+        .last_inbox_notification_registration_context
+        .is_empty();
+    let handoff_phase = if notification_registered {
+        "post_common_views_notification_handoff"
+    } else {
+        "post_common_views_inbox_handoff"
+    };
+    let next_expected_client_step = if notification_registered {
+        "notification_wait_or_open_inbox_associated_or_normal_contents_table"
+    } else {
+        "open_inbox_or_register_notification"
+    };
+    let cookie_debug = request_cookie_transport_debug(endpoint, headers);
+    let session_cookie_debug = cookie_value_debug(Some(session_id));
+    let request_sequence_cookie_matches =
+        request_sequence_cookie_matches(endpoint, headers, session_id);
+    let notification_subscription_count = session
+        .handles
+        .values()
+        .filter(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+        .count();
+    let post_handoff_context = format_inbox_post_fai_handoff_context(state);
+    let live_handle_summaries = format_live_handle_debug_summary(session);
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        handoff_phase = handoff_phase,
+        request_rop_names = %request.names_csv,
+        response_rop_names = %response.names_csv,
+        response_rop_results = %response.results_csv,
+        response_body_bytes = response_body_bytes,
+        cached_execute_response = cached_execute_response,
+        selected_context_hash = %cookie_debug.selected_context_hash,
+        selected_sequence_hash = %cookie_debug.selected_sequence_hash,
+        session_id_hash = %session_cookie_debug.hash,
+        request_sequence_cookie_matches = request_sequence_cookie_matches,
+        notification_subscription_count = notification_subscription_count,
+        post_handoff_context = %post_handoff_context,
+        live_handle_summaries = %live_handle_summaries,
+        next_expected_client_step = next_expected_client_step,
+        "rca debug mapi post common views execute response handoff transport"
+    );
+
+    let tenant_id = principal.tenant_id.to_string();
+    let account_id = principal.account_id.to_string();
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "mapi",
+        endpoint: "emsmdb",
+        session_key: session_id,
+        direction: OutlookTraceDirection::Outbound,
+        phase: "ExecutePostCommonViewsHandoff",
+        remote_peer: None,
+        tenant_id: Some(&tenant_id),
+        account: Some(&principal.email),
+        status: Some(200),
+        metadata: vec![
+            ("account_id", account_id),
+            ("mapi_request_id", request_id.to_string()),
+            ("handoff_phase", handoff_phase.to_string()),
+            ("request_rop_ids", request.ids_csv.clone()),
+            ("request_rop_names", request.names_csv.clone()),
+            ("response_rop_ids", response.ids_csv.clone()),
+            ("response_rop_names", response.names_csv.clone()),
+            ("response_rop_results", response.results_csv.clone()),
+            ("response_body_bytes", response_body_bytes.to_string()),
+            (
+                "cached_execute_response",
+                cached_execute_response.to_string(),
+            ),
+            (
+                "cookie_header_count",
+                cookie_debug.cookie_header_count.to_string(),
+            ),
+            (
+                "mapi_context_candidate_count",
+                cookie_debug.context_candidate_count.to_string(),
+            ),
+            (
+                "mapi_sequence_candidate_count",
+                cookie_debug.sequence_candidate_count.to_string(),
+            ),
+            ("selected_context_hash", cookie_debug.selected_context_hash),
+            (
+                "selected_sequence_hash",
+                cookie_debug.selected_sequence_hash,
+            ),
+            ("session_id_hash", session_cookie_debug.hash),
+            (
+                "request_sequence_cookie_matches",
+                request_sequence_cookie_matches.to_string(),
+            ),
+            (
+                "notification_subscription_count",
+                notification_subscription_count.to_string(),
+            ),
+            ("post_handoff_context", post_handoff_context),
+            ("live_handle_summaries", live_handle_summaries),
+            (
+                "next_expected_client_step",
+                next_expected_client_step.to_string(),
+            ),
+        ],
+        payload: None,
+    });
 }
 
 pub(in crate::mapi) const MAX_ROP_DEBUG_ENTRIES: usize = 32;
