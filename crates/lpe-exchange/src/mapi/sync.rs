@@ -323,14 +323,16 @@ fn default_folder_named_view_sync_message(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| default_view_special_folder_container_class(folder_id))?;
-    default_view_supported_folder(folder_id, container_class)
-        .then(|| {
-            snapshot.default_folder_named_view_message(
-                folder_id,
-                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-            )
-        })
-        .flatten()
+    if default_view_supported_folder(folder_id, container_class)
+        && !default_view_uses_common_views(container_class, folder_id)
+    {
+        snapshot.default_folder_named_view_message(
+            folder_id,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+    } else {
+        None
+    }
 }
 
 fn default_view_special_folder_container_class(folder_id: u64) -> Option<&'static str> {

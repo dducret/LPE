@@ -103,8 +103,8 @@ pub(in crate::mapi) fn default_view_uses_common_views(
     container_class: &str,
     folder_id: u64,
 ) -> bool {
-    let _ = (container_class, folder_id);
-    false
+    (container_class == "IPF.Note" || container_class.starts_with("IPF.Note."))
+        && folder_id == INBOX_FOLDER_ID
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

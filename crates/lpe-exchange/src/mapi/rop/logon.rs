@@ -5,12 +5,21 @@ use crate::mapi::AccountPrincipal;
 use crate::mapi_mailstore;
 use std::time::{Duration, SystemTime};
 
+pub(in crate::mapi) fn private_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
+    request_logon_flags & 0x0f | 0x01
+}
+
+pub(in crate::mapi) fn public_folder_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
+    request_logon_flags & 0x0f & !0x01
+}
+
 pub(in crate::mapi) fn rop_logon_response_body(
     principal: &AccountPrincipal,
     request: &RopRequest,
 ) -> Vec<u8> {
     let output_handle_index = request.output_handle_index.unwrap_or(0);
-    let logon_flags = request.payload.first().copied().unwrap_or(0x01) & 0x07 | 0x01;
+    let logon_flags =
+        private_logon_response_logon_flags(request.payload.first().copied().unwrap_or(0x01));
     let mut response = Vec::new();
     response.push(0xFE);
     response.push(output_handle_index);
@@ -35,7 +44,8 @@ pub(in crate::mapi) fn rop_public_folder_logon_response_body(
     request: &RopRequest,
 ) -> Vec<u8> {
     let output_handle_index = request.output_handle_index.unwrap_or(0);
-    let logon_flags = request.payload.first().copied().unwrap_or(0) & 0x07 & !0x01;
+    let logon_flags =
+        public_folder_logon_response_logon_flags(request.payload.first().copied().unwrap_or(0));
     let mut response = Vec::new();
     response.push(0xFE);
     response.push(output_handle_index);

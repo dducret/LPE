@@ -21,8 +21,9 @@ use crate::mapi::identity::{
 use crate::mapi::nspi::{normalize_nspi_lookup_value, principal_legacy_dn_aliases};
 use crate::mapi::properties::{MapiSortOrder, MapiValue};
 use crate::mapi::rop::{
-    is_rpc_header_ext_rop_buffer, read_rop_request, rpc_header_ext_payload, split_rop_buffer,
-    Cursor, RopLogonRequest,
+    is_rpc_header_ext_rop_buffer, private_logon_response_logon_flags,
+    public_folder_logon_response_logon_flags, read_rop_request, rpc_header_ext_payload,
+    split_rop_buffer, Cursor, RopLogonRequest,
 };
 use crate::mapi::session::read_handle_table;
 use crate::mapi::session::{MapiObject, MapiSession};
@@ -1137,9 +1138,9 @@ fn logon_store_state(request: &RopLogonRequest) -> u32 {
 
 fn projected_logon_response_flags(request_logon_flags: u8) -> u8 {
     if request_logon_flags & 0x01 != 0 {
-        request_logon_flags & 0x07 | 0x01
+        private_logon_response_logon_flags(request_logon_flags)
     } else {
-        request_logon_flags & 0x07 & !0x01
+        public_folder_logon_response_logon_flags(request_logon_flags)
     }
 }
 
@@ -1173,7 +1174,7 @@ mod logon_request_shape_tests {
 
         assert_eq!(
             format_logon_request_shape(&request),
-            "request_flags=0x09;private=true;open_flags=0x21000040;store_state=0x00000000;projected_response_flags=0x01;dropped_request_bits=0x08;observed_0x09_path=true"
+            "request_flags=0x09;private=true;open_flags=0x21000040;store_state=0x00000000;projected_response_flags=0x09;dropped_request_bits=0x00;observed_0x09_path=true"
         );
     }
 

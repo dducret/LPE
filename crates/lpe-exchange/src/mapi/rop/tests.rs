@@ -3988,6 +3988,30 @@ pub(in crate::mapi) fn private_logon_places_exactly_13_folder_ids_before_respons
 }
 
 #[test]
+pub(in crate::mapi) fn private_logon_preserves_undercover_logon_flag_0x09() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let request = RopRequest {
+        rop_id: 0xFE,
+        input_handle_index: Some(0),
+        output_handle_index: Some(1),
+        payload: vec![0x09],
+    };
+
+    let response = rop_logon_response_body(&principal, &request);
+    let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len() * 8;
+
+    assert_eq!(response[6], 0x09);
+    assert_eq!(response[response_flags_offset], 0x07);
+}
+
+#[test]
 pub(in crate::mapi) fn long_term_id_from_id_accepts_outlook_and_emitted_counter_forms() {
     let canonical_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
     let dynamic_id = crate::mapi::identity::mapi_store_id(

@@ -269,7 +269,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
     if associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
+    let Some(message) = debug_advertised_default_named_view(snapshot, folder_id) else {
         return "default_view=missing".to_string();
     };
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
@@ -344,7 +344,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     if associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) else {
+    let Some(message) = debug_advertised_default_named_view(snapshot, folder_id) else {
         return "default_view=missing".to_string();
     };
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);

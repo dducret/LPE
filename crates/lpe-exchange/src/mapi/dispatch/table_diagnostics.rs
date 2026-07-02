@@ -556,14 +556,36 @@ pub(super) fn debug_default_folder_associated_named_view(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| advertised_special_folder_container_class(folder_id))?;
-    default_view_supported_folder(folder_id, container_class)
-        .then(|| {
-            snapshot.default_folder_named_view_message(
-                folder_id,
-                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-            )
-        })
-        .flatten()
+    if default_view_supported_folder(folder_id, container_class)
+        && !default_view_uses_common_views(container_class, folder_id)
+    {
+        snapshot.default_folder_named_view_message(
+            folder_id,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )
+    } else {
+        None
+    }
+}
+
+pub(super) fn debug_advertised_default_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| advertised_special_folder_container_class(folder_id))?;
+    if !default_view_supported_folder(folder_id, container_class) {
+        return None;
+    }
+    if default_view_uses_common_views(container_class, folder_id) {
+        snapshot.common_view_named_view_message_for_id(
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        )
+    } else {
+        debug_default_folder_associated_named_view(snapshot, folder_id)
+    }
 }
 
 pub(super) fn format_inbox_fai_handoff_visibility_context(
@@ -586,8 +608,7 @@ pub(super) fn format_inbox_fai_handoff_visibility_context(
         Some(&prefix_restriction),
         account_id,
     );
-    let advertised_default_view =
-        debug_default_folder_associated_named_view(snapshot, INBOX_FOLDER_ID);
+    let advertised_default_view = debug_advertised_default_named_view(snapshot, INBOX_FOLDER_ID);
     let advertised_default_view_rows = advertised_default_view
         .as_ref()
         .map(|view| {
@@ -598,7 +619,11 @@ pub(super) fn format_inbox_fai_handoff_visibility_context(
         })
         .unwrap_or_default();
     format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x};default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
+        "advertised_default_view_folder_id={};default_view_id={};current_restriction={};current_count={};current_rows={};unfiltered_count={};unfiltered_rows={};prefix_ipm_configuration_count={};prefix_ipm_configuration_rows={};exact_named_view_count={};exact_named_view_rows={}",
+        advertised_default_view
+            .as_ref()
+            .map(|view| format!("0x{:016x}", view.folder_id))
+            .unwrap_or_else(|| "none".to_string()),
         advertised_default_view
             .as_ref()
             .map(|view| format!("0x{:016x}", view.id))

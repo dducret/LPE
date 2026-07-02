@@ -4277,14 +4277,10 @@ fn inbox_associated_find_row_returns_outlook_elc_config() {
 }
 
 #[test]
-fn inbox_associated_find_row_returns_folder_default_named_view() {
-    let response = inbox_associated_find_row_response_for_message_class(
+fn inbox_associated_find_row_does_not_fabricate_folder_default_named_view() {
+    assert_inbox_associated_find_row_no_match_for_message_class(
         "IPM.Microsoft.FolderDesign.NamedView",
     );
-
-    assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
 }
 
 #[test]
@@ -4691,7 +4687,7 @@ fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view
 }
 
 #[test]
-fn inbox_associated_table_exposes_folder_default_named_view() {
+fn inbox_associated_table_does_not_expose_folder_local_default_named_view() {
     let restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -4706,12 +4702,7 @@ fn inbox_associated_table_exposes_folder_default_named_view() {
         Uuid::nil(),
     );
 
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(rows[0], AssociatedTableRow::NamedView(_)));
-    assert_eq!(
-        associated_table_row_id(&rows[0]),
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
-    );
+    assert!(rows.is_empty());
     assert_eq!(
         restricted_associated_folder_message_count(
             INBOX_FOLDER_ID,
@@ -4719,7 +4710,7 @@ fn inbox_associated_table_exposes_folder_default_named_view() {
             Some(&restriction),
             Uuid::nil()
         ),
-        1
+        0
     );
 }
 
@@ -5466,10 +5457,10 @@ fn inbox_associated_query_rows_uses_sort_order() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
@@ -5507,10 +5498,10 @@ fn inbox_associated_query_rows_suppresses_extended_rule_message() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
@@ -5577,7 +5568,7 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 4);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
@@ -5648,9 +5639,9 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
@@ -5808,9 +5799,9 @@ fn inbox_associated_query_rows_suppresses_prefix_configuration_with_stored_strea
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
 #[test]

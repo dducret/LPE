@@ -107,7 +107,7 @@ fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
 }
 
 #[test]
-fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
+fn inbox_view_handoff_table_contract_reports_common_views_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         INBOX_FOLDER_ID,
@@ -116,14 +116,14 @@ fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
     assert!(contract.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
+        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
     )));
     assert!(contract.contains(&format!(
         "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
     )));
 }
 
@@ -144,15 +144,16 @@ fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
     );
 
     assert!(context.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
+        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
     )));
     assert!(context.contains(&format!(
         "default_view_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
     )));
+    assert!(context.contains("current_count=1"));
     assert!(context.contains("exact_named_view_count=1"));
     assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
-    assert!(context.contains("subject=Messages"));
+    assert!(context.contains("subject=Compact"));
 }
 
 #[test]
@@ -223,7 +224,7 @@ fn inbox_view_descriptor_set_columns_contract_reports_missing_descriptor_columns
     );
 
     assert!(contract.contains("phase=setcolumns"));
-    assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
+    assert!(contract.contains("default_view_id=0x7ffffffffff70001"));
     assert!(contract
         .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
     assert!(!contract.contains("descriptor_columns=0x00040001"));

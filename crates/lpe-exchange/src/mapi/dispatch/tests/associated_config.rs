@@ -711,7 +711,7 @@ fn associated_config_debug_summaries_honor_table_restriction() {
 }
 
 #[test]
-fn inbox_associated_named_view_debug_summaries_expose_folder_default_view() {
+fn inbox_associated_named_view_debug_summaries_do_not_fabricate_folder_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let restriction = MapiRestriction::Property {
@@ -761,34 +761,12 @@ fn inbox_associated_named_view_debug_summaries_expose_folder_default_view() {
         &snapshot,
     );
 
-    assert!(window.contains("total=1"), "{window}");
+    assert!(window.contains("total=0"), "{window}");
     assert!(
-        window.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
-        "{window}"
-    );
-    assert!(
-        values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+        !values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
         "{values}"
     );
-    assert!(
-        values.contains(&format!("0x67480014={INBOX_FOLDER_ID}")),
-        "{values}"
-    );
-    assert!(
-        values.contains(&format!(
-            "0x674a0014={}",
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
-        )),
-        "{values}"
-    );
-    assert!(values.contains("0x683a0003=8"), "{values}");
-    assert!(!wire.is_empty(), "{wire}");
-    assert!(
-        wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
-        "{wire}"
-    );
-    assert!(wire.contains("value_len=32"), "{wire}");
-    assert!(wire.contains("query_rows_len=33"), "{wire}");
+    assert!(wire.is_empty(), "{wire}");
 }
 
 #[test]
