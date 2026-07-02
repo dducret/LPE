@@ -387,6 +387,37 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
             "rca debug mapi opened inbox folder handle contract"
         );
         if let Some(summary) = format_inbox_open_loop_summary(&session.post_hierarchy_actions) {
+            if !session
+                .post_hierarchy_actions
+                .post_common_views_inbox_open_loop_metric_logged
+                && !session
+                    .post_hierarchy_actions
+                    .last_common_views_inbox_shortcut_context
+                    .is_empty()
+            {
+                record_mapi_outlook_view_repeated_inbox_open_after_common_views();
+                session.record_outlook_view_failure_trace_event(format!(
+                    "repeated_inbox_open_after_common_views:{summary}"
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x02",
+                    folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                    loop_summary = %summary,
+                    last_inbox_notification_registration =
+                        %debug_context_or_none(
+                            &session
+                                .post_hierarchy_actions
+                                .last_inbox_notification_registration_context
+                        ),
+                    "rca debug mapi repeated inbox open after common views"
+                );
+                session.mark_post_common_views_inbox_open_loop_metric_logged();
+            }
             if !session.post_hierarchy_actions.inbox_loop_transition_logged {
                 tracing::info!(
                     rca_debug = true,

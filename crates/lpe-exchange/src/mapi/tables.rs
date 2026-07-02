@@ -57,6 +57,7 @@ pub(in crate::mapi) use controls::*;
 pub(in crate::mapi) use counts::*;
 pub(in crate::mapi) use diagnostics::outlook_bootstrap_row_invariant_summaries;
 use diagnostics::*;
+pub(in crate::mapi) use filters::is_unrestricted_common_views_navigation_projection;
 use filters::*;
 use find::*;
 pub(in crate::mapi) use flags::*;

@@ -825,6 +825,42 @@ fn common_views_query_row_values_report_selected_wlink_columns() {
 }
 
 #[test]
+fn common_views_diagnostics_project_navigation_shortcuts_like_wire_rows() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = default_navigation_shortcut_property_tags();
+
+    let window = format_outlook_query_row_window(
+        COMMON_VIEWS_FOLDER_ID,
+        true,
+        0,
+        true,
+        10,
+        &[],
+        None,
+        &columns,
+        account_id,
+        &snapshot,
+    );
+    let values = format_outlook_query_row_values(
+        account_id,
+        COMMON_VIEWS_FOLDER_ID,
+        true,
+        0,
+        true,
+        10,
+        &[],
+        None,
+        &columns,
+        &snapshot,
+    );
+
+    assert!(window.contains("total=4"), "{window}");
+    assert!(!window.contains("FolderDesign.NamedView"), "{window}");
+    assert!(!values.contains("FolderDesign.NamedView"), "{values}");
+}
+
+#[test]
 fn quick_step_associated_debug_summaries_report_custom_action_row() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();

@@ -72,6 +72,69 @@ pub(super) async fn append_register_notification_response<S>(
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     responses.extend_from_slice(&rop_register_notification_response(request));
     output_handles.push(handle);
+    let registration_context = format!(
+        "phase=register_notification;request_id={request_id};request_rops={request_rop_names};input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={handle};notification_types=0x{notification_types:04x};whole_store={};notification_folder={};cursor_loaded={}",
+        request.input_handle_index().unwrap_or(0),
+        format_optional_debug_handle(input_handle_value),
+        input_object_kind,
+        input_folder_id,
+        request.output_handle_index.unwrap_or(0),
+        notification_folder_id.is_none(),
+        notification_folder_id
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        session.notification_cursor.is_some()
+    );
+    if notification_folder_id == Some(INBOX_FOLDER_ID) {
+        session.record_last_inbox_notification_registration_context(registration_context.clone());
+    }
+    if notification_folder_id == Some(INBOX_FOLDER_ID)
+        && !session
+            .post_hierarchy_actions
+            .last_common_views_inbox_shortcut_context
+            .is_empty()
+        && !session
+            .post_hierarchy_actions
+            .post_common_views_notification_handoff_logged
+        && !session
+            .post_hierarchy_actions
+            .inbox_associated_contents_table_observed
+        && !session
+            .post_hierarchy_actions
+            .inbox_normal_contents_table_observed
+    {
+        record_mapi_outlook_view_post_common_views_inbox_notification_without_contents();
+        session.record_outlook_view_failure_trace_event(format!(
+            "post_common_views_inbox_notification_without_contents:{registration_context}"
+        ));
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = "0x29",
+            request_rop_names = %request_rop_names,
+            registration_context = %registration_context,
+            common_views_inbox_shortcut_context =
+                %session.post_hierarchy_actions.last_common_views_inbox_shortcut_context,
+            receive_folder_verification_passed =
+                session.post_hierarchy_actions.receive_folder_verification_passed,
+            inbox_open_folder_count =
+                session.post_hierarchy_actions.inbox_open_folder_probe_count,
+            inbox_folder_type_getprops_count =
+                session.post_hierarchy_actions.inbox_folder_type_getprops_probe_count,
+            inbox_associated_contents_table_observed =
+                session.post_hierarchy_actions.inbox_associated_contents_table_observed,
+            normal_contents_table_observed =
+                session.post_hierarchy_actions.inbox_normal_contents_table_observed,
+            live_handle_summaries = %format_live_handle_debug_summary(session),
+            next_expected_client_step = "open_inbox_associated_or_normal_contents_table",
+            "rca debug mapi post common views inbox notification without contents"
+        );
+        session.mark_post_common_views_notification_handoff_logged();
+    }
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -94,6 +157,7 @@ pub(super) async fn append_register_notification_response<S>(
             .map(|folder_id| format!("0x{folder_id:016x}"))
             .unwrap_or_else(|| "none".to_string()),
         notification_cursor_loaded = session.notification_cursor.is_some(),
+        registration_context = %registration_context,
         inbox_normal_contents_table_observed =
             session.post_hierarchy_actions.inbox_normal_contents_table_observed,
         inbox_normal_setcolumns_observed =

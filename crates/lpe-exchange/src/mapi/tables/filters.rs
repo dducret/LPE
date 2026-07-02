@@ -36,7 +36,7 @@ pub(super) fn property_tag_id_matches(left: u32, right: u32) -> bool {
     (left & 0xFFFF_0000) == (right & 0xFFFF_0000)
 }
 
-pub(super) fn is_unrestricted_common_views_navigation_projection(
+pub(in crate::mapi) fn is_unrestricted_common_views_navigation_projection(
     columns: &[u32],
     restriction: &Option<MapiRestriction>,
 ) -> bool {

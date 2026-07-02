@@ -286,6 +286,14 @@ impl MapiSession {
             .last_common_views_inbox_shortcut_context = context;
     }
 
+    pub(in crate::mapi) fn record_last_inbox_notification_registration_context(
+        &mut self,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_inbox_notification_registration_context = context;
+    }
+
     pub(in crate::mapi) fn record_last_inbox_hierarchy_table_context(&mut self, context: String) {
         self.post_hierarchy_actions
             .last_inbox_hierarchy_table_context = context;
@@ -367,6 +375,16 @@ impl MapiSession {
 
     pub(in crate::mapi) fn mark_post_common_views_handoff_logged(&mut self) {
         self.post_hierarchy_actions.post_common_views_handoff_logged = true;
+    }
+
+    pub(in crate::mapi) fn mark_post_common_views_notification_handoff_logged(&mut self) {
+        self.post_hierarchy_actions
+            .post_common_views_notification_handoff_logged = true;
+    }
+
+    pub(in crate::mapi) fn mark_post_common_views_inbox_open_loop_metric_logged(&mut self) {
+        self.post_hierarchy_actions
+            .post_common_views_inbox_open_loop_metric_logged = true;
     }
 
     pub(in crate::mapi) fn mark_post_inbox_fai_reopen_logged(&mut self) {

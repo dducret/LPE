@@ -74,17 +74,37 @@ pub(in crate::mapi::dispatch) fn outlook_bootstrap_query_rows_total_count(
         }
         Some(MapiObject::ContentsTable {
             associated,
+            columns,
             restriction,
             ..
-        }) if *associated => Some(
-            restricted_associated_folder_message_count(
-                *folder_id,
-                snapshot,
-                restriction.as_ref(),
-                mailbox_guid,
-            )
-            .min(u32::MAX as usize) as u32,
-        ),
+        }) if *associated => {
+            if *folder_id == COMMON_VIEWS_FOLDER_ID
+                && is_unrestricted_common_views_navigation_projection(columns, restriction)
+            {
+                Some(
+                    snapshot
+                        .common_views_table_messages()
+                        .filter(|message| {
+                            matches!(
+                                message,
+                                crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(_)
+                            )
+                        })
+                        .count()
+                        .min(u32::MAX as usize) as u32,
+                )
+            } else {
+                Some(
+                    restricted_associated_folder_message_count(
+                        *folder_id,
+                        snapshot,
+                        restriction.as_ref(),
+                        mailbox_guid,
+                    )
+                    .min(u32::MAX as usize) as u32,
+                )
+            }
+        }
         Some(MapiObject::ContentsTable { associated, .. })
             if !*associated && *folder_id == INBOX_FOLDER_ID =>
         {
@@ -577,7 +597,21 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_query_rows(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
-    let total_row_count = if *associated {
+    let total_row_count = if *associated
+        && *folder_id == COMMON_VIEWS_FOLDER_ID
+        && is_unrestricted_common_views_navigation_projection(&selected_columns, restriction)
+    {
+        snapshot
+            .common_views_table_messages()
+            .filter(|message| {
+                matches!(
+                    message,
+                    crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(_)
+                )
+            })
+            .count()
+            .min(u32::MAX as usize) as u32
+    } else if *associated {
         restricted_associated_folder_message_count(
             *folder_id,
             snapshot,
@@ -597,6 +631,7 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_query_rows(
         requested_row_count,
         sort_orders,
         restriction.as_ref(),
+        &selected_columns,
         principal.account_id,
         snapshot,
     );

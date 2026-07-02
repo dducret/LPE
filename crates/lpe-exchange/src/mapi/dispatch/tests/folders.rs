@@ -1191,6 +1191,35 @@ fn bootstrap_query_rows_total_count_keeps_sync_issues_leaf_until_backed() {
 }
 
 #[test]
+fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts() {
+    let object = MapiObject::ContentsTable {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        associated: true,
+        columns: default_navigation_shortcut_property_tags(),
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+
+    assert_eq!(
+        outlook_bootstrap_query_rows_total_count(
+            Some(&object),
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            Uuid::nil(),
+        ),
+        Some(4)
+    );
+}
+
+#[test]
 fn default_folder_entry_id_values_debug_decodes_freebusy_data_index() {
     let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
     let freebusy_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
