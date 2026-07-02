@@ -4346,10 +4346,8 @@ fn outlook_smart_input_variant_test_lock() -> std::sync::MutexGuard<'static, ()>
 }
 
 #[test]
-fn inbox_associated_find_row_does_not_fabricate_folder_default_named_view() {
-    assert_inbox_associated_find_row_no_match_for_message_class(
-        "IPM.Microsoft.FolderDesign.NamedView",
-    );
+fn inbox_associated_find_row_returns_folder_default_named_view() {
+    assert_inbox_associated_find_row_returns_message_class("IPM.Microsoft.FolderDesign.NamedView");
 }
 
 #[test]
@@ -4757,7 +4755,7 @@ fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view
 }
 
 #[test]
-fn inbox_associated_table_does_not_expose_folder_local_default_named_view() {
+fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup() {
     let restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -4772,7 +4770,8 @@ fn inbox_associated_table_does_not_expose_folder_local_default_named_view() {
         Uuid::nil(),
     );
 
-    assert!(rows.is_empty());
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(rows[0], AssociatedTableRow::NamedView(_)));
     assert_eq!(
         restricted_associated_folder_message_count(
             INBOX_FOLDER_ID,
@@ -4780,7 +4779,7 @@ fn inbox_associated_table_does_not_expose_folder_local_default_named_view() {
             Some(&restriction),
             Uuid::nil()
         ),
-        0
+        1
     );
 }
 

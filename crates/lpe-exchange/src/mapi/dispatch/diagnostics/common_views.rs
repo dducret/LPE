@@ -209,7 +209,19 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             debug_default_folder_associated_named_view(snapshot, folder_id),
         )
     };
-    let folder_local_default_supported = !uses_common_views && view.is_some();
+    let folder_local_default_view = if folder_id == COMMON_VIEWS_FOLDER_ID {
+        None
+    } else {
+        container_class
+            .filter(|container_class| default_view_supported_folder(folder_id, container_class))
+            .and_then(|_| {
+                snapshot.default_folder_named_view_message(
+                    folder_id,
+                    crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+                )
+            })
+    };
+    let folder_local_default_supported = folder_local_default_view.is_some();
     let exact_named_view_restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -223,7 +235,9 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             Uuid::nil(),
         )
         .iter()
-        .any(|row| debug_associated_row_id(row) == expected_view_message_id);
+        .any(|row| {
+            debug_associated_row_id(row) == crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        });
     let descriptor_summary = view
         .as_ref()
         .map(|message| {

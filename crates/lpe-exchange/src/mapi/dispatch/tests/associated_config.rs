@@ -484,7 +484,10 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
         summary.contains("class=IPM.Configuration.AccountPrefs"),
         "{summary}"
     );
-    assert!(summary.contains("class=IPM.Configuration.ELC"), "{summary}");
+    assert!(
+        !summary.contains("class=IPM.Configuration.ELC"),
+        "{summary}"
+    );
     assert!(
         !summary.contains("class=IPM.Configuration.MessageListSettings"),
         "{summary}"
@@ -708,7 +711,7 @@ fn associated_config_debug_summaries_honor_table_restriction() {
 }
 
 #[test]
-fn inbox_associated_named_view_debug_summaries_do_not_fabricate_folder_default_view() {
+fn inbox_associated_named_view_debug_summaries_report_folder_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let restriction = MapiRestriction::Property {
@@ -758,12 +761,15 @@ fn inbox_associated_named_view_debug_summaries_do_not_fabricate_folder_default_v
         &snapshot,
     );
 
-    assert!(window.contains("total=0"), "{window}");
+    assert!(window.contains("total=1"), "{window}");
     assert!(
-        !values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+        values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
         "{values}"
     );
-    assert!(wire.is_empty(), "{wire}");
+    assert!(
+        wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+        "{wire}"
+    );
 }
 
 #[test]

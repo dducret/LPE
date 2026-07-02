@@ -175,7 +175,9 @@ pub(super) fn associated_table_rows(
         .map(AssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
-        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
+        if (folder_id != INBOX_FOLDER_ID || restriction.is_some())
+            && restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid)
+        {
             rows.push(AssociatedTableRow::NamedView(message));
         }
     }
@@ -193,9 +195,7 @@ fn default_folder_associated_named_view(
             let (_, _, container_class, _) = special_folder_metadata(folder_id);
             (!container_class.is_empty()).then_some(container_class)
         })?;
-    if default_view_supported_folder(folder_id, container_class)
-        && !default_view_uses_common_views(container_class, folder_id)
-    {
+    if default_view_supported_folder(folder_id, container_class) {
         snapshot.default_folder_named_view_message(
             folder_id,
             crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,

@@ -116,8 +116,8 @@ fn inbox_view_handoff_table_contract_reports_common_views_default_view() {
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=false"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains("folder_local_default_supported=true"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(&format!(
         "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
     )));

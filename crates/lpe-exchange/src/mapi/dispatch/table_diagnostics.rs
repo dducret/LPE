@@ -467,7 +467,9 @@ pub(super) fn debug_associated_table_rows(
         .map(DebugAssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) {
-        if restriction_matches_common_view_named_view(restriction, &message, mailbox_guid) {
+        if (folder_id != INBOX_FOLDER_ID || restriction.is_some())
+            && restriction_matches_common_view_named_view(restriction, &message, mailbox_guid)
+        {
             rows.push(DebugAssociatedTableRow::NamedView(message));
         }
     }
@@ -556,9 +558,7 @@ pub(super) fn debug_default_folder_associated_named_view(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| advertised_special_folder_container_class(folder_id))?;
-    if default_view_supported_folder(folder_id, container_class)
-        && !default_view_uses_common_views(container_class, folder_id)
-    {
+    if default_view_supported_folder(folder_id, container_class) {
         snapshot.default_folder_named_view_message(
             folder_id,
             crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
