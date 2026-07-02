@@ -236,10 +236,9 @@ fn append_exact_virtual_inbox_associated_config(
 fn append_modeled_inbox_broad_startup_configs(messages: &mut Vec<MapiAssociatedConfigMessage>) {
     for message in crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults() {
         if !messages.iter().any(|existing| {
-            existing.id == message.id
-                && existing
-                    .message_class
-                    .eq_ignore_ascii_case(&message.message_class)
+            existing
+                .message_class
+                .eq_ignore_ascii_case(&message.message_class)
         }) {
             messages.push(message);
         }

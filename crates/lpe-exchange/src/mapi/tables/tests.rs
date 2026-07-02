@@ -5158,7 +5158,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        2
+        1
     );
     assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
@@ -5368,6 +5368,25 @@ fn inbox_associated_broad_configuration_restriction_keeps_persisted_non_empty_ou
             "IPM.Configuration.AccountPrefs"
         ]
     );
+}
+
+#[test]
+fn inbox_associated_broad_configuration_restriction_dedupes_modeled_startup_class() {
+    let snapshot = inbox_associated_sort_snapshot();
+    let restriction = MapiRestriction::Property {
+        relop: 0x02,
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: MapiValue::String("IPM.Configuration.".to_string()),
+    };
+
+    let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
+    let account_prefs_count = rows
+        .iter()
+        .filter_map(associated_table_row_config)
+        .filter(|message| message.message_class == "IPM.Configuration.AccountPrefs")
+        .count();
+
+    assert_eq!(account_prefs_count, 1);
 }
 
 #[test]
