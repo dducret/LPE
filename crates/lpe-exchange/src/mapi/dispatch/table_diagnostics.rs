@@ -933,6 +933,30 @@ pub(super) fn inbox_associated_broad_findrow_matched(
             .is_some_and(is_broad_ipm_configuration_restriction)
 }
 
+pub(super) fn inbox_associated_exact_configuration_findrow_matched(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    response: &[u8],
+) -> bool {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        ..
+    }) = object
+    else {
+        return false;
+    };
+    *folder_id == INBOX_FOLDER_ID
+        && *associated
+        && response.get(7).copied().unwrap_or(0) != 0
+        && request
+            .restriction()
+            .ok()
+            .flatten()
+            .as_ref()
+            .is_some_and(is_exact_ipm_configuration_restriction)
+}
+
 fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool {
     match restriction {
         MapiRestriction::Content {
@@ -963,6 +987,38 @@ fn is_broad_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool
         MapiRestriction::Not(child)
         | MapiRestriction::Count { child, .. }
         | MapiRestriction::SubObject { child, .. } => is_broad_ipm_configuration_restriction(child),
+        _ => false,
+    }
+}
+
+fn is_exact_ipm_configuration_restriction(restriction: &MapiRestriction) -> bool {
+    match restriction {
+        MapiRestriction::Content {
+            property_tag,
+            value,
+            ..
+        } => {
+            matches!(
+                canonical_property_storage_tag(*property_tag),
+                PID_TAG_MESSAGE_CLASS_W
+            ) && value.to_ascii_lowercase().starts_with("ipm.configuration.")
+        }
+        MapiRestriction::Property {
+            relop: 0x04,
+            property_tag,
+            value: MapiValue::String(value),
+        } => {
+            matches!(
+                canonical_property_storage_tag(*property_tag),
+                PID_TAG_MESSAGE_CLASS_W
+            ) && value.to_ascii_lowercase().starts_with("ipm.configuration.")
+        }
+        MapiRestriction::And(children) | MapiRestriction::Or(children) => {
+            children.iter().any(is_exact_ipm_configuration_restriction)
+        }
+        MapiRestriction::Not(child)
+        | MapiRestriction::Count { child, .. }
+        | MapiRestriction::SubObject { child, .. } => is_exact_ipm_configuration_restriction(child),
         _ => false,
     }
 }

@@ -7,7 +7,7 @@ const STARTUP_GATES: [&str; 10] = [
     "ipm_subtree_hierarchy_opened",
     "inbox_folder_opened",
     "inbox_associated_contents_table_opened",
-    "broad_ipm_configuration_findrow_matched",
+    "ipm_configuration_findrow_matched",
     "fai_query_rows_returned_non_empty",
     "receive_folder_verification_passed",
     "normal_inbox_contents_table_opened",
@@ -78,7 +78,8 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
         ipm_subtree_hierarchy_opened,
         inbox_folder_opened,
         actions.inbox_associated_contents_table_observed,
-        actions.inbox_associated_broad_ipm_configuration_findrow_matched,
+        actions.inbox_associated_broad_ipm_configuration_findrow_matched
+            || actions.inbox_associated_exact_ipm_configuration_findrow_matched,
         actions.inbox_associated_query_rows_returned_non_empty,
         actions.receive_folder_verification_passed,
         actions.inbox_normal_contents_table_observed,
@@ -145,7 +146,7 @@ mod tests {
         session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
         session.record_opened_folder(INBOX_FOLDER_ID);
         session.record_inbox_associated_contents_table();
-        session.record_inbox_associated_broad_findrow(true);
+        session.record_inbox_associated_exact_findrow(true);
         session.record_inbox_associated_query_rows_returned_non_empty();
         session.record_receive_folder_verification_passed();
 
@@ -159,6 +160,30 @@ mod tests {
             summary.first_missing_gate,
             "normal_inbox_contents_table_opened"
         );
+    }
+
+    #[test]
+    fn classifier_accepts_exact_ipm_configuration_findrow_gate() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
+        session.record_opened_folder(INBOX_FOLDER_ID);
+        session.record_inbox_associated_contents_table();
+        session.record_inbox_associated_exact_findrow(true);
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(
+            summary.last_successful_gate,
+            "ipm_configuration_findrow_matched"
+        );
+        assert_eq!(
+            summary.first_missing_gate,
+            "fai_query_rows_returned_non_empty"
+        );
+        assert!(summary
+            .gates
+            .contains("ipm_configuration_findrow_matched=true"));
     }
 
     #[test]

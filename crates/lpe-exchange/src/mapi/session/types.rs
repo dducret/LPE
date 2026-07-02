@@ -94,6 +94,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_normal_contents_table_query_rows_handle: Option<u32>,
     pub(in crate::mapi) inbox_associated_contents_table_observed: bool,
     pub(in crate::mapi) inbox_associated_broad_ipm_configuration_findrow_matched: bool,
+    pub(in crate::mapi) inbox_associated_exact_ipm_configuration_findrow_matched: bool,
     pub(in crate::mapi) inbox_associated_query_rows_returned_non_empty: bool,
     pub(in crate::mapi) inbox_associated_query_rows_reached_end: bool,
     pub(in crate::mapi) receive_folder_verification_passed: bool,

@@ -87,6 +87,14 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         outlook_startup_gates = %startup_gates.gates,
         outlook_abandoned_immediately_after_fai =
             startup_gates.abandoned_immediately_after_fai,
+        inbox_associated_broad_ipm_configuration_findrow_matched =
+            session
+                .post_hierarchy_actions
+                .inbox_associated_broad_ipm_configuration_findrow_matched,
+        inbox_associated_exact_ipm_configuration_findrow_matched =
+            session
+                .post_hierarchy_actions
+                .inbox_associated_exact_ipm_configuration_findrow_matched,
         outlook_smart_input_variant = %session.outlook_smart_input_variant,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,

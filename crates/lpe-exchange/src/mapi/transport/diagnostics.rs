@@ -442,6 +442,13 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
         && !actions.inbox_normal_contents_table_observed
     {
         4
+    } else if actions.inbox_associated_contents_table_observed
+        && actions.inbox_associated_exact_ipm_configuration_findrow_matched
+        && !actions.inbox_associated_query_rows_returned_non_empty
+        && !actions.inbox_associated_config_open_observed
+        && !actions.inbox_normal_contents_table_observed
+    {
+        5
     } else if actions.post_inbox_fai_folder_type_probe_loop_logged {
         3
     } else if !actions.last_inbox_hierarchy_query_context.is_empty()
@@ -461,6 +468,7 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
 
 pub(in crate::mapi) fn outlook_bootstrap_stall_name(stall_code: u64) -> &'static str {
     match stall_code {
+        5 => "after_inbox_fai_exact_config_findrow_without_open",
         4 => "after_common_views_inbox_notification_without_contents",
         3 => "repeated_inbox_folder_type_probe_without_contents",
         2 => "after_ipm_hierarchy_without_inbox_contents",
@@ -757,6 +765,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
+    } else if post_hierarchy_summary.outlook_bootstrap_stall_code == 5 {
+        "post_inbox_fai_exact_config_findrow_without_open"
     } else if post_hierarchy_summary.outlook_bootstrap_stall_code == 4 {
         "post_common_views_inbox_notification_without_contents"
     } else if post_fai_inbox_probe_loop_terminal {
@@ -822,6 +832,14 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                     && !session.outlook_smart_input_variant.starts_with("unknown:"),
             outlook_smart_input_variant_applied =
                 session.outlook_smart_input_variant_applied,
+            inbox_associated_broad_ipm_configuration_findrow_matched =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_broad_ipm_configuration_findrow_matched,
+            inbox_associated_exact_ipm_configuration_findrow_matched =
+                session
+                    .post_hierarchy_actions
+                    .inbox_associated_exact_ipm_configuration_findrow_matched,
             outlook_smart_input_variant_result =
                 if session.outlook_smart_input_variant_applied {
                     "applied"

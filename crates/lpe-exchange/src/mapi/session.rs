@@ -192,6 +192,13 @@ impl MapiSession {
         }
     }
 
+    pub(in crate::mapi) fn record_inbox_associated_exact_findrow(&mut self, matched: bool) {
+        if matched {
+            self.post_hierarchy_actions
+                .inbox_associated_exact_ipm_configuration_findrow_matched = true;
+        }
+    }
+
     pub(in crate::mapi) fn record_inbox_associated_query_rows_returned_non_empty(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_query_rows_returned_non_empty = true;

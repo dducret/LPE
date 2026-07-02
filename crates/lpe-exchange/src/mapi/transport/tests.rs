@@ -511,6 +511,25 @@ fn outlook_bootstrap_stall_classifies_post_common_views_notification_handoff() {
 }
 
 #[test]
+fn outlook_bootstrap_stall_classifies_exact_fai_findrow_without_open() {
+    let mut state = PostHierarchyActionState {
+        inbox_associated_contents_table_observed: true,
+        inbox_associated_exact_ipm_configuration_findrow_matched: true,
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 5);
+    assert_eq!(
+        outlook_bootstrap_stall_name(outlook_bootstrap_stall_code(&state)),
+        "after_inbox_fai_exact_config_findrow_without_open"
+    );
+
+    state.inbox_associated_config_open_observed = true;
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 0);
+}
+
+#[test]
 fn post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard() {
     let mut session = test_session(HashMap::new());
     session.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;

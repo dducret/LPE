@@ -1136,6 +1136,13 @@ pub(super) fn append_find_row_response(
     ) {
         session.record_inbox_associated_broad_findrow(true);
     }
+    if inbox_associated_exact_configuration_findrow_matched(
+        input_object(session, handle_slots, request),
+        request,
+        &response,
+    ) {
+        session.record_inbox_associated_exact_findrow(true);
+    }
     if let Some((handle, associated, position, columns, restriction)) = find_trace {
         let response_return_value = read_response_error_code(&response, 0).unwrap_or(0xffff_ffff);
         let response_found = response.get(7).copied().unwrap_or(0);
