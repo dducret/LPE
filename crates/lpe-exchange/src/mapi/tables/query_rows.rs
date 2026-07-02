@@ -599,14 +599,14 @@ pub(in crate::mapi) fn rop_query_rows_response(
             *position = next_position;
         }
     }
-    let response_origin = if forward_read {
-        if next_position >= total_row_count {
+    let response_origin = if selected.is_empty() {
+        if forward_read && next_position >= total_row_count {
             0x02
+        } else if !forward_read && next_position == 0 {
+            0x00
         } else {
             0x01
         }
-    } else if next_position == 0 {
-        0x00
     } else {
         0x01
     };

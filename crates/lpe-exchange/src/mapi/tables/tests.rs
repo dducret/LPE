@@ -1111,11 +1111,27 @@ fn query_rows_origin_tracks_cursor_boundary() {
         Uuid::nil(),
     );
 
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes(response[7..9].try_into().unwrap()),
         (total_rows - 11) as u16
     );
+    assert_eq!(table_position(&table), Some(total_rows));
+
+    let response = rop_query_rows_response(
+        &RopRequest {
+            payload: vec![0, 1, 10, 0],
+            ..request
+        },
+        Some(&mut table),
+        &mailboxes,
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(response[6], 0x02);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
     assert_eq!(table_position(&table), Some(total_rows));
 }
 
@@ -1201,7 +1217,7 @@ fn query_rows_origin_uses_global_position_for_windowed_content_tables() {
     );
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
     assert_eq!(table_position(&table), Some(4));
 }
@@ -1915,7 +1931,7 @@ fn restricted_associated_query_position_reports_filtered_row_count() {
     );
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes(response[7..9].try_into().unwrap()),
         expected_count as u16
@@ -4354,6 +4370,7 @@ fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+    assert_eq!(query_response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
         1
