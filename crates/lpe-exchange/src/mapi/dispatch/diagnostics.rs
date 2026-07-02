@@ -1083,6 +1083,11 @@ pub(super) fn log_rop_logon_request_identity(
         && aliases
             .iter()
             .any(|alias| normalized_essdn == alias.to_ascii_lowercase());
+    let logon_shape = format_logon_request_shape(request);
+    let open_flags = logon_open_flags(request);
+    let store_state = logon_store_state(request);
+    let projected_response_logon_flags = projected_logon_response_flags(request.logon_flags);
+    let dropped_request_logon_bits = request.logon_flags & !projected_response_logon_flags;
 
     tracing::info!(
         rca_debug = true,
@@ -1098,12 +1103,94 @@ pub(super) fn log_rop_logon_request_identity(
         logon_output_handle_index = request.output_handle_index,
         logon_prefix_bytes = request.prefix.len(),
         logon_prefix = %bytes_to_hex(&request.prefix),
+        logon_open_flags = %format!("{open_flags:#010x}"),
+        logon_store_state = %format!("{store_state:#010x}"),
+        projected_response_logon_flags = %format!("{projected_response_logon_flags:#04x}"),
+        dropped_request_logon_bits = %format!("{dropped_request_logon_bits:#04x}"),
+        observed_outlook_logon_flags_0x09_path = request.logon_flags == 0x09,
+        logon_request_shape = %logon_shape,
         logon_essdn = %essdn,
         logon_essdn_bytes = request.essdn.len(),
         principal_aliases = %aliases.join("|"),
         essdn_matches_principal,
         message = "rca debug mapi logon request identity"
     );
+}
+
+fn logon_open_flags(request: &RopLogonRequest) -> u32 {
+    request
+        .prefix
+        .get(0..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0)
+}
+
+fn logon_store_state(request: &RopLogonRequest) -> u32 {
+    request
+        .prefix
+        .get(4..8)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0)
+}
+
+fn projected_logon_response_flags(request_logon_flags: u8) -> u8 {
+    if request_logon_flags & 0x01 != 0 {
+        request_logon_flags & 0x07 | 0x01
+    } else {
+        request_logon_flags & 0x07 & !0x01
+    }
+}
+
+fn format_logon_request_shape(request: &RopLogonRequest) -> String {
+    let projected_response_logon_flags = projected_logon_response_flags(request.logon_flags);
+    let dropped_request_logon_bits = request.logon_flags & !projected_response_logon_flags;
+    format!(
+        "request_flags={:#04x};private={};open_flags={:#010x};store_state={:#010x};projected_response_flags={:#04x};dropped_request_bits={:#04x};observed_0x09_path={}",
+        request.logon_flags,
+        request.logon_flags & 0x01 != 0,
+        logon_open_flags(request),
+        logon_store_state(request),
+        projected_response_logon_flags,
+        dropped_request_logon_bits,
+        request.logon_flags == 0x09
+    )
+}
+
+#[cfg(test)]
+mod logon_request_shape_tests {
+    use super::*;
+
+    #[test]
+    fn formats_observed_outlook_logon_flags_0x09_path() {
+        let request = RopLogonRequest {
+            output_handle_index: 0,
+            logon_flags: 0x09,
+            prefix: vec![0x40, 0x00, 0x00, 0x21, 0x00, 0x00, 0x00, 0x00],
+            essdn: Vec::new(),
+        };
+
+        assert_eq!(
+            format_logon_request_shape(&request),
+            "request_flags=0x09;private=true;open_flags=0x21000040;store_state=0x00000000;projected_response_flags=0x01;dropped_request_bits=0x08;observed_0x09_path=true"
+        );
+    }
+
+    #[test]
+    fn formats_initial_private_logon_open_flags_without_dropped_bits() {
+        let request = RopLogonRequest {
+            output_handle_index: 0,
+            logon_flags: 0x01,
+            prefix: vec![0x0c, 0x04, 0x00, 0x21, 0x00, 0x00, 0x00, 0x00],
+            essdn: Vec::new(),
+        };
+
+        assert_eq!(
+            format_logon_request_shape(&request),
+            "request_flags=0x01;private=true;open_flags=0x2100040c;store_state=0x00000000;projected_response_flags=0x01;dropped_request_bits=0x00;observed_0x09_path=false"
+        );
+    }
 }
 
 fn decode_logon_identity_bytes(bytes: &[u8]) -> String {
