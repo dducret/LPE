@@ -5231,6 +5231,78 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
 }
 
 #[test]
+fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff() {
+    let _guard = outlook_smart_input_variant_test_lock();
+    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
+    std::env::set_var(
+        "LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT",
+        "broad_findrow_no_handoff",
+    );
+
+    let snapshot = inbox_associated_sort_snapshot();
+    let mut table = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: true,
+        columns: vec![PID_TAG_MESSAGE_CLASS_W],
+        columns_set: true,
+        sort_orders: vec![MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            order: 0,
+        }],
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    write_utf16z(&mut restriction, "IPM.Configuration.");
+    let mut payload = vec![0];
+    payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    payload.extend_from_slice(&restriction);
+    payload.push(1);
+    payload.extend_from_slice(&0u16.to_le_bytes());
+
+    let find_response = rop_find_row_response(
+        &RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    match previous {
+        Some(value) => std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value),
+        None => std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT"),
+    }
+
+    assert_eq!(find_response[0], RopId::FindRow.as_u8());
+    assert_eq!(
+        u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
+        0
+    );
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
+    assert_eq!(table_position(&table), Some(0));
+    assert!(matches!(
+        table,
+        MapiObject::ContentsTable {
+            restriction: None,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn inbox_associated_broad_find_row_keeps_persisted_followup_rows() {
     let account_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1608);
     let earlier_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1609);

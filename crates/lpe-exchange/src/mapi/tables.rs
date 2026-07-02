@@ -437,7 +437,26 @@ pub(in crate::mapi) fn rop_find_row_response(
                     } else {
                         *position = index;
                     }
-                    if broad_outlook_configuration_probe {
+                    if broad_outlook_configuration_probe
+                        && configured_smart_input_variant() == "broad_findrow_no_handoff"
+                    {
+                        tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            request_type = "Execute",
+                            request_rop_id = "0x4f",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                            associated = true,
+                            matched_row_index = index,
+                            matched_message_class = %associated_table_row_message_class(message),
+                            outlook_smart_input_variant = "broad_findrow_no_handoff",
+                            resulting_position = *position,
+                            table_restriction_rewritten = false,
+                            "rca debug outlook associated config broad find row handoff variant skipped"
+                        );
+                    } else if broad_outlook_configuration_probe {
                         *table_restriction = Some(outlook_configuration_prefix_restriction());
                         *position = 0;
                         tracing::info!(
