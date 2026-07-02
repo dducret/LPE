@@ -365,6 +365,10 @@ impl MapiSession {
         self.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;
     }
 
+    pub(in crate::mapi) fn mark_post_common_views_handoff_logged(&mut self) {
+        self.post_hierarchy_actions.post_common_views_handoff_logged = true;
+    }
+
     pub(in crate::mapi) fn mark_post_inbox_fai_reopen_logged(&mut self) {
         self.post_hierarchy_actions.post_inbox_fai_reopen_logged = true;
     }

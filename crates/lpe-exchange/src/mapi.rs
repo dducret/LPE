@@ -74,6 +74,7 @@ static MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_PARTIAL_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_COMMON_VIEWS_HANDOFF_WITHOUT_CONTENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_POST_FAI_HIERARCHY_WITHOUT_CONTENTS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_INBOX_NORMAL_CONTENTS_OPENED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_IPM_SUBTREE_HIERARCHY_QUERY_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -110,6 +111,7 @@ pub struct MapiFolderPurgeMetrics {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MapiOutlookViewMetrics {
     pub inbox_fai_handoff_without_contents_total: u64,
+    pub common_views_handoff_without_contents_total: u64,
     pub post_fai_hierarchy_without_contents_total: u64,
     pub inbox_normal_contents_opened_total: u64,
     pub ipm_subtree_hierarchy_query_total: u64,
@@ -155,6 +157,11 @@ pub fn mapi_folder_purge_metrics() -> MapiFolderPurgeMetrics {
 
 pub(crate) fn record_mapi_outlook_view_inbox_fai_handoff_without_contents() {
     MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL
+        .fetch_add(1, AtomicOrdering::Relaxed);
+}
+
+pub(crate) fn record_mapi_outlook_view_common_views_handoff_without_contents() {
+    MAPI_OUTLOOK_VIEW_COMMON_VIEWS_HANDOFF_WITHOUT_CONTENTS_TOTAL
         .fetch_add(1, AtomicOrdering::Relaxed);
 }
 
@@ -233,6 +240,9 @@ pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
     MapiOutlookViewMetrics {
         inbox_fai_handoff_without_contents_total:
             MAPI_OUTLOOK_VIEW_INBOX_FAI_HANDOFF_WITHOUT_CONTENTS_TOTAL.load(AtomicOrdering::Relaxed),
+        common_views_handoff_without_contents_total:
+            MAPI_OUTLOOK_VIEW_COMMON_VIEWS_HANDOFF_WITHOUT_CONTENTS_TOTAL
+                .load(AtomicOrdering::Relaxed),
         post_fai_hierarchy_without_contents_total:
             MAPI_OUTLOOK_VIEW_POST_FAI_HIERARCHY_WITHOUT_CONTENTS_TOTAL
                 .load(AtomicOrdering::Relaxed),

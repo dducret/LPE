@@ -975,6 +975,55 @@ pub(super) fn append_query_rows_response(
                 }
             }
         }
+        if folder_id == COMMON_VIEWS_FOLDER_ID
+            && associated
+            && row_count == 0
+            && response_origin == 0x02
+            && !session
+                .post_hierarchy_actions
+                .post_common_views_handoff_logged
+            && !session
+                .post_hierarchy_actions
+                .inbox_associated_contents_table_observed
+            && !session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed
+        {
+            let live_handle_summary = format_live_handle_debug_summary(session);
+            record_mapi_outlook_view_common_views_handoff_without_contents();
+            session.record_outlook_view_failure_trace_event(format!(
+                "common_views_exhausted_without_inbox_contents:{query_context}"
+            ));
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = %request_id,
+                request_rop_id = "0x15",
+                request_rop_names = %request_rop_names,
+                input_handle_index = request.input_handle_index().unwrap_or(0),
+                input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                query_rows_end_context = %query_context,
+                common_views_inbox_shortcut_context =
+                    %session.post_hierarchy_actions.last_common_views_inbox_shortcut_context,
+                live_handle_summaries = %live_handle_summary,
+                receive_folder_verification_passed = session
+                    .post_hierarchy_actions
+                    .receive_folder_verification_passed,
+                inbox_associated_contents_table_observed = session
+                    .post_hierarchy_actions
+                    .inbox_associated_contents_table_observed,
+                normal_contents_table_observed = session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed,
+                next_expected_client_step =
+                    "open_inbox_associated_or_normal_contents_table",
+                "rca debug mapi common views exhausted without inbox contents"
+            );
+            session.mark_post_common_views_handoff_logged();
+        }
     }
     if inbox_associated_query_rows_returned_non_empty {
         session.record_inbox_associated_query_rows_returned_non_empty();

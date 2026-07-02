@@ -19,7 +19,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
     }
 
     let response_columns = query_rows_response_columns(object.as_deref(), snapshot);
-    let total_row_count = object
+    let mut total_row_count = object
         .as_deref()
         .map(|object| {
             table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid).1
@@ -140,6 +140,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                     let total_common_views_rows = rows.len();
+                    let navigation_projection =
+                        is_unrestricted_common_views_navigation_projection(&columns, restriction);
                     let navigation_shortcut_count = rows
                         .iter()
                         .filter(|message| {
@@ -173,7 +175,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             virtual_navigation_shortcut_count,
                         common_views_named_view_count =
                             total_common_views_rows.saturating_sub(navigation_shortcut_count),
-                        common_views_navigation_projection = false,
+                        common_views_navigation_projection = navigation_projection,
                         table_has_restriction = restriction.is_some(),
                         current_position = *table_position,
                         selected_property_tag_count = columns.len(),
@@ -187,7 +189,13 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             mailbox_guid,
                         )
                     });
+                    if navigation_projection {
+                        rows.retain(|message| {
+                            matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
+                        });
+                    }
                     sort_common_views_messages(&mut rows, sort_orders);
+                    total_row_count = rows.len();
                     rows.iter()
                         .map(|message| {
                             serialize_common_views_row_with_mailbox_guid(

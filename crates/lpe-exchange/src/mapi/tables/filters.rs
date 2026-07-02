@@ -36,6 +36,54 @@ pub(super) fn property_tag_id_matches(left: u32, right: u32) -> bool {
     (left & 0xFFFF_0000) == (right & 0xFFFF_0000)
 }
 
+pub(super) fn is_unrestricted_common_views_navigation_projection(
+    columns: &[u32],
+    restriction: &Option<MapiRestriction>,
+) -> bool {
+    restriction.is_none()
+        && columns.iter().any(|tag| {
+            [
+                PID_TAG_WLINK_SAVE_STAMP,
+                PID_TAG_WLINK_TYPE,
+                PID_TAG_WLINK_FLAGS,
+                PID_TAG_WLINK_ORDINAL,
+                PID_TAG_WLINK_ENTRY_ID,
+                PID_TAG_WLINK_RECORD_KEY,
+                PID_TAG_WLINK_STORE_ENTRY_ID,
+                PID_TAG_WLINK_FOLDER_TYPE,
+                PID_TAG_WLINK_GROUP_HEADER_ID,
+                PID_TAG_WLINK_GROUP_CLSID,
+                PID_TAG_WLINK_GROUP_NAME_W,
+                PID_TAG_WLINK_SECTION,
+                PID_TAG_WLINK_CALENDAR_COLOR,
+                PID_TAG_WLINK_ADDRESS_BOOK_EID,
+                PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+                PID_TAG_WLINK_CLIENT_ID,
+                PID_TAG_WLINK_RO_GROUP_TYPE,
+                PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+            ]
+            .iter()
+            .any(|wlink_tag| property_tag_id_matches(*tag, *wlink_tag))
+        })
+        && !columns.iter().any(|tag| {
+            [
+                PID_TAG_VIEW_DESCRIPTOR_CLSID,
+                PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION,
+                PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+                PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+                PID_TAG_VIEW_DESCRIPTOR_BINARY,
+                PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+                PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+                PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+            ]
+            .iter()
+            .any(|view_tag| property_tag_id_matches(*tag, *view_tag))
+        })
+}
+
 pub(super) fn retain_rows_by_restriction<T>(
     rows: &mut Vec<T>,
     restriction: Option<&MapiRestriction>,

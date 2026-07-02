@@ -123,6 +123,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) first_inbox_loop_transition_context: String,
     pub(in crate::mapi) inbox_loop_transition_logged: bool,
     pub(in crate::mapi) post_inbox_fai_handoff_logged: bool,
+    pub(in crate::mapi) post_common_views_handoff_logged: bool,
     pub(in crate::mapi) post_inbox_fai_reopen_logged: bool,
     pub(in crate::mapi) post_inbox_fai_folder_type_probe_loop_logged: bool,
     pub(in crate::mapi) post_rule_organizer_stream_reopen_logged: bool,

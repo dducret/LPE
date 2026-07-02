@@ -66,12 +66,17 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
 ) -> OutlookStartupGateSummary {
     let actions = &session.post_hierarchy_actions;
     let abandoned = session.abandoned_after_inbox_fai_query_rows();
+    let ipm_subtree_hierarchy_opened = actions.opened_folder_ids.contains(&IPM_SUBTREE_FOLDER_ID)
+        || actions.last_completed_hierarchy_sync_root == Some(IPM_SUBTREE_FOLDER_ID)
+        || actions.receive_folder_verification_passed
+        || !actions.last_common_views_inbox_shortcut_context.is_empty();
+    let inbox_folder_opened = actions.opened_folder_ids.contains(&INBOX_FOLDER_ID)
+        || actions.inbox_open_folder_probe_count > 0
+        || actions.receive_folder_verification_passed;
     let passed = [
         session.logon_identity.is_some(),
-        actions.opened_folder_ids.contains(&IPM_SUBTREE_FOLDER_ID)
-            || actions.last_completed_hierarchy_sync_root == Some(IPM_SUBTREE_FOLDER_ID),
-        actions.opened_folder_ids.contains(&INBOX_FOLDER_ID)
-            || actions.inbox_open_folder_probe_count > 0,
+        ipm_subtree_hierarchy_opened,
+        inbox_folder_opened,
         actions.inbox_associated_contents_table_observed,
         actions.inbox_associated_broad_ipm_configuration_findrow_matched,
         actions.inbox_associated_query_rows_returned_non_empty,
@@ -153,6 +158,21 @@ mod tests {
         assert_eq!(
             summary.first_missing_gate,
             "normal_inbox_contents_table_opened"
+        );
+    }
+
+    #[test]
+    fn classifier_reports_inbox_contents_gate_after_receive_folder_verified() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_receive_folder_verification_passed();
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(summary.last_successful_gate, "inbox_folder_opened");
+        assert_eq!(
+            summary.first_missing_gate,
+            "inbox_associated_contents_table_opened"
         );
     }
 }
