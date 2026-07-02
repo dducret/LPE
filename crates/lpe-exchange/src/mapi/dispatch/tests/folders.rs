@@ -1220,6 +1220,20 @@ fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts()
 }
 
 #[test]
+fn contents_table_open_row_count_projects_common_views_navigation_shortcuts() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+
+    assert_eq!(
+        associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
+        6
+    );
+    assert_eq!(
+        contents_table_open_row_count(COMMON_VIEWS_FOLDER_ID, true, &[], &[], &snapshot,),
+        4
+    );
+}
+
+#[test]
 fn default_folder_entry_id_values_debug_decodes_freebusy_data_index() {
     let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
     let freebusy_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(

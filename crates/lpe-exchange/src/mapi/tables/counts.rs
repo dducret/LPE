@@ -132,6 +132,27 @@ pub(in crate::mapi) fn associated_folder_message_count(
     }
 }
 
+pub(in crate::mapi) fn contents_table_open_row_count(
+    folder_id: u64,
+    associated: bool,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
+        return snapshot
+            .common_views_table_messages()
+            .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
+            .count()
+            .min(u32::MAX as usize) as u32;
+    }
+    if associated {
+        associated_folder_message_count(folder_id, snapshot)
+    } else {
+        folder_message_count(folder_id, mailboxes, emails, snapshot)
+    }
+}
+
 pub(in crate::mapi) fn restricted_associated_folder_message_count(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,

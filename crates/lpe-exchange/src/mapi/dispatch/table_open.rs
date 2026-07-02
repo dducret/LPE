@@ -226,11 +226,13 @@ pub(super) async fn append_open_table_response<S>(
                 contents_table_object(contents_folder_id, associated),
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
-            let row_count = if associated {
-                associated_folder_message_count(contents_folder_id, snapshot)
-            } else {
-                folder_message_count(contents_folder_id, mailboxes, emails, snapshot)
-            };
+            let row_count = contents_table_open_row_count(
+                contents_folder_id,
+                associated,
+                mailboxes,
+                emails,
+                snapshot,
+            );
             log_outlook_contents_table_open(
                 principal,
                 request_id,
