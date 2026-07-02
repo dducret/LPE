@@ -59,31 +59,37 @@ pub(crate) use dashboard_config::{
     default_reputation_enabled, default_reputation_quarantine_threshold,
     default_reputation_reject_threshold, default_spam_quarantine_threshold,
     default_spam_reject_threshold, default_spool_queues, default_state, default_true,
-    ensure_management_bootstrap, lpe_bridge_probe_url, lpe_health_probe_url,
-    normalize_accepted_domains, normalize_local_data_stores, normalize_policy_settings,
+    ensure_management_bootstrap, normalize_accepted_domains, normalize_local_data_stores,
+    normalize_policy_settings,
     normalize_public_tls_settings, normalize_relay_settings, probe_lpe_core_delivery,
     probe_lpe_recipient_bridge, submission_listener_is_configured, validate_relay_settings,
 };
+#[cfg(test)]
+pub(crate) use dashboard_config::{lpe_bridge_probe_url, lpe_health_probe_url};
 pub(crate) use http_routes::{
     accepted_domains, connect_lpe_support, create_accepted_domain, dashboard,
     delete_accepted_domain, delete_host_log, delete_public_tls_profile, delete_trace,
     digest_report_details, digest_reports, download_host_log, flush_mail_queue, health,
     health_live, health_ready, host_log_content, host_logs_list, import_accepted_domains, login,
-    logout, mail_history, mark_accepted_domain_verified, me, outbound_handoff, policy_status,
-    quarantine_items, release_trace, reporting_snapshot, retry_trace, route_diagnostics,
-    run_apt_update_upgrade, run_digest_reports, run_spam_test, run_system_power_action,
-    run_system_tool, select_public_tls_profile, sync_system_ntp, system_diagnostic_report,
+    logout, mail_history, me, outbound_handoff, policy_status, quarantine_items, release_trace,
+    reporting_snapshot, retry_trace, route_diagnostics, run_apt_update_upgrade,
+    run_digest_reports, run_spam_test, run_system_power_action, run_system_tool,
+    select_public_tls_profile, sync_system_ntp, system_diagnostic_report,
     system_diagnostic_service_action, system_diagnostic_services, system_health_check,
-    test_accepted_domain, trace_details, trace_history, update_accepted_domain, update_network,
-    update_policies, update_relay, update_reporting, update_site, update_system_ntp,
-    update_updates, upload_public_tls_profile,
+    test_accepted_domain, trace_details, trace_history, update_accepted_domain,
+    update_network, update_policies, update_relay, update_reporting, update_site,
+    update_system_ntp, update_updates, upload_public_tls_profile,
 };
+#[cfg(test)]
+pub(crate) use http_routes::mark_accepted_domain_verified;
 use management_auth::{
     bearer_token, hash_password, is_known_weak_secret, require_management_admin, verify_password,
     ApiError,
 };
 pub(crate) use management_auth::{integration_shared_secret, require_integration_request};
-pub(crate) use readiness::{address_binds_publicly, ha_non_active_role_for_traffic};
+pub(crate) use readiness::ha_non_active_role_for_traffic;
+#[cfg(test)]
+pub(crate) use readiness::address_binds_publicly;
 use readiness::{
     check_dashboard_state_store, check_local_data_store_policy, check_non_empty_value,
     check_optional_http_dependency, check_optional_tcp_dependency, check_quarantine_backlog,

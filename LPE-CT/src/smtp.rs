@@ -46,28 +46,36 @@ mod audit;
 mod auth;
 mod bayes;
 mod inbound_policy;
-use anti_abuse::{
-    dnsbl_query_name, evaluate_greylisting, query_dnsbl, DnsblOutcome, GreylistEntry,
-};
+use anti_abuse::{evaluate_greylisting, query_dnsbl, DnsblOutcome};
+#[cfg(test)]
+use anti_abuse::{dnsbl_query_name, GreylistEntry};
 use antivirus::{
     classify_inbound_message, evaluate_antivirus_policy, load_antivirus_providers,
-    parse_antivirus_output, AntivirusProviderConfig, AntivirusProviderDecision,
-    InboundMagikaOutcome,
+    AntivirusProviderConfig, InboundMagikaOutcome,
 };
+#[cfg(test)]
+use antivirus::{parse_antivirus_output, AntivirusProviderDecision};
 use audit::{
-    append_transport_audit, postfix_style_mail_log_line, quarantine_search_text,
-    TransportAuditEvent,
+    append_transport_audit, quarantine_search_text,
 };
+#[cfg(test)]
+use audit::{postfix_style_mail_log_line, TransportAuditEvent};
 use auth::{
-    apply_authentication_scores, authenticate_message, dkim_disposition, spf_disposition,
-    summarize_dkim, summarize_dmarc, summarize_spf, AuthSummary, AuthenticationAssessment,
-    DkimDisposition, SpfDisposition,
+    apply_authentication_scores, authenticate_message, AuthSummary, AuthenticationAssessment,
+    SpfDisposition,
+};
+#[cfg(test)]
+use auth::{
+    dkim_disposition, spf_disposition, summarize_dkim, summarize_dmarc, summarize_spf,
+    DkimDisposition,
 };
 use bayes::train_bayespam;
-pub(crate) use bayes::{
-    load_bayespam_corpus, score_bayespam, BayesLabel, BAYESPAM_MIN_SCORING_TOKENS,
-};
-use inbound_policy::{apply_filter_verdict, evaluate_inbound_policy, finalize_policy_decision};
+pub(crate) use bayes::{score_bayespam, BayesLabel};
+#[cfg(test)]
+pub(crate) use bayes::{load_bayespam_corpus, BAYESPAM_MIN_SCORING_TOKENS};
+use inbound_policy::{apply_filter_verdict, evaluate_inbound_policy};
+#[cfg(test)]
+use inbound_policy::finalize_policy_decision;
 mod delivery_bridge;
 use delivery_bridge::deliver_inbound_message;
 mod dns;
@@ -100,15 +108,18 @@ use protocol::{
     expect_smtp, read_smtp_data, read_smtp_reply, smtp_command, smtp_command_reply, write_smtp,
 };
 pub(crate) use protocol::{
-    max_smtp_message_size_bytes, parse_smtp_path, smtp_path_error_reply, ParsedSmtpPath,
-    SmtpPathError, SmtpPathKind,
+    max_smtp_message_size_bytes, parse_smtp_path, smtp_path_error_reply, SmtpPathKind,
 };
+#[cfg(test)]
+pub(crate) use protocol::{ParsedSmtpPath, SmtpPathError};
 use reputation::{load_reputation_score, update_reputation};
 
 mod outbound;
 mod outbound_delivery;
 mod outbound_policy;
-pub(crate) use outbound::{compose_rfc822_message, encode_quoted_printable};
+pub(crate) use outbound::compose_rfc822_message;
+#[cfg(test)]
+pub(crate) use outbound::encode_quoted_printable;
 use outbound_delivery::{relay_message, sanitize_outbound_ehlo_name};
 use outbound_policy::{
     default_queue_for_status, evaluate_outbound_throttle, outbound_handoff_response_from_spool,
@@ -116,13 +127,16 @@ use outbound_policy::{
 };
 
 mod session;
+use session::handle_smtp_session;
+#[cfg(test)]
 use session::{
-    handle_smtp_command, handle_smtp_session, receive_message, receive_message_with_validator,
-    SmtpCommandOutcome, SmtpTransaction,
+    handle_smtp_command, receive_message, receive_message_with_validator, SmtpCommandOutcome,
+    SmtpTransaction,
 };
 mod tls;
 mod trace;
 mod trace_actions;
+#[cfg(test)]
 pub(crate) use tls::smtp_starttls_acceptor_for_paths;
 use tls::{smtp_starttls_acceptor_from_store, StartTlsStream};
 use trace::{
