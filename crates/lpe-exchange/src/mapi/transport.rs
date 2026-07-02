@@ -877,10 +877,11 @@ where
 }
 
 fn notification_wait_empty_delay_millis(session: &MapiSession) -> u64 {
-    if session
-        .handles
-        .values()
-        .any(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+    if session.logon_identity.is_some()
+        || session
+            .handles
+            .values()
+            .any(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
     {
         MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
     } else {

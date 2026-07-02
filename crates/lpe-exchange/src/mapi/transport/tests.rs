@@ -175,6 +175,14 @@ fn notification_wait_empty_delay_uses_long_poll_when_subscription_exists() {
         MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
     );
 
+    let mut logged_on_session = test_session(HashMap::new());
+    logged_on_session.logon_identity = Some(MapiLogonIdentityDebug::default());
+
+    assert_eq!(
+        notification_wait_empty_delay_millis(&logged_on_session),
+        MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
+    );
+
     let mut handles = HashMap::new();
     handles.insert(
         7,
