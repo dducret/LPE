@@ -3,6 +3,12 @@ use super::super::*;
 pub(in crate::mapi::dispatch) fn should_log_outlook_surface_getprops_info(
     object: Option<&MapiObject>,
 ) -> bool {
+    if matches!(
+        object,
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
+        return true;
+    }
     matches!(
         object.and_then(MapiObject::folder_id),
         Some(

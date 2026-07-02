@@ -290,6 +290,14 @@ pub(super) async fn append_get_properties_specific_response<S>(
     session.record_post_hierarchy_request_contract(format!("{post_hierarchy_contract}->ok"));
     responses.extend_from_slice(&property_response);
     if is_inbox_folder_type_probe {
+        let folder_type_probe_succeeded = property_response
+            .get(2..6)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            == Some(0);
+        if folder_type_probe_succeeded {
+            session.record_receive_folder_verification_passed();
+        }
         if let Some(context) = inbox_folder_type_getprops_context {
             session.record_last_inbox_folder_type_getprops_context(format!(
                 "{};{}",

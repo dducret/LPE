@@ -36,6 +36,16 @@ fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
 }
 
 #[test]
+fn logon_getprops_are_outlook_surface_diagnostics() {
+    assert!(should_log_outlook_surface_getprops_info(Some(
+        &MapiObject::Logon
+    )));
+    assert!(should_log_outlook_surface_getprops_info(Some(
+        &MapiObject::PublicFolderLogon
+    )));
+}
+
+#[test]
 fn inbox_display_name_getprops_probe_loads_store_snapshot() {
     let session = test_mapi_session();
     let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
