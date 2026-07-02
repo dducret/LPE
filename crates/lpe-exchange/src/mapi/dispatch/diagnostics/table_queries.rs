@@ -98,6 +98,7 @@ pub(in crate::mapi::dispatch) fn outlook_bootstrap_query_rows_total_count(
 
 pub(in crate::mapi::dispatch) fn log_outlook_contents_table_find_row(
     principal: &AccountPrincipal,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -210,6 +211,7 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_find_row(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = request_id,
         request_rop_id = "0x4f",
         request_input_handle_index = request.input_handle_index().unwrap_or(0),
         folder_id = %format!("0x{folder_id:016x}"),

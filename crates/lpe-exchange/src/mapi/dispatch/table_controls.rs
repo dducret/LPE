@@ -971,13 +971,13 @@ pub(super) fn append_find_row_response(
             associated,
             columns,
             position,
-            restriction,
             ..
-        }) if *folder_id == INBOX_FOLDER_ID => Some(format!(
-            "inbox_find_row:request_id={request_id};handle={};associated={associated};position={position};columns={};restriction={}",
+        }) if *folder_id == INBOX_FOLDER_ID => Some((
             format_optional_debug_handle(input_handle(handle_slots, request)),
+            *associated,
+            *position,
             format_debug_property_tags(columns),
-            format_debug_restriction_option(restriction.as_ref())
+            format_debug_restriction(request_restriction_bytes(request)),
         )),
         _ => None,
     };
@@ -995,6 +995,7 @@ pub(super) fn append_find_row_response(
     );
     log_outlook_contents_table_find_row(
         principal,
+        request_id,
         request,
         input_object(session, handle_slots, request),
         mailboxes,
@@ -1019,8 +1020,12 @@ pub(super) fn append_find_row_response(
     ) {
         session.record_inbox_associated_broad_findrow(true);
     }
-    if let Some(trace) = find_trace {
-        session.record_outlook_view_failure_trace_event(trace);
+    if let Some((handle, associated, position, columns, restriction)) = find_trace {
+        let response_return_value = read_response_error_code(&response, 0).unwrap_or(0xffff_ffff);
+        let response_found = response.get(7).copied().unwrap_or(0);
+        session.record_outlook_view_failure_trace_event(format!(
+            "inbox_find_row:request_id={request_id};handle={handle};associated={associated};position={position};columns={columns};request_restriction={restriction};response={response_return_value:#010x};found={response_found}"
+        ));
     }
     responses.extend_from_slice(&response);
 }
