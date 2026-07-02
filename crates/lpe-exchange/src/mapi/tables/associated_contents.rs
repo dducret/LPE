@@ -295,6 +295,11 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if message.message_class == "IPM.ExtendedRule.Message" {
         return false;
     }
+    if is_modeled_inbox_broad_startup_config(message)
+        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction))
+    {
+        return true;
+    }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
         return matches!(
             message.message_class.as_str(),
