@@ -190,8 +190,10 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| advertised_special_folder_container_class(folder_id));
-    let uses_common_views = container_class
-        .is_some_and(|container_class| default_view_uses_common_views(container_class, folder_id));
+    let uses_common_views = folder_id == COMMON_VIEWS_FOLDER_ID
+        || container_class.is_some_and(|container_class| {
+            default_view_uses_common_views(container_class, folder_id)
+        });
     let (view_folder_id, expected_view_message_id, view) = if uses_common_views {
         (
             COMMON_VIEWS_FOLDER_ID,
@@ -511,5 +513,21 @@ mod tests {
             "visible_column_tags=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x12130003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
+    }
+
+    #[test]
+    fn common_views_table_contract_reports_common_views_named_view() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let summary = format_outlook_view_handoff_table_contract(
+            COMMON_VIEWS_FOLDER_ID,
+            true,
+            &[],
+            &snapshot,
+        );
+
+        assert!(summary.contains("folder_local_default_supported=false"));
+        assert!(summary.contains("advertised_default_view_folder_id=0x0000000000090001"));
+        assert!(summary.contains("expected_view_message_id=0x7ffffffffff70001"));
+        assert!(summary.contains("descriptor_summary=version=8"));
     }
 }

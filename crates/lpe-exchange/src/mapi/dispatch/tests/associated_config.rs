@@ -900,6 +900,12 @@ fn common_views_wlink_target_decoding_reports_inbox_match() {
     assert!(summary.contains("entry_id_matches_inbox=true"));
     assert!(summary.contains(&format!("source_key_decoded=0x{INBOX_FOLDER_ID:016x}")));
     assert!(summary.contains("source_key_matches_inbox=true"));
+    assert!(summary.contains("store_entry_id=binary:bytes=46"));
+    assert!(summary.contains("store_entry_id_decoded=0x0000000000010001"));
+    assert!(summary.contains("store_entry_id_matches_private_store=true"));
+    assert!(summary.contains("address_book_store_entry_id=binary:bytes=46"));
+    assert!(summary.contains("address_book_store_entry_id_decoded=0x0000000000010001"));
+    assert!(summary.contains("address_book_store_entry_id_matches_private_store=true"));
     assert!(summary.contains(&format!(
         "sharing_local_folder_id_decoded=0x{INBOX_FOLDER_ID:016x}"
     )));

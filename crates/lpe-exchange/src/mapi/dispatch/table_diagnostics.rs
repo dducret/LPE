@@ -1089,8 +1089,39 @@ pub(super) fn format_common_views_wlink_target_decoding(
                     }
                     _ => None,
                 };
+                let private_store_entry_id = mapi_mailstore::private_store_entry_id(account_id);
+                let store_entry_id = navigation_shortcut_property_value(
+                    &shortcut,
+                    account_id,
+                    PID_TAG_WLINK_STORE_ENTRY_ID,
+                );
+                let store_entry_id_decoded = match &store_entry_id {
+                    Some(MapiValue::Binary(bytes)) => {
+                        crate::mapi::identity::object_id_from_folder_entry_id(bytes)
+                    }
+                    _ => None,
+                };
+                let store_entry_id_matches_private_store = matches!(
+                    &store_entry_id,
+                    Some(MapiValue::Binary(bytes)) if bytes == &private_store_entry_id
+                );
+                let address_book_store_entry_id = navigation_shortcut_property_value(
+                    &shortcut,
+                    account_id,
+                    PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+                );
+                let address_book_store_entry_id_decoded = match &address_book_store_entry_id {
+                    Some(MapiValue::Binary(bytes)) => {
+                        crate::mapi::identity::object_id_from_folder_entry_id(bytes)
+                    }
+                    _ => None,
+                };
+                let address_book_store_entry_id_matches_private_store = matches!(
+                    &address_book_store_entry_id,
+                    Some(MapiValue::Binary(bytes)) if bytes == &private_store_entry_id
+                );
                 Some(format!(
-                    "id=0x{:016x};subject={};target_folder={};entry_id_bytes={};entry_id_decoded={};entry_id_matches_inbox={};source_key_bytes={};source_key_decoded={};source_key_matches_inbox={};sharing_local_folder_id={};sharing_local_folder_id_decoded={};sharing_local_folder_id_matches_inbox={};expected_inbox=0x{INBOX_FOLDER_ID:016x}",
+                    "id=0x{:016x};subject={};target_folder={};entry_id_bytes={};entry_id_decoded={};entry_id_matches_inbox={};source_key_bytes={};source_key_decoded={};source_key_matches_inbox={};store_entry_id={};store_entry_id_decoded={};store_entry_id_matches_private_store={};address_book_store_entry_id={};address_book_store_entry_id_decoded={};address_book_store_entry_id_matches_private_store={};sharing_local_folder_id={};sharing_local_folder_id_decoded={};sharing_local_folder_id_matches_inbox={};expected_inbox=0x{INBOX_FOLDER_ID:016x}",
                     shortcut.id,
                     shortcut.subject,
                     shortcut
@@ -1103,6 +1134,18 @@ pub(super) fn format_common_views_wlink_target_decoding(
                     source_key.len(),
                     format_optional_folder_id(source_key_decoded),
                     source_key_decoded == Some(INBOX_FOLDER_ID),
+                    store_entry_id
+                        .as_ref()
+                        .map(mapi_value_debug_shape)
+                        .unwrap_or_else(|| "missing".to_string()),
+                    format_optional_folder_id(store_entry_id_decoded),
+                    store_entry_id_matches_private_store,
+                    address_book_store_entry_id
+                        .as_ref()
+                        .map(mapi_value_debug_shape)
+                        .unwrap_or_else(|| "missing".to_string()),
+                    format_optional_folder_id(address_book_store_entry_id_decoded),
+                    address_book_store_entry_id_matches_private_store,
                     sharing_local_folder_id
                         .as_ref()
                         .map(mapi_value_debug_shape)
