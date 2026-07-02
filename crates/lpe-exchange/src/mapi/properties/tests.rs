@@ -5938,6 +5938,30 @@ fn navigation_shortcut_section_one_projects_favorites_group_name() {
 }
 
 #[test]
+fn navigation_shortcut_section_one_preserves_non_mail_group_name() {
+    let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
+    let shortcut = MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapi_store_id(904),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x4445),
+        subject: "My Calendars".to_string(),
+        target_folder_id: None,
+        shortcut_type: 4,
+        flags: 0,
+        save_stamp: 0,
+        section: 1,
+        ordinal: 0x80,
+        group_header_id: Some(group_id),
+        group_name: "My Calendars".to_string(),
+    };
+
+    assert_eq!(
+        navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_WLINK_GROUP_NAME_W),
+        Some(MapiValue::String("My Calendars".to_string()))
+    );
+}
+
+#[test]
 fn logon_projects_outlook_bootstrap_identity_metadata() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),

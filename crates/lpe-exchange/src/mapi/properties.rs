@@ -1185,7 +1185,12 @@ pub(crate) fn default_wlink_group_uuid() -> Uuid {
 }
 
 fn wlink_group_name(message: &MapiNavigationShortcutMessage) -> String {
-    if message.section == 1 {
+    if message.section == 1
+        && message.group_header_id == Some(default_wlink_group_uuid())
+        && (message.group_name.trim().is_empty()
+            || message.group_name.eq_ignore_ascii_case("Mail")
+            || message.group_name.eq_ignore_ascii_case("Favorites"))
+    {
         return "Favorites".to_string();
     }
     if message.group_name.trim().is_empty() {
