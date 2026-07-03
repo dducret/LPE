@@ -4959,11 +4959,11 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&calendar)),
         vec![
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
             PID_LID_COMMON_START_TAG,
             PID_LID_COMMON_END_TAG,
-            string8_property_tag(PID_LID_LOCATION_W_TAG),
+            PID_LID_LOCATION_W_TAG,
             PID_LID_BUSY_STATUS_TAG,
         ]
     );

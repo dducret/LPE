@@ -208,7 +208,7 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001e,0x0037001e,0x85160040,0x85170040,0x8208001e,0x82050003"
+        "visible_column_tags=0x001a001f,0x0037001f,0x85160040,0x85170040,0x8208001f,0x82050003"
     ));
     assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
 }

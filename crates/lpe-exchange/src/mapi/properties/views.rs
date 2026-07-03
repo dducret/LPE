@@ -259,18 +259,8 @@ fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::CalendarCompact,
         columns: vec![
-            view_column(
-                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                0x12,
-                0x0000_270A,
-                "Icon",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_SUBJECT_W),
-                0x18,
-                0x0000_2F00,
-                "Subject",
-            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_named_id_column(
                 PID_LID_COMMON_START_TAG,
                 0x10,
@@ -288,7 +278,7 @@ fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {
                 "End",
             ),
             view_named_id_column(
-                string8_property_tag(PID_LID_LOCATION_W_TAG),
+                PID_LID_LOCATION_W_TAG,
                 0x14,
                 0x0000_3F00,
                 PSETID_APPOINTMENT_GUID,
