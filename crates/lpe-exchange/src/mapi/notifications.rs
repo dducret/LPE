@@ -155,7 +155,6 @@ impl MapiNotificationEvent {
 pub(in crate::mapi) fn rop_register_notification_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x29, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.push(0);
     response
 }
 
@@ -164,7 +163,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn register_notification_success_response_includes_read_status_changed() {
+    fn register_notification_success_response_matches_microsoft_wire_shape() {
         let response = rop_register_notification_response(&RopRequest {
             rop_id: 0x29,
             input_handle_index: Some(0),
@@ -172,7 +171,7 @@ mod tests {
             payload: Vec::new(),
         });
 
-        assert_eq!(response, vec![0x29, 0x03, 0, 0, 0, 0, 0]);
+        assert_eq!(response, vec![0x29, 0x03, 0, 0, 0, 0]);
     }
 }
 

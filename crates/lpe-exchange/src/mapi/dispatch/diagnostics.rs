@@ -611,7 +611,7 @@ fn response_rop_fixed_frame_end(
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(8).saturating_add(byte_count))
         }),
-        (0x29, Some(0)) => Some(start.saturating_add(7)),
+        (0x29, Some(0)) => Some(start.saturating_add(6)),
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(10).saturating_add(byte_count))
