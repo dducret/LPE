@@ -538,6 +538,29 @@ fn outlook_bootstrap_stall_classifies_exact_fai_findrow_without_open() {
 }
 
 #[test]
+fn post_hierarchy_close_kind_classifies_visible_inbox_query_position_without_query_rows() {
+    let mut state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        last_inbox_normal_contents_table_query_position_context: "handle=140;response_row_count=1"
+            .to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_query_position_before_query_rows"
+    );
+
+    state.inbox_normal_contents_table_query_rows_observed = true;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "post_hierarchy_no_close"
+    );
+}
+
+#[test]
 fn post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard() {
     let mut session = test_session(HashMap::new());
     session.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;

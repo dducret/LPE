@@ -1076,6 +1076,24 @@ fn inbox_release_context_flags_visible_table_setcolumns_without_query_rows() {
 }
 
 #[test]
+fn inbox_handoff_context_reports_visible_query_position_before_query_rows() {
+    let mut state = PostHierarchyActionState::default();
+    state.inbox_normal_contents_table_observed = true;
+    state.inbox_normal_contents_table_setcolumns_observed = true;
+    state.last_inbox_normal_contents_table_setcolumns_context =
+        "handle=17;columns=0x67480014,0x0037001f".to_string();
+    state.last_inbox_normal_contents_table_query_position_context =
+        "handle=17;response_row_count=1".to_string();
+
+    let context = format_inbox_post_fai_handoff_context(&state);
+
+    assert!(context.contains("normal_setcolumns_observed=true"));
+    assert!(context.contains("normal_query_rows_observed=false"));
+    assert!(context.contains("last_normal_query_position=handle=17;response_row_count=1"));
+    assert!(context.contains("last_normal_query_rows=none"));
+}
+
+#[test]
 fn normal_message_column_support_covers_visible_inbox_probe_columns() {
     let summary = normal_message_table_column_support_summary(&[
         PID_TAG_FOLDER_ID,

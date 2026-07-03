@@ -1125,6 +1125,31 @@ pub(super) fn append_table_control_response(
             input_object(session, handle_slots, request),
         )),
         Some(RopId::QueryPosition) => {
+            let inbox_normal_query_position_context = match input_object(
+                session,
+                handle_slots,
+                request,
+            ) {
+                Some(MapiObject::ContentsTable {
+                    folder_id,
+                    associated,
+                    columns,
+                    position,
+                    restriction,
+                    sort_orders,
+                    ..
+                }) if *folder_id == INBOX_FOLDER_ID && !*associated => Some(format!(
+                    "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={}",
+                    format_optional_debug_handle(input_handle(handle_slots, request)),
+                    request.input_handle_index().unwrap_or(0),
+                    position,
+                    format_debug_property_tags(columns),
+                    normal_message_table_column_support_summary(columns),
+                    format_debug_sort_orders(sort_orders),
+                    format_debug_restriction_option(restriction.as_ref())
+                )),
+                _ => None,
+            };
             let calendar_normal_query_position_context = match input_object(
                 session,
                 handle_slots,
@@ -1197,6 +1222,45 @@ pub(super) fn append_table_control_response(
                 session.record_outlook_view_failure_trace_event(format!(
                     "calendar_normal_query_position:{context};response_position={position};response_row_count={row_count}"
                 ));
+            }
+            if let Some(context) = inbox_normal_query_position_context {
+                let position = response
+                    .get(6..10)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let row_count = response
+                    .get(10..14)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let context = format!(
+                    "{context};response_position={position};response_row_count={row_count}"
+                );
+                session.record_inbox_normal_contents_table_query_position(
+                    input_handle(handle_slots, request),
+                    context.clone(),
+                );
+                session.record_outlook_view_failure_trace_event(format!(
+                    "visible_inbox_query_position:{context}"
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x17",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                    query_position_context = %context,
+                    normal_query_rows_observed = session
+                        .post_hierarchy_actions
+                        .inbox_normal_contents_table_query_rows_observed,
+                    next_expected_client_step = "query_rows_on_visible_inbox_contents_table",
+                    "rca debug mapi visible inbox query position tracked"
+                );
             }
             responses.extend_from_slice(&response);
         }

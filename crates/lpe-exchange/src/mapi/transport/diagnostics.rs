@@ -511,6 +511,12 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_release_logoff_before_content_sync"
     } else if actions.release_client_initiated {
         "outlook_release_before_content_sync"
+    } else if !actions
+        .last_inbox_normal_contents_table_query_position_context
+        .is_empty()
+        && !actions.inbox_normal_contents_table_query_rows_observed
+    {
+        "outlook_visible_inbox_query_position_before_query_rows"
     } else if actions.execute_count > 0 {
         "outlook_post_hierarchy_execute_before_content_sync"
     } else if disconnect_client_initiated && actions.last_completed_hierarchy_sync_root.is_some() {
@@ -765,6 +771,15 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
+    } else if !session
+        .post_hierarchy_actions
+        .last_inbox_normal_contents_table_query_position_context
+        .is_empty()
+        && !session
+            .post_hierarchy_actions
+            .inbox_normal_contents_table_query_rows_observed
+    {
+        "visible_inbox_query_rows_missing_after_query_position"
     } else if post_hierarchy_summary.outlook_bootstrap_stall_code == 5 {
         "post_inbox_fai_exact_config_findrow_without_open"
     } else if post_hierarchy_summary.outlook_bootstrap_stall_code == 4 {
@@ -948,6 +963,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .inbox_normal_contents_table_query_rows_observed,
+            last_inbox_normal_query_position_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_normal_contents_table_query_position_context
+                ),
+            last_inbox_normal_query_position_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_inbox_normal_contents_table_query_position_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
             abandoned_after_inbox_fai_query_rows =
                 final_phase_abandoned_after_inbox_fai_query_rows,
             post_fai_inbox_probe_loop_terminal,
