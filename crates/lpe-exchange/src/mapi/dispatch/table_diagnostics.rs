@@ -558,15 +558,17 @@ pub(super) fn debug_default_folder_associated_named_view(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| advertised_special_folder_container_class(folder_id))?;
-    if default_view_supported_folder(folder_id, container_class)
-        && !default_view_uses_common_views(container_class, folder_id)
-    {
+    if !default_view_supported_folder(folder_id, container_class) {
+        None
+    } else if default_view_uses_common_views(container_class, folder_id) {
+        snapshot.common_view_named_view_message_for_id(
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        )
+    } else {
         snapshot.default_folder_named_view_message(
             folder_id,
             crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         )
-    } else {
-        None
     }
 }
 
