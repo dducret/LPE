@@ -226,7 +226,7 @@ fn inbox_view_descriptor_set_columns_contract_reports_missing_descriptor_columns
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7ffffffffff70001"));
     assert!(contract
-        .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b"));
+        .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b"));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
     assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
     assert!(contract.ends_with("selected_missing_descriptor_columns="));

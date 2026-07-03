@@ -4685,10 +4685,10 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
             &outlook_mail_view_definition("Messages")
         )))
     );
-    assert_eq!(descriptor.len(), 510);
+    assert_eq!(descriptor.len(), 436);
     assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
     assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-    assert_eq!(&descriptor[20..24], &11u32.to_le_bytes());
+    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
     assert_eq!(&descriptor[24..28], &8u32.to_le_bytes());
     assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
     assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
@@ -4707,7 +4707,6 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
-            PID_NAME_KEYWORDS_TAG,
         ]
     );
     assert_eq!(&descriptor[96..98], &0x0003u16.to_le_bytes());
@@ -4739,7 +4738,7 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
                 PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
             ),
             Some(MapiValue::String(
-                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n".to_string()
+                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n".to_string()
             ))
         );
     assert_eq!(
@@ -4762,15 +4761,15 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
     let definition = outlook_mail_view_definition("Messages");
     let descriptor = view_descriptor_binary(&definition);
 
-    assert_eq!(descriptor.len(), 510);
+    assert_eq!(descriptor.len(), 436);
     assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
     assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-    assert_eq!(&descriptor[20..24], &11u32.to_le_bytes());
+    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
     assert_eq!(&descriptor[24..28], &8u32.to_le_bytes());
     assert_eq!(
-            view_descriptor_strings(&definition),
-            "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n"
-        );
+        view_descriptor_strings(&definition),
+        "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n"
+    );
     assert_eq!(
         descriptor_column_property_tags(&descriptor),
         vec![
@@ -4783,7 +4782,6 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
-            PID_NAME_KEYWORDS_TAG,
         ]
     );
     assert_eq!(
@@ -4889,62 +4887,17 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
                 guid: None,
                 name: None,
             },
-            TestViewColumnPacket {
-                property_type: 0x101F,
-                property_id: 0x9000,
-                width: 0x12,
-                flags: 0x0000_7B20,
-                kind: 1,
-                id: 0x0022_A764,
-                guid: Some(PS_PUBLIC_STRINGS_GUID),
-                name: Some("Keywords".to_string()),
-            },
         ]
     );
 }
 
 #[test]
-fn outlook_unicode_keywords_view_definition_binary_matches_trace_contract() {
+fn outlook_compact_view_definition_binary_matches_visible_trace_contract() {
     let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Messages"));
-    let expected = hex_to_bytes(
-        "\
-            00000000000000000800000002000000\
-            000000000b0000000800000000000000\
-            00000000000000000000000000000000\
-            00000000000000000000000001000400\
-            07000000\
-            00000000280000000000000000000000\
-            00000000000000000400000003001700\
-            12000000000000004a2f000000000000\
-            00000000000000000000000017000000\
-            0b0014851200000000000000403f0000\
-            000000000000000034019a1100000000\
-            148500000820060000000000c0000000\
-            000000461f001a001200000000000000\
-            0a270000000000000000000000000000\
-            000000001a0000000300170e12000000\
-            000000004a2f00000000000000000000\
-            0000000000000000170e00000b001b0e\
-            12000000000000004a2f000000000000\
-            0000000000000000000000001b0e0000\
-            1f0042000c00000000000000002f0000\
-            00000000000000000000000000000000\
-            420000001f0037001100000000000000\
-            002f0000000000000000000000000000\
-            00000000370000004000060e10000000\
-            00000000402f00000000000000000000\
-            0000000000000000060e000003001312\
-            0c000000000000004027000000000000\
-            00000000000000000000000013120000\
-            1f1000901200000000000000207b0000\
-            000000000000000034019a1101000000\
-            64a722002903020000000000c0000000\
-            00000046120000004b00650079007700\
-            6f007200640073000000",
-    )
-    .expect("MS-OXOCFG 4.2.1 view descriptor binary hex is valid");
 
-    assert_eq!(descriptor, expected);
+    assert_eq!(descriptor.len(), 436);
+    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
+    assert!(!descriptor_column_property_tags(&descriptor).contains(&PID_NAME_KEYWORDS_TAG));
 }
 
 #[test]

@@ -519,12 +519,12 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=11"));
+        assert!(summary.contains("column_count=10"));
         assert!(summary.contains("sort_column=8"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x00170003,0x8514000b,0x001a001e,0x0e170003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x12130003,0x9000101f"
+            "visible_column_tags=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
         ));
         assert!(summary.contains("0x0e060040"));
     }
