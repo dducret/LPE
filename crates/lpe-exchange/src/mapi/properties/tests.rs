@@ -4700,11 +4700,11 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
         vec![
             PID_TAG_IMPORTANCE,
             PID_LID_OUTLOOK_COMMON_8514_TAG,
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+            PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_MESSAGE_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
-            string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
             PID_NAME_KEYWORDS_TAG,
@@ -4776,11 +4776,11 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
         vec![
             PID_TAG_IMPORTANCE,
             PID_LID_OUTLOOK_COMMON_8514_TAG,
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+            PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_MESSAGE_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
-            string8_property_tag(PID_TAG_SENT_REPRESENTING_NAME_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
             PID_NAME_KEYWORDS_TAG,
@@ -4820,7 +4820,7 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
                 name: None,
             },
             TestViewColumnPacket {
-                property_type: 0x001E,
+                property_type: 0x001F,
                 property_id: 0x001A,
                 width: 0x12,
                 flags: 0x0000_270A,
@@ -4850,7 +4850,7 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
                 name: None,
             },
             TestViewColumnPacket {
-                property_type: 0x001E,
+                property_type: 0x001F,
                 property_id: 0x0042,
                 width: 0x0C,
                 flags: 0x0000_2F00,
@@ -4860,7 +4860,7 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
                 name: None,
             },
             TestViewColumnPacket {
-                property_type: 0x001E,
+                property_type: 0x001F,
                 property_id: 0x0037,
                 width: 0x11,
                 flags: 0x0000_2F00,
@@ -4920,16 +4920,16 @@ fn outlook_unicode_keywords_view_definition_binary_matches_trace_contract() {
             0b0014851200000000000000403f0000\
             000000000000000034019a1100000000\
             148500000820060000000000c0000000\
-            000000461e001a001200000000000000\
+            000000461f001a001200000000000000\
             0a270000000000000000000000000000\
             000000001a0000000300170e12000000\
             000000004a2f00000000000000000000\
             0000000000000000170e00000b001b0e\
             12000000000000004a2f000000000000\
             0000000000000000000000001b0e0000\
-            1e0042000c00000000000000002f0000\
+            1f0042000c00000000000000002f0000\
             00000000000000000000000000000000\
-            420000001e0037001100000000000000\
+            420000001f0037001100000000000000\
             002f0000000000000000000000000000\
             00000000370000004000060e10000000\
             00000000402f00000000000000000000\
@@ -4960,11 +4960,11 @@ fn common_view_sent_to_descriptor_uses_recipient_columns() {
         vec![
             PID_TAG_IMPORTANCE,
             PID_LID_REMINDER_SET_TAG,
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
+            PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_FLAG_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
-            string8_property_tag(PID_TAG_DISPLAY_TO_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_DISPLAY_TO_W,
+            PID_TAG_SUBJECT_W,
             PID_TAG_CLIENT_SUBMIT_TIME,
             PID_TAG_MESSAGE_SIZE,
             PID_NAME_KEYWORDS_TAG,
