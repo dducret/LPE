@@ -331,18 +331,8 @@ fn outlook_task_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::TaskList,
         columns: vec![
-            view_column(
-                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                0x12,
-                0x0000_270A,
-                "Icon",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_SUBJECT_W),
-                0x18,
-                0x0000_2F00,
-                "Subject",
-            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_column(PID_TAG_FLAG_STATUS, 0x0C, 0x0000_2F4A, "Status"),
             view_named_id_column(
                 PID_LID_TASK_DUE_DATE_TAG,
@@ -378,18 +368,8 @@ fn outlook_note_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::NoteList,
         columns: vec![
-            view_column(
-                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                0x12,
-                0x0000_270A,
-                "Icon",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_SUBJECT_W),
-                0x18,
-                0x0000_2F00,
-                "Subject",
-            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_column(
                 PID_TAG_LAST_MODIFICATION_TIME,
                 0x10,
@@ -414,18 +394,8 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::JournalList,
         columns: vec![
-            view_column(
-                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                0x12,
-                0x0000_270A,
-                "Icon",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_SUBJECT_W),
-                0x18,
-                0x0000_2F00,
-                "Subject",
-            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_named_id_column(
                 PID_LID_LOG_START_TAG,
                 0x10,
@@ -443,7 +413,7 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
                 "Duration",
             ),
             view_named_id_column(
-                string8_property_tag(PID_LID_LOG_TYPE_W_TAG),
+                PID_LID_LOG_TYPE_W_TAG,
                 0x12,
                 0x0000_3F00,
                 PSETID_LOG_GUID,

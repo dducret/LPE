@@ -4976,8 +4976,8 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&task)),
         vec![
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
             PID_TAG_FLAG_STATUS,
             PID_LID_TASK_DUE_DATE_TAG,
             PID_LID_TASK_START_DATE_TAG,
@@ -4993,8 +4993,8 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&note)),
         vec![
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
             PID_TAG_LAST_MODIFICATION_TIME,
             PID_LID_NOTE_COLOR_TAG,
         ]
@@ -5008,11 +5008,11 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&journal)),
         vec![
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-            string8_property_tag(PID_TAG_SUBJECT_W),
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
             PID_LID_LOG_START_TAG,
             PID_LID_LOG_DURATION_TAG,
-            string8_property_tag(PID_LID_LOG_TYPE_W_TAG),
+            PID_LID_LOG_TYPE_W_TAG,
         ]
     );
     assert_eq!(
