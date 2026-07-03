@@ -115,12 +115,6 @@ pub(in crate::mapi) fn rop_seek_row_response(
     };
     let (current_position, total_rows) =
         table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid);
-    let replay_broad_startup_row = should_replay_inbox_broad_configuration_startup_seek(
-        request,
-        object,
-        current_position,
-        total_rows,
-    );
     let Some(position) = table_position_mut(object) else {
         return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
     };
@@ -132,11 +126,7 @@ pub(in crate::mapi) fn rop_seek_row_response(
         _ => current_position as isize,
     };
     let requested_position = base_position.saturating_add(requested_rows as isize);
-    let new_position = if replay_broad_startup_row {
-        0
-    } else {
-        requested_position.clamp(0, total_rows as isize)
-    };
+    let new_position = requested_position.clamp(0, total_rows as isize);
     let rows_sought = (new_position - base_position) as i32;
     *position = new_position as usize;
 
@@ -146,26 +136,6 @@ pub(in crate::mapi) fn rop_seek_row_response(
     response.push((want_row_moved_count && rows_sought != requested_rows) as u8);
     response.extend_from_slice(&if want_row_moved_count { rows_sought } else { 0 }.to_le_bytes());
     response
-}
-
-fn should_replay_inbox_broad_configuration_startup_seek(
-    request: &RopRequest,
-    object: &MapiObject,
-    current_position: usize,
-    total_rows: usize,
-) -> bool {
-    matches!(
-        object,
-        MapiObject::ContentsTable {
-            folder_id: INBOX_FOLDER_ID,
-            associated: true,
-            restriction,
-            ..
-        } if is_broad_outlook_configuration_restriction(restriction.as_ref())
-    ) && current_position == 0
-        && total_rows == 1
-        && request.seek_origin() == Some(1)
-        && request.seek_row_count() == Some(1)
 }
 
 fn seek_row_request_is_valid(request: &RopRequest) -> bool {

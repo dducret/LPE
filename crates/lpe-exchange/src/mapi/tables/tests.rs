@@ -5149,7 +5149,7 @@ fn inbox_associated_exact_configuration_find_row_uses_sort_order() {
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() {
+fn inbox_associated_broad_configuration_find_row_consumes_single_followup_row() {
     let snapshot = inbox_associated_sort_snapshot();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5219,9 +5219,9 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[6], 0x02);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        0
     );
-    assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
+    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
@@ -5414,7 +5414,7 @@ fn inbox_associated_broad_find_row_suppresses_persisted_followup_rows() {
         u32::from_le_bytes(seek_response[2..6].try_into().unwrap()),
         0
     );
-    assert_eq!(table_position(&table), Some(0));
+    assert_eq!(table_position(&table), Some(1));
 
     let query_response = rop_query_rows_response(
         &RopRequest {
@@ -5434,10 +5434,10 @@ fn inbox_associated_broad_find_row_suppresses_persisted_followup_rows() {
     assert_eq!(query_response[6], 0x02);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        0
     );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
-    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_some());
+    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
