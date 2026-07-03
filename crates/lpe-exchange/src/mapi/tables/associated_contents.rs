@@ -305,7 +305,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if message.message_class == "IPM.ExtendedRule.Message" {
         return false;
     }
-    if is_modeled_inbox_broad_startup_config(message)
+    if is_inbox_broad_startup_config_class(message)
         && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction))
     {
         return true;
@@ -324,6 +324,9 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         });
     }
     if message.message_class.starts_with("IPM.Configuration.") {
+        if is_broad_outlook_configuration_restriction(restriction) {
+            return is_inbox_broad_startup_config_class(message);
+        }
         if is_inbox_broad_startup_config_visible(restriction, message) {
             return true;
         }
@@ -348,24 +351,22 @@ fn is_inbox_broad_startup_config_visible(
         return !is_empty_inbox_configuration_placeholder(message);
     }
     if is_broad_outlook_configuration_restriction(restriction) {
-        return is_modeled_inbox_broad_startup_config(message)
-            || !is_empty_inbox_configuration_placeholder(message);
+        return is_inbox_broad_startup_config_class(message);
     }
     if restriction.is_none() {
-        return is_modeled_inbox_broad_startup_config(message)
+        return is_inbox_broad_startup_config_class(message)
             || !is_empty_inbox_configuration_placeholder(message);
     }
     false
 }
 
-fn is_modeled_inbox_broad_startup_config(message: &MapiAssociatedConfigMessage) -> bool {
+fn is_inbox_broad_startup_config_class(message: &MapiAssociatedConfigMessage) -> bool {
     crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults()
         .into_iter()
         .any(|modeled| {
-            message.id == modeled.id
-                && message
-                    .message_class
-                    .eq_ignore_ascii_case(&modeled.message_class)
+            message
+                .message_class
+                .eq_ignore_ascii_case(&modeled.message_class)
         })
 }
 

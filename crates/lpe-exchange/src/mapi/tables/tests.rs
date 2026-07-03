@@ -5231,7 +5231,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff() {
+fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_handoff() {
     let _guard = outlook_smart_input_variant_test_lock();
     let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
     std::env::set_var(
@@ -5296,14 +5296,14 @@ fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff(
     assert!(matches!(
         table,
         MapiObject::ContentsTable {
-            restriction: None,
+            restriction: Some(ref restriction),
             ..
-        }
+        } if is_broad_outlook_configuration_restriction(Some(restriction))
     ));
 }
 
 #[test]
-fn inbox_associated_broad_find_row_keeps_persisted_followup_rows() {
+fn inbox_associated_broad_find_row_suppresses_persisted_followup_rows() {
     let account_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1608);
     let earlier_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1609);
     let persisted_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1610);
@@ -5414,7 +5414,7 @@ fn inbox_associated_broad_find_row_keeps_persisted_followup_rows() {
         u32::from_le_bytes(seek_response[2..6].try_into().unwrap()),
         0
     );
-    assert_eq!(table_position(&table), Some(1));
+    assert_eq!(table_position(&table), Some(0));
 
     let query_response = rop_query_rows_response(
         &RopRequest {
@@ -5437,8 +5437,8 @@ fn inbox_associated_broad_find_row_keeps_persisted_followup_rows() {
         1
     );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
-    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
-    assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
+    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_some());
+    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -5461,7 +5461,7 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_keeps_persisted_non_empty_outlook_configs() {
+fn inbox_associated_broad_configuration_restriction_suppresses_persisted_followup_configs() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let autocomplete_id = Uuid::from_u128(0x6d617069_6175_746f_8000_000000000101);
     crate::mapi::identity::remember_mapi_identity(
@@ -5495,13 +5495,7 @@ fn inbox_associated_broad_configuration_restriction_keeps_persisted_non_empty_ou
         .map(|message| message.message_class.as_str())
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        classes,
-        vec![
-            "IPM.Configuration.Autocomplete",
-            "IPM.Configuration.AccountPrefs"
-        ]
-    );
+    assert_eq!(classes, vec!["IPM.Configuration.AccountPrefs"]);
 }
 
 #[test]
@@ -5899,7 +5893,7 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
 }
 
 #[test]
-fn inbox_associated_query_rows_suppresses_prefix_configuration_with_stored_stream() {
+fn inbox_associated_query_rows_prefix_configuration_suppresses_stored_stream() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000099);
     crate::mapi::identity::remember_mapi_identity(
@@ -5945,9 +5939,9 @@ fn inbox_associated_query_rows_suppresses_prefix_configuration_with_stored_strea
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
