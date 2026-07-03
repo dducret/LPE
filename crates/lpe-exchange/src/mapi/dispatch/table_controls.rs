@@ -878,6 +878,39 @@ pub(super) fn append_query_rows_response(
         snapshot,
         queried_position,
     );
+    if let Some(MapiObject::HierarchyTable {
+        folder_id,
+        columns,
+        position,
+        ..
+    }) = input_object(session, handle_slots, request)
+    {
+        let row_count = response
+            .get(7..9)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0);
+        let response_origin = response.get(6).copied().unwrap_or(0xff);
+        let selected_columns = if columns.is_empty() {
+            default_hierarchy_columns()
+        } else {
+            columns.clone()
+        };
+        session.record_outlook_view_failure_trace_event(format!(
+            "hierarchy_query_rows:request_id={request_id};folder=0x{folder_id:016x};role={};input_index={};handle={};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_origin=0x{response_origin:02x};response_row_count={row_count};columns={};after_view_handoff={}",
+            debug_role_for_folder_id(*folder_id),
+            request.input_handle_index().unwrap_or(0),
+            format_optional_debug_handle(input_handle_value),
+            request.query_forward_read(),
+            request.query_row_count().unwrap_or(0),
+            format_debug_property_tags(&selected_columns),
+            session
+                .post_hierarchy_actions
+                .outlook_view_failure_trace_events
+                .iter()
+                .any(|event| event.starts_with("view_handoff:"))
+        ));
+    }
     let mut inbox_associated_query_rows_returned_non_empty = false;
     if let Some(MapiObject::ContentsTable {
         folder_id,
