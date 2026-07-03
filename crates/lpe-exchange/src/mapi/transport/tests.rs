@@ -1,4 +1,5 @@
 use super::*;
+use crate::mapi::transport::diagnostics::post_hierarchy_close_kind;
 
 fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
     MapiSession {
@@ -557,6 +558,31 @@ fn post_hierarchy_close_kind_classifies_visible_inbox_query_position_without_que
     assert_eq!(
         post_hierarchy_close_kind(&state, false),
         "post_hierarchy_no_close"
+    );
+}
+
+#[test]
+fn post_hierarchy_close_kind_classifies_calendar_query_position_without_query_rows() {
+    let mut state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        last_inbox_normal_contents_table_query_position_context: "handle=27;response_row_count=1"
+            .to_string(),
+        last_calendar_normal_contents_table_query_position_context:
+            "handle=55;response_row_count=1".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_calendar_query_position_before_query_rows"
+    );
+
+    state.calendar_normal_contents_table_query_rows_observed = true;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_query_position_before_query_rows"
     );
 }
 

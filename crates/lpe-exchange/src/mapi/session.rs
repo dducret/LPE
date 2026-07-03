@@ -191,6 +191,30 @@ impl MapiSession {
             .last_inbox_normal_contents_table_query_position_context = context;
     }
 
+    pub(in crate::mapi) fn record_calendar_normal_contents_table_query_position(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_calendar_normal_contents_table_query_position_handle = handle;
+        self.post_hierarchy_actions
+            .last_calendar_normal_contents_table_query_position_context = context;
+    }
+
+    pub(in crate::mapi) fn record_calendar_normal_contents_table_query_rows(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .calendar_normal_contents_table_query_rows_observed = true;
+        self.post_hierarchy_actions
+            .last_calendar_normal_contents_table_query_rows_handle = handle;
+        self.post_hierarchy_actions
+            .last_calendar_normal_contents_table_query_rows_context = context;
+    }
+
     pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_contents_table_observed = true;

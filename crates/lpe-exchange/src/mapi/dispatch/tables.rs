@@ -1219,9 +1219,33 @@ pub(super) fn append_table_control_response(
                     .and_then(|bytes| bytes.try_into().ok())
                     .map(u32::from_le_bytes)
                     .unwrap_or(0);
+                let context = format!(
+                    "{context};response_position={position};response_row_count={row_count}"
+                );
+                session.record_calendar_normal_contents_table_query_position(
+                    input_handle(handle_slots, request),
+                    context.clone(),
+                );
                 session.record_outlook_view_failure_trace_event(format!(
-                    "calendar_normal_query_position:{context};response_position={position};response_row_count={row_count}"
+                    "calendar_normal_query_position:{context}"
                 ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x17",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                    query_position_context = %context,
+                    calendar_query_rows_observed = session
+                        .post_hierarchy_actions
+                        .calendar_normal_contents_table_query_rows_observed,
+                    next_expected_client_step = "query_rows_on_calendar_contents_table",
+                    "rca debug mapi calendar query position tracked"
+                );
             }
             if let Some(context) = inbox_normal_query_position_context {
                 let position = response

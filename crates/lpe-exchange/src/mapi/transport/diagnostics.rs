@@ -512,6 +512,12 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
     } else if actions.release_client_initiated {
         "outlook_release_before_content_sync"
     } else if !actions
+        .last_calendar_normal_contents_table_query_position_context
+        .is_empty()
+        && !actions.calendar_normal_contents_table_query_rows_observed
+    {
+        "outlook_calendar_query_position_before_query_rows"
+    } else if !actions
         .last_inbox_normal_contents_table_query_position_context
         .is_empty()
         && !actions.inbox_normal_contents_table_query_rows_observed
@@ -773,6 +779,15 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         "client_abandoned_after_inbox_fai_query_rows"
     } else if !session
         .post_hierarchy_actions
+        .last_calendar_normal_contents_table_query_position_context
+        .is_empty()
+        && !session
+            .post_hierarchy_actions
+            .calendar_normal_contents_table_query_rows_observed
+    {
+        "calendar_query_rows_missing_after_query_position"
+    } else if !session
+        .post_hierarchy_actions
         .last_inbox_normal_contents_table_query_position_context
         .is_empty()
         && !session
@@ -973,6 +988,22 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 %session
                     .post_hierarchy_actions
                     .last_inbox_normal_contents_table_query_position_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            calendar_normal_query_rows_observed =
+                session
+                    .post_hierarchy_actions
+                    .calendar_normal_contents_table_query_rows_observed,
+            last_calendar_normal_query_position_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_calendar_normal_contents_table_query_position_context
+                ),
+            last_calendar_normal_query_position_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_calendar_normal_contents_table_query_position_handle
                     .map(|handle| handle.to_string())
                     .unwrap_or_else(|| "none".to_string()),
             abandoned_after_inbox_fai_query_rows =
