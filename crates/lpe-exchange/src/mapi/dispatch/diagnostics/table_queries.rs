@@ -1071,6 +1071,8 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
         restriction_property_tags,
         normal_message_query_position_summary,
         calendar_event_query_position_summary,
+        calendar_view_descriptor_columns,
+        calendar_view_descriptor_row_projection,
         inbox_view_descriptor_behavior_contract,
     ) = match object {
         Some(MapiObject::ContentsTable {
@@ -1084,6 +1086,19 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
         }) => {
             let effective_columns =
                 effective_contents_table_columns(*folder_id, *associated, columns);
+            let calendar_view_descriptor_columns =
+                outlook_view_descriptor_visible_property_tags(*folder_id, snapshot);
+            let calendar_view_descriptor_row_projection =
+                format_calendar_event_query_position_summary(
+                    *folder_id,
+                    *associated,
+                    *table_position,
+                    row_count.min(5) as usize,
+                    sort_orders,
+                    restriction.as_ref(),
+                    &calendar_view_descriptor_columns,
+                    snapshot,
+                );
             (
                 Some(*associated),
                 format_debug_property_tags(&effective_columns),
@@ -1114,6 +1129,8 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
                     &effective_columns,
                     snapshot,
                 ),
+                format_debug_property_tags(&calendar_view_descriptor_columns),
+                calendar_view_descriptor_row_projection,
                 format_inbox_view_descriptor_behavior_contract(
                     *folder_id,
                     *associated,
@@ -1134,6 +1151,8 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
             String::new(),
             0,
             false,
+            String::new(),
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -1169,6 +1188,8 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
         restriction_property_tags = %restriction_property_tags,
         normal_message_query_position_summary = %normal_message_query_position_summary,
         calendar_event_query_position_summary = %calendar_event_query_position_summary,
+        calendar_view_descriptor_columns = %calendar_view_descriptor_columns,
+        calendar_view_descriptor_row_projection = %calendar_view_descriptor_row_projection,
         inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
         inbox_associated_config_summary = object
             .and_then(MapiObject::folder_id)
