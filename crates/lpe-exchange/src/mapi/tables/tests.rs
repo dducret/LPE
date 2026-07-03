@@ -5458,6 +5458,11 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
     };
 
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
+    assert!(
+        rows.iter()
+            .all(|row| matches!(row, AssociatedTableRow::Config(_))),
+        "broad IPM.Configuration startup scans must not return FolderDesign views"
+    );
     let classes = rows
         .iter()
         .filter_map(associated_table_row_config)

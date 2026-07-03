@@ -176,6 +176,8 @@ pub(super) fn associated_table_rows(
         .collect::<Vec<_>>();
     if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
         if (folder_id != INBOX_FOLDER_ID || restriction.is_some())
+            && !(folder_id == INBOX_FOLDER_ID
+                && is_broad_outlook_configuration_restriction(restriction))
             && restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid)
         {
             rows.push(AssociatedTableRow::NamedView(message));
