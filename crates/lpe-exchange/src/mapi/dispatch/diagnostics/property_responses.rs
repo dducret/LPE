@@ -13,6 +13,7 @@ pub(in crate::mapi::dispatch) fn should_log_outlook_surface_getprops_info(
         object.and_then(MapiObject::folder_id),
         Some(
             INBOX_FOLDER_ID
+                | DEFERRED_ACTION_FOLDER_ID
                 | CONTACTS_FOLDER_ID
                 | CALENDAR_FOLDER_ID
                 | JOURNAL_FOLDER_ID

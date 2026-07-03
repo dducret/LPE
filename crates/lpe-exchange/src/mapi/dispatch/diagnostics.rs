@@ -553,7 +553,7 @@ fn summarize_response_rop_buffer_with_optional_expected_handles(
     summary
 }
 
-fn response_rop_frame_end(
+pub(in crate::mapi::dispatch) fn response_rop_frame_end(
     responses: &[u8],
     start: usize,
     error_code: Option<u32>,

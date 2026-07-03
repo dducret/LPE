@@ -46,6 +46,16 @@ fn logon_getprops_are_outlook_surface_diagnostics() {
 }
 
 #[test]
+fn deferred_action_folder_getprops_are_outlook_surface_diagnostics() {
+    assert!(should_log_outlook_surface_getprops_info(Some(
+        &MapiObject::Folder {
+            folder_id: DEFERRED_ACTION_FOLDER_ID,
+            properties: HashMap::new(),
+        }
+    )));
+}
+
+#[test]
 fn calendar_folder_getprops_trace_summarizes_response_contract() {
     let request = RopRequest {
         rop_id: RopId::GetPropertiesSpecific.as_u8(),

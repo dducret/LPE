@@ -1,4 +1,5 @@
 use super::super::*;
+use super::response_rop_frame_end;
 
 pub(in crate::mapi::dispatch) fn summarize_first_post_hierarchy_probe(
     request_rop_buffer: &[u8],
@@ -92,7 +93,12 @@ pub(in crate::mapi::dispatch) fn summarize_first_post_hierarchy_probe(
     let mut open_folder_responses = Vec::new();
     let mut get_properties_responses = Vec::new();
     let mut set_properties_responses = Vec::new();
-    for rop_id in request_rop_ids {
+    let response_rop_ids = request_rop_ids
+        .iter()
+        .copied()
+        .filter(|rop_id| !rop_has_no_response(*rop_id))
+        .collect::<Vec<_>>();
+    for (response_index, rop_id) in response_rop_ids.iter().copied().enumerate() {
         if rop_has_no_response(rop_id) {
             continue;
         }
@@ -136,7 +142,16 @@ pub(in crate::mapi::dispatch) fn summarize_first_post_hierarchy_probe(
             }
             _ => {}
         }
-        response_offset = response_offset.saturating_add(6);
+        let next_expected_rop_id = response_rop_ids.get(response_index + 1).copied();
+        let following_expected_rop_id = response_rop_ids.get(response_index + 2).copied();
+        response_offset = response_rop_frame_end(
+            responses,
+            response_offset,
+            read_response_error_code(responses, response_offset),
+            next_expected_rop_id,
+            None,
+            following_expected_rop_id,
+        );
     }
     summary.open_folder_response_shapes = open_folder_responses.join("|");
     summary.get_properties_specific_response_shapes = get_properties_responses.join("|");
