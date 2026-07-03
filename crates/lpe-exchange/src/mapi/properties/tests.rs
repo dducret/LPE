@@ -4942,12 +4942,12 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&contact)),
         vec![
-            string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-            string8_property_tag(PID_TAG_DISPLAY_NAME_W),
-            string8_property_tag(PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG),
-            string8_property_tag(PID_TAG_MOBILE_TELEPHONE_NUMBER_W),
-            string8_property_tag(PID_TAG_COMPANY_NAME_W),
-            string8_property_tag(PID_TAG_TITLE_W),
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_DISPLAY_NAME_W,
+            PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG,
+            PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
+            PID_TAG_COMPANY_NAME_W,
+            PID_TAG_TITLE_W,
         ]
     );
     assert_eq!(

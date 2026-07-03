@@ -190,7 +190,7 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001e,0x3001001e,0x8083001e,0x3a1c001e,0x3a16001e,0x3a17001e"
+        "visible_column_tags=0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
     ));
     assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
 }

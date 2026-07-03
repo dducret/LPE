@@ -303,20 +303,10 @@ fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::ContactList,
         columns: vec![
-            view_column(
-                string8_property_tag(PID_TAG_MESSAGE_CLASS_W),
-                0x12,
-                0x0000_270A,
-                "Icon",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_DISPLAY_NAME_W),
-                0x18,
-                0x0000_2F00,
-                "Full Name",
-            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_DISPLAY_NAME_W, 0x18, 0x0000_2F00, "Full Name"),
             view_named_id_column(
-                string8_property_tag(PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG),
+                PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG,
                 0x18,
                 0x0000_3F00,
                 PSETID_ADDRESS_GUID,
@@ -324,23 +314,13 @@ fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
                 "Email",
             ),
             view_column(
-                string8_property_tag(PID_TAG_MOBILE_TELEPHONE_NUMBER_W),
+                PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
                 0x12,
                 0x0000_2F00,
                 "Mobile",
             ),
-            view_column(
-                string8_property_tag(PID_TAG_COMPANY_NAME_W),
-                0x14,
-                0x0000_2F00,
-                "Company",
-            ),
-            view_column(
-                string8_property_tag(PID_TAG_TITLE_W),
-                0x14,
-                0x0000_2F00,
-                "Job Title",
-            ),
+            view_column(PID_TAG_COMPANY_NAME_W, 0x14, 0x0000_2F00, "Company"),
+            view_column(PID_TAG_TITLE_W, 0x14, 0x0000_2F00, "Job Title"),
         ],
         sort_column: 1,
         sort_descending: false,
