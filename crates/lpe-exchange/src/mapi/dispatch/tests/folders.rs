@@ -804,8 +804,8 @@ fn open_folder_debug_metadata_uses_real_dynamic_mailbox_values() {
 }
 
 #[test]
-fn private_create_folder_response_never_sets_existing_folder_flag() {
-    assert!(!private_create_folder_is_existing_response_flag());
+fn private_create_folder_response_marks_existing_folder_reuse() {
+    assert!(private_create_folder_is_existing_response_flag());
 }
 
 #[test]

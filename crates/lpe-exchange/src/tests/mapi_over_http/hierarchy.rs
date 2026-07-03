@@ -1101,7 +1101,7 @@ async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_e
     expected.extend_from_slice(&mapi_wire_id_bytes(
         crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
     ));
-    expected.push(0);
+    expected.extend_from_slice(&[1, 0]);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
@@ -1167,7 +1167,7 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
     expected.extend_from_slice(&mapi_wire_id_bytes(
         crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
     ));
-    expected.push(0);
+    expected.extend_from_slice(&[1, 0]);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn private_create_folder_is_existing_response_flag() -> bool {
-    false
+    true
 }
 
 pub(super) fn is_receive_folder_rop(rop_id: RopId) -> bool {
