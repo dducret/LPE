@@ -123,14 +123,20 @@ fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids(
     let session = test_mapi_session();
     let snapshot = MapiMailStoreSnapshot::empty();
 
-    let contacts =
-        format_outlook_view_descriptor_named_property_context(&session, CONTACTS_FOLDER_ID, &snapshot);
+    let contacts = format_outlook_view_descriptor_named_property_context(
+        &session,
+        CONTACTS_FOLDER_ID,
+        &snapshot,
+    );
     let tasks =
         format_outlook_view_descriptor_named_property_context(&session, TASKS_FOLDER_ID, &snapshot);
     let notes =
         format_outlook_view_descriptor_named_property_context(&session, NOTES_FOLDER_ID, &snapshot);
-    let journal =
-        format_outlook_view_descriptor_named_property_context(&session, JOURNAL_FOLDER_ID, &snapshot);
+    let journal = format_outlook_view_descriptor_named_property_context(
+        &session,
+        JOURNAL_FOLDER_ID,
+        &snapshot,
+    );
 
     assert!(contacts.contains("0x8083001f"));
     assert!(tasks.contains("0x81050040"));

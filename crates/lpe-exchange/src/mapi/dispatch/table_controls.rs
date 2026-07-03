@@ -8,7 +8,11 @@ pub(super) enum TableControlFlow {
 fn is_outlook_default_view_setcolumns_diagnostic_target(folder_id: u64) -> bool {
     matches!(
         folder_id,
-        CALENDAR_FOLDER_ID | CONTACTS_FOLDER_ID | NOTES_FOLDER_ID | TASKS_FOLDER_ID | JOURNAL_FOLDER_ID
+        CALENDAR_FOLDER_ID
+            | CONTACTS_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | TASKS_FOLDER_ID
+            | JOURNAL_FOLDER_ID
     )
 }
 
