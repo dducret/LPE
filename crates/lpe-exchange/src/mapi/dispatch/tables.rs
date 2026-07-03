@@ -1125,27 +1125,46 @@ pub(super) fn append_table_control_response(
             input_object(session, handle_slots, request),
         )),
         Some(RopId::QueryPosition) => {
-            let calendar_normal_query_position_context =
-                match input_object(session, handle_slots, request) {
-                    Some(MapiObject::ContentsTable {
-                        folder_id,
-                        associated,
-                        columns,
-                        position,
-                        restriction,
-                        sort_orders,
-                        ..
-                    }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => Some(format!(
-                    "handle={};input_index={};position_before={};columns={};sort={};restriction={}",
-                    format_optional_debug_handle(input_handle(handle_slots, request)),
-                    request.input_handle_index().unwrap_or(0),
+            let calendar_normal_query_position_context = match input_object(
+                session,
+                handle_slots,
+                request,
+            ) {
+                Some(MapiObject::ContentsTable {
+                    folder_id,
+                    associated,
+                    columns,
                     position,
-                    format_debug_property_tags(columns),
-                    format_debug_sort_orders(sort_orders),
-                    format_debug_restriction_option(restriction.as_ref())
-                )),
-                    _ => None,
-                };
+                    restriction,
+                    sort_orders,
+                    ..
+                }) if *folder_id == CALENDAR_FOLDER_ID && !*associated => {
+                    let descriptor_columns =
+                        outlook_view_descriptor_visible_property_tags(*folder_id, snapshot);
+                    let descriptor_projection = format_calendar_event_query_position_summary(
+                        *folder_id,
+                        *associated,
+                        *position,
+                        1,
+                        sort_orders,
+                        restriction.as_ref(),
+                        &descriptor_columns,
+                        snapshot,
+                    );
+                    Some(format!(
+                            "handle={};input_index={};position_before={};columns={};sort={};restriction={};view_descriptor_columns={};view_descriptor_row_projection={}",
+                            format_optional_debug_handle(input_handle(handle_slots, request)),
+                            request.input_handle_index().unwrap_or(0),
+                            position,
+                            format_debug_property_tags(columns),
+                            format_debug_sort_orders(sort_orders),
+                            format_debug_restriction_option(restriction.as_ref()),
+                            format_debug_property_tags(&descriptor_columns),
+                            descriptor_projection
+                        ))
+                }
+                _ => None,
+            };
             let response = query_position_response(
                 request,
                 input_object(session, handle_slots, request),

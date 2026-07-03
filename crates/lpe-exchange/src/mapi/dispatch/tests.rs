@@ -149,6 +149,24 @@ fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids(
 }
 
 #[test]
+fn outlook_view_descriptor_visible_property_tags_reports_calendar_columns() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let tags = outlook_view_descriptor_visible_property_tags(CALENDAR_FOLDER_ID, &snapshot);
+
+    assert_eq!(
+        tags,
+        vec![
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
+            PID_LID_COMMON_START_TAG,
+            PID_LID_COMMON_END_TAG,
+            PID_LID_LOCATION_W_TAG,
+            PID_LID_BUSY_STATUS_TAG,
+        ]
+    );
+}
+
+#[test]
 fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
     let mut session = test_mapi_session();
     session.outlook_smart_input_variant = "fai_cursor_reset_before_query_rows".to_string();
