@@ -382,7 +382,7 @@ fn is_inbox_broad_startup_config_class(message: &MapiAssociatedConfigMessage) ->
         })
 }
 
-fn message_class_restriction_matches_exact(
+pub(super) fn message_class_restriction_matches_exact(
     restriction: &MapiRestriction,
     message_class: &str,
 ) -> bool {

@@ -4363,10 +4363,7 @@ fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
         associated: true,
         columns: vec![PID_TAG_MESSAGE_CLASS_W],
         columns_set: true,
-        sort_orders: vec![MapiSortOrder {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            order: 0,
-        }],
+        sort_orders: Vec::new(),
         category_count: 0,
         expanded_count: 0,
         collapsed_categories: HashSet::new(),
@@ -5307,6 +5304,81 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_hand
             ..
         } if is_broad_outlook_configuration_restriction(Some(restriction))
     ));
+}
+
+#[test]
+fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let mut table = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: true,
+        columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W, PID_TAG_MESSAGE_CLASS_W],
+        columns_set: true,
+        sort_orders: vec![MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            order: 0,
+        }],
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: Some(outlook_configuration_prefix_restriction()),
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 6,
+    };
+    let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    write_utf16z(&mut restriction, "IPM.Microsoft.FolderDesign.NamedView");
+    let mut payload = vec![0];
+    payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    payload.extend_from_slice(&restriction);
+    payload.push(1);
+    payload.extend_from_slice(&0u16.to_le_bytes());
+
+    let find_response = rop_find_row_response(
+        &RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(find_response[0], RopId::FindRow.as_u8());
+    assert_eq!(
+        u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
+        0
+    );
+    assert_response_contains_utf16(&find_response, "IPM.Microsoft.FolderDesign.NamedView");
+    assert_eq!(table_position(&table), Some(0));
+
+    let query_response = rop_query_rows_response(
+        &RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+    assert_eq!(query_response[6], 0x02);
+    assert_eq!(
+        u16::from_le_bytes([query_response[7], query_response[8]]),
+        1
+    );
+    assert_response_contains_utf16(&query_response, "IPM.Microsoft.FolderDesign.NamedView");
 }
 
 #[test]

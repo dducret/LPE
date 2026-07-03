@@ -418,7 +418,13 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 config,
                             )
                         });
-                    if exact_virtual_row_probe {
+                    let exact_named_view_probe = *folder_id == INBOX_FOLDER_ID
+                        && matches!(message, AssociatedTableRow::NamedView(_))
+                        && message_class_restriction_matches_exact(
+                            &restriction,
+                            "IPM.Microsoft.FolderDesign.NamedView",
+                        );
+                    if exact_virtual_row_probe || exact_named_view_probe {
                         *table_restriction = Some(restriction.clone());
                         *position = 0;
                         tracing::info!(
@@ -432,7 +438,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                             associated = true,
                             matched_row_index = index,
                             matched_message_class = %associated_table_row_message_class(message),
-                            "rca debug outlook associated config exact virtual find row followup query restricted"
+                            "rca debug outlook associated exact find row followup query restricted"
                         );
                     } else {
                         *position = index;
