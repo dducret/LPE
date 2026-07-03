@@ -426,10 +426,6 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
     }
 }
 
-pub(in crate::mapi) fn string8_property_tag(property_tag: u32) -> u32 {
-    (property_tag & 0xFFFF_0000) | 0x001E
-}
-
 fn view_column(property_tag: u32, width: u32, flags: u32, header: &'static str) -> ViewColumn {
     ViewColumn {
         property_tag,
