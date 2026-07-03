@@ -5309,6 +5309,14 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_hand
 #[test]
 fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
     let snapshot = MapiMailStoreSnapshot::empty();
+    let broad_restriction = outlook_configuration_prefix_restriction();
+    let broad_row_count = associated_table_rows(
+        INBOX_FOLDER_ID,
+        &snapshot,
+        Some(&broad_restriction),
+        Uuid::nil(),
+    )
+    .len();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
         associated: true,
@@ -5321,10 +5329,10 @@ fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
         category_count: 0,
         expanded_count: 0,
         collapsed_categories: HashSet::new(),
-        restriction: Some(outlook_configuration_prefix_restriction()),
+        restriction: Some(broad_restriction),
         bookmarks: HashMap::new(),
         next_bookmark: 1,
-        position: 6,
+        position: broad_row_count,
     };
     let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
     restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
