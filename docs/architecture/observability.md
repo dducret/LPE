@@ -79,4 +79,7 @@ must remain disabled by default, should be retained only for the active
 troubleshooting window, and sanitized mode must redact credentials, cookies,
 authorization headers, passwords, and obvious tokens. Raw payload tracing is a
 stronger opt-in because captured payloads can contain credentials and mailbox
-contents.
+contents. Each captured Outlook session writes the legacy append-only JSONL
+trace plus two sibling JSONL artifacts: `.replay.jsonl` for ordered,
+payload-light step comparison, and `.rr.jsonl` for request/response inspection
+keyed by the same `step_id` values.

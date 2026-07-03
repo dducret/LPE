@@ -4,7 +4,7 @@ use std::{
     env,
     fs::{self, OpenOptions},
     hash::{Hash, Hasher},
-    io::Write,
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -83,10 +83,19 @@ pub fn write_outlook_trace_with_config(config: &OutlookTraceConfig, event: &Outl
 
 fn write_event(config: &OutlookTraceConfig, event: &OutlookTraceEvent<'_>) -> std::io::Result<()> {
     create_trace_dir(&config.directory)?;
-    let path = trace_file_path(&config.directory, event.component, event.session_key);
+    let paths = trace_file_paths(&config.directory, event.component, event.session_key);
+    let sequence = next_trace_sequence(&paths.replay)?;
+    let context = TraceRenderContext::new(event.session_key, sequence);
+    let path = paths.legacy;
     let mut file = open_trace_file(&path)?;
-    file.write_all(render_event(config, event).as_bytes())?;
+    file.write_all(render_event(config, event, &context).as_bytes())?;
     file.write_all(b"\n")?;
+    let mut rr = open_trace_file(&paths.rr)?;
+    rr.write_all(render_request_response_event(config, event, &context).as_bytes())?;
+    rr.write_all(b"\n")?;
+    let mut replay = open_trace_file(&paths.replay)?;
+    replay.write_all(render_replay_event(event, &context).as_bytes())?;
+    replay.write_all(b"\n")?;
     Ok(())
 }
 
@@ -126,29 +135,73 @@ fn open_trace_file_with_mode(options: OpenOptions, path: &Path) -> std::io::Resu
     options.open(path)
 }
 
-fn trace_file_path(directory: &Path, component: &str, session_key: &str) -> PathBuf {
-    directory.join(format!(
-        "outlook-{}-{:016x}.jsonl",
-        safe_component(component),
-        stable_hash(session_key)
-    ))
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TraceFilePaths {
+    legacy: PathBuf,
+    replay: PathBuf,
+    rr: PathBuf,
 }
 
-fn render_event(config: &OutlookTraceConfig, event: &OutlookTraceEvent<'_>) -> String {
+fn trace_file_paths(directory: &Path, component: &str, session_key: &str) -> TraceFilePaths {
+    let stem = format!(
+        "outlook-{}-{:016x}",
+        safe_component(component),
+        stable_hash(session_key)
+    );
+    TraceFilePaths {
+        legacy: directory.join(format!("{stem}.jsonl")),
+        replay: directory.join(format!("{stem}.replay.jsonl")),
+        rr: directory.join(format!("{stem}.rr.jsonl")),
+    }
+}
+
+fn next_trace_sequence(path: &Path) -> std::io::Result<u64> {
+    match std::fs::File::open(path) {
+        Ok(file) => Ok(BufReader::new(file).lines().count() as u64 + 1),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(1),
+        Err(error) => Err(error),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TraceRenderContext {
+    timestamp_unix_ms: u128,
+    event_id: String,
+    session_id: String,
+    sequence: u64,
+    step_id: String,
+}
+
+impl TraceRenderContext {
+    fn new(session_key: &str, sequence: u64) -> Self {
+        let session_id = format!("{:016x}", stable_hash(session_key));
+        Self {
+            timestamp_unix_ms: unix_timestamp_millis(),
+            event_id: Uuid::new_v4().to_string(),
+            step_id: format!("{session_id}-{sequence:06}"),
+            session_id,
+            sequence,
+        }
+    }
+}
+
+fn render_event(
+    config: &OutlookTraceConfig,
+    event: &OutlookTraceEvent<'_>,
+    context: &TraceRenderContext,
+) -> String {
     let mut fields = vec![
         json_pair(
             "timestamp_unix_ms",
-            unix_timestamp_millis().to_string(),
+            context.timestamp_unix_ms.to_string(),
             false,
         ),
-        json_pair("event_id", Uuid::new_v4().to_string(), true),
+        json_pair("event_id", context.event_id.clone(), true),
+        json_pair("step_id", context.step_id.clone(), true),
+        json_pair("sequence", context.sequence.to_string(), false),
         json_pair("component", event.component.to_string(), true),
         json_pair("endpoint", event.endpoint.to_string(), true),
-        json_pair(
-            "session_id",
-            format!("{:016x}", stable_hash(event.session_key)),
-            true,
-        ),
+        json_pair("session_id", context.session_id.clone(), true),
         json_pair("direction", event.direction.as_str().to_string(), true),
         json_pair("phase", event.phase.to_string(), true),
     ];
@@ -189,6 +242,101 @@ fn render_event(config: &OutlookTraceConfig, event: &OutlookTraceEvent<'_>) -> S
         }
     }
     format!("{{{}}}", fields.join(","))
+}
+
+fn render_replay_event(event: &OutlookTraceEvent<'_>, context: &TraceRenderContext) -> String {
+    let mut fields = vec![
+        json_pair("step_id", context.step_id.clone(), true),
+        json_pair("sequence", context.sequence.to_string(), false),
+        json_pair("session_id", context.session_id.clone(), true),
+        json_pair("component", event.component.to_string(), true),
+        json_pair("endpoint", event.endpoint.to_string(), true),
+        json_pair("direction", event.direction.as_str().to_string(), true),
+        json_pair("phase", event.phase.to_string(), true),
+    ];
+    if let Some(tenant_id) = event.tenant_id {
+        fields.push(json_pair("tenant_id", tenant_id.to_string(), true));
+    }
+    if let Some(account) = event.account {
+        fields.push(json_pair("account", account.to_string(), true));
+    }
+    if let Some(status) = event.status {
+        fields.push(json_pair("status", status.to_string(), false));
+    }
+    fields.push(json_object_pair("metadata", &redacted_metadata(event)));
+    if let Some(payload) = event.payload {
+        fields.push(json_pair("payload_bytes", payload.len().to_string(), false));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn render_request_response_event(
+    config: &OutlookTraceConfig,
+    event: &OutlookTraceEvent<'_>,
+    context: &TraceRenderContext,
+) -> String {
+    let mut fields = vec![
+        json_pair(
+            "timestamp_unix_ms",
+            context.timestamp_unix_ms.to_string(),
+            false,
+        ),
+        json_pair("event_id", context.event_id.clone(), true),
+        json_pair("step_id", context.step_id.clone(), true),
+        json_pair("sequence", context.sequence.to_string(), false),
+        json_pair("session_id", context.session_id.clone(), true),
+        json_pair("component", event.component.to_string(), true),
+        json_pair("protocol", event.component.to_string(), true),
+        json_pair("endpoint", event.endpoint.to_string(), true),
+        json_pair("direction", event.direction.as_str().to_string(), true),
+        json_pair("phase", event.phase.to_string(), true),
+    ];
+    if let Some(remote_peer) = event.remote_peer {
+        fields.push(json_pair("remote_peer", remote_peer.to_string(), true));
+    }
+    if let Some(tenant_id) = event.tenant_id {
+        fields.push(json_pair("tenant_id", tenant_id.to_string(), true));
+    }
+    if let Some(account) = event.account {
+        fields.push(json_pair("account", account.to_string(), true));
+    }
+    if let Some(status) = event.status {
+        fields.push(json_pair("response_status", status.to_string(), false));
+    }
+    fields.push(json_object_pair("metadata", &redacted_metadata(event)));
+    if let Some(payload) = event.payload {
+        let payload_field = match event.direction {
+            OutlookTraceDirection::Inbound => "request_body",
+            OutlookTraceDirection::Outbound => "response_body",
+        };
+        if config.raw_payloads {
+            fields.push(json_pair(
+                &format!("{payload_field}_base64"),
+                BASE64_STANDARD.encode(payload),
+                true,
+            ));
+        } else {
+            fields.push(json_pair(
+                &format!("{payload_field}_summary"),
+                sanitized_payload_summary(payload),
+                true,
+            ));
+        }
+        fields.push(json_pair(
+            &format!("{payload_field}_bytes"),
+            payload.len().to_string(),
+            false,
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn redacted_metadata(event: &OutlookTraceEvent<'_>) -> Vec<(String, String)> {
+    event
+        .metadata
+        .iter()
+        .map(|(key, value)| (key.to_string(), redact_metadata_value(key, value)))
+        .collect()
 }
 
 fn sanitized_payload_summary(payload: &[u8]) -> String {
@@ -282,6 +430,21 @@ fn json_pair(key: &str, value: String, quote: bool) -> String {
     }
 }
 
+fn json_object_pair(key: &str, values: &[(String, String)]) -> String {
+    let fields = values
+        .iter()
+        .map(|(field_key, field_value)| {
+            format!(
+                "\"{}\":\"{}\"",
+                escape_json(field_key),
+                escape_json(field_value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("\"{}\":{{{}}}", escape_json(key), fields)
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -349,6 +512,48 @@ mod tests {
         path
     }
 
+    fn trace_file_names(dir: &Path) -> Vec<String> {
+        let mut files = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        files.sort();
+        files
+    }
+
+    fn trace_file_with_suffix(dir: &Path, suffix: &str) -> PathBuf {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .ends_with(suffix)
+            })
+            .unwrap()
+    }
+
+    fn legacy_trace_file(dir: &Path) -> PathBuf {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                let name = path.file_name().unwrap().to_string_lossy();
+                name.ends_with(".jsonl")
+                    && !name.ends_with(".replay.jsonl")
+                    && !name.ends_with(".rr.jsonl")
+            })
+            .unwrap()
+    }
+
+    fn json_string_value(line: &str, key: &str) -> String {
+        let needle = format!("\"{key}\":\"");
+        let start = line.find(&needle).unwrap() + needle.len();
+        let end = line[start..].find('"').unwrap() + start;
+        line[start..end].to_string()
+    }
+
     #[test]
     fn disabled_trace_does_not_create_files() {
         let dir = temp_trace_dir("disabled");
@@ -377,20 +582,21 @@ mod tests {
             &sample_event("../../tenant@example.test", b"hello"),
         );
 
-        let files = fs::read_dir(dir)
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(files.len(), 1);
-        let file_name = files[0].file_name().to_string_lossy().to_string();
-        assert!(file_name.starts_with("outlook-mapi-"));
-        assert!(file_name.ends_with(".jsonl"));
-        assert!(!file_name.contains("tenant"));
-        assert!(!file_name.contains(".."));
+        let files = trace_file_names(&dir);
+        assert_eq!(files.len(), 3);
+        assert!(files.iter().any(|file| file.ends_with(".jsonl")));
+        assert!(files.iter().any(|file| file.ends_with(".replay.jsonl")));
+        assert!(files.iter().any(|file| file.ends_with(".rr.jsonl")));
+        for file_name in files {
+            assert!(file_name.starts_with("outlook-mapi-"));
+            assert!(file_name.ends_with(".jsonl"));
+            assert!(!file_name.contains("tenant"));
+            assert!(!file_name.contains(".."));
+        }
     }
 
     #[test]
-    fn trace_events_append_in_order() {
+    fn trace_events_append_in_order_with_matching_replay_and_rr_steps() {
         let dir = temp_trace_dir("order");
         let config = OutlookTraceConfig {
             enabled: true,
@@ -407,11 +613,27 @@ mod tests {
         outbound.phase = "response";
         write_outlook_trace_with_config(&config, &outbound);
 
-        let file = fs::read_dir(dir).unwrap().next().unwrap().unwrap().path();
-        let content = fs::read_to_string(file).unwrap();
+        let content = fs::read_to_string(legacy_trace_file(&dir)).unwrap();
         let request_index = content.find("\"phase\":\"request\"").unwrap();
         let response_index = content.find("\"phase\":\"response\"").unwrap();
         assert!(request_index < response_index);
+        assert!(content.contains("\"sequence\":1"));
+        assert!(content.contains("\"sequence\":2"));
+
+        let replay = fs::read_to_string(trace_file_with_suffix(&dir, ".replay.jsonl")).unwrap();
+        let rr = fs::read_to_string(trace_file_with_suffix(&dir, ".rr.jsonl")).unwrap();
+        let replay_lines = replay.lines().collect::<Vec<_>>();
+        let rr_lines = rr.lines().collect::<Vec<_>>();
+        assert_eq!(replay_lines.len(), 2);
+        assert_eq!(rr_lines.len(), 2);
+        assert!(replay_lines[0].contains("\"phase\":\"request\""));
+        assert!(replay_lines[1].contains("\"phase\":\"response\""));
+        for (replay_line, rr_line) in replay_lines.iter().zip(rr_lines.iter()) {
+            assert_eq!(
+                json_string_value(replay_line, "step_id"),
+                json_string_value(rr_line, "step_id")
+            );
+        }
     }
 
     #[test]
@@ -427,13 +649,16 @@ mod tests {
 
         write_outlook_trace_with_config(&config, &sample_event("session-3", payload));
 
-        let file = fs::read_dir(dir).unwrap().next().unwrap().unwrap().path();
-        let content = fs::read_to_string(file).unwrap();
+        let content = fs::read_to_string(legacy_trace_file(&dir)).unwrap();
         assert!(content.contains("payload_summary"));
         assert!(!content.contains("raw_payload_base64"));
         assert!(!content.contains("abc123"));
         assert!(!content.contains("secret"));
         assert!(!content.contains(">abc<"));
+        let rr = fs::read_to_string(trace_file_with_suffix(&dir, ".rr.jsonl")).unwrap();
+        assert!(rr.contains("request_body_summary"));
+        assert!(!rr.contains("abc123"));
+        assert!(!rr.contains("secret"));
     }
 
     #[test]
@@ -447,11 +672,13 @@ mod tests {
 
         write_outlook_trace_with_config(&config, &sample_event("session-4", b"raw-body"));
 
-        let file = fs::read_dir(dir).unwrap().next().unwrap().unwrap().path();
-        let content = fs::read_to_string(file).unwrap();
+        let content = fs::read_to_string(legacy_trace_file(&dir)).unwrap();
         assert!(content.contains("raw_payload_base64"));
         assert!(content.contains(&BASE64_STANDARD.encode(b"raw-body")));
         assert!(!content.contains("payload_summary"));
+        let rr = fs::read_to_string(trace_file_with_suffix(&dir, ".rr.jsonl")).unwrap();
+        assert!(rr.contains("request_body_base64"));
+        assert!(rr.contains(&BASE64_STANDARD.encode(b"raw-body")));
     }
 
     fn sample_event<'a>(session_key: &'a str, payload: &'a [u8]) -> OutlookTraceEvent<'a> {
