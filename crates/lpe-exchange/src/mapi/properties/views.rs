@@ -179,7 +179,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 view_column(PID_TAG_CLIENT_SUBMIT_TIME, 0x10, 0x0000_2F40, "Sent"),
                 view_column(PID_TAG_MESSAGE_SIZE, 0x0C, 0x0000_2740, "Size"),
                 view_named_string_column(
-                    multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
+                    PID_NAME_KEYWORDS_TAG,
                     0x12,
                     0x0000_7B20,
                     PS_PUBLIC_STRINGS_GUID,
@@ -232,7 +232,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                     "Size",
                 ),
                 view_named_string_column(
-                    multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
+                    PID_NAME_KEYWORDS_TAG,
                     0x12,
                     0x0000_7B20,
                     PS_PUBLIC_STRINGS_GUID,
@@ -285,7 +285,7 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                 "Size",
             ),
             view_named_string_column(
-                multiple_string8_property_tag(PID_NAME_KEYWORDS_TAG),
+                PID_NAME_KEYWORDS_TAG,
                 0x12,
                 0x0000_7B20,
                 PS_PUBLIC_STRINGS_GUID,
@@ -549,10 +549,6 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
 
 pub(in crate::mapi) fn string8_property_tag(property_tag: u32) -> u32 {
     (property_tag & 0xFFFF_0000) | 0x001E
-}
-
-pub(in crate::mapi) fn multiple_string8_property_tag(property_tag: u32) -> u32 {
-    (property_tag & 0xFFFF_0000) | 0x101E
 }
 
 fn view_column(property_tag: u32, width: u32, flags: u32, header: &'static str) -> ViewColumn {

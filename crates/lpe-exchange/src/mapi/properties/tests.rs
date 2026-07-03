@@ -4707,7 +4707,7 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
             string8_property_tag(PID_TAG_SUBJECT_W),
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
-            0x0000_101E,
+            PID_NAME_KEYWORDS_TAG,
         ]
     );
     assert_eq!(&descriptor[96..98], &0x0003u16.to_le_bytes());
@@ -4783,7 +4783,7 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
             string8_property_tag(PID_TAG_SUBJECT_W),
             PID_TAG_MESSAGE_DELIVERY_TIME,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
-            0x0000_101E,
+            PID_NAME_KEYWORDS_TAG,
         ]
     );
     assert_eq!(
@@ -4890,8 +4890,8 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
                 name: None,
             },
             TestViewColumnPacket {
-                property_type: 0x101E,
-                property_id: 0x0000,
+                property_type: 0x101F,
+                property_id: 0x9000,
                 width: 0x12,
                 flags: 0x0000_7B20,
                 kind: 1,
@@ -4904,7 +4904,7 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
 }
 
 #[test]
-fn microsoft_oxocfg_view_definition_binary_matches_protocol_example() {
+fn outlook_unicode_keywords_view_definition_binary_matches_trace_contract() {
     let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Messages"));
     let expected = hex_to_bytes(
         "\
@@ -4936,7 +4936,7 @@ fn microsoft_oxocfg_view_definition_binary_matches_protocol_example() {
             0000000000000000060e000003001312\
             0c000000000000004027000000000000\
             00000000000000000000000013120000\
-            1e1000001200000000000000207b0000\
+            1f1000901200000000000000207b0000\
             000000000000000034019a1101000000\
             64a722002903020000000000c0000000\
             00000046120000004b00650079007700\
@@ -4967,7 +4967,7 @@ fn common_view_sent_to_descriptor_uses_recipient_columns() {
             string8_property_tag(PID_TAG_SUBJECT_W),
             PID_TAG_CLIENT_SUBMIT_TIME,
             PID_TAG_MESSAGE_SIZE,
-            0x0000_101E,
+            PID_NAME_KEYWORDS_TAG,
         ]
     );
     assert_eq!(
