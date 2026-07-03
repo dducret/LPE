@@ -5,6 +5,13 @@ pub(super) enum TableControlFlow {
     StopBatch,
 }
 
+fn is_outlook_default_view_setcolumns_diagnostic_target(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CALENDAR_FOLDER_ID | CONTACTS_FOLDER_ID | NOTES_FOLDER_ID | TASKS_FOLDER_ID | JOURNAL_FOLDER_ID
+    )
+}
+
 pub(super) fn is_status_or_bookmark_rop(rop_id: RopId) -> bool {
     matches!(
         rop_id,
@@ -190,8 +197,19 @@ pub(super) fn append_set_columns_response(
         .unwrap_or_default();
     let selected_named_property_context =
         format_debug_named_property_context(session, &normalized_columns);
+    let outlook_view_descriptor_named_property_context =
+        match input_object(session, handle_slots, request) {
+            Some(MapiObject::ContentsTable {
+                folder_id,
+                associated,
+                ..
+            }) if !*associated => {
+                format_outlook_view_descriptor_named_property_context(session, *folder_id, snapshot)
+            }
+            _ => String::new(),
+        };
     let mut inbox_normal_setcolumns_context = None;
-    let mut calendar_normal_setcolumns_context = None;
+    let mut outlook_default_view_setcolumns_context = None;
     let flow = match input_object_mut(session, handle_slots, request) {
         Some(MapiObject::HierarchyTable {
             folder_id,
@@ -346,22 +364,27 @@ pub(super) fn append_set_columns_response(
                     ),
                 ));
             }
-            if *folder_id == CALENDAR_FOLDER_ID && !*associated {
+            if is_outlook_default_view_setcolumns_diagnostic_target(*folder_id) && !*associated {
                 let row_count = folder_message_count(*folder_id, mailboxes, emails, snapshot);
-                calendar_normal_setcolumns_context = Some(format!(
-                    "handle={};input_index={};row_count={};columns={};named_properties={};view_handoff={}",
+                outlook_default_view_setcolumns_context = Some((
+                    *folder_id,
+                    format!(
+                    "handle={};input_index={};folder=0x{:016x};role={};row_count={};columns={};named_properties={};view_descriptor_named_properties={};view_handoff={}",
                     format_optional_debug_handle(input_handle_value),
                     request.input_handle_index().unwrap_or(0),
+                    *folder_id,
+                    debug_role_for_folder_id(*folder_id),
                     row_count,
                     format_debug_property_tags(columns),
                     selected_named_property_context,
+                    outlook_view_descriptor_named_property_context,
                     format_outlook_view_handoff_table_contract(
                         *folder_id,
                         *associated,
                         columns,
                         snapshot,
                     )
-                ));
+                )));
             }
             responses.extend_from_slice(&set_columns_response(request));
             TableControlFlow::Continue
@@ -446,9 +469,9 @@ pub(super) fn append_set_columns_response(
             "rca debug mapi visible inbox setcolumns tracked"
         );
     }
-    if let Some(context) = calendar_normal_setcolumns_context {
+    if let Some((folder_id, context)) = outlook_default_view_setcolumns_context {
         session.record_outlook_view_failure_trace_event(format!(
-            "calendar_normal_setcolumns:{context}"
+            "outlook_default_view_setcolumns:{context}"
         ));
         tracing::info!(
             rca_debug = true,
@@ -458,8 +481,10 @@ pub(super) fn append_set_columns_response(
             request_type = "Execute",
             request_rop_id = "0x12",
             input_handle_index = request.input_handle_index().unwrap_or(0),
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(folder_id),
             setcolumns_context = %context,
-            "rca debug mapi calendar normal setcolumns tracked"
+            "rca debug mapi outlook default view setcolumns tracked"
         );
     }
     flow

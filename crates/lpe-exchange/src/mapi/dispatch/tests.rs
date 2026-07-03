@@ -61,6 +61,88 @@ fn contents_table_named_property_context_reports_selected_columns() {
 }
 
 #[test]
+fn outlook_view_descriptor_probe_detection_tracks_collaboration_view_named_properties() {
+    let properties = vec![
+        MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_COMMON_START),
+        },
+        MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_BUSY_STATUS),
+        },
+        MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_EMAIL_ADDRESS),
+        },
+        MapiNamedProperty {
+            guid: PSETID_TASK_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_TASK_DUE_DATE),
+        },
+        MapiNamedProperty {
+            guid: PSETID_NOTE_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_NOTE_COLOR),
+        },
+        MapiNamedProperty {
+            guid: PSETID_LOG_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_LOG_TYPE),
+        },
+    ];
+
+    assert!(contains_outlook_view_descriptor_probe(&properties));
+}
+
+#[test]
+fn outlook_view_descriptor_named_property_context_reports_calendar_lids() {
+    let mut session = test_mapi_session();
+    session.cache_named_property(
+        PID_LID_LOCATION as u16,
+        MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_LOCATION),
+        },
+    );
+    let context = format_debug_named_property_context(
+        &session,
+        &[
+            PID_LID_COMMON_START_TAG,
+            PID_LID_COMMON_END_TAG,
+            PID_LID_LOCATION_W_TAG,
+            PID_LID_BUSY_STATUS_TAG,
+        ],
+    );
+
+    assert!(context.contains("0x85160040:id=0x8516:type=0x0040"));
+    assert!(context.contains("lid=0x00008516"));
+    assert!(context.contains("0x8208001f:id=0x8208:type=0x001f:source=session"));
+    assert!(context.contains("0x82050003:id=0x8205:type=0x0003"));
+}
+
+#[test]
+fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids() {
+    let session = test_mapi_session();
+    let snapshot = MapiMailStoreSnapshot::empty();
+
+    let contacts =
+        format_outlook_view_descriptor_named_property_context(&session, CONTACTS_FOLDER_ID, &snapshot);
+    let tasks =
+        format_outlook_view_descriptor_named_property_context(&session, TASKS_FOLDER_ID, &snapshot);
+    let notes =
+        format_outlook_view_descriptor_named_property_context(&session, NOTES_FOLDER_ID, &snapshot);
+    let journal =
+        format_outlook_view_descriptor_named_property_context(&session, JOURNAL_FOLDER_ID, &snapshot);
+
+    assert!(contacts.contains("0x8083001f"));
+    assert!(tasks.contains("0x81050040"));
+    assert!(tasks.contains("0x81040040"));
+    assert!(tasks.contains("0x81020005"));
+    assert!(notes.contains("0x8b000003"));
+    assert!(journal.contains("0x87060040"));
+    assert!(journal.contains("0x87070003"));
+    assert!(journal.contains("0x8700001f"));
+}
+
+#[test]
 fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
     let mut session = test_mapi_session();
     session.outlook_smart_input_variant = "fai_cursor_reset_before_query_rows".to_string();

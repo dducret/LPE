@@ -25,6 +25,34 @@ pub(super) fn contains_outlook_osc_contact_source_probe(properties: &[MapiNamedP
     })
 }
 
+pub(super) fn contains_outlook_view_descriptor_probe(properties: &[MapiNamedProperty]) -> bool {
+    properties.iter().any(|property| {
+        matches!(
+            (&property.guid, &property.kind),
+            (guid, MapiNamedPropertyKind::Lid(lid))
+                if (*guid == PSETID_COMMON_GUID
+                    && matches!(*lid, PID_LID_COMMON_START | PID_LID_COMMON_END))
+                    || (*guid == PSETID_APPOINTMENT_GUID
+                        && matches!(*lid, PID_LID_LOCATION | PID_LID_BUSY_STATUS))
+                    || (*guid == PSETID_ADDRESS_GUID
+                        && matches!(*lid, PID_LID_EMAIL1_EMAIL_ADDRESS))
+                    || (*guid == PSETID_TASK_GUID
+                        && matches!(
+                            *lid,
+                            PID_LID_TASK_DUE_DATE
+                                | PID_LID_TASK_START_DATE
+                                | PID_LID_PERCENT_COMPLETE
+                        ))
+                    || (*guid == PSETID_NOTE_GUID && matches!(*lid, PID_LID_NOTE_COLOR))
+                    || (*guid == PSETID_LOG_GUID
+                        && matches!(
+                            *lid,
+                            PID_LID_LOG_START | PID_LID_LOG_DURATION | PID_LID_LOG_TYPE
+                        ))
+        )
+    })
+}
+
 pub(super) fn cache_named_property_mapping_and_return_property_id(
     session: &mut MapiSession,
     property_id: u16,
@@ -234,6 +262,15 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
             "resolve_osc_contact_sources:request_id={request_id};object={};create_missing={};requested={};returned={}",
+            mapi_object_debug_kind(input_object(session, handle_slots, request)),
+            request.named_property_create(),
+            requested_named_properties,
+            format_debug_property_ids(&property_ids)
+        ));
+    }
+    if contains_outlook_view_descriptor_probe(&properties) {
+        session.record_outlook_view_failure_trace_event(format!(
+            "resolve_outlook_view_descriptor_props:request_id={request_id};object={};create_missing={};requested={};returned={}",
             mapi_object_debug_kind(input_object(session, handle_slots, request)),
             request.named_property_create(),
             requested_named_properties,

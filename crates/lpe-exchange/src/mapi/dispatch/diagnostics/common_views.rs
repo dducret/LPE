@@ -269,6 +269,20 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     )
 }
 
+pub(in crate::mapi::dispatch) fn format_outlook_view_descriptor_named_property_context(
+    session: &MapiSession,
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let Some(view) = debug_advertised_default_named_view(snapshot, folder_id) else {
+        return String::new();
+    };
+    let definition = outlook_folder_view_definition(view.folder_id, &view.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    format_debug_named_property_context(session, &descriptor_columns)
+}
+
 pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
     folder_id: u64,
     associated: bool,
