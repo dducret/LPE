@@ -46,6 +46,60 @@ fn logon_getprops_are_outlook_surface_diagnostics() {
 }
 
 #[test]
+fn calendar_folder_getprops_trace_summarizes_response_contract() {
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&4096u16.to_le_bytes());
+            payload.extend_from_slice(&2u16.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_DISPLAY_NAME_W.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_CONTAINER_CLASS_W.to_le_bytes());
+            payload
+        },
+    };
+    let object = MapiObject::Folder {
+        folder_id: CALENDAR_FOLDER_ID,
+        properties: HashMap::from([
+            (
+                PID_TAG_DISPLAY_NAME_W,
+                MapiValue::String("Calendar".to_string()),
+            ),
+            (
+                PID_TAG_CONTAINER_CLASS_W,
+                MapiValue::String("IPF.Appointment".to_string()),
+            ),
+        ]),
+    };
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &test_principal(),
+        &[],
+        &[],
+        &empty_snapshot(),
+    );
+
+    let trace = format_outlook_surface_folder_getprops_trace(
+        "{REQ}:225",
+        &request,
+        Some(&object),
+        &response,
+    )
+    .expect("calendar folder trace");
+
+    assert!(trace.contains("getprops_folder:request_id={REQ}:225"));
+    assert!(trace.contains("folder=0x0000000000100001"));
+    assert!(trace.contains("role=calendar"));
+    assert!(trace.contains("tags=0x3001001f,0x3613001f"));
+    assert!(trace.contains("returned=0x3001001f,0x3613001f"));
+    assert!(trace.contains("values=0x3001001f:string:chars=8"));
+    assert!(trace.contains("response=0x00000000"));
+}
+
+#[test]
 fn inbox_display_name_getprops_probe_loads_store_snapshot() {
     let session = test_mapi_session();
     let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];

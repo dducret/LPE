@@ -269,6 +269,12 @@ pub(super) async fn append_get_properties_specific_response<S>(
     );
     let post_hierarchy_contract =
         post_hierarchy_getprops_contract(request, object, &property_response);
+    let outlook_surface_folder_getprops_trace = format_outlook_surface_folder_getprops_trace(
+        request_id,
+        request,
+        object,
+        &property_response,
+    );
     if should_log_outlook_surface_getprops_info(object) {
         tracing::info!(
             rca_debug = true,
@@ -289,6 +295,9 @@ pub(super) async fn append_get_properties_specific_response<S>(
     session.record_post_hierarchy_getprops_contract(post_hierarchy_contract.clone());
     session.record_post_hierarchy_request_contract(format!("{post_hierarchy_contract}->ok"));
     responses.extend_from_slice(&property_response);
+    if let Some(trace) = outlook_surface_folder_getprops_trace {
+        session.record_outlook_view_failure_trace_event(trace);
+    }
     if is_inbox_folder_type_probe {
         let folder_type_probe_succeeded = property_response
             .get(2..6)

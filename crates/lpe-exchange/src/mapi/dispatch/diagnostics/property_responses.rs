@@ -22,6 +22,42 @@ pub(in crate::mapi::dispatch) fn should_log_outlook_surface_getprops_info(
     )
 }
 
+pub(in crate::mapi::dispatch) fn format_outlook_surface_folder_getprops_trace(
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_response: &[u8],
+) -> Option<String> {
+    let Some(MapiObject::Folder { folder_id, .. }) = object else {
+        return None;
+    };
+    if !should_log_outlook_surface_getprops_info(object) {
+        return None;
+    }
+    let property_tags = request.property_tags();
+    let response = getprops_contract_response_summary(&property_tags, property_response);
+    Some(format!(
+        "getprops_folder:request_id={request_id};handle={};folder=0x{folder_id:016x};role={};tags={};names={};returned={};problems={};zero_defaults={};values={};response={}",
+        request.input_handle_index().unwrap_or(0),
+        debug_role_for_folder_id(*folder_id),
+        format_debug_property_tags(&property_tags),
+        format_set_property_names_for_debug(&property_tags),
+        response.returned_tags,
+        response.problem_tags,
+        response.zero_default_tags,
+        truncate_debug_field(&response.value_shapes, 512),
+        response.result
+    ))
+}
+
+fn truncate_debug_field(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
+        value.to_string()
+    } else {
+        format!("{}...", &value[..limit])
+    }
+}
+
 pub(in crate::mapi::dispatch) fn log_set_properties_specific_debug(
     principal: &AccountPrincipal,
     request_id: &str,
