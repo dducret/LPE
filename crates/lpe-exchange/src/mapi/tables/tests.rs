@@ -5905,6 +5905,78 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
 }
 
 #[test]
+fn calendar_associated_query_rows_prefix_configuration_returns_calendar_config() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let availability_id = Uuid::from_u128(0x6d617069_6361_6c43_8000_000000000001);
+    let calendar_id = Uuid::from_u128(0x6d617069_6361_6c43_8000_000000000002);
+    crate::mapi::identity::remember_mapi_identity(
+        availability_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 84,
+        ),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        calendar_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 85,
+        ),
+    );
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: availability_id,
+            account_id,
+            folder_id: CALENDAR_FOLDER_ID,
+            message_class: "IPM.Configuration.AvailabilityOptions".to_string(),
+            subject: "Availability options".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c070102": {"type": "binary", "value": "0102"}
+            }),
+        },
+        crate::store::MapiAssociatedConfigRecord {
+            id: calendar_id,
+            account_id,
+            folder_id: CALENDAR_FOLDER_ID,
+            message_class: "IPM.Configuration.Calendar".to_string(),
+            subject: "Calendar".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c070102": {"type": "binary", "value": "0304"}
+            }),
+        },
+    ]);
+    let mut table = MapiObject::ContentsTable {
+        folder_id: CALENDAR_FOLDER_ID,
+        associated: true,
+        columns: vec![PID_TAG_MESSAGE_CLASS_W],
+        columns_set: true,
+        sort_orders: vec![MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            order: 0,
+        }],
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: Some(outlook_configuration_prefix_restriction()),
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let request = RopRequest {
+        rop_id: RopId::QueryRows.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: vec![0, 1, 50, 0],
+    };
+
+    let response =
+        rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+    assert_eq!(response[0], RopId::QueryRows.as_u8());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert!(utf16_position(&response, "IPM.Configuration.Calendar").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.AvailabilityOptions").is_none());
+}
+
+#[test]
 fn inbox_associated_query_rows_prefix_configuration_suppresses_stored_stream() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000099);

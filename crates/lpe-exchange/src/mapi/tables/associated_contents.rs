@@ -305,6 +305,12 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
+    if folder_id == CALENDAR_FOLDER_ID
+        && message.message_class.starts_with("IPM.Configuration.")
+        && is_broad_outlook_configuration_restriction(restriction)
+    {
+        return message.message_class == "IPM.Configuration.Calendar";
+    }
     if folder_id != INBOX_FOLDER_ID {
         return true;
     }
