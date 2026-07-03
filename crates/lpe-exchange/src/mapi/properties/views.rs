@@ -641,7 +641,7 @@ fn write_view_column_packet(
     kind: ViewColumnKind,
 ) {
     let property_id = match kind {
-        ViewColumnKind::NamedString { .. } => 0,
+        ViewColumnKind::NamedString { .. } => property_tag >> 16,
         ViewColumnKind::NamedId { id, .. } => id,
         ViewColumnKind::Id => property_tag >> 16,
     };
