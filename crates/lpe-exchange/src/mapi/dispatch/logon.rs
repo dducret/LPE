@@ -168,6 +168,7 @@ pub(super) fn address_types_response(request: &RopRequest, has_input_object: boo
 
 pub(super) fn append_address_types_response(
     principal: &AccountPrincipal,
+    session: &MapiSession,
     object: Option<&MapiObject>,
     request: &RopRequest,
     responses: &mut Vec<u8>,
@@ -188,6 +189,13 @@ pub(super) fn append_address_types_response(
         object_kind = mapi_object_debug_kind(object),
         address_type_count = 2,
         address_types = "EX,SMTP",
+        inbox_associated_query_rows_returned_non_empty =
+            session.post_hierarchy_actions.inbox_associated_query_rows_returned_non_empty,
+        inbox_normal_contents_table_observed =
+            session.post_hierarchy_actions.inbox_normal_contents_table_observed,
+        last_inbox_associated_query = %debug_context_or_none(
+            &session.post_hierarchy_actions.last_inbox_associated_query_context
+        ),
         message = "rca debug mapi get address types",
     );
     responses.extend_from_slice(&address_types_response(request, true));
@@ -202,6 +210,7 @@ pub(super) fn append_address_types_dispatch_response(
 ) -> bool {
     append_address_types_response(
         principal,
+        session,
         input_object(session, handle_slots, request),
         request,
         responses,

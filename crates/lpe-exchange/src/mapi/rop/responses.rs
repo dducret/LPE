@@ -234,7 +234,7 @@ pub(in crate::mapi) fn rop_get_stream_size_response(
 
 pub(in crate::mapi) fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {
     let address_types = b"EX\0SMTP\0";
-    let mut response = vec![0x49, request.response_handle_index()];
+    let mut response = vec![0x49, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     response.extend_from_slice(&2u16.to_le_bytes());
     response.extend_from_slice(&(address_types.len() as u16).to_le_bytes());

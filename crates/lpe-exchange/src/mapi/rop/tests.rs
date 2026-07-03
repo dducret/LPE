@@ -4515,6 +4515,21 @@ pub(in crate::mapi) fn upload_state_success_response_uses_input_handle_index() {
 }
 
 #[test]
+pub(in crate::mapi) fn get_address_types_success_response_uses_input_handle_index() {
+    let request = RopRequest {
+        rop_id: RopId::GetAddressTypes.as_u8(),
+        input_handle_index: Some(3),
+        output_handle_index: Some(9),
+        payload: Vec::new(),
+    };
+
+    assert_eq!(
+        rop_get_address_types_response(&request),
+        vec![0x49, 0x03, 0, 0, 0, 0, 2, 0, 8, 0, b'E', b'X', 0, b'S', b'M', b'T', b'P', 0,]
+    );
+}
+
+#[test]
 pub(in crate::mapi) fn note_and_journal_message_handles_serialize_object_properties() {
     let note_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
     let journal_id = Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap();
