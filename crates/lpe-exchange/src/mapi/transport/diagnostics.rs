@@ -494,6 +494,16 @@ pub(in crate::mapi) fn outlook_bootstrap_next_expected_phase(
     }
 }
 
+pub(in crate::mapi) fn visible_inbox_release_without_query_rows_observed(
+    actions: &PostHierarchyActionState,
+) -> bool {
+    actions.inbox_normal_contents_table_setcolumns_observed
+        && !actions.inbox_normal_contents_table_query_rows_observed
+        && actions
+            .last_inbox_related_release_context
+            .contains("visible_inbox_release_without_query_rows=true")
+}
+
 pub(in crate::mapi) fn post_hierarchy_close_kind(
     actions: &PostHierarchyActionState,
     disconnect_client_initiated: bool,
@@ -512,6 +522,8 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_release_logoff_before_content_sync"
     } else if actions.release_client_initiated {
         "outlook_release_before_content_sync"
+    } else if visible_inbox_release_without_query_rows_observed(actions) {
+        "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
     } else if actions.post_calendar_query_position_named_property_probe_count > 0
         && !actions.calendar_normal_contents_table_query_rows_observed
     {
@@ -782,6 +794,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
+    } else if visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions) {
+        "visible_inbox_released_after_setcolumns_before_query_rows"
     } else if session
         .post_hierarchy_actions
         .post_calendar_query_position_named_property_probe_count

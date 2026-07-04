@@ -291,10 +291,10 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
     if let Some(context) = visible_inbox_release_without_query_rows {
         let has_defaulted_columns =
             context.contains(";defaulted=0x") || context.contains("backed=false");
+        session.record_outlook_view_failure_trace_event(format!(
+            "visible_inbox_release_without_query_rows:{context}"
+        ));
         if has_defaulted_columns {
-            session.record_outlook_view_failure_trace_event(format!(
-                "visible_inbox_release_without_query_rows:{context}"
-            ));
             tracing::warn!(
                 rca_debug = true,
                 adapter = "mapi",

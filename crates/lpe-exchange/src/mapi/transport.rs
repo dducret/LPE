@@ -48,7 +48,6 @@ mod headers;
 
 pub(crate) use cookies::request_cookie_transport_debug;
 pub(in crate::mapi) use cookies::*;
-pub(in crate::mapi) use diagnostics::post_hierarchy_action_summary;
 use diagnostics::{log_connect_body_debug, log_mapi_session_disconnect};
 #[cfg(test)]
 use diagnostics::{
@@ -57,6 +56,9 @@ use diagnostics::{
     partial_scope_checkpoint_not_stored_count, post_fai_inbox_probe_loop_terminal_summary,
     required_default_folder_disconnect_coverage_summary, special_folder_contract_summary,
     summarize_connect_body,
+};
+pub(in crate::mapi) use diagnostics::{
+    post_hierarchy_action_summary, visible_inbox_release_without_query_rows_observed,
 };
 pub(in crate::mapi) use headers::*;
 pub(crate) use headers::{
