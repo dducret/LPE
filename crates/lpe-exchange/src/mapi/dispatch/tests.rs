@@ -593,6 +593,36 @@ fn get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_ma
     );
 }
 
+#[test]
+fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
+    let mut session = test_mapi_session();
+    let property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("custom-contact-shadow".to_string()),
+    };
+
+    let property_id = cache_named_property_mapping_and_return_property_id(
+        &mut session,
+        PID_LID_EMAIL1_DISPLAY_NAME as u16,
+        property.clone(),
+    );
+
+    assert_ne!(property_id, PID_LID_EMAIL1_DISPLAY_NAME as u16);
+    assert!(!is_reserved_named_property_id(property_id));
+    assert_eq!(
+        session.property_id_for_name(property.clone(), false),
+        Some(property_id)
+    );
+    assert_eq!(session.property_name_for_id(property_id), property);
+    assert_eq!(
+        session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
+        MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_DISPLAY_NAME),
+        }
+    );
+}
+
 fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
     lpe_storage::JmapEmailMailboxState {
         mailbox_id,

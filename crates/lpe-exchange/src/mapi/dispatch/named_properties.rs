@@ -58,6 +58,13 @@ pub(super) fn cache_named_property_mapping_and_return_property_id(
     property_id: u16,
     property: MapiNamedProperty,
 ) -> u16 {
+    if is_reserved_named_property_id(property_id)
+        && well_known_named_property_id(&property).is_none()
+    {
+        return session
+            .property_id_for_name(property, true)
+            .unwrap_or(property_id);
+    }
     let property_for_lookup = property.clone();
     session.cache_named_property(property_id, property);
     session

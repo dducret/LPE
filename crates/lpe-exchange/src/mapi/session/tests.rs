@@ -459,6 +459,28 @@ fn cached_well_known_named_property_does_not_alias_reserved_id_collision() {
 }
 
 #[test]
+fn cached_unknown_named_property_does_not_shadow_reserved_id() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("custom-contact-shadow".to_string()),
+    };
+
+    session.cache_named_property(PID_LID_EMAIL1_DISPLAY_NAME as u16, property.clone());
+
+    assert_eq!(session.property_id_for_name(property, false), None);
+    assert_eq!(
+        session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
+        MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_DISPLAY_NAME),
+        }
+    );
+}
+
+#[test]
 fn ps_mapi_lid_maps_directly_even_in_named_property_range() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
