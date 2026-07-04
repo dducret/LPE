@@ -587,6 +587,30 @@ fn post_hierarchy_close_kind_classifies_calendar_query_position_without_query_ro
 }
 
 #[test]
+fn post_hierarchy_close_kind_classifies_calendar_named_property_burst_without_query_rows() {
+    let mut state = PostHierarchyActionState {
+        last_calendar_normal_contents_table_query_position_context:
+            "handle=134;response_row_count=1".to_string(),
+        post_calendar_query_position_named_property_probe_count: 3,
+        last_post_calendar_query_position_named_property_context:
+            "request_id={A}:215;requested=140;missing=111;returned=140".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_calendar_query_position_named_property_burst_before_query_rows"
+    );
+
+    state.calendar_normal_contents_table_query_rows_observed = true;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "post_hierarchy_no_close"
+    );
+}
+
+#[test]
 fn post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard() {
     let mut session = test_session(HashMap::new());
     session.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;

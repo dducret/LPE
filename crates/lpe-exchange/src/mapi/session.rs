@@ -215,6 +215,30 @@ impl MapiSession {
             .last_calendar_normal_contents_table_query_rows_context = context;
     }
 
+    pub(in crate::mapi) fn record_post_calendar_query_position_named_property_probe(
+        &mut self,
+        context: String,
+    ) {
+        if self
+            .post_hierarchy_actions
+            .last_calendar_normal_contents_table_query_position_context
+            .is_empty()
+            || self
+                .post_hierarchy_actions
+                .calendar_normal_contents_table_query_rows_observed
+        {
+            return;
+        }
+        self.post_hierarchy_actions
+            .post_calendar_query_position_named_property_probe_count += 1;
+        self.post_hierarchy_actions
+            .last_post_calendar_query_position_named_property_context = context.clone();
+        self.record_outlook_view_failure_trace_event(format!(
+            "post_calendar_query_position_named_properties:{context}"
+        ));
+        crate::mapi::record_mapi_outlook_view_post_calendar_query_position_named_property_probe();
+    }
+
     pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_contents_table_observed = true;

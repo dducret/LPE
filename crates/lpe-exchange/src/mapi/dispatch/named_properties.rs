@@ -259,6 +259,15 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         returned_property_ids = %format_debug_property_ids(&property_ids),
         message = "rca debug mapi get property ids from names",
     );
+    record_post_calendar_query_position_named_property_probe(
+        session,
+        handle_slots,
+        request,
+        request_id,
+        properties.len(),
+        missing_properties.len(),
+        property_ids.len(),
+    );
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
             "resolve_osc_contact_sources:request_id={request_id};object={};create_missing={};requested={};returned={}",
@@ -281,6 +290,53 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         request,
         &property_ids,
     ));
+}
+
+fn record_post_calendar_query_position_named_property_probe(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    requested_count: usize,
+    missing_count: usize,
+    returned_count: usize,
+) {
+    if session
+        .post_hierarchy_actions
+        .last_calendar_normal_contents_table_query_position_context
+        .is_empty()
+        || session
+            .post_hierarchy_actions
+            .calendar_normal_contents_table_query_rows_observed
+    {
+        return;
+    }
+    let object_kind = mapi_object_debug_kind(input_object(session, handle_slots, request));
+    let calendar_query_position_context = session
+        .post_hierarchy_actions
+        .last_calendar_normal_contents_table_query_position_context
+        .clone();
+    let context = format!(
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};after_calendar_query_position={calendar_query_position_context}",
+        request.named_property_create()
+    );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        request_rop_id = "0x56",
+        request_id,
+        object_kind,
+        create_missing = request.named_property_create(),
+        requested_named_property_count = requested_count,
+        missing_named_property_count = missing_count,
+        returned_property_id_count = returned_count,
+        calendar_query_position_context = %calendar_query_position_context,
+        next_debug_focus = "calendar_query_rows_missing_after_named_property_probe",
+        "rca debug mapi post calendar query position named property probe"
+    );
+    session.record_post_calendar_query_position_named_property_probe(context);
 }
 
 pub(super) async fn append_query_named_properties_response<S>(

@@ -511,6 +511,10 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_release_logoff_before_content_sync"
     } else if actions.release_client_initiated {
         "outlook_release_before_content_sync"
+    } else if actions.post_calendar_query_position_named_property_probe_count > 0
+        && !actions.calendar_normal_contents_table_query_rows_observed
+    {
+        "outlook_calendar_query_position_named_property_burst_before_query_rows"
     } else if !actions
         .last_calendar_normal_contents_table_query_position_context
         .is_empty()
@@ -777,6 +781,15 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
+    } else if session
+        .post_hierarchy_actions
+        .post_calendar_query_position_named_property_probe_count
+        > 0
+        && !session
+            .post_hierarchy_actions
+            .calendar_normal_contents_table_query_rows_observed
+    {
+        "calendar_query_rows_missing_after_named_property_probe"
     } else if !session
         .post_hierarchy_actions
         .last_calendar_normal_contents_table_query_position_context
@@ -1006,6 +1019,16 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                     .last_calendar_normal_contents_table_query_position_handle
                     .map(|handle| handle.to_string())
                     .unwrap_or_else(|| "none".to_string()),
+            post_calendar_query_position_named_property_probe_count =
+                session
+                    .post_hierarchy_actions
+                    .post_calendar_query_position_named_property_probe_count,
+            last_post_calendar_query_position_named_property_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_post_calendar_query_position_named_property_context
+                ),
             abandoned_after_inbox_fai_query_rows =
                 final_phase_abandoned_after_inbox_fai_query_rows,
             post_fai_inbox_probe_loop_terminal,

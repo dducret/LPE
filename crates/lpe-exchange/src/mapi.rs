@@ -104,6 +104,8 @@ static MAPI_OUTLOOK_VIEW_REPEATED_INBOX_FOLDER_TYPE_PROBE_TOTAL: AtomicU64 = Ato
 static MAPI_OUTLOOK_VIEW_STALL_AFTER_COMMON_VIEWS_NOTIFICATION_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_LAST_INBOX_OPEN_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT: AtomicU64 = AtomicU64::new(0);
+static MAPI_OUTLOOK_VIEW_POST_CALENDAR_QUERY_POSITION_NAMED_PROPERTY_PROBE_TOTAL: AtomicU64 =
+    AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MapiFolderPurgeMetrics {
@@ -138,6 +140,7 @@ pub struct MapiOutlookViewMetrics {
     pub stall_after_common_views_notification_total: u64,
     pub last_inbox_open_probe_count: u64,
     pub last_inbox_folder_type_getprops_probe_count: u64,
+    pub post_calendar_query_position_named_property_probe_total: u64,
 }
 
 pub(crate) fn record_mapi_folder_purge_metrics(
@@ -258,6 +261,11 @@ pub(crate) fn record_mapi_outlook_view_bootstrap_stall(stall_code: u64) {
     }
 }
 
+pub(crate) fn record_mapi_outlook_view_post_calendar_query_position_named_property_probe() {
+    MAPI_OUTLOOK_VIEW_POST_CALENDAR_QUERY_POSITION_NAMED_PROPERTY_PROBE_TOTAL
+        .fetch_add(1, AtomicOrdering::Relaxed);
+}
+
 pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
     MapiOutlookViewMetrics {
         inbox_fai_handoff_without_contents_total:
@@ -315,6 +323,9 @@ pub fn mapi_outlook_view_metrics() -> MapiOutlookViewMetrics {
             .load(AtomicOrdering::Relaxed),
         last_inbox_folder_type_getprops_probe_count:
             MAPI_OUTLOOK_VIEW_LAST_INBOX_FOLDER_TYPE_GETPROPS_PROBE_COUNT
+                .load(AtomicOrdering::Relaxed),
+        post_calendar_query_position_named_property_probe_total:
+            MAPI_OUTLOOK_VIEW_POST_CALENDAR_QUERY_POSITION_NAMED_PROPERTY_PROBE_TOTAL
                 .load(AtomicOrdering::Relaxed),
     }
 }
