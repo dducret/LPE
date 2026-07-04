@@ -776,6 +776,9 @@ where
             inbox_associated_query_rows_returned_non_empty = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_returned_non_empty,
+            inbox_associated_findrow_returned_content = session
+                .post_hierarchy_actions
+                .inbox_associated_findrow_returned_content,
             inbox_associated_query_rows_reached_end = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_reached_end,
@@ -834,6 +837,9 @@ where
             inbox_associated_query_rows_returned_non_empty = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_returned_non_empty,
+            inbox_associated_findrow_returned_content = session
+                .post_hierarchy_actions
+                .inbox_associated_findrow_returned_content,
             inbox_associated_query_rows_reached_end = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_reached_end,

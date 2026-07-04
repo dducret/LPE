@@ -480,13 +480,14 @@ pub(in crate::mapi::dispatch) fn format_inbox_open_loop_summary(
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_query_rows_returned_non_empty={};associated_query_rows_reached_end={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_position={};last_normal_query_rows={};last_associated_query={};last_associated_non_empty_query={};last_associated_end_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_notification_registration={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_findrow_returned_content={};associated_query_rows_returned_non_empty={};associated_query_rows_reached_end={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_position={};last_normal_query_rows={};last_associated_query={};last_associated_non_empty_query={};last_associated_end_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_notification_registration={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
         state.inbox_normal_contents_table_setcolumns_observed,
         state.inbox_normal_contents_table_query_rows_observed,
         state.inbox_associated_contents_table_observed,
+        state.inbox_associated_findrow_returned_content,
         state.inbox_associated_query_rows_returned_non_empty,
         state.inbox_associated_query_rows_reached_end,
         state.inbox_associated_config_open_observed,
@@ -591,11 +592,12 @@ pub(in crate::mapi) fn format_inbox_post_fai_handoff_context(
     state: &PostHierarchyActionState,
 ) -> String {
     format!(
-        "normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_query_rows_returned_non_empty={};associated_query_rows_reached_end={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_position={};last_normal_query_rows={};last_associated_query={};last_associated_non_empty_query={};last_associated_end_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_notification_registration={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_associated_config_message_or_normal_contents_table",
+        "normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};associated_contents_table_observed={};associated_findrow_returned_content={};associated_query_rows_returned_non_empty={};associated_query_rows_reached_end={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};rule_organizer_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_normal_setcolumns={};last_normal_query_position={};last_normal_query_rows={};last_associated_query={};last_associated_non_empty_query={};last_associated_end_query={};last_associated_find={};last_rule_organizer_stream={};last_common_views_inbox_shortcut={};last_inbox_notification_registration={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_associated_config_message_or_normal_contents_table",
         state.inbox_normal_contents_table_observed,
         state.inbox_normal_contents_table_setcolumns_observed,
         state.inbox_normal_contents_table_query_rows_observed,
         state.inbox_associated_contents_table_observed,
+        state.inbox_associated_findrow_returned_content,
         state.inbox_associated_query_rows_returned_non_empty,
         state.inbox_associated_query_rows_reached_end,
         state.inbox_associated_config_open_observed,
