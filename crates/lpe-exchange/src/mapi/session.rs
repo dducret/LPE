@@ -258,6 +258,11 @@ impl MapiSession {
         }
     }
 
+    pub(in crate::mapi) fn record_inbox_associated_findrow_returned_content(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_findrow_returned_content = true;
+    }
+
     pub(in crate::mapi) fn record_inbox_associated_query_rows_returned_non_empty(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_query_rows_returned_non_empty = true;
@@ -414,6 +419,7 @@ impl MapiSession {
         actions.inbox_associated_contents_table_observed
             && !actions.inbox_normal_contents_table_observed
             && !actions.inbox_normal_contents_table_query_rows_observed
+            && !actions.inbox_associated_findrow_returned_content
             && !actions.last_inbox_associated_query_context.is_empty()
             && actions
                 .last_table_release_context

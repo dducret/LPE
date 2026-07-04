@@ -1,4 +1,3 @@
-
 use super::{
     classify_client_submission_storage_error, delete_client_note_with_store,
     delete_journal_entry_with_store, delete_search_folder_with_store, get_client_note_with_store,

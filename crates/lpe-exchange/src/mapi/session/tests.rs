@@ -111,6 +111,28 @@ fn session_detects_abandon_after_inbox_fai_query_rows_release() {
 
     assert!(session.abandoned_after_inbox_fai_query_rows());
 
+    session.record_inbox_associated_findrow_returned_content();
+
+    assert!(!session.abandoned_after_inbox_fai_query_rows());
+}
+
+#[test]
+fn session_does_not_treat_findrow_delivered_fai_as_abandoned() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+
+    session.record_inbox_associated_contents_table();
+    session.record_inbox_associated_findrow_returned_content();
+    session.record_last_inbox_associated_query_context(
+        "handle=19;folder=0x0000000000050001;associated=true;response_row_count=0".to_string(),
+    );
+    session.record_last_table_release_context(
+        "phase=release;folder=0x0000000000050001;role=inbox;associated=true".to_string(),
+    );
+
+    assert!(!session.abandoned_after_inbox_fai_query_rows());
+
     session.record_inbox_normal_contents_table();
 
     assert!(!session.abandoned_after_inbox_fai_query_rows());

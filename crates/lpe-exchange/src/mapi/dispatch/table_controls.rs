@@ -1222,6 +1222,17 @@ pub(super) fn append_find_row_response(
     ) {
         session.record_inbox_associated_exact_findrow(true);
     }
+    if matches!(
+        input_object(session, handle_slots, request),
+        Some(MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            ..
+        })
+    ) && response.get(7).copied().unwrap_or(0) == 1
+    {
+        session.record_inbox_associated_findrow_returned_content();
+    }
     if let Some((handle, associated, position, columns, restriction)) = find_trace {
         let response_return_value = read_response_error_code(&response, 0).unwrap_or(0xffff_ffff);
         let response_found = response.get(7).copied().unwrap_or(0);

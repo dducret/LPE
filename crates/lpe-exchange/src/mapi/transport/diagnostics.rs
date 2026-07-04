@@ -444,6 +444,7 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
         4
     } else if actions.inbox_associated_contents_table_observed
         && actions.inbox_associated_exact_ipm_configuration_findrow_matched
+        && !actions.inbox_associated_findrow_returned_content
         && !actions.inbox_associated_query_rows_returned_non_empty
         && !actions.inbox_associated_config_open_observed
         && !actions.inbox_normal_contents_table_observed

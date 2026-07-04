@@ -8,7 +8,7 @@ const STARTUP_GATES: [&str; 10] = [
     "inbox_folder_opened",
     "inbox_associated_contents_table_opened",
     "ipm_configuration_findrow_matched",
-    "fai_query_rows_returned_non_empty",
+    "fai_content_delivered",
     "receive_folder_verification_passed",
     "normal_inbox_contents_table_opened",
     "normal_inbox_query_rows_observed",
@@ -80,7 +80,8 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
         actions.inbox_associated_contents_table_observed,
         actions.inbox_associated_broad_ipm_configuration_findrow_matched
             || actions.inbox_associated_exact_ipm_configuration_findrow_matched,
-        actions.inbox_associated_query_rows_returned_non_empty,
+        actions.inbox_associated_findrow_returned_content
+            || actions.inbox_associated_query_rows_returned_non_empty,
         actions.receive_folder_verification_passed,
         actions.inbox_normal_contents_table_observed,
         actions.inbox_normal_contents_table_query_rows_observed,
@@ -179,13 +180,30 @@ mod tests {
             summary.last_successful_gate,
             "ipm_configuration_findrow_matched"
         );
-        assert_eq!(
-            summary.first_missing_gate,
-            "fai_query_rows_returned_non_empty"
-        );
+        assert_eq!(summary.first_missing_gate, "fai_content_delivered");
         assert!(summary
             .gates
             .contains("ipm_configuration_findrow_matched=true"));
+    }
+
+    #[test]
+    fn classifier_accepts_findrow_delivered_fai_content() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
+        session.record_opened_folder(INBOX_FOLDER_ID);
+        session.record_inbox_associated_contents_table();
+        session.record_inbox_associated_exact_findrow(true);
+        session.record_inbox_associated_findrow_returned_content();
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(summary.last_successful_gate, "fai_content_delivered");
+        assert_eq!(
+            summary.first_missing_gate,
+            "receive_folder_verification_passed"
+        );
+        assert!(summary.gates.contains("fai_content_delivered=true"));
     }
 
     #[test]

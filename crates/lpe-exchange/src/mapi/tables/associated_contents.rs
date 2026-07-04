@@ -225,9 +225,6 @@ fn append_exact_virtual_inbox_associated_config(
     let Some(message_class) = exact_message_class_restriction_value(restriction) else {
         return;
     };
-    if message_class.eq_ignore_ascii_case("IPM.Configuration.ELC") {
-        return;
-    }
     append_modeled_inbox_exact_startup_config(
         messages,
         crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(

@@ -4303,12 +4303,12 @@ fn inbox_associated_find_row_suppresses_outlook_eas_config() {
 }
 
 #[test]
-fn inbox_associated_find_row_suppresses_outlook_elc_config() {
+fn inbox_associated_find_row_returns_outlook_elc_config() {
     let _guard = outlook_smart_input_variant_test_lock();
     let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
     std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT");
 
-    assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
+    assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
 
     if let Some(value) = previous {
         std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value);

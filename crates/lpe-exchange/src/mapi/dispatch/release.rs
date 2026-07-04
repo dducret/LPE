@@ -178,6 +178,12 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 .inbox_associated_contents_table_observed
             && !session
                 .post_hierarchy_actions
+                .inbox_associated_findrow_returned_content
+            && !session
+                .post_hierarchy_actions
+                .inbox_associated_query_rows_returned_non_empty
+            && !session
+                .post_hierarchy_actions
                 .inbox_normal_contents_table_observed
             && !session.post_hierarchy_actions.post_inbox_fai_handoff_logged =>
         {
