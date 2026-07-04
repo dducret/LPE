@@ -1319,6 +1319,31 @@ fn calendar_associated_sort_trace_reports_missing_query_rows_handoff() {
 }
 
 #[test]
+fn debug_named_property_sample_is_bounded() {
+    let properties = vec![
+        MapiNamedProperty {
+            guid: PS_PUBLIC_STRINGS_GUID,
+            kind: MapiNamedPropertyKind::Name("alpha".to_string()),
+        },
+        MapiNamedProperty {
+            guid: PS_PUBLIC_STRINGS_GUID,
+            kind: MapiNamedPropertyKind::Name("beta".to_string()),
+        },
+        MapiNamedProperty {
+            guid: PS_PUBLIC_STRINGS_GUID,
+            kind: MapiNamedPropertyKind::Name("gamma".to_string()),
+        },
+    ];
+
+    let sample = format_debug_named_property_sample(&properties, 2);
+
+    assert!(sample.contains("name=alpha"));
+    assert!(sample.contains("name=beta"));
+    assert!(!sample.contains("name=gamma"));
+    assert!(sample.ends_with("...1 more"));
+}
+
+#[test]
 fn normal_message_column_support_covers_visible_inbox_probe_columns() {
     let summary = normal_message_table_column_support_summary(&[
         PID_TAG_FOLDER_ID,

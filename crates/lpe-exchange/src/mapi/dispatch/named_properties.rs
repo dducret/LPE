@@ -302,6 +302,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         duplicate_summary.1,
         duplicate_summary.2,
         &duplicate_summary.3,
+        &missing_properties,
     );
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
@@ -339,6 +340,7 @@ fn record_post_calendar_query_position_named_property_probe(
     duplicate_returned_id_count: usize,
     returned_id_collision_count: usize,
     returned_id_collisions: &str,
+    missing_properties: &[MapiNamedProperty],
 ) {
     if session
         .post_hierarchy_actions
@@ -380,16 +382,14 @@ fn record_post_calendar_query_position_named_property_probe(
         .post_hierarchy_actions
         .last_inbox_normal_contents_table_query_rows_context
         .clone();
-    let next_debug_focus =
-        if crate::mapi::transport::visible_inbox_release_without_query_rows_observed(
+    let missing_named_property_sample = format_debug_named_property_sample(missing_properties, 32);
+    let visible_inbox_release_without_query_rows =
+        crate::mapi::transport::visible_inbox_release_without_query_rows_observed(
             &session.post_hierarchy_actions,
-        ) {
-            "visible_inbox_released_after_setcolumns_before_query_rows"
-        } else {
-            "calendar_query_rows_missing_after_named_property_probe"
-        };
+        );
+    let next_debug_focus = "calendar_query_rows_missing_after_named_property_probe";
     let context = format!(
-        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};missing_sample={missing_named_property_sample};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};visible_inbox_release_without_query_rows={visible_inbox_release_without_query_rows};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
         request.named_property_create()
     );
     tracing::info!(
@@ -403,6 +403,7 @@ fn record_post_calendar_query_position_named_property_probe(
         create_missing = request.named_property_create(),
         requested_named_property_count = requested_count,
         missing_named_property_count = missing_count,
+        missing_named_property_sample = %missing_named_property_sample,
         returned_property_id_count = returned_count,
         duplicate_requested_named_property_count = duplicate_requested_count,
         duplicate_returned_property_id_count = duplicate_returned_id_count,
@@ -411,6 +412,7 @@ fn record_post_calendar_query_position_named_property_probe(
         inbox_normal_contents_table_observed,
         inbox_normal_contents_table_setcolumns_observed,
         inbox_normal_contents_table_query_rows_observed,
+        visible_inbox_release_without_query_rows,
         last_inbox_normal_contents_table_context =
             %last_inbox_normal_contents_table_context,
         last_inbox_normal_contents_table_setcolumns_context =
@@ -424,6 +426,26 @@ fn record_post_calendar_query_position_named_property_probe(
         "rca debug mapi post calendar query position named property probe"
     );
     session.record_post_calendar_query_position_named_property_probe(context);
+}
+
+pub(super) fn format_debug_named_property_sample(
+    properties: &[MapiNamedProperty],
+    limit: usize,
+) -> String {
+    let mut sample = properties
+        .iter()
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut formatted = format_debug_named_properties(&sample);
+    if properties.len() > sample.len() {
+        if !formatted.is_empty() {
+            formatted.push('|');
+        }
+        formatted.push_str(&format!("...{} more", properties.len() - sample.len()));
+    }
+    sample.clear();
+    formatted
 }
 
 pub(super) fn summarize_named_property_id_duplicates(
