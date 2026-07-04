@@ -5725,7 +5725,7 @@ fn appointment_color_named_property_maps_to_stable_id() {
 fn outlook_visible_inbox_probe_named_property_maps_to_stable_id() {
     assert_eq!(
         well_known_named_property_id(&MapiNamedProperty {
-            guid: PSETID_APPOINTMENT_GUID,
+            guid: PSETID_COMMON_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
         }),
         Some(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16)
