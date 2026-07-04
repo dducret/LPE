@@ -5578,6 +5578,31 @@ fn outlook_contact_source_probe_named_properties_map_to_stable_ids() {
             Some(lid as u16),
             "PSETID_Address lid 0x{lid:04x} should not allocate a transient id"
         );
+        assert!(is_reserved_named_property_id(lid as u16));
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
+        );
+    }
+}
+
+#[test]
+fn outlook_address_probe_lid_family_maps_to_stable_ids() {
+    for lid in [
+        0x800c, 0x8017, 0x8018, 0x8026, 0x804f, 0x8050, 0x8051, 0x8052, 0x80d8, 0x80de,
+        0x80df,
+    ] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Address lid 0x{lid:04x} should not allocate a transient id"
+        );
     }
 }
 
@@ -5599,6 +5624,31 @@ fn outlook_calendar_sharing_probe_named_properties_map_to_stable_ids() {
         PID_LID_OUTLOOK_SHARING_8A88,
         PID_LID_OUTLOOK_SHARING_8A8E,
         PID_LID_OUTLOOK_SHARING_8A8D,
+    ] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_SHARING_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Sharing lid 0x{lid:04x} should not allocate a transient id"
+        );
+        assert!(is_reserved_named_property_id(lid as u16));
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_SHARING_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
+        );
+    }
+}
+
+#[test]
+fn outlook_sharing_probe_lid_family_maps_to_stable_ids() {
+    for lid in [
+        0x8a20, 0x8a42, 0x8a43, 0x8a44, 0x8a45, 0x8a4b, 0x8a4c, 0x8a4d, 0x8a4e, 0x8a56,
+        0x8ab4, 0x8ab5,
     ] {
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {

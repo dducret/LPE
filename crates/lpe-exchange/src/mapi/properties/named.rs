@@ -13,6 +13,10 @@ pub(crate) enum MapiNamedPropertyKind {
 }
 
 pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
+    if let Some(property_id) = well_known_lid_family_property_id(property) {
+        return Some(property_id);
+    }
+
     well_known_named_properties()
         .into_iter()
         .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
@@ -21,6 +25,10 @@ pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty
 pub(in crate::mapi) fn well_known_named_property_for_id(
     property_id: u16,
 ) -> Option<MapiNamedProperty> {
+    if let Some(property) = well_known_lid_family_property_for_id(property_id) {
+        return Some(property);
+    }
+
     well_known_named_properties()
         .into_iter()
         .find_map(|(candidate_id, property)| (candidate_id == property_id).then_some(property))
@@ -28,6 +36,33 @@ pub(in crate::mapi) fn well_known_named_property_for_id(
 
 pub(crate) fn is_reserved_named_property_id(property_id: u16) -> bool {
     well_known_named_property_for_id(property_id).is_some()
+}
+
+fn well_known_lid_family_property_id(property: &MapiNamedProperty) -> Option<u16> {
+    let MapiNamedPropertyKind::Lid(lid) = property.kind else {
+        return None;
+    };
+    let property_id = u16::try_from(lid).ok()?;
+
+    match property.guid {
+        PSETID_ADDRESS_GUID if (0x8000..=0x80ff).contains(&lid) => Some(property_id),
+        PSETID_SHARING_GUID if (0x8a00..=0x8aff).contains(&lid) => Some(property_id),
+        _ => None,
+    }
+}
+
+fn well_known_lid_family_property_for_id(property_id: u16) -> Option<MapiNamedProperty> {
+    match property_id {
+        0x8000..=0x80ff => Some(MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        0x8a00..=0x8aff => Some(MapiNamedProperty {
+            guid: PSETID_SHARING_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        _ => None,
+    }
 }
 
 fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
