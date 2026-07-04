@@ -1247,6 +1247,44 @@ fn visible_inbox_query_position_wire_summary_reports_compact_response_shape() {
 }
 
 #[test]
+fn calendar_query_position_wire_summary_reports_compact_response_shape() {
+    let response = vec![
+        RopId::QueryPosition.as_u8(),
+        31,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+    ];
+    let summary = format_calendar_query_position_wire_summary(
+        "request:212",
+        "SetColumns,QueryPosition",
+        "handle=134;input_index=31;response_row_count=1",
+        &response,
+        false,
+    );
+
+    assert!(summary.contains("request_id=request:212"));
+    assert!(summary.contains("request_rops=SetColumns,QueryPosition"));
+    assert!(summary.contains("response_bytes=14"));
+    assert!(summary.contains("response_preview=171f000000000000000001000000"));
+    assert!(summary.contains("response_return=0x00000000"));
+    assert!(summary.contains("response_position=0"));
+    assert!(summary.contains("response_row_count=1"));
+    assert!(summary.contains("query_rows_observed=false"));
+    assert!(summary.contains("next_expected_client_step=query_rows_on_calendar_contents_table"));
+    assert!(summary.contains("handle=134"));
+}
+
+#[test]
 fn normal_message_column_support_covers_visible_inbox_probe_columns() {
     let summary = normal_message_table_column_support_summary(&[
         PID_TAG_FOLDER_ID,

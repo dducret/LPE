@@ -49,6 +49,44 @@ pub(super) fn format_visible_inbox_query_position_wire_summary(
     response: &[u8],
     query_rows_observed: bool,
 ) -> String {
+    format_query_position_wire_summary(
+        request_id,
+        request_rop_names,
+        context,
+        response,
+        query_rows_observed,
+        "visible_inbox_query_rows_already_observed",
+        "query_rows_on_visible_inbox_contents_table",
+    )
+}
+
+pub(super) fn format_calendar_query_position_wire_summary(
+    request_id: &str,
+    request_rop_names: &str,
+    context: &str,
+    response: &[u8],
+    query_rows_observed: bool,
+) -> String {
+    format_query_position_wire_summary(
+        request_id,
+        request_rop_names,
+        context,
+        response,
+        query_rows_observed,
+        "calendar_query_rows_already_observed",
+        "query_rows_on_calendar_contents_table",
+    )
+}
+
+fn format_query_position_wire_summary(
+    request_id: &str,
+    request_rop_names: &str,
+    context: &str,
+    response: &[u8],
+    query_rows_observed: bool,
+    observed_next_step: &str,
+    missing_next_step: &str,
+) -> String {
     let response_return_value = response
         .get(2..6)
         .and_then(|bytes| bytes.try_into().ok())
@@ -72,9 +110,9 @@ pub(super) fn format_visible_inbox_query_position_wire_summary(
         response.len(),
         hex_preview(response, 32),
         if query_rows_observed {
-            "visible_inbox_query_rows_already_observed"
+            observed_next_step
         } else {
-            "query_rows_on_visible_inbox_contents_table"
+            missing_next_step
         }
     )
 }
@@ -1303,6 +1341,18 @@ pub(super) fn append_table_control_response(
                 session.record_outlook_view_failure_trace_event(format!(
                     "calendar_normal_query_position:{context}"
                 ));
+                let wire_summary = format_calendar_query_position_wire_summary(
+                    request_id,
+                    request_rop_names,
+                    &context,
+                    &response,
+                    session
+                        .post_hierarchy_actions
+                        .calendar_normal_contents_table_query_rows_observed,
+                );
+                session.record_outlook_view_failure_trace_event(format!(
+                    "calendar_query_position_wire:{wire_summary}"
+                ));
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -1319,6 +1369,20 @@ pub(super) fn append_table_control_response(
                         .calendar_normal_contents_table_query_rows_observed,
                     next_expected_client_step = "query_rows_on_calendar_contents_table",
                     "rca debug mapi calendar query position tracked"
+                );
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x17",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                    calendar_query_position_wire = %wire_summary,
+                    next_debug_focus = "calendar_query_rows_missing_after_query_position",
+                    "rca debug mapi calendar query position wire"
                 );
             }
             if let Some(context) = inbox_normal_query_position_context {
