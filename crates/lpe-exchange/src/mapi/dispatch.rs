@@ -763,6 +763,7 @@ where
     let mut same_execute_released_handles = HashSet::new();
     let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
+    let mut request_has_release = false;
     record_execute_stream_batch_observation(
         principal,
         request_id,
@@ -783,6 +784,7 @@ where
         }
         match RopId::from_u8(typed_request.rop_id()) {
             Some(rop_id) if is_release_dispatch_rop(rop_id) => {
+                request_has_release = true;
                 echo_input_handle_table |= append_release_dispatch_response(
                     store,
                     principal,
@@ -1171,6 +1173,7 @@ where
         &handle_slots,
         &output_handles,
         echo_input_handle_table,
+        request_has_release,
         extended,
     )
 }

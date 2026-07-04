@@ -14,6 +14,7 @@ const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;
 const MAX_OUTLOOK_VIEW_FAILURE_TRACE_EVENTS: usize = 32;
 const MAX_OUTLOOK_STREAM_BATCH_EVENTS: usize = 8;
+const RELEASED_HANDLE_RESPONSE_SENTINEL: u32 = 0;
 
 mod lifecycle;
 mod types;
@@ -1046,6 +1047,25 @@ pub(in crate::mapi) fn response_handle_table(
     } else {
         handles
     }
+}
+
+pub(in crate::mapi) fn response_handle_table_with_released_handle_sentinel(
+    handle_slots: &[u32],
+    output_handles: &[u32],
+    echo_input_handles: bool,
+    use_released_handle_sentinel: bool,
+) -> Vec<u32> {
+    let mut handles = response_handle_table(handle_slots, output_handles, echo_input_handles);
+    if use_released_handle_sentinel {
+        // MS-OXCROPS Appendix A notes Exchange can return a non-0xFFFFFFFF invalid handle
+        // for released slots in multi-ROP release batches.
+        for handle in &mut handles {
+            if *handle == u32::MAX {
+                *handle = RELEASED_HANDLE_RESPONSE_SENTINEL;
+            }
+        }
+    }
+    handles
 }
 
 pub(in crate::mapi) fn reset_table_state(object: &mut MapiObject) -> bool {

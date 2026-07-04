@@ -70,7 +70,7 @@ fn release_only_execute_batch_is_store_independent() {
 
 #[test]
 fn release_only_execute_response_echoes_input_handle_table() {
-    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], true);
+    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], true, true);
 
     assert_eq!(response_handles, vec![u32::MAX]);
 }
@@ -82,9 +82,36 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
         &[u32::MAX, 77],
         &[77],
         true,
+        true,
     );
 
-    assert_eq!(response_handles, vec![u32::MAX, 77]);
+    assert_eq!(response_handles, vec![0, 77]);
+}
+
+#[test]
+fn mixed_release_execute_response_uses_exchange_invalid_released_handle() {
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x01, 0, 0, 0, 0, 0],
+        &[25, u32::MAX, u32::MAX, u32::MAX],
+        &[],
+        true,
+        true,
+    );
+
+    assert_eq!(response_handles, vec![25, 0, 0, 0]);
+}
+
+#[test]
+fn non_release_echo_response_keeps_output_placeholders() {
+    let response_handles = execute_response_handle_table(
+        &[0x07, 0x01, 0, 0, 0, 0, 0],
+        &[25, u32::MAX],
+        &[],
+        true,
+        false,
+    );
+
+    assert_eq!(response_handles, vec![25, u32::MAX]);
 }
 
 #[test]
