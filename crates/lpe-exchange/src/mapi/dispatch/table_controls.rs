@@ -153,6 +153,7 @@ pub(super) fn append_table_control_dispatch_response(
             append_table_control_response(
                 principal,
                 request_id,
+                request_rop_names,
                 session,
                 handle_slots,
                 request,

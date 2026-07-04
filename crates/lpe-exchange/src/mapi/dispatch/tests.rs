@@ -1207,6 +1207,46 @@ fn inbox_handoff_context_reports_visible_query_position_before_query_rows() {
 }
 
 #[test]
+fn visible_inbox_query_position_wire_summary_reports_compact_response_shape() {
+    let response = vec![
+        RopId::QueryPosition.as_u8(),
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+    ];
+    let summary = format_visible_inbox_query_position_wire_summary(
+        "request:223",
+        "GetContentsTable,SetColumns,QueryPosition",
+        "handle=140;input_index=4;response_row_count=1",
+        &response,
+        false,
+    );
+
+    assert!(summary.contains("request_id=request:223"));
+    assert!(summary.contains("request_rops=GetContentsTable,SetColumns,QueryPosition"));
+    assert!(summary.contains("response_bytes=14"));
+    assert!(summary.contains("response_preview=1704000000000000000001000000"));
+    assert!(summary.contains("response_return=0x00000000"));
+    assert!(summary.contains("response_position=0"));
+    assert!(summary.contains("response_row_count=1"));
+    assert!(summary.contains("query_rows_observed=false"));
+    assert!(
+        summary.contains("next_expected_client_step=query_rows_on_visible_inbox_contents_table")
+    );
+    assert!(summary.contains("handle=140"));
+}
+
+#[test]
 fn normal_message_column_support_covers_visible_inbox_probe_columns() {
     let summary = normal_message_table_column_support_summary(&[
         PID_TAG_FOLDER_ID,
