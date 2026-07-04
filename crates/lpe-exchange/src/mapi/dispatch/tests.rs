@@ -1285,6 +1285,40 @@ fn calendar_query_position_wire_summary_reports_compact_response_shape() {
 }
 
 #[test]
+fn calendar_associated_sort_trace_reports_missing_query_rows_handoff() {
+    let snapshot = empty_snapshot();
+    let trace = format_calendar_associated_sort_trace(
+        "request:217",
+        "134".to_string(),
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            0x685D_0003,
+        ],
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            order: 0,
+        }],
+        &snapshot,
+    );
+
+    assert!(trace.contains("calendar_associated_sort_table"));
+    assert!(trace.contains("request_id=request:217"));
+    assert!(trace.contains("handle=134"));
+    assert!(trace.contains("associated=true"));
+    assert!(trace.contains("row_count="));
+    assert!(trace.contains("columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x30080040,0x685d0003"));
+    assert!(trace.contains("sort=0x001a001f:0"));
+    assert!(trace.contains(
+        "next_expected_client_step=query_rows_on_calendar_associated_contents_table"
+    ));
+}
+
+#[test]
 fn normal_message_column_support_covers_visible_inbox_probe_columns() {
     let summary = normal_message_table_column_support_summary(&[
         PID_TAG_FOLDER_ID,

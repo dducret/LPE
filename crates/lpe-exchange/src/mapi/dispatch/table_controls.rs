@@ -516,6 +516,20 @@ pub(super) fn append_sort_table_response(
             format_debug_property_tags(columns),
             format_debug_sort_orders(&request.sort_orders())
         )),
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            columns,
+            ..
+        }) if *folder_id == CALENDAR_FOLDER_ID && *associated => Some(
+            format_calendar_associated_sort_trace(
+                request_id,
+                format_optional_debug_handle(input_handle(handle_slots, request)),
+                columns,
+                &request.sort_orders(),
+                snapshot,
+            ),
+        ),
         _ => None,
     };
     match input_object_mut(session, handle_slots, request) {
@@ -573,6 +587,21 @@ pub(super) fn append_sort_table_response(
     if let Some(trace) = sort_trace {
         session.record_outlook_view_failure_trace_event(trace);
     }
+}
+
+pub(super) fn format_calendar_associated_sort_trace(
+    request_id: &str,
+    handle: String,
+    columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    format!(
+        "calendar_associated_sort_table:request_id={request_id};handle={handle};associated=true;row_count={};columns={};sort={};next_expected_client_step=query_rows_on_calendar_associated_contents_table",
+        associated_folder_message_count(CALENDAR_FOLDER_ID, snapshot),
+        format_debug_property_tags(columns),
+        format_debug_sort_orders(sort_orders)
+    )
 }
 
 pub(super) fn append_restrict_response(
