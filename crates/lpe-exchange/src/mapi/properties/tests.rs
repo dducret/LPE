@@ -5672,6 +5672,56 @@ fn outlook_appointment_probe_lid_family_maps_to_stable_ids() {
 }
 
 #[test]
+fn outlook_common_probe_lid_family_maps_to_stable_ids() {
+    for lid in [
+        0x8219, 0x822c, 0x822d, 0x8504, 0x8505, 0x853b, 0x853c, 0x854a, 0x8571, 0x8587,
+        0x858a, 0x858d, 0x858f, 0x8595, 0x859a, 0x859d, 0x85a5, 0x85d2, 0x85d3, 0x85d4,
+        0x85d5,
+    ] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Common lid 0x{lid:04x} should not allocate a transient id"
+        );
+        assert!(is_reserved_named_property_id(lid as u16));
+        if (0x8500..=0x85ff).contains(&lid) {
+            assert_eq!(
+                well_known_named_property_for_id(lid as u16),
+                Some(MapiNamedProperty {
+                    guid: PSETID_COMMON_GUID,
+                    kind: MapiNamedPropertyKind::Lid(lid),
+                })
+            );
+        }
+    }
+}
+
+#[test]
+fn outlook_log_probe_lid_family_maps_to_stable_ids() {
+    for lid in [0x8704, 0x8705, 0x870e, 0x870f, 0x8710] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_LOG_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Log lid 0x{lid:04x} should not allocate a transient id"
+        );
+        assert!(is_reserved_named_property_id(lid as u16));
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_LOG_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
+        );
+    }
+}
+
+#[test]
 fn outlook_sharing_probe_lid_family_maps_to_stable_ids() {
     for lid in [
         0x8a20, 0x8a42, 0x8a43, 0x8a44, 0x8a45, 0x8a4b, 0x8a4c, 0x8a4d, 0x8a4e, 0x8a56,
