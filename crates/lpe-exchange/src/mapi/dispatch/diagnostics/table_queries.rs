@@ -1074,6 +1074,7 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
         calendar_view_descriptor_columns,
         calendar_view_descriptor_row_projection,
         inbox_view_descriptor_behavior_contract,
+        default_view_table_compatibility_contract,
     ) = match object {
         Some(MapiObject::ContentsTable {
             folder_id,
@@ -1144,6 +1145,14 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
                     emails,
                     snapshot,
                 ),
+                format_default_view_table_compatibility_contract(
+                    *folder_id,
+                    *associated,
+                    &effective_columns,
+                    sort_orders,
+                    restriction.as_ref(),
+                    snapshot,
+                ),
             )
         }
         _ => (
@@ -1151,6 +1160,7 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
             String::new(),
             0,
             false,
+            String::new(),
             String::new(),
             String::new(),
             String::new(),
@@ -1191,6 +1201,7 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
         calendar_view_descriptor_columns = %calendar_view_descriptor_columns,
         calendar_view_descriptor_row_projection = %calendar_view_descriptor_row_projection,
         inbox_view_descriptor_behavior_contract = %inbox_view_descriptor_behavior_contract,
+        default_view_table_compatibility_contract = %default_view_table_compatibility_contract,
         inbox_associated_config_summary = object
             .and_then(MapiObject::folder_id)
             .map(|folder_id| {

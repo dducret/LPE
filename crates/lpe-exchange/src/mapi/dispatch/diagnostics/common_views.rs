@@ -411,6 +411,59 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     )
 }
 
+pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contract(
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if associated {
+        return String::new();
+    }
+    let Some(message) = debug_advertised_default_named_view(snapshot, folder_id) else {
+        return "default_view=missing".to_string();
+    };
+    let definition = outlook_folder_view_definition(message.folder_id, &message.name);
+    let descriptor = view_descriptor_binary(&definition);
+    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let all_descriptor_columns = view_descriptor_all_property_tags(&descriptor);
+    let descriptor_sort_column = descriptor
+        .get(24..28)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .and_then(|column| usize::try_from(column).ok());
+    let descriptor_sort_tag =
+        descriptor_sort_column.and_then(|index| all_descriptor_columns.get(index).copied());
+    let table_primary_sort_tag = sort_orders.first().map(|sort| sort.property_tag);
+    let descriptor_missing_from_table = missing_debug_property_tags(&descriptor_columns, columns);
+    let table_sort_matches_descriptor = descriptor_sort_tag
+        .zip(table_primary_sort_tag)
+        .is_some_and(|(expected, actual)| expected == actual);
+
+    format!(
+        "folder=0x{folder_id:016x};view_folder=0x{:016x};view=0x{:016x};\
+         view_name={};descriptor_summary={};descriptor_columns_missing_from_table={};\
+         descriptor_sort_tag={};table_primary_sort_tag={};table_sort_matches_descriptor={};\
+         table_sort_count={};table_restriction_present={}",
+        message.folder_id,
+        message.id,
+        message.name,
+        format_view_descriptor_binary_summary(&descriptor),
+        descriptor_missing_from_table,
+        descriptor_sort_tag
+            .map(|tag| format!("0x{tag:08x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        table_primary_sort_tag
+            .map(|tag| format!("0x{tag:08x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        table_sort_matches_descriptor,
+        sort_orders.len(),
+        restriction.is_some()
+    )
+}
+
 pub(in crate::mapi::dispatch) fn warn_outlook_view_handoff_table_invariants(
     principal: &AccountPrincipal,
     request_rop_id: &str,
@@ -569,5 +622,47 @@ mod tests {
         assert!(summary.contains("advertised_default_view_folder_id=0x0000000000090001"));
         assert!(summary.contains("expected_view_message_id=0x7ffffffffff70001"));
         assert!(summary.contains("descriptor_summary=version=8"));
+    }
+
+    #[test]
+    fn default_view_table_compatibility_reports_visible_inbox_contract() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let columns = [
+            PID_TAG_IMPORTANCE,
+            PID_LID_OUTLOOK_COMMON_8514_TAG,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_MESSAGE_STATUS,
+            PID_TAG_HAS_ATTACHMENTS,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+            OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+        ];
+        let sort_orders = [MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 0,
+        }];
+        let restriction = MapiRestriction::Bitmask {
+            property_tag: PID_TAG_MESSAGE_FLAGS,
+            mask: MSGFLAG_READ,
+            must_be_nonzero: false,
+        };
+
+        let summary = format_default_view_table_compatibility_contract(
+            INBOX_FOLDER_ID,
+            false,
+            &columns,
+            &sort_orders,
+            Some(&restriction),
+            &snapshot,
+        );
+
+        assert!(summary.contains("view_folder=0x0000000000090001"));
+        assert!(summary.contains("view_name=Compact"));
+        assert!(summary.contains("descriptor_columns_missing_from_table="));
+        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
+        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
+        assert!(summary.contains("table_sort_matches_descriptor=true"));
+        assert!(summary.contains("table_restriction_present=true"));
     }
 }
