@@ -52,6 +52,7 @@ fn well_known_lid_family_property_id(property: &MapiNamedProperty) -> Option<u16
         {
             Some(property_id)
         }
+        OUTLOOK_VIEW_8F07_GUID if lid == PID_LID_OUTLOOK_APPOINTMENT_8F07 => Some(property_id),
         PSETID_LOG_GUID if (0x8700..=0x87ff).contains(&lid) => Some(property_id),
         PSETID_SHARING_GUID if (0x8a00..=0x8aff).contains(&lid) => Some(property_id),
         PSETID_NOTE_GUID if (0x8b00..=0x8bff).contains(&lid) => Some(property_id),

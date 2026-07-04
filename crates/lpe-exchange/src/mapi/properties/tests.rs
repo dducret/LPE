@@ -5780,6 +5780,13 @@ fn outlook_visible_inbox_probe_named_property_maps_to_stable_id() {
         }),
         Some(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16)
     );
+    assert_eq!(
+        well_known_named_property_id(&MapiNamedProperty {
+            guid: OUTLOOK_VIEW_8F07_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
+        }),
+        Some(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16)
+    );
 }
 
 #[test]
