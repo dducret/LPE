@@ -623,6 +623,33 @@ fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
     );
 }
 
+#[test]
+fn named_property_duplicate_summary_separates_repeats_from_collisions() {
+    let repeated = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("Content-Class".to_string()),
+    };
+    let colliding = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("content-class".to_string()),
+    };
+    let distinct = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_BUSY_STATUS),
+    };
+
+    let (duplicate_requests, duplicate_ids, collisions, collision_summary) =
+        summarize_named_property_id_duplicates(
+            &[repeated.clone(), repeated, colliding, distinct],
+            &[0x801f, 0x801f, 0x801f, 0x8205],
+        );
+
+    assert_eq!(duplicate_requests, 1);
+    assert_eq!(duplicate_ids, 2);
+    assert_eq!(collisions, 1);
+    assert_eq!(collision_summary, "0x801f:2");
+}
+
 fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
     lpe_storage::JmapEmailMailboxState {
         mailbox_id,
@@ -1138,6 +1165,27 @@ fn normal_message_column_support_covers_visible_inbox_probe_columns() {
 
     assert!(summary
         .contains("backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"));
+    assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+}
+
+#[test]
+fn calendar_event_column_support_covers_observed_outlook_view_probe_columns() {
+    let summary = calendar_event_table_column_support_summary(&[
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_STATUS,
+        PID_LID_OUTLOOK_COMMON_8578_TAG,
+        PID_LID_SIDE_EFFECTS_TAG,
+    ]);
+
+    assert!(summary.contains(
+        "backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85780003,0x85100003"
+    ));
     assert!(summary.ends_with("defaulted=;named_or_dynamic="));
 }
 

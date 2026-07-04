@@ -220,6 +220,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         }
     }
     if !request.named_property_create() && property_ids.contains(&0) {
+        let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -237,6 +238,10 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             missing_named_properties = %format_debug_named_properties(&missing_properties),
             returned_property_id_count = property_ids.len(),
             returned_property_ids = %format_debug_property_ids(&property_ids),
+            duplicate_requested_named_property_count = duplicate_summary.0,
+            duplicate_returned_property_id_count = duplicate_summary.1,
+            returned_property_id_collision_count = duplicate_summary.2,
+            returned_property_id_collisions = %duplicate_summary.3,
             rop_return_value = "0x8004010f",
             message = "rca debug mapi get property ids from names",
         );
@@ -247,6 +252,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         ));
         return;
     }
+    let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -264,6 +270,10 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         missing_named_properties = %format_debug_named_properties(&missing_properties),
         returned_property_id_count = property_ids.len(),
         returned_property_ids = %format_debug_property_ids(&property_ids),
+        duplicate_requested_named_property_count = duplicate_summary.0,
+        duplicate_returned_property_id_count = duplicate_summary.1,
+        returned_property_id_collision_count = duplicate_summary.2,
+        returned_property_id_collisions = %duplicate_summary.3,
         message = "rca debug mapi get property ids from names",
     );
     record_post_calendar_query_position_named_property_probe(
@@ -274,6 +284,10 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         properties.len(),
         missing_properties.len(),
         property_ids.len(),
+        duplicate_summary.0,
+        duplicate_summary.1,
+        duplicate_summary.2,
+        &duplicate_summary.3,
     );
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
@@ -307,6 +321,10 @@ fn record_post_calendar_query_position_named_property_probe(
     requested_count: usize,
     missing_count: usize,
     returned_count: usize,
+    duplicate_requested_count: usize,
+    duplicate_returned_id_count: usize,
+    returned_id_collision_count: usize,
+    returned_id_collisions: &str,
 ) {
     if session
         .post_hierarchy_actions
@@ -324,7 +342,7 @@ fn record_post_calendar_query_position_named_property_probe(
         .last_calendar_normal_contents_table_query_position_context
         .clone();
     let context = format!(
-        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};after_calendar_query_position={calendar_query_position_context}",
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};after_calendar_query_position={calendar_query_position_context}",
         request.named_property_create()
     );
     tracing::info!(
@@ -339,11 +357,60 @@ fn record_post_calendar_query_position_named_property_probe(
         requested_named_property_count = requested_count,
         missing_named_property_count = missing_count,
         returned_property_id_count = returned_count,
+        duplicate_requested_named_property_count = duplicate_requested_count,
+        duplicate_returned_property_id_count = duplicate_returned_id_count,
+        returned_property_id_collision_count = returned_id_collision_count,
+        returned_property_id_collisions = returned_id_collisions,
         calendar_query_position_context = %calendar_query_position_context,
         next_debug_focus = "calendar_query_rows_missing_after_named_property_probe",
         "rca debug mapi post calendar query position named property probe"
     );
     session.record_post_calendar_query_position_named_property_probe(context);
+}
+
+pub(super) fn summarize_named_property_id_duplicates(
+    properties: &[MapiNamedProperty],
+    property_ids: &[u16],
+) -> (usize, usize, usize, String) {
+    let mut request_counts = std::collections::HashMap::<String, usize>::new();
+    for property in properties {
+        let key = format_debug_named_properties(std::slice::from_ref(property));
+        *request_counts.entry(key).or_insert(0) += 1;
+    }
+    let duplicate_requested_count = request_counts
+        .values()
+        .map(|count| count.saturating_sub(1))
+        .sum::<usize>();
+
+    let mut id_counts = std::collections::HashMap::<u16, usize>::new();
+    let mut id_to_names =
+        std::collections::HashMap::<u16, std::collections::HashSet<String>>::new();
+    for (property, property_id) in properties.iter().zip(property_ids.iter().copied()) {
+        *id_counts.entry(property_id).or_insert(0) += 1;
+        id_to_names
+            .entry(property_id)
+            .or_default()
+            .insert(format_debug_named_properties(std::slice::from_ref(
+                property,
+            )));
+    }
+    let duplicate_returned_id_count = id_counts
+        .values()
+        .map(|count| count.saturating_sub(1))
+        .sum::<usize>();
+    let mut collisions = id_to_names
+        .into_iter()
+        .filter_map(|(property_id, names)| {
+            (names.len() > 1).then_some(format!("0x{property_id:04x}:{}", names.len()))
+        })
+        .collect::<Vec<_>>();
+    collisions.sort();
+    (
+        duplicate_requested_count,
+        duplicate_returned_id_count,
+        collisions.len(),
+        collisions.join(","),
+    )
 }
 
 pub(super) async fn append_query_named_properties_response<S>(

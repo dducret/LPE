@@ -153,6 +153,10 @@ pub(super) fn associated_contents_table_column_support_summary(columns: &[u32]) 
     table_column_support_summary(columns, associated_contents_table_column_is_backed)
 }
 
+pub(super) fn calendar_event_table_column_support_summary(columns: &[u32]) -> String {
+    table_column_support_summary(columns, calendar_event_table_column_is_backed)
+}
+
 pub(super) fn contents_table_column_support_summary(associated: bool, columns: &[u32]) -> String {
     if associated {
         associated_contents_table_column_support_summary(columns)
@@ -835,6 +839,26 @@ fn table_column_support_summary(columns: &[u32], is_backed: impl Fn(u32) -> bool
     )
 }
 
+fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
+    if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
+        return true;
+    }
+    matches!(
+        storage_tag,
+        PID_TAG_FOLDER_ID
+            | PID_TAG_PARENT_FOLDER_ID
+            | PID_TAG_MID
+            | PID_TAG_INST_ID
+            | PID_TAG_INSTANCE_NUM
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_SUBJECT_W
+            | PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_MESSAGE_STATUS
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_INSTANCE_KEY
+    )
+}
+
 fn associated_contents_table_column_is_backed(storage_tag: u32) -> bool {
     normal_message_table_column_is_backed(storage_tag)
         || matches!(
@@ -1176,14 +1200,26 @@ pub(super) fn append_table_control_response(
                         &descriptor_columns,
                         snapshot,
                     );
+                    let selected_projection = format_calendar_event_query_position_summary(
+                        *folder_id,
+                        *associated,
+                        *position,
+                        1,
+                        sort_orders,
+                        restriction.as_ref(),
+                        columns,
+                        snapshot,
+                    );
                     Some(format!(
-                            "handle={};input_index={};position_before={};columns={};sort={};restriction={};view_descriptor_columns={};view_descriptor_row_projection={}",
+                            "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={};selected_row_projection={};view_descriptor_columns={};view_descriptor_row_projection={}",
                             format_optional_debug_handle(input_handle(handle_slots, request)),
                             request.input_handle_index().unwrap_or(0),
                             position,
                             format_debug_property_tags(columns),
+                            calendar_event_table_column_support_summary(columns),
                             format_debug_sort_orders(sort_orders),
                             format_debug_restriction_option(restriction.as_ref()),
+                            selected_projection,
                             format_debug_property_tags(&descriptor_columns),
                             descriptor_projection
                         ))
