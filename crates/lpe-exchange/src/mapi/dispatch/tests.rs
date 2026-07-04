@@ -655,11 +655,11 @@ fn get_property_ids_from_names_remaps_stale_duplicate_dynamic_mapping() {
 #[test]
 fn named_property_duplicate_summary_separates_repeats_from_collisions() {
     let repeated = MapiNamedProperty {
-        guid: PS_PUBLIC_STRINGS_GUID,
+        guid: PS_INTERNET_HEADERS_GUID,
         kind: MapiNamedPropertyKind::Name("Content-Class".to_string()),
     };
-    let colliding = MapiNamedProperty {
-        guid: PS_PUBLIC_STRINGS_GUID,
+    let normalized_repeat = MapiNamedProperty {
+        guid: PS_INTERNET_HEADERS_GUID,
         kind: MapiNamedPropertyKind::Name("content-class".to_string()),
     };
     let distinct = MapiNamedProperty {
@@ -669,14 +669,39 @@ fn named_property_duplicate_summary_separates_repeats_from_collisions() {
 
     let (duplicate_requests, duplicate_ids, collisions, collision_summary) =
         summarize_named_property_id_duplicates(
-            &[repeated.clone(), repeated, colliding, distinct],
+            &[
+                repeated.clone(),
+                repeated,
+                normalized_repeat,
+                distinct.clone(),
+            ],
             &[0x801f, 0x801f, 0x801f, 0x8205],
         );
 
-    assert_eq!(duplicate_requests, 1);
+    assert_eq!(duplicate_requests, 2);
     assert_eq!(duplicate_ids, 2);
+    assert_eq!(collisions, 0);
+    assert_eq!(collision_summary, "");
+
+    let colliding_first = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("X-LPE-First".to_string()),
+    };
+    let colliding_second = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("X-LPE-Second".to_string()),
+    };
+
+    let (duplicate_requests, duplicate_ids, collisions, collision_summary) =
+        summarize_named_property_id_duplicates(
+            &[colliding_first, colliding_second, distinct],
+            &[0x9001, 0x9001, 0x8205],
+        );
+
+    assert_eq!(duplicate_requests, 0);
+    assert_eq!(duplicate_ids, 1);
     assert_eq!(collisions, 1);
-    assert_eq!(collision_summary, "0x801f:2");
+    assert_eq!(collision_summary, "0x9001:2");
 }
 
 fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {

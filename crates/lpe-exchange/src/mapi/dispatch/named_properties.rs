@@ -386,8 +386,13 @@ pub(super) fn summarize_named_property_id_duplicates(
     properties: &[MapiNamedProperty],
     property_ids: &[u16],
 ) -> (usize, usize, usize, String) {
+    let normalized_properties = properties
+        .iter()
+        .cloned()
+        .map(normalize_named_property)
+        .collect::<Vec<_>>();
     let mut request_counts = std::collections::HashMap::<String, usize>::new();
-    for property in properties {
+    for property in &normalized_properties {
         let key = format_debug_named_properties(std::slice::from_ref(property));
         *request_counts.entry(key).or_insert(0) += 1;
     }
@@ -399,7 +404,10 @@ pub(super) fn summarize_named_property_id_duplicates(
     let mut id_counts = std::collections::HashMap::<u16, usize>::new();
     let mut id_to_names =
         std::collections::HashMap::<u16, std::collections::HashSet<String>>::new();
-    for (property, property_id) in properties.iter().zip(property_ids.iter().copied()) {
+    for (property, property_id) in normalized_properties
+        .iter()
+        .zip(property_ids.iter().copied())
+    {
         *id_counts.entry(property_id).or_insert(0) += 1;
         id_to_names
             .entry(property_id)
