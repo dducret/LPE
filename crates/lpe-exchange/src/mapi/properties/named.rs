@@ -46,7 +46,9 @@ fn well_known_lid_family_property_id(property: &MapiNamedProperty) -> Option<u16
 
     match property.guid {
         PSETID_ADDRESS_GUID if (0x8000..=0x80ff).contains(&lid) => Some(property_id),
+        PSETID_APPOINTMENT_GUID if (0x8200..=0x82ff).contains(&lid) => Some(property_id),
         PSETID_SHARING_GUID if (0x8a00..=0x8aff).contains(&lid) => Some(property_id),
+        PSETID_NOTE_GUID if (0x8b00..=0x8bff).contains(&lid) => Some(property_id),
         _ => None,
     }
 }
@@ -57,8 +59,16 @@ fn well_known_lid_family_property_for_id(property_id: u16) -> Option<MapiNamedPr
             guid: PSETID_ADDRESS_GUID,
             kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
         }),
+        0x8200..=0x82ff => Some(MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
         0x8a00..=0x8aff => Some(MapiNamedProperty {
             guid: PSETID_SHARING_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        0x8b00..=0x8bff => Some(MapiNamedProperty {
+            guid: PSETID_NOTE_GUID,
             kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
         }),
         _ => None,

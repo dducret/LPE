@@ -5645,6 +5645,33 @@ fn outlook_calendar_sharing_probe_named_properties_map_to_stable_ids() {
 }
 
 #[test]
+fn outlook_appointment_probe_lid_family_maps_to_stable_ids() {
+    for lid in [
+        0x8206, 0x8207, 0x820f, 0x8210, 0x8211, 0x8212, 0x8218, 0x8220, 0x8224, 0x8225,
+        0x8226, 0x8227, 0x8228, 0x8229, 0x822b, 0x822e, 0x822f, 0x8230, 0x8231, 0x8250,
+        0x8251, 0x8252, 0x8253, 0x8254, 0x8255, 0x8256, 0x8257, 0x8259, 0x825a, 0x825b,
+        0x8260,
+    ] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Appointment lid 0x{lid:04x} should not allocate a transient id"
+        );
+        assert!(is_reserved_named_property_id(lid as u16));
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
+        );
+    }
+}
+
+#[test]
 fn outlook_sharing_probe_lid_family_maps_to_stable_ids() {
     for lid in [
         0x8a20, 0x8a42, 0x8a43, 0x8a44, 0x8a45, 0x8a4b, 0x8a4c, 0x8a4d, 0x8a4e, 0x8a56,
@@ -5657,6 +5684,28 @@ fn outlook_sharing_probe_lid_family_maps_to_stable_ids() {
             }),
             Some(lid as u16),
             "PSETID_Sharing lid 0x{lid:04x} should not allocate a transient id"
+        );
+    }
+}
+
+#[test]
+fn outlook_note_probe_lid_family_maps_to_stable_ids() {
+    for lid in [0x8b01] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_NOTE_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            Some(lid as u16),
+            "PSETID_Note lid 0x{lid:04x} should not allocate a transient id"
+        );
+        assert!(is_reserved_named_property_id(lid as u16));
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_NOTE_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
         );
     }
 }
