@@ -323,7 +323,8 @@ Protocol adapters store only cursor rows:
   Outlook-specific property values by canonical object identity, property tag,
   and property type. These tables preserve object fidelity; they must not
   become protocol-local mailbox, `Sent`, outbox, search, rights, or AI/search
-  projection state.
+  projection state. Each `(tenant_id, account_id, property_id)` is unique so
+  Outlook never receives one property id for two distinct named properties.
 - `mapi_profile_settings` stores only bounded account-scoped Outlook profile
   settings required for cached-mode reuse. The initial setting is
   `ipm_subtree_ost_id`, the client-written IPM subtree OST identity reloaded

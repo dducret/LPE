@@ -58,8 +58,22 @@ pub(super) fn cache_named_property_mapping_and_return_property_id(
     property_id: u16,
     property: MapiNamedProperty,
 ) -> u16 {
+    let property = normalize_named_property(property);
     if is_reserved_named_property_id(property_id)
         && well_known_named_property_id(&property).is_none()
+    {
+        return session
+            .property_id_for_name(property, true)
+            .unwrap_or(property_id);
+    }
+    let existing_property = session
+        .named_property_ids
+        .get(&property_id)
+        .cloned()
+        .or_else(|| well_known_named_property_for_id(property_id));
+    if existing_property
+        .as_ref()
+        .is_some_and(|existing| existing != &property)
     {
         return session
             .property_id_for_name(property, true)

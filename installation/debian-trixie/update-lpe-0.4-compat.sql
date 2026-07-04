@@ -205,6 +205,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS mapi_object_identities_active_source_key_uidx
     ON public.mapi_object_identities (tenant_id, account_id, source_key)
     WHERE deleted_at IS NULL;
 
+DO $$
+BEGIN
+    IF to_regclass('public.mapi_named_properties') IS NOT NULL THEN
+        WITH duplicate_rows AS (
+            SELECT ctid
+            FROM (
+                SELECT ctid,
+                       row_number() OVER (
+                           PARTITION BY tenant_id, account_id, property_id
+                           ORDER BY created_at, property_guid, property_kind, property_lid NULLS LAST, property_name NULLS LAST
+                       ) AS row_number
+                FROM public.mapi_named_properties
+            ) ranked
+            WHERE row_number > 1
+        )
+        DELETE FROM public.mapi_named_properties properties
+        USING duplicate_rows
+        WHERE properties.ctid = duplicate_rows.ctid;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = 'public.mapi_named_properties'::regclass
+              AND contype = 'p'
+              AND conname = 'mapi_named_properties_pkey'
+        ) THEN
+            ALTER TABLE public.mapi_named_properties
+                ADD CONSTRAINT mapi_named_properties_pkey
+                PRIMARY KEY (tenant_id, account_id, property_id);
+        END IF;
+    END IF;
+END $$;
+
 ALTER TABLE public.accounts
   ADD COLUMN IF NOT EXISTS recoverable_items_retention_days INTEGER NOT NULL DEFAULT 14,
   ADD COLUMN IF NOT EXISTS litigation_hold_enabled BOOLEAN NOT NULL DEFAULT FALSE,

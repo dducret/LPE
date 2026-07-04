@@ -624,6 +624,35 @@ fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
 }
 
 #[test]
+fn get_property_ids_from_names_remaps_stale_duplicate_dynamic_mapping() {
+    let mut session = test_mapi_session();
+    let first = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("X-LPE-First".to_string()),
+    };
+    let second = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("X-LPE-Second".to_string()),
+    };
+
+    session.cache_named_property(0x9001, first.clone());
+    let remapped_id =
+        cache_named_property_mapping_and_return_property_id(&mut session, 0x9001, second.clone());
+
+    assert_ne!(remapped_id, 0x9001);
+    assert_eq!(
+        session.property_id_for_name(first.clone(), false),
+        Some(0x9001)
+    );
+    assert_eq!(session.property_name_for_id(0x9001), first);
+    assert_eq!(
+        session.property_id_for_name(second.clone(), false),
+        Some(remapped_id)
+    );
+    assert_eq!(session.property_name_for_id(remapped_id), second);
+}
+
+#[test]
 fn named_property_duplicate_summary_separates_repeats_from_collisions() {
     let repeated = MapiNamedProperty {
         guid: PS_PUBLIC_STRINGS_GUID,
