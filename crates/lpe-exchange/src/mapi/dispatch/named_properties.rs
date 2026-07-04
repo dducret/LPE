@@ -355,8 +355,33 @@ fn record_post_calendar_query_position_named_property_probe(
         .post_hierarchy_actions
         .last_calendar_normal_contents_table_query_position_context
         .clone();
+    let inbox_normal_contents_table_observed = session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_observed;
+    let inbox_normal_contents_table_setcolumns_observed = session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_setcolumns_observed;
+    let inbox_normal_contents_table_query_rows_observed = session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_query_rows_observed;
+    let last_inbox_normal_contents_table_context = session
+        .post_hierarchy_actions
+        .last_inbox_contents_table_context
+        .clone();
+    let last_inbox_normal_contents_table_setcolumns_context = session
+        .post_hierarchy_actions
+        .last_inbox_normal_contents_table_setcolumns_context
+        .clone();
+    let last_inbox_normal_contents_table_query_position_context = session
+        .post_hierarchy_actions
+        .last_inbox_normal_contents_table_query_position_context
+        .clone();
+    let last_inbox_normal_contents_table_query_rows_context = session
+        .post_hierarchy_actions
+        .last_inbox_normal_contents_table_query_rows_context
+        .clone();
     let context = format!(
-        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};after_calendar_query_position={calendar_query_position_context}",
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
         request.named_property_create()
     );
     tracing::info!(
@@ -375,6 +400,17 @@ fn record_post_calendar_query_position_named_property_probe(
         duplicate_returned_property_id_count = duplicate_returned_id_count,
         returned_property_id_collision_count = returned_id_collision_count,
         returned_property_id_collisions = returned_id_collisions,
+        inbox_normal_contents_table_observed,
+        inbox_normal_contents_table_setcolumns_observed,
+        inbox_normal_contents_table_query_rows_observed,
+        last_inbox_normal_contents_table_context =
+            %last_inbox_normal_contents_table_context,
+        last_inbox_normal_contents_table_setcolumns_context =
+            %last_inbox_normal_contents_table_setcolumns_context,
+        last_inbox_normal_contents_table_query_position_context =
+            %last_inbox_normal_contents_table_query_position_context,
+        last_inbox_normal_contents_table_query_rows_context =
+            %last_inbox_normal_contents_table_query_rows_context,
         calendar_query_position_context = %calendar_query_position_context,
         next_debug_focus = "calendar_query_rows_missing_after_named_property_probe",
         "rca debug mapi post calendar query position named property probe"
