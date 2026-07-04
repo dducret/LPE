@@ -69,6 +69,7 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         response_rop_count = response.count,
         response_handle_count = response.handle_count,
         output_handle_table_summary = %response.handle_table_summary,
+        response_rop_frames = %response.frames,
         response_extended_rop_buffer = response.extended,
         response_rop_parse_error = %response.parse_error,
         last_completed_hierarchy_sync_root = %post_hierarchy.last_completed_hierarchy_sync_root,
@@ -104,6 +105,7 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         logon_parse_error = %logon.parse_error,
         request_rop_buffer_bytes = request_rop_buffer.len(),
         response_rop_buffer_bytes = response_rop_buffer.len(),
+        response_rop_buffer_preview = %hex_preview(response_rop_buffer, 160),
         message = message,
     );
 
