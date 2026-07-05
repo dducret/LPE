@@ -1111,7 +1111,7 @@ fn query_rows_origin_tracks_cursor_boundary() {
         Uuid::nil(),
     );
 
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes(response[7..9].try_into().unwrap()),
         (total_rows - 11) as u16
@@ -1217,7 +1217,7 @@ fn query_rows_origin_uses_global_position_for_windowed_content_tables() {
     );
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
     assert_eq!(table_position(&table), Some(4));
 }
@@ -4201,7 +4201,7 @@ fn common_views_wlink_query_rows_exclude_named_views_without_restriction() {
         u16::from_le_bytes(response[7..9].try_into().unwrap()) as usize,
         navigation_shortcut_count
     );
-    assert_eq!(response[6], 0x02);
+    assert_eq!(response[6], 0x01);
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "Compact").is_none());
 
