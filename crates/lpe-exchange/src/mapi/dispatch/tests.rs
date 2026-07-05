@@ -236,6 +236,28 @@ fn inbox_view_handoff_table_contract_reports_common_views_default_view() {
 }
 
 #[test]
+fn sent_view_handoff_table_contract_reports_common_views_sent_to_default_view() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let contract = format_outlook_view_handoff_table_contract(
+        SENT_FOLDER_ID,
+        true,
+        &default_associated_config_columns(),
+        &snapshot,
+    );
+
+    assert!(contract.contains("folder_local_default_supported=true"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains(&format!(
+        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+    )));
+    assert!(contract.contains(&format!(
+        "expected_view_message_id=0x{:016x}",
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
+    )));
+    assert!(contract.contains("selected_view_name=Sent To"));
+}
+
+#[test]
 fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let prefix_restriction = MapiRestriction::Content {

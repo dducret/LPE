@@ -190,17 +190,17 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
         .collaboration_folder_for_id(folder_id)
         .map(|folder| collaboration_folder_message_class(folder.kind))
         .or_else(|| advertised_special_folder_container_class(folder_id));
-    let uses_common_views = folder_id == COMMON_VIEWS_FOLDER_ID
-        || container_class.is_some_and(|container_class| {
-            default_view_uses_common_views(container_class, folder_id)
-        });
+    let common_views_default_id = container_class
+        .and_then(|container_class| default_common_views_named_view_id(container_class, folder_id));
+    let uses_common_views =
+        folder_id == COMMON_VIEWS_FOLDER_ID || common_views_default_id.is_some();
+    let expected_common_views_id = common_views_default_id
+        .unwrap_or(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID);
     let (view_folder_id, expected_view_message_id, view) = if uses_common_views {
         (
             COMMON_VIEWS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-            snapshot.common_view_named_view_message_for_id(
-                crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-            ),
+            expected_common_views_id,
+            snapshot.common_view_named_view_message_for_id(expected_common_views_id),
         )
     } else {
         (
@@ -255,10 +255,15 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             missing_debug_property_tags(&descriptor_columns, columns)
         })
         .unwrap_or_default();
+    let selected_view_name = view
+        .as_ref()
+        .map(|message| message.name.as_str())
+        .unwrap_or("");
     format!(
         "folder_local_default_supported={folder_local_default_supported};\
          folder_local_default_visible_in_fai_table={folder_local_default_visible_in_fai_table};\
          advertised_default_view_folder_id=0x{view_folder_id:016x};\
+         selected_view_name={selected_view_name};\
          expected_view_message_id=0x{:016x};selected_property_tag_count={};\
          selected_missing_descriptor_columns={selected_missing_descriptor_columns};\
          descriptor_summary={descriptor_summary}",

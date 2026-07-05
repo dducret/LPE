@@ -1126,17 +1126,17 @@ fn getprops_view_response_values_debug_decodes_default_view_entry_id() {
     response.extend_from_slice(&(entry_id.len() as u16).to_le_bytes());
     response.extend_from_slice(&entry_id);
 
-    let debug = get_properties_view_response_values_for_debug(
-        &[PID_TAG_DEFAULT_VIEW_ENTRY_ID],
-        &response,
-    );
+    let debug =
+        get_properties_view_response_values_for_debug(&[PID_TAG_DEFAULT_VIEW_ENTRY_ID], &response);
 
     assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-    assert!(debug.contains(&format!("decoded_folder_id=0x{SENT_FOLDER_ID:016x}")));
-    assert!(debug.contains("decoded_folder_name=sent"));
+    assert!(debug.contains(&format!(
+        "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+    )));
+    assert!(debug.contains("decoded_folder_name=common_views"));
     assert!(debug.contains(&format!(
         "decoded_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
     )));
 }
 

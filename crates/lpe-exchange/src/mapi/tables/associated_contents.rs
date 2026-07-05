@@ -199,10 +199,8 @@ fn default_folder_associated_named_view(
         })?;
     if !default_view_supported_folder(folder_id, container_class) {
         None
-    } else if default_view_uses_common_views(container_class, folder_id) {
-        snapshot.common_view_named_view_message_for_id(
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-        )
+    } else if let Some(view_id) = default_common_views_named_view_id(container_class, folder_id) {
+        snapshot.common_view_named_view_message_for_id(view_id)
     } else {
         snapshot.default_folder_named_view_message(
             folder_id,

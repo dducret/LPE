@@ -84,17 +84,15 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
     folder_id: u64,
     container_class: &str,
 ) -> Option<MapiValue> {
-    let (view_folder_id, view_id) = if default_view_uses_common_views(container_class, folder_id) {
-        (
-            COMMON_VIEWS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-        )
-    } else {
-        (
-            folder_id,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-    };
+    let (view_folder_id, view_id) =
+        if let Some(view_id) = default_common_views_named_view_id(container_class, folder_id) {
+            (COMMON_VIEWS_FOLDER_ID, view_id)
+        } else {
+            (
+                folder_id,
+                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            )
+        };
     crate::mapi::identity::message_entry_id_from_object_ids(mailbox_guid, view_folder_id, view_id)
         .map(MapiValue::Binary)
 }
@@ -103,8 +101,20 @@ pub(in crate::mapi) fn default_view_uses_common_views(
     container_class: &str,
     folder_id: u64,
 ) -> bool {
+    default_common_views_named_view_id(container_class, folder_id).is_some()
+}
+
+pub(in crate::mapi) fn default_common_views_named_view_id(
+    container_class: &str,
+    folder_id: u64,
+) -> Option<u64> {
     (container_class == "IPF.Note" || container_class.starts_with("IPF.Note."))
-        && folder_id == INBOX_FOLDER_ID
+        .then_some(folder_id)
+        .and_then(|folder_id| match folder_id {
+            INBOX_FOLDER_ID => Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID),
+            SENT_FOLDER_ID => Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID),
+            _ => None,
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

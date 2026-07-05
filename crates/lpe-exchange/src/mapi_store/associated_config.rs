@@ -40,7 +40,7 @@ pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
 pub(crate) const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
-pub(super) const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
+pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
 pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE7);

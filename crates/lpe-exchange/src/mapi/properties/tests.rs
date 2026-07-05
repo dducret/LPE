@@ -679,6 +679,30 @@ fn inbox_mailbox_properties_advertise_common_views_default_view() {
 }
 
 #[test]
+fn sent_mailbox_properties_advertise_common_views_sent_to_default_view() {
+    let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
+    let mailbox = mailbox("56565656-5656-4656-9656-565656565657", None, "sent", "Sent");
+    crate::mapi::identity::remember_mapi_identity(mailbox.id, SENT_FOLDER_ID);
+
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    )
+    .unwrap();
+
+    assert_eq!(
+        mailbox_property_value_with_context_for_account(
+            &mailbox,
+            &[],
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+            account_id,
+        ),
+        Some(MapiValue::Binary(expected_entry_id))
+    );
+}
+
+#[test]
 fn mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view() {
     let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
     let mailbox = mailbox(
