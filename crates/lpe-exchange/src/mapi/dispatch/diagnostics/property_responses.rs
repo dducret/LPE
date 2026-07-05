@@ -356,7 +356,9 @@ pub(in crate::mapi::dispatch) fn get_properties_specific_response_values_for_deb
 
 fn get_properties_specific_value_for_debug(tag: u32, value: &MapiValue) -> String {
     let storage_tag = canonical_property_storage_tag(tag);
-    if is_default_folder_identification_property_tag(storage_tag) {
+    if is_default_folder_identification_property_tag(storage_tag)
+        || storage_tag == PID_TAG_DEFAULT_VIEW_ENTRY_ID
+    {
         return default_folder_getprops_value_for_debug(storage_tag, value);
     }
     let decoded = match value {
@@ -396,7 +398,10 @@ fn is_outlook_view_property_tag_for_debug(tag: u32) -> bool {
     )
 }
 
-fn get_properties_view_response_values_for_debug(property_tags: &[u32], response: &[u8]) -> String {
+pub(in crate::mapi::dispatch) fn get_properties_view_response_values_for_debug(
+    property_tags: &[u32],
+    response: &[u8],
+) -> String {
     if response.get(6).copied() != Some(0) {
         return "not-standard-row".to_string();
     }

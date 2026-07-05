@@ -1115,6 +1115,32 @@ fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
 }
 
 #[test]
+fn getprops_view_response_values_debug_decodes_default_view_entry_id() {
+    let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+    let MapiValue::Binary(entry_id) =
+        default_folder_view_entry_id(mailbox_guid, SENT_FOLDER_ID, "IPF.Note").unwrap()
+    else {
+        panic!("default folder view entry id must be binary");
+    };
+    let mut response = vec![0x07, 0x01, 0, 0, 0, 0, 0];
+    response.extend_from_slice(&(entry_id.len() as u16).to_le_bytes());
+    response.extend_from_slice(&entry_id);
+
+    let debug = get_properties_view_response_values_for_debug(
+        &[PID_TAG_DEFAULT_VIEW_ENTRY_ID],
+        &response,
+    );
+
+    assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
+    assert!(debug.contains(&format!("decoded_folder_id=0x{SENT_FOLDER_ID:016x}")));
+    assert!(debug.contains("decoded_folder_name=sent"));
+    assert!(debug.contains(&format!(
+        "decoded_message_id=0x{:016x}",
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+    )));
+}
+
+#[test]
 fn set_property_debug_names_cover_folder_special_properties() {
     assert_eq!(
         set_property_debug_name(PID_TAG_CONTAINER_CLASS_W),
