@@ -251,6 +251,33 @@ pub(super) async fn append_open_table_response<S>(
                 handle,
                 debug_role_for_folder_id(contents_folder_id)
             ));
+            let (_, _, container_class) = debug_open_folder_metadata(contents_folder_id, mailboxes);
+            if !associated && default_view_supported_folder(contents_folder_id, &container_class) {
+                let context = format!(
+                    "request_id={request_id};handle={handle};folder=0x{contents_folder_id:016x};role={};container_class={container_class};row_count={row_count};table_flags=0x{table_flags:02x}",
+                    debug_role_for_folder_id(contents_folder_id)
+                );
+                session.record_outlook_view_failure_trace_event(format!(
+                    "default_view_normal_table_open:{context}"
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x05",
+                    folder_id = format!("0x{contents_folder_id:016x}"),
+                    folder_role = debug_role_for_folder_id(contents_folder_id),
+                    container_class,
+                    output_handle = handle,
+                    row_count,
+                    default_view_normal_table_open = %context,
+                    next_expected_client_step = "set_columns_or_query_rows_on_default_view_contents_table",
+                    "rca debug mapi default view normal contents table opened"
+                );
+            }
             if contents_folder_id == CALENDAR_FOLDER_ID && !associated {
                 session.record_outlook_view_failure_trace_event(format!(
                     "calendar_normal_table_open:request_id={request_id};handle={handle};row_count={row_count};flags=0x{table_flags:02x}"

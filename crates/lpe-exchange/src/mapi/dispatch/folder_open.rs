@@ -216,6 +216,31 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
     );
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     let open_folder_response = rop_open_folder_response(request, is_public_folder_ghosted);
+    if default_view_supported_folder(folder_id, &folder_container_class) {
+        let context = format!(
+            "request_id={request_id};handle={handle};folder=0x{folder_id:016x};role={folder_role};container_class={folder_container_class};content_count={};open_folder_response_bytes={}",
+            inbox_contract_content_count,
+            open_folder_response.len()
+        );
+        session
+            .record_outlook_view_failure_trace_event(format!("default_view_folder_open:{context}"));
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = "0x02",
+            folder_id = format!("0x{folder_id:016x}"),
+            folder_role,
+            container_class = folder_container_class,
+            output_handle = handle,
+            default_view_folder_open = %context,
+            next_expected_client_step = "get_contents_table_or_sync_configure_for_opened_default_view_folder",
+            "rca debug mapi default view folder opened"
+        );
+    }
     if folder_id == INBOX_FOLDER_ID {
         let first_loop_transition = format!(
             "trigger=open_folder;open_probe_before={};folder_type_probe_before={};input_index={};input_handle={};input_kind={};input_folder={};input_context={};output_index={};output_handle={};open_mode=0x{:02x};requested_folder=0x{requested_folder_id:016x};resolved_folder=0x{folder_id:016x};alias_resolved={};recent_before={}",
