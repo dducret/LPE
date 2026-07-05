@@ -198,18 +198,31 @@ pub(super) fn execute_response_handle_table(
     responses: &[u8],
     handle_slots: &[u32],
     output_handles: &[u32],
+    response_handle_indexes: &[u8],
     echo_input_handle_table: bool,
     request_has_release: bool,
 ) -> Vec<u32> {
     if responses.is_empty() && !echo_input_handle_table {
         return Vec::new();
     }
-    response_handle_table_with_released_handle_sentinel(
+    let mut handles = response_handle_table_with_released_handle_sentinel(
         handle_slots,
         output_handles,
         echo_input_handle_table,
         request_has_release && echo_input_handle_table && !responses.is_empty(),
-    )
+    );
+    if !responses.is_empty() {
+        if let Some(max_response_handle_index) = response_handle_indexes.iter().copied().max() {
+            let required_len = usize::from(max_response_handle_index) + 1;
+            if handles.len() > required_len {
+                handles.truncate(required_len);
+            }
+            while handles.len() < required_len {
+                handles.push(u32::MAX);
+            }
+        }
+    }
+    handles
 }
 
 pub(super) fn parse_execute_rop_dispatch_input(
@@ -285,6 +298,7 @@ pub(super) fn finalize_execute_rop_buffer(
     responses: Vec<u8>,
     handle_slots: &[u32],
     output_handles: &[u32],
+    response_handle_indexes: &[u8],
     echo_input_handle_table: bool,
     request_has_release: bool,
     extended: bool,
@@ -293,6 +307,7 @@ pub(super) fn finalize_execute_rop_buffer(
         &responses,
         handle_slots,
         output_handles,
+        response_handle_indexes,
         echo_input_handle_table,
         request_has_release,
     );

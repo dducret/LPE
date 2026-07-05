@@ -759,6 +759,7 @@ where
     let mut cursor = Cursor::new(requests);
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
+    let mut response_handle_indexes = Vec::new();
     let mut response_handle_slots = handle_slots.clone();
     let mut post_hierarchy_release_events = Vec::new();
     let mut same_execute_released_handles = HashSet::new();
@@ -782,6 +783,7 @@ where
         let response_len_before = responses.len();
         if let Some(response) = unknown_property_wire_type_response(principal, &request) {
             responses.extend_from_slice(&response);
+            response_handle_indexes.push(request.response_handle_index());
             response_handle_slots = handle_slots.clone();
             break;
         }
@@ -1146,11 +1148,13 @@ where
             }
             None => {
                 append_unsupported_unknown_dispatch_response(&request, &mut responses);
+                response_handle_indexes.push(request.response_handle_index());
                 response_handle_slots = handle_slots.clone();
                 break;
             }
         }
         if responses.len() != response_len_before {
+            response_handle_indexes.push(request.response_handle_index());
             response_handle_slots = handle_slots.clone();
         }
         record_execute_sync_observations(
@@ -1184,6 +1188,7 @@ where
         responses,
         final_handle_slots,
         &output_handles,
+        &response_handle_indexes,
         echo_input_handle_table,
         request_has_release,
         extended,

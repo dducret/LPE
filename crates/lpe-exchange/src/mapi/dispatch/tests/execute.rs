@@ -70,7 +70,8 @@ fn release_only_execute_batch_is_store_independent() {
 
 #[test]
 fn release_only_execute_response_echoes_input_handle_table() {
-    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], true, true);
+    let response_handles =
+        execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, true);
 
     assert_eq!(response_handles, vec![u32::MAX]);
 }
@@ -81,6 +82,7 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
         &[0x02, 0x01, 0, 0, 0, 0, 0, 0],
         &[u32::MAX, 77],
         &[77],
+        &[1],
         true,
         true,
     );
@@ -90,10 +92,30 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
 
 #[test]
 fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
-    let response_handles =
-        execute_response_handle_table(&[0x12, 0x01, 0, 0, 0, 0, 0], &[25], &[], true, true);
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x01, 0, 0, 0, 0, 0],
+        &[25],
+        &[],
+        &[0],
+        true,
+        true,
+    );
 
     assert_eq!(response_handles, vec![25]);
+}
+
+#[test]
+fn mixed_setcolumns_release_response_trims_snapshot_to_response_handle_index() {
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x00, 0, 0, 0, 0, 0],
+        &[27, 75, 74],
+        &[],
+        &[0],
+        true,
+        true,
+    );
+
+    assert_eq!(response_handles, vec![27]);
 }
 
 #[test]
@@ -102,6 +124,7 @@ fn non_release_echo_response_keeps_output_placeholders() {
         &[0x07, 0x01, 0, 0, 0, 0, 0],
         &[25, u32::MAX],
         &[],
+        &[1],
         true,
         false,
     );
