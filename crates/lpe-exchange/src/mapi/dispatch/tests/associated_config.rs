@@ -830,7 +830,7 @@ fn common_views_query_row_values_report_selected_wlink_columns() {
 }
 
 #[test]
-fn common_views_diagnostics_project_navigation_shortcuts_like_wire_rows() {
+fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = default_navigation_shortcut_property_tags();
@@ -860,9 +860,10 @@ fn common_views_diagnostics_project_navigation_shortcuts_like_wire_rows() {
         &snapshot,
     );
 
-    assert!(window.contains("total=4"), "{window}");
-    assert!(!window.contains("FolderDesign.NamedView"), "{window}");
-    assert!(!values.contains("FolderDesign.NamedView"), "{values}");
+    assert!(window.contains("total=6"), "{window}");
+    assert!(window.contains("FolderDesign.NamedView"), "{window}");
+    assert!(window.contains("Sent To"), "{window}");
+    assert!(values.contains("FolderDesign.NamedView"), "{values}");
 }
 
 #[test]

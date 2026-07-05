@@ -365,7 +365,7 @@ pub(super) fn format_common_views_query_row_window(
     row_count: usize,
     sort_orders: &[MapiSortOrder],
     restriction: Option<&MapiRestriction>,
-    columns: &[u32],
+    _columns: &[u32],
     account_id: Uuid,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
@@ -373,14 +373,6 @@ pub(super) fn format_common_views_query_row_window(
     rows.retain(|message| {
         restriction_matches_common_views_message(restriction, message, account_id)
     });
-    if is_unrestricted_common_views_navigation_projection(columns, &restriction.cloned()) {
-        rows.retain(|message| {
-            matches!(
-                message,
-                crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(_)
-            )
-        });
-    }
     sort_common_views_messages(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
@@ -444,14 +436,6 @@ pub(super) fn format_outlook_query_row_values(
         rows.retain(|message| {
             restriction_matches_common_views_message(restriction, message, account_id)
         });
-        if is_unrestricted_common_views_navigation_projection(columns, &restriction.cloned()) {
-            rows.retain(|message| {
-                matches!(
-                    message,
-                    crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(_)
-                )
-            });
-        }
         sort_common_views_messages(&mut rows, sort_orders);
         return select_query_window(rows.len(), position, forward_read, row_count)
             .iter()
