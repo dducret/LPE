@@ -182,12 +182,23 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     }
     let requested_named_properties = format_debug_named_properties(&properties);
     let mut property_ids = Vec::with_capacity(properties.len());
+    let mut property_id_sources = Vec::with_capacity(properties.len());
     let mut missing = Vec::new();
     for (index, property) in properties.iter().cloned().enumerate() {
-        match session.property_id_for_name(property.clone(), false) {
-            Some(property_id) => property_ids.push(property_id),
+        let normalized = normalize_named_property(property.clone());
+        let well_known = well_known_named_property_id(&normalized);
+        match session.property_id_for_name(normalized, false) {
+            Some(property_id) => {
+                property_ids.push(property_id);
+                property_id_sources.push(if well_known == Some(property_id) {
+                    "well_known"
+                } else {
+                    "session_cached"
+                });
+            }
             None => {
                 property_ids.push(0);
+                property_id_sources.push("missing");
                 missing.push((index, property));
             }
         }
@@ -196,11 +207,48 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         .iter()
         .map(|(_index, property)| property.clone())
         .collect::<Vec<_>>();
+    let post_calendar_query_position_probe = !session
+        .post_hierarchy_actions
+        .last_calendar_normal_contents_table_query_position_context
+        .is_empty()
+        && !session
+            .post_hierarchy_actions
+            .calendar_normal_contents_table_query_rows_observed;
+    if post_calendar_query_position_probe && !missing.is_empty() {
+        if let Ok(mappings) = store
+            .fetch_mapi_named_properties(principal.account_id, None)
+            .await
+        {
+            let db_mapping_by_property = mappings
+                .into_iter()
+                .map(|mapping| {
+                    (
+                        normalize_named_property(mapping.property),
+                        mapping.property_id,
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>();
+            missing.retain(|(index, property)| {
+                let normalized = normalize_named_property(property.clone());
+                let Some(property_id) = db_mapping_by_property.get(&normalized).copied() else {
+                    return true;
+                };
+                session.cache_named_property(property_id, normalized);
+                property_ids[*index] = property_id;
+                property_id_sources[*index] = "db_existing";
+                false
+            });
+        }
+    }
     if !missing.is_empty() {
+        let allocatable_properties = missing
+            .iter()
+            .map(|(_index, property)| property.clone())
+            .collect::<Vec<_>>();
         match store
             .fetch_or_allocate_mapi_named_property_ids(
                 principal.account_id,
-                &missing_properties,
+                &allocatable_properties,
                 request.named_property_create(),
             )
             .await
@@ -220,6 +268,15 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
                             session.property_id_for_name(property, request.named_property_create())
                         });
                     property_ids[index] = property_id.unwrap_or(0);
+                    property_id_sources[index] = if property_id.is_some() {
+                        if post_calendar_query_position_probe {
+                            "newly_allocated"
+                        } else {
+                            "store_existing_or_allocated"
+                        }
+                    } else {
+                        "unresolved"
+                    };
                 }
             }
             Err(_) if request.named_property_create() => {
@@ -267,6 +324,10 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         return;
     }
     let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
+    let property_id_source_summary = format_named_property_id_sources(&property_id_sources);
+    let property_id_mapping_summary =
+        format_named_property_resolution_mappings(&properties, &property_ids, &property_id_sources);
+    let named_property_response = rop_get_property_ids_from_names_response(request, &property_ids);
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -284,6 +345,9 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         missing_named_properties = %format_debug_named_properties(&missing_properties),
         returned_property_id_count = property_ids.len(),
         returned_property_ids = %format_debug_property_ids(&property_ids),
+        returned_property_id_sources = %property_id_source_summary,
+        returned_named_property_mappings = %property_id_mapping_summary,
+        response_rop_payload_bytes = named_property_response.len(),
         duplicate_requested_named_property_count = duplicate_summary.0,
         duplicate_returned_property_id_count = duplicate_summary.1,
         returned_property_id_collision_count = duplicate_summary.2,
@@ -303,6 +367,9 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         duplicate_summary.2,
         &duplicate_summary.3,
         &missing_properties,
+        &property_id_source_summary,
+        &property_id_mapping_summary,
+        named_property_response.len(),
     );
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
@@ -322,10 +389,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             format_debug_property_ids(&property_ids)
         ));
     }
-    responses.extend_from_slice(&rop_get_property_ids_from_names_response(
-        request,
-        &property_ids,
-    ));
+    responses.extend_from_slice(&named_property_response);
 }
 
 fn record_post_calendar_query_position_named_property_probe(
@@ -341,6 +405,9 @@ fn record_post_calendar_query_position_named_property_probe(
     returned_id_collision_count: usize,
     returned_id_collisions: &str,
     missing_properties: &[MapiNamedProperty],
+    property_id_source_summary: &str,
+    property_id_mapping_summary: &str,
+    response_rop_payload_bytes: usize,
 ) {
     if session
         .post_hierarchy_actions
@@ -387,9 +454,11 @@ fn record_post_calendar_query_position_named_property_probe(
         crate::mapi::transport::visible_inbox_release_without_query_rows_observed(
             &session.post_hierarchy_actions,
         );
+    let input_handle_table_summary = format_debug_handle_table(handle_slots);
+    let live_handle_summaries = format_live_handle_debug_summary(session);
     let next_debug_focus = "calendar_query_rows_missing_after_named_property_probe";
     let context = format!(
-        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};missing_sample={missing_named_property_sample};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};visible_inbox_release_without_query_rows={visible_inbox_release_without_query_rows};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};missing_sample={missing_named_property_sample};returned={returned_count};property_id_sources={property_id_source_summary};response_rop_payload_bytes={response_rop_payload_bytes};input_handle_table={input_handle_table_summary};live_handles={live_handle_summaries};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};visible_inbox_release_without_query_rows={visible_inbox_release_without_query_rows};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
         request.named_property_create()
     );
     tracing::info!(
@@ -405,6 +474,11 @@ fn record_post_calendar_query_position_named_property_probe(
         missing_named_property_count = missing_count,
         missing_named_property_sample = %missing_named_property_sample,
         returned_property_id_count = returned_count,
+        returned_property_id_sources = %property_id_source_summary,
+        returned_named_property_mappings = %property_id_mapping_summary,
+        response_rop_payload_bytes,
+        input_handle_table_summary = %input_handle_table_summary,
+        live_handle_summaries = %live_handle_summaries,
         duplicate_requested_named_property_count = duplicate_requested_count,
         duplicate_returned_property_id_count = duplicate_returned_id_count,
         returned_property_id_collision_count = returned_id_collision_count,
@@ -426,6 +500,47 @@ fn record_post_calendar_query_position_named_property_probe(
         "rca debug mapi post calendar query position named property probe"
     );
     session.record_post_calendar_query_position_named_property_probe(context);
+}
+
+fn format_named_property_id_sources(sources: &[&str]) -> String {
+    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    for source in sources {
+        *counts.entry(*source).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(source, count)| format!("{source}={count}"))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+fn format_named_property_resolution_mappings(
+    properties: &[MapiNamedProperty],
+    property_ids: &[u16],
+    sources: &[&str],
+) -> String {
+    properties
+        .iter()
+        .zip(property_ids.iter().copied())
+        .zip(sources.iter().copied())
+        .enumerate()
+        .map(|(index, ((property, property_id), source))| {
+            format!(
+                "{index}:0x{property_id:04x}:{source}:{}",
+                format_debug_named_properties(std::slice::from_ref(property))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn format_debug_handle_table(handle_slots: &[u32]) -> String {
+    let handles = handle_slots
+        .iter()
+        .map(|handle| format!("{handle:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("count={};handles={handles}", handle_slots.len())
 }
 
 pub(super) fn format_debug_named_property_sample(
