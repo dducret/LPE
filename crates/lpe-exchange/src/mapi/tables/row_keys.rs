@@ -156,6 +156,9 @@ pub(in crate::mapi) fn table_row_keys(
                 sort_recoverable_items(&mut rows, sort_orders);
                 return rows.into_iter().map(|item| item.id).collect();
             }
+            if normal_contents_suppressed_for_associated_only_folder(*folder_id) {
+                return Vec::new();
+            }
             let window_emails = if is_top_level_count_restriction(restriction.as_ref()) {
                 None
             } else {

@@ -680,6 +680,110 @@ fn quick_step_settings_is_projected_as_leaf_configuration_folder() {
 }
 
 #[test]
+fn quick_step_settings_normal_contents_stays_empty_when_folder_row_has_count() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let quick_step = JmapMailbox {
+        id: Uuid::from_u128(0x71756963_6b73_7465_8000_000000000001),
+        parent_id: None,
+        role: "quick_step_settings".to_string(),
+        name: "Quick Step Settings".to_string(),
+        sort_order: 175,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let mailboxes = [quick_step];
+
+    assert_eq!(
+        folder_message_count(QUICK_STEP_SETTINGS_FOLDER_ID, &mailboxes, &[], &snapshot),
+        0
+    );
+    assert!(associated_folder_message_count(QUICK_STEP_SETTINGS_FOLDER_ID, &snapshot) > 0);
+}
+
+#[test]
+fn conversation_action_settings_normal_contents_stays_empty_when_folder_row_has_count() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let conversation_actions = JmapMailbox {
+        id: Uuid::from_u128(0x636f6e76_6163_746e_8000_000000000001),
+        parent_id: None,
+        role: "conversation_action_settings".to_string(),
+        name: "Conversation Action Settings".to_string(),
+        sort_order: 170,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let mailboxes = [conversation_actions];
+
+    assert_eq!(
+        folder_message_count(
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            &mailboxes,
+            &[],
+            &snapshot
+        ),
+        0
+    );
+}
+
+#[test]
+fn quick_step_settings_normal_query_rows_returns_end_without_rows() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let quick_step = JmapMailbox {
+        id: Uuid::from_u128(0x71756963_6b73_7465_8000_000000000002),
+        parent_id: None,
+        role: "quick_step_settings".to_string(),
+        name: "Quick Step Settings".to_string(),
+        sort_order: 175,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let mailboxes = [quick_step];
+    let mut table = MapiObject::ContentsTable {
+        folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+        associated: false,
+        columns: vec![PID_TAG_SUBJECT_W],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let request = RopRequest {
+        rop_id: RopId::QueryRows.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: vec![0, 1, 40, 0],
+    };
+
+    let response = rop_query_rows_response(
+        &request,
+        Some(&mut table),
+        &mailboxes,
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(response[0], RopId::QueryRows.as_u8());
+    assert_eq!(response[6], 0x02);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+    assert_eq!(table_position(&table), Some(0));
+}
+
+#[test]
 fn configuration_folders_project_hidden_attribute() {
     assert_eq!(
         special_folder_property_value(

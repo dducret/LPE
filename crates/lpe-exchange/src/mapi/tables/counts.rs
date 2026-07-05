@@ -34,6 +34,9 @@ pub(in crate::mapi) fn folder_message_count(
     if folder_id == CONVERSATION_MEMBERS_CONTENTS_TABLE_ID {
         return emails.len().min(u32::MAX as usize) as u32;
     }
+    if normal_contents_suppressed_for_associated_only_folder(folder_id) {
+        return 0;
+    }
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return match folder.kind {
             MapiCollaborationFolderKind::Contacts => snapshot
@@ -90,6 +93,15 @@ pub(in crate::mapi) fn folder_message_count(
     folder_row_for_id(folder_id, mailboxes)
         .map(|mailbox| mailbox.total_emails)
         .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len() as u32)
+}
+
+pub(in crate::mapi) fn normal_contents_suppressed_for_associated_only_folder(
+    folder_id: u64,
+) -> bool {
+    matches!(
+        folder_id,
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
+    )
 }
 
 pub(super) fn is_contact_contents_folder(folder_id: u64) -> bool {
@@ -223,7 +235,11 @@ pub(in crate::mapi) fn table_position_and_count(
             collapsed_categories,
             ..
         }) => {
-            let total = if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+            let total = if !*associated
+                && normal_contents_suppressed_for_associated_only_folder(*folder_id)
+            {
+                0
+            } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
                 restricted_associated_folder_message_count(
                     *folder_id,
                     snapshot,

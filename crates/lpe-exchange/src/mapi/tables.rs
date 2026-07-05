@@ -484,6 +484,8 @@ pub(in crate::mapi) fn rop_find_row_response(
                     }
                     return rop_find_row_no_match_response(request);
                 }
+            } else if normal_contents_suppressed_for_associated_only_folder(*folder_id) {
+                return rop_find_row_no_match_response(request);
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows =
                     calendar_content_rows(snapshot, *folder_id, table_restriction.as_ref());

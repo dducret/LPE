@@ -237,6 +237,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 } else {
                     Vec::new()
                 }
+            } else if normal_contents_suppressed_for_associated_only_folder(*folder_id) {
+                Vec::new()
             } else if snapshot.public_folder_for_id(*folder_id).is_some() {
                 let mut rows = snapshot.public_folder_items_for_folder(*folder_id);
                 retain_rows_by_restriction(&mut rows, restriction.as_ref(), |item, restriction| {
