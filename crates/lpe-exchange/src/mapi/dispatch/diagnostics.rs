@@ -986,6 +986,14 @@ pub(super) fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option
     }
     if request_rop_ids
         .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x12))
+        && request_rop_ids.contains(&0x12)
+        && request_rop_ids.contains(&0x01)
+    {
+        return Some("setcolumns_release_batch");
+    }
+    if request_rop_ids
+        .iter()
         .all(|rop_id| matches!(*rop_id, 0x01 | 0x07))
         && request_rop_ids.contains(&0x07)
     {

@@ -392,11 +392,8 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
-    let selected_missing_descriptor_columns = if columns.len() >= descriptor_columns.len() {
-        missing_debug_property_tags(&descriptor_columns, columns)
-    } else {
-        String::new()
-    };
+    let selected_missing_descriptor_columns =
+        missing_debug_property_tags(&descriptor_columns, columns);
 
     format!(
         "phase=setcolumns;default_view_id=0x{:016x};view_name={};\

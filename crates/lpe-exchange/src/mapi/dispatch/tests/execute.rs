@@ -825,6 +825,10 @@ fn execute_response_framing_context_includes_bootstrap_getprops_batches() {
         Some("contents_table_batch")
     );
     assert_eq!(
+        execute_response_framing_context(&[0x12, 0x01, 0x01, 0x01]),
+        Some("setcolumns_release_batch")
+    );
+    assert_eq!(
         execute_response_framing_context(&[0x01, 0x02, 0x07]),
         Some("openfolder_getprops_probe")
     );
