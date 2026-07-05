@@ -312,6 +312,14 @@ pub(in crate::mapi) fn serialize_advertised_special_folder_row_with_mailbox_guid
                     None => write_property_default(&mut row, *column),
                 }
             }
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID
+                if default_view_supported_folder(folder_id, message_class) =>
+            {
+                match default_folder_view_entry_id(mailbox_guid, folder_id, message_class) {
+                    Some(value) => write_mapi_value(&mut row, *column, &value),
+                    None => write_property_default(&mut row, *column),
+                }
+            }
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_LOCAL_COMMIT_TIME_MAX

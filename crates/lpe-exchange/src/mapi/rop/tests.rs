@@ -3043,7 +3043,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         payload: default_view_payload,
     };
 
-    assert!(!fallback_default_specific_property(
+    assert!(fallback_default_specific_property(
         Some(&ipm_subtree),
         &principal,
         &[],
@@ -3061,8 +3061,41 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
-    assert_eq!(&response[7..], &[0x00, 0x00]);
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+    assert_eq!(response[7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(response[8..12].try_into().unwrap()),
+        ROP_ERROR_NOT_FOUND
+    );
+
+    let quick_step_settings = MapiObject::Folder {
+        folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+    assert!(fallback_default_specific_property(
+        Some(&quick_step_settings),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+    ));
+
+    let response = rop_get_properties_specific_response(
+        &default_view_request,
+        Some(&quick_step_settings),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+    assert_eq!(response[7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(response[8..12].try_into().unwrap()),
+        ROP_ERROR_NOT_FOUND
+    );
 }
 
 #[test]
@@ -3186,7 +3219,6 @@ fn folder_view_empty_defaults_are_modeled_not_fallback() {
         PID_TAG_FOLDER_XVIEWINFO_E,
         PID_TAG_FOLDER_VIEWS_ONLY,
         PID_TAG_DEFAULT_FORM_NAME_W,
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
         PID_TAG_FOLDER_FORM_STORAGE,
         PID_TAG_ACL_MEMBER_NAME_W,
         0x6672_0102,
@@ -3197,6 +3229,11 @@ fn folder_view_empty_defaults_are_modeled_not_fallback() {
             property_tag
         ));
     }
+
+    assert!(!modeled_zero_or_default_property(
+        Some(&folder),
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID
+    ));
 }
 
 #[test]

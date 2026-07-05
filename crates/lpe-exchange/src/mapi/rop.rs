@@ -649,6 +649,11 @@ fn fallback_default_specific_property(
     let encoded = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
     let mut default_value = Vec::new();
     write_property_default(&mut default_value, tag);
+    if encoded == default_value
+        && canonical_property_storage_tag(tag) == PID_TAG_DEFAULT_VIEW_ENTRY_ID
+    {
+        return true;
+    }
     encoded == default_value
         && !modeled_zero_or_default_property(object, tag)
         && !associated_config_modeled_property(object, principal, snapshot, tag)
@@ -915,7 +920,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
-                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_STORAGE
                         | PID_TAG_FOLDER_VIEWLIST_FLAGS
                 )
@@ -942,7 +946,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
-                        | PID_TAG_DEFAULT_VIEW_ENTRY_ID
                         | PID_TAG_FOLDER_FORM_STORAGE
                         | PID_TAG_FOLDER_VIEWLIST_FLAGS
                 )
