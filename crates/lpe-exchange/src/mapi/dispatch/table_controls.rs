@@ -821,6 +821,37 @@ pub(super) fn append_query_rows_response(
         )),
         _ => None,
     };
+    let default_view_normal_query_rows_context = match query_object {
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            columns,
+            position,
+            restriction,
+            sort_orders,
+            ..
+        }) if !*associated => {
+            let (_, _, container_class) = debug_open_folder_metadata(*folder_id, mailboxes);
+            default_view_supported_folder(*folder_id, &container_class).then(|| {
+                (
+                    input_handle_value,
+                    format!(
+                        "handle={};input_index={};folder=0x{folder_id:016x};role={};container_class={container_class};position={};requested_forward_read={};requested_row_count={};columns={};sort={};restriction={}",
+                        format_optional_debug_handle(input_handle_value),
+                        request.input_handle_index().unwrap_or(0),
+                        debug_role_for_folder_id(*folder_id),
+                        position,
+                        request.query_forward_read(),
+                        request.query_row_count().unwrap_or(0),
+                        format_debug_property_tags(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref())
+                    ),
+                )
+            })
+        }
+        _ => None,
+    };
     let bootstrap_query_phase = outlook_bootstrap_query_rows_phase(query_object);
     let bootstrap_row_invariants = outlook_bootstrap_row_invariant_summaries(
         query_object,
@@ -1175,6 +1206,25 @@ pub(super) fn append_query_rows_response(
             input_handle_value = %format_optional_debug_handle(handle),
             query_rows_context = %context,
             "rca debug mapi calendar query rows tracked"
+        );
+    }
+    if let Some((handle, context)) = default_view_normal_query_rows_context {
+        session.record_default_view_normal_contents_table_query_rows(handle, context.clone());
+        session.record_outlook_view_failure_trace_event(format!(
+            "default_view_normal_query_rows:{context}"
+        ));
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = %request_id,
+            request_rop_id = "0x15",
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            input_handle_value = %format_optional_debug_handle(handle),
+            query_rows_context = %context,
+            "rca debug mapi default view normal query rows tracked"
         );
     }
 }

@@ -1022,6 +1022,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .calendar_normal_contents_table_query_rows_observed,
+            default_view_normal_query_rows_observed =
+                session
+                    .post_hierarchy_actions
+                    .default_view_normal_contents_table_query_rows_observed,
             last_calendar_normal_query_position_context =
                 %debug_context_or_none(
                     &session
@@ -1032,6 +1036,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 %session
                     .post_hierarchy_actions
                     .last_calendar_normal_contents_table_query_position_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            last_default_view_normal_query_rows_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_default_view_normal_contents_table_query_rows_context
+                ),
+            last_default_view_normal_query_rows_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_default_view_normal_contents_table_query_rows_handle
                     .map(|handle| handle.to_string())
                     .unwrap_or_else(|| "none".to_string()),
             post_calendar_query_position_named_property_probe_count =

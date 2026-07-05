@@ -639,6 +639,31 @@ fn post_hierarchy_close_kind_classifies_calendar_named_property_burst_without_qu
 }
 
 #[test]
+fn records_default_view_normal_query_rows_without_marking_inbox_complete() {
+    let mut session = test_session(HashMap::new());
+
+    session.record_default_view_normal_contents_table_query_rows(
+        Some(42),
+        "folder=0x0000000000070001;role=sent;response_row_count=2".to_string(),
+    );
+
+    assert!(
+        session
+            .post_hierarchy_actions
+            .default_view_normal_contents_table_query_rows_observed
+    );
+    assert_eq!(
+        session
+            .post_hierarchy_actions
+            .last_default_view_normal_contents_table_query_rows_handle,
+        Some(42)
+    );
+    assert!(!session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_query_rows_observed);
+}
+
+#[test]
 fn post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard() {
     let mut session = test_session(HashMap::new());
     session.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;

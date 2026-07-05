@@ -216,6 +216,19 @@ impl MapiSession {
             .last_calendar_normal_contents_table_query_rows_context = context;
     }
 
+    pub(in crate::mapi) fn record_default_view_normal_contents_table_query_rows(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .default_view_normal_contents_table_query_rows_observed = true;
+        self.post_hierarchy_actions
+            .last_default_view_normal_contents_table_query_rows_handle = handle;
+        self.post_hierarchy_actions
+            .last_default_view_normal_contents_table_query_rows_context = context;
+    }
+
     pub(in crate::mapi) fn record_post_calendar_query_position_named_property_probe(
         &mut self,
         context: String,
