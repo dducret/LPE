@@ -1310,7 +1310,7 @@ fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts()
 }
 
 #[test]
-fn contents_table_open_row_count_projects_common_views_navigation_shortcuts() {
+fn contents_table_open_row_count_projects_common_views_full_table() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     assert_eq!(
@@ -1319,7 +1319,7 @@ fn contents_table_open_row_count_projects_common_views_navigation_shortcuts() {
     );
     assert_eq!(
         contents_table_open_row_count(COMMON_VIEWS_FOLDER_ID, true, &[], &[], &snapshot,),
-        4
+        6
     );
 }
 
