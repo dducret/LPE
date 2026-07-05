@@ -179,7 +179,7 @@ fn format_view_handoff_invariant_warnings(
 
 pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     folder_id: u64,
-    associated: bool,
+    _associated: bool,
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
@@ -246,17 +246,15 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             format_view_descriptor_binary_summary(&descriptor)
         })
         .unwrap_or_default();
-    let selected_missing_descriptor_columns = if associated {
-        view.as_ref().map(|message| {
+    let selected_missing_descriptor_columns = view
+        .as_ref()
+        .map(|message| {
             let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             let descriptor = view_descriptor_binary(&definition);
             let descriptor_columns = view_descriptor_property_tags(&descriptor);
             missing_debug_property_tags(&descriptor_columns, columns)
         })
-    } else {
-        None
-    }
-    .unwrap_or_default();
+        .unwrap_or_default();
     format!(
         "folder_local_default_supported={folder_local_default_supported};\
          folder_local_default_visible_in_fai_table={folder_local_default_visible_in_fai_table};\

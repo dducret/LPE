@@ -212,6 +212,47 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
     }
 
     if endpoint == "emsmdb"
+        && request.full_ids.contains(&RopId::SetColumns.as_u8())
+        && request.full_ids.contains(&RopId::Release.as_u8())
+    {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            response_framing_context = "setcolumns_release_batch",
+            request_full_rop_ids = %rop_ids_csv(&request.full_ids),
+            request_full_rop_names = %rop_names_csv(&request.full_ids),
+            request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
+            request_non_release_rops = %request.non_release_rops,
+            request_rop_raw_frame_count = request.raw_frame_count,
+            request_rop_raw_frames = %request.raw_frames,
+            response_rop_ids = %response.ids_csv,
+            response_rop_names = %response.names_csv,
+            response_rop_results_best_effort = %response.results_csv,
+            response_rop_buffer_layout = %response.buffer_layout,
+            response_rop_buffer_size_word = %response.buffer_size_word,
+            response_rop_payload_bytes = response.response_payload_bytes,
+            response_handle_table_bytes = response.handle_table_bytes,
+            response_handle_count = response.handle_count,
+            output_handle_table_summary = %response.handle_table_summary,
+            response_rop_frame_count = response.count,
+            response_rop_frames = %response.frames,
+            response_rop_parse_error = %response.parse_error,
+            "rca debug mapi setcolumns release response framing"
+        );
+    }
+
+    if endpoint == "emsmdb"
         && request.all_release
         && request.total_count != 0
         && response.count == 0
