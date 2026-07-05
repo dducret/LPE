@@ -4148,7 +4148,7 @@ fn common_views_query_rows_uses_account_bound_wlink_entry_ids() {
 }
 
 #[test]
-fn common_views_wlink_query_rows_exclude_named_views_without_restriction() {
+fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = common_views_sort_snapshot(account_id);
     let mut table = MapiObject::ContentsTable {
@@ -4187,11 +4187,8 @@ fn common_views_wlink_query_rows_exclude_named_views_without_restriction() {
 
     let (_, projected_total) =
         table_position_and_count(Some(&table), &[], &[], &snapshot, account_id);
-    let navigation_shortcut_count = snapshot
-        .common_views_table_messages()
-        .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
-        .count();
-    assert_eq!(projected_total, navigation_shortcut_count);
+    let full_common_views_count = snapshot.common_views_table_messages().count();
+    assert_eq!(projected_total, full_common_views_count);
 
     let response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
@@ -4199,11 +4196,11 @@ fn common_views_wlink_query_rows_exclude_named_views_without_restriction() {
     assert_response_contains_utf16(&response, "Alpha");
     assert_eq!(
         u16::from_le_bytes(response[7..9].try_into().unwrap()) as usize,
-        navigation_shortcut_count
+        full_common_views_count
     );
     assert_eq!(response[6], 0x01);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
-    assert!(utf16_position(&response, "Compact").is_none());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "Compact").is_some());
 
     let end_response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);

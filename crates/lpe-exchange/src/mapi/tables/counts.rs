@@ -215,7 +215,6 @@ pub(in crate::mapi) fn table_position_and_count(
         Some(MapiObject::ContentsTable {
             folder_id,
             associated,
-            columns,
             position,
             restriction,
             sort_orders,
@@ -224,17 +223,7 @@ pub(in crate::mapi) fn table_position_and_count(
             collapsed_categories,
             ..
         }) => {
-            let total = if *associated
-                && *folder_id == COMMON_VIEWS_FOLDER_ID
-                && is_unrestricted_common_views_navigation_projection(columns, restriction)
-            {
-                snapshot
-                    .common_views_table_messages()
-                    .filter(|message| {
-                        matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
-                    })
-                    .count()
-            } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+            let total = if *folder_id == FREEBUSY_DATA_FOLDER_ID {
                 restricted_associated_folder_message_count(
                     *folder_id,
                     snapshot,

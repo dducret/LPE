@@ -189,11 +189,6 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             mailbox_guid,
                         )
                     });
-                    if navigation_projection {
-                        rows.retain(|message| {
-                            matches!(message, MapiCommonViewsMessage::NavigationShortcut(_))
-                        });
-                    }
                     sort_common_views_messages(&mut rows, sort_orders);
                     total_row_count = rows.len();
                     rows.iter()
