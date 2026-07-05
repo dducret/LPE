@@ -89,16 +89,11 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
 }
 
 #[test]
-fn mixed_release_execute_response_uses_exchange_invalid_released_handle() {
-    let response_handles = execute_response_handle_table(
-        &[0x12, 0x01, 0, 0, 0, 0, 0],
-        &[25, u32::MAX, u32::MAX, u32::MAX],
-        &[],
-        true,
-        true,
-    );
+fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
+    let response_handles =
+        execute_response_handle_table(&[0x12, 0x01, 0, 0, 0, 0, 0], &[25], &[], true, true);
 
-    assert_eq!(response_handles, vec![25, 0, 0, 0]);
+    assert_eq!(response_handles, vec![25]);
 }
 
 #[test]
