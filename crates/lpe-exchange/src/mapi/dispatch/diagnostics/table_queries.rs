@@ -1041,6 +1041,7 @@ pub(in crate::mapi::dispatch) fn log_outlook_hierarchy_table_query_rows_response
 
 pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
     principal: &AccountPrincipal,
+    session: &MapiSession,
     request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -1212,6 +1213,7 @@ pub(in crate::mapi::dispatch) fn log_mapi_query_position_debug(
                 )
             })
             .unwrap_or_default(),
+        default_view_advertisement_state = %session.default_view_advertisement_state(),
         "rca debug mapi query position"
     );
 }

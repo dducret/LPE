@@ -258,6 +258,37 @@ fn sent_view_handoff_table_contract_reports_common_views_sent_to_default_view() 
 }
 
 #[test]
+fn default_view_advertisement_state_marks_matching_open() {
+    let mut session = test_mapi_session();
+
+    session.record_default_view_advertised(
+        "request:143",
+        SENT_FOLDER_ID,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        "Sent To",
+    );
+
+    assert!(session
+        .default_view_advertisement_state()
+        .contains("owner_role=sent"));
+    assert!(session
+        .default_view_advertisement_state()
+        .contains("opened=false"));
+
+    assert!(session.record_default_view_opened(
+        "request:144",
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    ));
+
+    let state = session.default_view_advertisement_state();
+    assert!(state.contains("name=Sent To"));
+    assert!(state.contains("opened=true"));
+    assert!(state.contains("open_request=request:144"));
+}
+
+#[test]
 fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let prefix_restriction = MapiRestriction::Content {

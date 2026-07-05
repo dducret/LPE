@@ -131,7 +131,8 @@ pub(super) async fn append_get_properties_specific_response<S>(
             );
         }
     }
-    let object = input_object(session, handle_slots, request);
+    let object_owned = input_object(session, handle_slots, request).cloned();
+    let object = object_owned.as_ref();
     let visible_emails;
     let emails_for_request = if created_emails.is_empty() {
         emails
@@ -267,6 +268,40 @@ pub(super) async fn append_get_properties_specific_response<S>(
         snapshot,
         &property_response,
     );
+    if request
+        .property_tags()
+        .iter()
+        .any(|tag| property_ids_match(*tag, PID_TAG_DEFAULT_VIEW_ENTRY_ID))
+    {
+        if let Some(MapiObject::Folder { folder_id, .. }) = object {
+            if let Some(view) = debug_advertised_default_named_view(snapshot, *folder_id) {
+                session.record_default_view_advertised(
+                    request_id,
+                    *folder_id,
+                    view.folder_id,
+                    view.id,
+                    &view.name,
+                );
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    request_rop_id = "0x07",
+                    folder_id = %format!("0x{folder_id:016x}"),
+                    folder_role = debug_role_for_folder_id(*folder_id),
+                    advertised_default_view_folder_id = %format!("0x{:016x}", view.folder_id),
+                    advertised_default_view_message_id = %format!("0x{:016x}", view.id),
+                    advertised_default_view_name = %view.name,
+                    default_view_advertisement_state =
+                        %session.default_view_advertisement_state(),
+                    "rca debug mapi default view advertised"
+                );
+            }
+        }
+    }
     let post_hierarchy_contract =
         post_hierarchy_getprops_contract(request, object, &property_response);
     let outlook_surface_folder_getprops_trace = format_outlook_surface_folder_getprops_trace(

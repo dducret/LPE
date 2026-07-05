@@ -499,6 +499,87 @@ impl MapiSession {
             .push(event);
     }
 
+    pub(in crate::mapi) fn record_default_view_advertised(
+        &mut self,
+        request_id: &str,
+        owner_folder_id: u64,
+        view_folder_id: u64,
+        view_message_id: u64,
+        view_name: &str,
+    ) {
+        self.post_hierarchy_actions
+            .last_advertised_default_view_owner_folder_id = Some(owner_folder_id);
+        self.post_hierarchy_actions
+            .last_advertised_default_view_folder_id = Some(view_folder_id);
+        self.post_hierarchy_actions
+            .last_advertised_default_view_message_id = Some(view_message_id);
+        self.post_hierarchy_actions
+            .last_advertised_default_view_name = view_name.to_string();
+        self.post_hierarchy_actions
+            .last_advertised_default_view_request_id = request_id.to_string();
+        self.post_hierarchy_actions
+            .last_advertised_default_view_opened = false;
+        self.post_hierarchy_actions
+            .last_advertised_default_view_open_request_id
+            .clear();
+        self.record_outlook_view_failure_trace_event(format!(
+            "default_view_advertised:request_id={request_id};owner_folder=0x{owner_folder_id:016x};view_folder=0x{view_folder_id:016x};view=0x{view_message_id:016x};name={view_name}"
+        ));
+    }
+
+    pub(in crate::mapi) fn record_default_view_opened(
+        &mut self,
+        request_id: &str,
+        view_folder_id: u64,
+        view_message_id: u64,
+    ) -> bool {
+        let matched = self
+            .post_hierarchy_actions
+            .last_advertised_default_view_folder_id
+            == Some(view_folder_id)
+            && self
+                .post_hierarchy_actions
+                .last_advertised_default_view_message_id
+                == Some(view_message_id);
+        if matched {
+            self.post_hierarchy_actions
+                .last_advertised_default_view_opened = true;
+            self.post_hierarchy_actions
+                .last_advertised_default_view_open_request_id = request_id.to_string();
+        }
+        matched
+    }
+
+    pub(in crate::mapi) fn default_view_advertisement_state(&self) -> String {
+        let actions = &self.post_hierarchy_actions;
+        let Some(owner_folder_id) = actions.last_advertised_default_view_owner_folder_id else {
+            return "none".to_string();
+        };
+        let view_folder_id = actions
+            .last_advertised_default_view_folder_id
+            .map(|id| format!("0x{id:016x}"))
+            .unwrap_or_else(|| "none".to_string());
+        let view_message_id = actions
+            .last_advertised_default_view_message_id
+            .map(|id| format!("0x{id:016x}"))
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "owner_folder=0x{owner_folder_id:016x};owner_role={};view_folder={view_folder_id};view={view_message_id};name={};advertised_request={};opened={};open_request={}",
+            debug_role_for_folder_id(owner_folder_id),
+            actions.last_advertised_default_view_name,
+            actions.last_advertised_default_view_request_id,
+            actions.last_advertised_default_view_opened,
+            if actions
+                .last_advertised_default_view_open_request_id
+                .is_empty()
+            {
+                "none"
+            } else {
+                &actions.last_advertised_default_view_open_request_id
+            }
+        )
+    }
+
     pub(in crate::mapi) fn record_outlook_stream_batch_observed(&mut self, summary: String) {
         self.post_hierarchy_actions.outlook_stream_batch_observed = true;
         if self

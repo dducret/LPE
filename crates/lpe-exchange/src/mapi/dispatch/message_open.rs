@@ -190,6 +190,23 @@ pub(super) fn append_open_message_response(
             "IPM.Microsoft.FolderDesign.NamedView",
             message.name
         ));
+        let opened_advertised_default_view =
+            session.record_default_view_opened(request_id, folder_id, message_id);
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            request_rop_id = "0x03",
+            mapi_request_id = request_id,
+            folder_id = %format!("0x{folder_id:016x}"),
+            view_message_id = %format!("0x{message_id:016x}"),
+            view_name = %message.name,
+            opened_advertised_default_view,
+            default_view_advertisement_state = %session.default_view_advertisement_state(),
+            "rca debug mapi advertised default view open state"
+        );
         responses.extend_from_slice(&rop_open_message_response(request, &message.name, 0));
         output_handles.push(handle);
     } else if let Some(definition) =

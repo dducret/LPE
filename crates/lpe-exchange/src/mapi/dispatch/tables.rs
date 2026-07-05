@@ -1312,6 +1312,7 @@ pub(super) fn append_table_control_response(
             );
             log_mapi_query_position_debug(
                 principal,
+                session,
                 request_id,
                 request,
                 input_object(session, handle_slots, request),
