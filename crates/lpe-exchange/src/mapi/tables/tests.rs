@@ -5343,7 +5343,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff() {
+fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows() {
     let _guard = outlook_smart_input_variant_test_lock();
     let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
     std::env::set_var(
@@ -5451,7 +5451,7 @@ fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff(
     assert!(matches!(
         table,
         MapiObject::ContentsTable {
-            restriction: None,
+            restriction: Some(MapiRestriction::Content { .. }),
             ..
         }
     ));
@@ -5492,11 +5492,11 @@ fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff(
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert!(
-        u16::from_le_bytes([query_response[7], query_response[8]]) > 0,
-        "broad no-handoff follow-up QueryRows should continue over the full FAI table"
+    assert_eq!(
+        u16::from_le_bytes([query_response[7], query_response[8]]),
+        0
     );
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
