@@ -153,7 +153,7 @@ fn folder_default_named_view_open_materializes_for_target_folder() {
 
     assert_eq!(
         selected.map(|message| (message.folder_id, message.name)),
-        Some((INBOX_FOLDER_ID, "Messages".to_string()))
+        Some((INBOX_FOLDER_ID, "Compact".to_string()))
     );
 }
 

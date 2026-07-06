@@ -422,14 +422,14 @@ fn cached_named_property_updates_bidirectional_registry() {
         kind: MapiNamedPropertyKind::Name("custom-field".to_string()),
     };
 
-    session.cache_named_property(0x8001, property.clone());
+    session.cache_named_property(0x9001, property.clone());
 
     assert_eq!(
         session.property_id_for_name(property.clone(), false),
-        Some(0x8001)
+        Some(0x9001)
     );
-    assert_eq!(session.property_name_for_id(0x8001), property);
-    assert_eq!(session.next_named_property_id, 0x8002);
+    assert_eq!(session.property_name_for_id(0x9001), property);
+    assert_eq!(session.next_named_property_id, 0x9002);
 }
 
 #[test]

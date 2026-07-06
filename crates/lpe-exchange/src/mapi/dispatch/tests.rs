@@ -9,7 +9,7 @@ mod folders;
 fn debug_named_property_context_reports_session_and_unresolved_properties() {
     let mut session = test_mapi_session();
     session.cache_named_property(
-        0x801f,
+        0x9001,
         MapiNamedProperty {
             guid: PS_PUBLIC_STRINGS_GUID,
             kind: MapiNamedPropertyKind::Name("custom field".to_string()),
@@ -18,10 +18,10 @@ fn debug_named_property_context_reports_session_and_unresolved_properties() {
 
     let context = format_debug_named_property_context(
         &session,
-        &[0x801f_001f, PID_TAG_SUBJECT_W, 0x836b_001f],
+        &[0x9001_001f, PID_TAG_SUBJECT_W, 0x836b_001f],
     );
 
-    assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
+    assert!(context.contains("0x9001001f:id=0x9001:type=0x001f:source=session"));
     assert!(context.contains("name=custom field"));
     assert!(context.contains("0x836b001f:id=0x836b:type=0x001f:source=well_known"));
     assert!(context.contains("name=content-type"));
@@ -32,7 +32,7 @@ fn debug_named_property_context_reports_session_and_unresolved_properties() {
 fn contents_table_named_property_context_reports_selected_columns() {
     let mut session = test_mapi_session();
     session.cache_named_property(
-        0x801f,
+        0x9001,
         MapiNamedProperty {
             guid: PS_PUBLIC_STRINGS_GUID,
             kind: MapiNamedPropertyKind::Name("view custom column".to_string()),
@@ -41,7 +41,7 @@ fn contents_table_named_property_context_reports_selected_columns() {
     let table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
         associated: false,
-        columns: vec![PID_TAG_SUBJECT_W, 0x801f_001f],
+        columns: vec![PID_TAG_SUBJECT_W, 0x9001_001f],
         columns_set: true,
         sort_orders: Vec::new(),
         category_count: 0,
@@ -55,7 +55,7 @@ fn contents_table_named_property_context_reports_selected_columns() {
 
     let context = format_contents_table_named_property_context(&session, Some(&table));
 
-    assert!(context.contains("0x801f001f:id=0x801f:type=0x001f:source=session"));
+    assert!(context.contains("0x9001001f:id=0x9001:type=0x001f:source=session"));
     assert!(context.contains("name=view custom column"));
     assert!(!context.contains("0x0037001f"));
 }
@@ -529,7 +529,7 @@ fn table_columns_normalize_stale_sharing_alias_without_cached_mapping() {
 fn table_columns_normalize_well_known_contact_email_named_property_alias() {
     let mut session = test_mapi_session();
     session.cache_named_property(
-        0x8022,
+        0x9002,
         MapiNamedProperty {
             guid: PSETID_ADDRESS_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_EMAIL_ADDRESS),
@@ -537,7 +537,7 @@ fn table_columns_normalize_well_known_contact_email_named_property_alias() {
     );
 
     let columns =
-        normalize_table_property_tags_for_session(&session, vec![0x8022_001f, PID_TAG_SUBJECT_W]);
+        normalize_table_property_tags_for_session(&session, vec![0x9002_001f, PID_TAG_SUBJECT_W]);
 
     assert_eq!(
         columns,
@@ -589,14 +589,14 @@ fn table_columns_normalize_outlook_visible_inbox_appointment_alias() {
 fn table_columns_normalize_outlook_calendar_common_aliases() {
     let mut session = test_mapi_session();
     session.cache_named_property(
-        0x8005,
+        0x9003,
         MapiNamedProperty {
             guid: PSETID_COMMON_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
         },
     );
     session.cache_named_property(
-        0x8013,
+        0x9004,
         MapiNamedProperty {
             guid: PSETID_COMMON_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_COMMON_8578),
@@ -605,7 +605,7 @@ fn table_columns_normalize_outlook_calendar_common_aliases() {
 
     let columns = normalize_table_property_tags_for_session(
         &session,
-        vec![0x8013_0003, 0x8005_0003, PID_TAG_SUBJECT_W],
+        vec![0x9004_0003, 0x9003_0003, PID_TAG_SUBJECT_W],
     );
 
     assert_eq!(
@@ -645,10 +645,10 @@ fn get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_ma
     };
 
     let property_id =
-        cache_named_property_mapping_and_return_property_id(&mut session, 0x80b8, property.clone());
+        cache_named_property_mapping_and_return_property_id(&mut session, 0x9005, property.clone());
 
     assert_eq!(property_id, PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16);
-    assert_eq!(session.property_name_for_id(0x80b8), property);
+    assert_eq!(session.property_name_for_id(0x9005), property);
     assert_eq!(
         session.property_id_for_name(property, false),
         Some(PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16)

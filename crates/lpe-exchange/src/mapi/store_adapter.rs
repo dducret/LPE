@@ -250,6 +250,28 @@ where
         .fetch_accessible_task_collections(account_id)
         .await
         .context("fetch MAPI task collections")?;
+    let collaboration_identity_requests = mapi_store::collaboration_folder_identity_requests(
+        &contact_collections,
+        &calendar_collections,
+        &task_collections,
+    );
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "allocate collaboration collection identities",
+        collaboration_identity_requests.len(),
+    );
+    for identity in store
+        .fetch_or_allocate_mapi_identities(account_id, &collaboration_identity_requests)
+        .await
+        .context("allocate MAPI collaboration collection identities")?
+    {
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key),
+        );
+    }
     log_mapi_store_load_step(account_id, plan, "fetch conversation actions", 0);
     let conversation_actions = store
         .fetch_conversation_actions(account_id)

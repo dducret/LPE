@@ -1305,7 +1305,7 @@ fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts()
             &MapiMailStoreSnapshot::empty(),
             Uuid::nil(),
         ),
-        Some(4)
+        Some(6)
     );
 }
 

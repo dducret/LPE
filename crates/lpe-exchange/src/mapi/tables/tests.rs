@@ -7899,6 +7899,9 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         CONTACTS_SEARCH_FOLDER_ID,
         CONTACTS_FOLDER_ID,
         CALENDAR_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        TASKS_FOLDER_ID,
     ] {
         assert!(
             matches!(
@@ -7915,9 +7918,6 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         SUGGESTED_CONTACTS_FOLDER_ID,
         QUICK_CONTACTS_FOLDER_ID,
         IM_CONTACT_LIST_FOLDER_ID,
-        JOURNAL_FOLDER_ID,
-        NOTES_FOLDER_ID,
-        TASKS_FOLDER_ID,
         TODO_SEARCH_FOLDER_ID,
         IPM_SUBTREE_FOLDER_ID,
         SYNC_ISSUES_FOLDER_ID,
