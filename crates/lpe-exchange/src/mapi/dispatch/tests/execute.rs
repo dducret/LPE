@@ -112,6 +112,20 @@ fn mixed_setcolumns_release_response_trims_snapshot_to_response_handle_index() {
 }
 
 #[test]
+fn mixed_setcolumns_trailing_release_returns_invalid_released_handle() {
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x00, 0, 0, 0, 0, 0],
+        &[u32::MAX, 75, 74],
+        &[],
+        &[0],
+        true,
+        true,
+    );
+
+    assert_eq!(response_handles, vec![0]);
+}
+
+#[test]
 fn non_release_echo_response_keeps_output_placeholders() {
     let response_handles = execute_response_handle_table(
         &[0x07, 0x01, 0, 0, 0, 0, 0],

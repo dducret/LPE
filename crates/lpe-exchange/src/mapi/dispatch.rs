@@ -805,6 +805,9 @@ where
                     &mut post_hierarchy_release_events,
                 )
                 .await;
+                if !responses.is_empty() {
+                    response_handle_slots = handle_slots.clone();
+                }
             }
             Some(rop_id) if is_folder_open_rop(rop_id) => {
                 append_folder_open_dispatch_response(
