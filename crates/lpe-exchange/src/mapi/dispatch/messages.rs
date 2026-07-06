@@ -221,6 +221,79 @@ pub(super) fn append_save_changes_message_response(
     responses.extend_from_slice(&rop_save_changes_message_response(request, message_id));
 }
 
+pub(super) fn restore_save_changes_containing_folder_response_handle(
+    session: &MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    folder_id: u64,
+) -> Option<u32> {
+    let response_handle_index = request.response_handle_index();
+    let previous_handle = handle_slots
+        .get(response_handle_index as usize)
+        .copied()
+        .unwrap_or(u32::MAX);
+    let folder_handle = folder_handle_for_id(session, handle_slots, previous_handle, folder_id)?;
+    set_handle_slot(handle_slots, Some(response_handle_index), folder_handle);
+    if previous_handle != folder_handle {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_type = "Execute",
+            request_rop_id = "0x0c",
+            response_handle_index,
+            previous_response_slot_handle = %format_optional_debug_handle(Some(previous_handle)),
+            restored_folder_handle = folder_handle,
+            folder_id = %format!("{folder_id:#018x}"),
+            contract = "MS-OXCMSG 2.2.3.3/3.2.5.3 response handle is containing folder",
+            "rca debug mapi save changes response folder handle restored"
+        );
+    }
+    Some(folder_handle)
+}
+
+fn folder_handle_for_id(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    preferred_handle: u32,
+    folder_id: u64,
+) -> Option<u32> {
+    if matches!(
+        session.handles.get(&preferred_handle),
+        Some(MapiObject::Folder {
+            folder_id: object_folder_id,
+            ..
+        }) if *object_folder_id == folder_id
+    ) {
+        return Some(preferred_handle);
+    }
+
+    handle_slots
+        .iter()
+        .copied()
+        .find(|handle| {
+            matches!(
+                session.handles.get(handle),
+                Some(MapiObject::Folder {
+                    folder_id: object_folder_id,
+                    ..
+                }) if *object_folder_id == folder_id
+            )
+        })
+        .or_else(|| {
+            session.handles.iter().find_map(|(handle, object)| {
+                matches!(
+                    object,
+                    MapiObject::Folder {
+                        folder_id: object_folder_id,
+                        ..
+                    } if *object_folder_id == folder_id
+                )
+                .then_some(*handle)
+            })
+        })
+}
+
 pub(super) fn stage_message_property_values(
     session: &mut MapiSession,
     handle_slots: &[u32],

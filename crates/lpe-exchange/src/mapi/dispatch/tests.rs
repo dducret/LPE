@@ -1851,6 +1851,43 @@ fn save_changes_success_response_preserves_containing_folder_handle_slot() {
 }
 
 #[test]
+fn save_changes_associated_message_restores_containing_folder_response_handle_slot() {
+    let request = RopRequest {
+        rop_id: 0x0c,
+        input_handle_index: Some(3),
+        output_handle_index: Some(1),
+        payload: vec![0],
+    };
+    let mut session = test_mapi_session();
+    session.handles.insert(
+        6,
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    session.handles.insert(
+        26,
+        MapiObject::AssociatedConfig {
+            folder_id: INBOX_FOLDER_ID,
+            config_id: 0x0000_0000_0000_1234,
+            saved_message: None,
+        },
+    );
+    let mut handle_slots = vec![u32::MAX, 26, 25, 26];
+
+    let restored = restore_save_changes_containing_folder_response_handle(
+        &session,
+        &mut handle_slots,
+        &request,
+        INBOX_FOLDER_ID,
+    );
+
+    assert_eq!(restored, Some(6));
+    assert_eq!(handle_slots, vec![u32::MAX, 6, 25, 26]);
+}
+
+#[test]
 fn builtin_search_criteria_fallback_covers_advertised_reminders_folder() {
     let (restriction, folder_ids, flags) =
         builtin_search_criteria_to_rop_for_folder_id(REMINDERS_FOLDER_ID)

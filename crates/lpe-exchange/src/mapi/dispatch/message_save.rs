@@ -1058,7 +1058,12 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             match persist_associated_config_message(store, principal, folder_id, &properties).await
             {
                 Ok((saved, message_id)) => {
-                    set_handle_slot(handle_slots, Some(request.response_handle_index()), handle);
+                    restore_save_changes_containing_folder_response_handle(
+                        session,
+                        handle_slots,
+                        &request,
+                        folder_id,
+                    );
                     session.handles.insert(
                         handle,
                         MapiObject::AssociatedConfig {
