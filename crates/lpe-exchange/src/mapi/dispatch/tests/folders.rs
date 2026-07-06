@@ -292,8 +292,8 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
         crate::mapi::identity::message_entry_id_from_object_ids(
             principal.account_id,
-            COMMON_VIEWS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+            INBOX_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         )
         .map(MapiValue::Binary)
         .as_ref()
@@ -1105,12 +1105,12 @@ fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
 
     assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
     assert!(debug.contains(&format!(
-        "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        "decoded_folder_id=0x{INBOX_FOLDER_ID:016x}"
     )));
-    assert!(debug.contains("decoded_folder_name=common_views"));
+    assert!(debug.contains("decoded_folder_name=inbox"));
     assert!(debug.contains(&format!(
         "decoded_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
     )));
 }
 

@@ -650,7 +650,7 @@ fn mailbox_properties_report_persisted_search_folder_type() {
 }
 
 #[test]
-fn inbox_mailbox_properties_advertise_common_views_default_view() {
+fn inbox_mailbox_properties_advertise_folder_local_default_view() {
     let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
     let mailbox = mailbox(
         "56565656-5656-4656-9656-565656565656",
@@ -662,8 +662,8 @@ fn inbox_mailbox_properties_advertise_common_views_default_view() {
 
     let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
         account_id,
-        COMMON_VIEWS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        INBOX_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
     )
     .unwrap();
 

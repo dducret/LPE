@@ -4447,7 +4447,7 @@ fn outlook_smart_input_variant_test_lock() -> std::sync::MutexGuard<'static, ()>
 }
 
 #[test]
-fn inbox_associated_find_row_returns_common_views_default_named_view() {
+fn inbox_associated_find_row_returns_folder_local_default_named_view() {
     assert_inbox_associated_find_row_returns_message_class("IPM.Microsoft.FolderDesign.NamedView");
 }
 
@@ -4852,7 +4852,7 @@ fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view
 }
 
 #[test]
-fn inbox_associated_table_exposes_common_views_default_named_view_for_exact_lookup() {
+fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup() {
     let restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -4869,12 +4869,12 @@ fn inbox_associated_table_exposes_common_views_default_named_view_for_exact_look
 
     assert_eq!(rows.len(), 1);
     let AssociatedTableRow::NamedView(view) = &rows[0] else {
-        panic!("expected Common Views named view row");
+        panic!("expected folder-local named view row");
     };
-    assert_eq!(view.folder_id, COMMON_VIEWS_FOLDER_ID);
+    assert_eq!(view.folder_id, INBOX_FOLDER_ID);
     assert_eq!(
         view.id,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
     );
     assert_eq!(
         restricted_associated_folder_message_count(
@@ -5574,7 +5574,7 @@ fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(query_response[6], 0x02);
+    assert_eq!(query_response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
         1
@@ -5711,11 +5711,6 @@ fn inbox_associated_broad_find_row_suppresses_persisted_followup_rows() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(query_response[6], 0x02);
-    assert_eq!(
-        u16::from_le_bytes([query_response[7], query_response[8]]),
-        0
-    );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
@@ -7122,7 +7117,7 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
     assert_eq!(
             associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
             Some(MapiValue::String(
-                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n".to_string()
+                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n".to_string()
             ))
         );
     assert_eq!(

@@ -162,6 +162,7 @@ pub(crate) fn is_outlook_default_folder_named_view_id(item_id: u64) -> bool {
 
 pub(crate) fn outlook_default_folder_named_view_name(folder_id: u64) -> &'static str {
     match folder_id {
+        crate::mapi::identity::INBOX_FOLDER_ID => "Compact",
         crate::mapi::identity::CALENDAR_FOLDER_ID => "Calendar",
         crate::mapi::identity::CONTACTS_FOLDER_ID
         | crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID => "Contacts",

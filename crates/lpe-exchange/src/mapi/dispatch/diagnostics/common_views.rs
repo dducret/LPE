@@ -657,7 +657,7 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("view_folder=0x0000000000090001"));
+        assert!(summary.contains("view_folder=0x0000000000050001"));
         assert!(summary.contains("view_name=Compact"));
         assert!(summary.contains("descriptor_columns_missing_from_table="));
         assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
