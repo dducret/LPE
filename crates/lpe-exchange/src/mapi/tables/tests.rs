@@ -4433,7 +4433,7 @@ fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
         rop_id: RopId::QueryRows.as_u8(),
         input_handle_index: Some(0),
         output_handle_index: None,
-        payload: vec![0, 1, 10, 0],
+        payload: vec![0, 1, 30, 0],
     };
 
     let (_, projected_total) =

@@ -834,12 +834,21 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
     let default_view_advertisement_state = session.default_view_advertisement_state();
+    let default_view_folder_open_without_query_rows = !session
+        .post_hierarchy_actions
+        .last_default_view_folder_open_context
+        .is_empty()
+        && !session
+            .post_hierarchy_actions
+            .last_default_view_folder_open_followed_by_query_rows;
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
     } else if visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions) {
         "visible_inbox_released_after_setcolumns_before_query_rows"
     } else if advertised_default_view_pending_open {
         "advertised_default_view_not_opened"
+    } else if default_view_folder_open_without_query_rows {
+        "default_view_folder_open_without_query_rows"
     } else if session
         .post_hierarchy_actions
         .post_calendar_query_position_named_property_probe_count
@@ -981,6 +990,52 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         );
     }
 
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && default_view_folder_open_without_query_rows
+    {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            last_default_view_folder_open_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_default_view_folder_open_context
+                ),
+            last_default_view_folder_open_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_default_view_folder_open_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            last_default_view_folder_open_folder_id =
+                %session
+                    .post_hierarchy_actions
+                    .last_default_view_folder_open_folder_id
+                    .map(|folder_id| format!("0x{folder_id:016x}"))
+                    .unwrap_or_else(|| "none".to_string()),
+            last_default_view_normal_query_rows_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_default_view_normal_contents_table_query_rows_context
+                ),
+            outlook_view_trace_events = %outlook_view_failure_trace_summary,
+            next_expected_client_step =
+                "get_contents_table_or_query_rows_for_opened_default_view_folder",
+            "rca warn mapi default view folder opened without query rows"
+        );
+    }
+
     if endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect" {
         tracing::info!(
             rca_debug = true,
@@ -1098,6 +1153,29 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .default_view_normal_contents_table_query_rows_observed,
+            default_view_folder_open_without_query_rows,
+            last_default_view_folder_open_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_default_view_folder_open_context
+                ),
+            last_default_view_folder_open_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_default_view_folder_open_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+            last_default_view_folder_open_folder_id =
+                %session
+                    .post_hierarchy_actions
+                    .last_default_view_folder_open_folder_id
+                    .map(|folder_id| format!("0x{folder_id:016x}"))
+                    .unwrap_or_else(|| "none".to_string()),
+            last_default_view_folder_open_followed_by_query_rows =
+                session
+                    .post_hierarchy_actions
+                    .last_default_view_folder_open_followed_by_query_rows,
             last_calendar_normal_query_position_context =
                 %debug_context_or_none(
                     &session

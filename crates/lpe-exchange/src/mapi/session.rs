@@ -228,6 +228,31 @@ impl MapiSession {
             .last_default_view_normal_contents_table_query_rows_handle = handle;
         self.post_hierarchy_actions
             .last_default_view_normal_contents_table_query_rows_context = context;
+        if !self
+            .post_hierarchy_actions
+            .last_default_view_folder_open_context
+            .is_empty()
+        {
+            self.post_hierarchy_actions
+                .last_default_view_folder_open_followed_by_query_rows = true;
+        }
+    }
+
+    pub(in crate::mapi) fn record_default_view_folder_opened(
+        &mut self,
+        handle: u32,
+        folder_id: u64,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_default_view_folder_open_handle = Some(handle);
+        self.post_hierarchy_actions
+            .last_default_view_folder_open_folder_id = Some(folder_id);
+        self.post_hierarchy_actions
+            .last_default_view_folder_open_context = context.clone();
+        self.post_hierarchy_actions
+            .last_default_view_folder_open_followed_by_query_rows = false;
+        self.record_outlook_view_failure_trace_event(format!("default_view_folder_open:{context}"));
     }
 
     pub(in crate::mapi) fn record_post_calendar_query_position_named_property_probe(

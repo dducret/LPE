@@ -206,6 +206,10 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
         mapi_value_debug_binary_decode(&properties, PID_TAG_SOURCE_KEY);
     let root_ipm_contract_parent_source_key =
         mapi_value_debug_binary_decode(&properties, PID_TAG_PARENT_SOURCE_KEY);
+    let default_view_entry_id =
+        mapi_value_debug_binary_decode(&properties, PID_TAG_DEFAULT_VIEW_ENTRY_ID);
+    let default_view_associated_count =
+        mapi_value_debug_u32(&properties, PID_TAG_ASSOCIATED_CONTENT_COUNT);
     let handle = session.allocate_output_handle_avoiding(
         request.output_handle_index,
         MapiObject::Folder {
@@ -218,12 +222,17 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
     let open_folder_response = rop_open_folder_response(request, is_public_folder_ghosted);
     if default_view_supported_folder(folder_id, &folder_container_class) {
         let context = format!(
-            "request_id={request_id};handle={handle};folder=0x{folder_id:016x};role={folder_role};container_class={folder_container_class};content_count={};open_folder_response_bytes={}",
+            "request_id={request_id};handle={handle};folder=0x{folder_id:016x};role={folder_role};container_class={folder_container_class};folder_type={};content_count={};unread_count={};associated_count={};subfolders={};default_view_entry_id={};default_view_state={};open_folder_response_bytes={}",
+            inbox_contract_folder_type,
             inbox_contract_content_count,
+            inbox_contract_unread_count,
+            default_view_associated_count,
+            inbox_contract_subfolders,
+            default_view_entry_id,
+            session.default_view_advertisement_state(),
             open_folder_response.len()
         );
-        session
-            .record_outlook_view_failure_trace_event(format!("default_view_folder_open:{context}"));
+        session.record_default_view_folder_opened(handle, folder_id, context.clone());
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -236,6 +245,13 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
             folder_role,
             container_class = folder_container_class,
             output_handle = handle,
+            folder_type = %inbox_contract_folder_type,
+            content_count = %inbox_contract_content_count,
+            unread_count = %inbox_contract_unread_count,
+            associated_count = %default_view_associated_count,
+            subfolders = %inbox_contract_subfolders,
+            default_view_entry_id = %default_view_entry_id,
+            default_view_advertisement_state = %session.default_view_advertisement_state(),
             default_view_folder_open = %context,
             next_expected_client_step = "get_contents_table_or_sync_configure_for_opened_default_view_folder",
             "rca debug mapi default view folder opened"
