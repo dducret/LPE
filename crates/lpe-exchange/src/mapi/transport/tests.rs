@@ -590,6 +590,26 @@ fn post_hierarchy_close_kind_prioritizes_visible_inbox_release_without_query_row
 }
 
 #[test]
+fn default_view_query_rows_clears_stale_visible_inbox_release_diagnostic() {
+    let state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        default_view_normal_contents_table_query_rows_observed: true,
+        last_default_view_normal_contents_table_query_rows_context:
+            "folder=0x00000000000e0001;role=drafts".to_string(),
+        last_inbox_related_release_context:
+            "visible_inbox_release_without_query_rows=true;handle=27".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert!(!visible_inbox_release_without_query_rows_observed(&state));
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_default_view_sweep_before_visible_inbox_query_rows"
+    );
+}
+
+#[test]
 fn post_hierarchy_close_kind_classifies_calendar_query_position_without_query_rows() {
     let mut state = PostHierarchyActionState {
         inbox_normal_contents_table_observed: true,
