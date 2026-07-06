@@ -650,7 +650,10 @@ fn associated_config_debug_summaries_honor_table_restriction() {
             folder_id: INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
             subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
-            properties_json: serde_json::json!({}),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
         },
     ]);
     let restriction = MapiRestriction::Property {

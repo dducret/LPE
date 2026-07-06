@@ -590,8 +590,8 @@ fn post_hierarchy_close_kind_prioritizes_visible_inbox_release_without_query_row
 }
 
 #[test]
-fn default_view_query_rows_clears_stale_visible_inbox_release_diagnostic() {
-    let state = PostHierarchyActionState {
+fn default_view_query_rows_does_not_clear_visible_inbox_release_diagnostic() {
+    let mut state = PostHierarchyActionState {
         inbox_normal_contents_table_observed: true,
         inbox_normal_contents_table_setcolumns_observed: true,
         default_view_normal_contents_table_query_rows_observed: true,
@@ -602,10 +602,18 @@ fn default_view_query_rows_clears_stale_visible_inbox_release_diagnostic() {
         ..PostHierarchyActionState::default()
     };
 
+    assert!(visible_inbox_release_without_query_rows_observed(&state));
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
+    );
+
+    state.inbox_normal_contents_table_query_rows_observed = true;
+
     assert!(!visible_inbox_release_without_query_rows_observed(&state));
     assert_eq!(
         post_hierarchy_close_kind(&state, false),
-        "outlook_default_view_sweep_before_visible_inbox_query_rows"
+        "post_hierarchy_no_close"
     );
 }
 

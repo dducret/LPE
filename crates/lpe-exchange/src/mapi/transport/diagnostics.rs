@@ -499,7 +499,6 @@ pub(in crate::mapi) fn visible_inbox_release_without_query_rows_observed(
 ) -> bool {
     actions.inbox_normal_contents_table_setcolumns_observed
         && !actions.inbox_normal_contents_table_query_rows_observed
-        && !actions.default_view_normal_contents_table_query_rows_observed
         && actions
             .last_inbox_related_release_context
             .contains("visible_inbox_release_without_query_rows=true")
