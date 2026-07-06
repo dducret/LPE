@@ -1254,7 +1254,18 @@ fn trace_mapi_connection(
     let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let execute_trace_metadata = execute_request_trace_metadata(request_type, request_body);
 
+    let mut inbound_metadata = vec![
+        ("account_id", account_id.clone()),
+        ("mapi_request_id", request_id.to_string()),
+        ("trace_id", trace_id.clone()),
+        ("client_request_id", client_request_id.clone()),
+        ("client_info", client_info.clone()),
+        ("client_application", client_application.clone()),
+        ("user_agent", user_agent.clone()),
+    ];
+    inbound_metadata.extend(execute_trace_metadata.clone());
     write_outlook_trace(&OutlookTraceEvent {
         component: "mapi",
         endpoint: endpoint_label,
@@ -1265,17 +1276,21 @@ fn trace_mapi_connection(
         tenant_id: Some(&tenant_id),
         account: Some(&principal.email),
         status: None,
-        metadata: vec![
-            ("account_id", account_id.clone()),
-            ("mapi_request_id", request_id.to_string()),
-            ("trace_id", trace_id.clone()),
-            ("client_request_id", client_request_id.clone()),
-            ("client_info", client_info.clone()),
-            ("client_application", client_application.clone()),
-            ("user_agent", user_agent.clone()),
-        ],
+        metadata: inbound_metadata,
         payload: Some(request_body),
     });
+    let mut outbound_metadata = vec![
+        ("account_id", account_id),
+        ("mapi_request_id", request_id.to_string()),
+        ("mapi_response_code", response_code),
+        ("trace_id", trace_id),
+        ("client_request_id", client_request_id),
+        ("client_info", client_info),
+        ("client_application", client_application),
+        ("user_agent", user_agent),
+        ("response_payload_bytes", response_payload_bytes.to_string()),
+    ];
+    outbound_metadata.extend(execute_trace_metadata);
     write_outlook_trace(&OutlookTraceEvent {
         component: "mapi",
         endpoint: endpoint_label,
@@ -1286,19 +1301,37 @@ fn trace_mapi_connection(
         tenant_id: Some(&tenant_id),
         account: Some(&principal.email),
         status: Some(status),
-        metadata: vec![
-            ("account_id", account_id),
-            ("mapi_request_id", request_id.to_string()),
-            ("mapi_response_code", response_code),
-            ("trace_id", trace_id),
-            ("client_request_id", client_request_id),
-            ("client_info", client_info),
-            ("client_application", client_application),
-            ("user_agent", user_agent),
-            ("response_payload_bytes", response_payload_bytes.to_string()),
-        ],
+        metadata: outbound_metadata,
         payload: None,
     });
+}
+
+fn execute_request_trace_metadata(
+    request_type: &str,
+    request_body: &[u8],
+) -> Vec<(&'static str, String)> {
+    if request_type != "Execute" {
+        return Vec::new();
+    }
+    match parse_execute_request(request_body) {
+        Ok(execute) => {
+            let summary = summarize_request_rop_buffer(&execute.rop_buffer);
+            vec![
+                ("request_rop_ids", summary.ids_csv),
+                ("request_rop_names", summary.names_csv),
+                ("request_rop_count", summary.total_count.to_string()),
+                ("request_non_release_rops", summary.non_release_rops),
+                (
+                    "request_all_rops_are_release",
+                    summary.all_release.to_string(),
+                ),
+                ("request_handle_count", summary.handle_count.to_string()),
+                ("request_handle_table", summary.handle_table_summary),
+                ("request_rop_parse_error", summary.parse_error),
+            ]
+        }
+        Err(error) => vec![("request_execute_parse_error", error.to_string())],
+    }
 }
 
 fn remote_peer(headers: &HeaderMap) -> Option<String> {

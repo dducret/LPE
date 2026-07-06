@@ -74,27 +74,27 @@ pub(super) use table_queries::*;
 pub(super) use values::*;
 
 #[derive(Debug, Default)]
-pub(super) struct RopRequestDebugSummary {
-    pub(super) full_ids: Vec<u8>,
-    pub(super) full_response_handle_indexes: Vec<Option<u8>>,
-    pub(super) ids: Vec<u8>,
-    pub(super) response_handle_indexes: Vec<Option<u8>>,
-    pub(super) ids_csv: String,
-    pub(super) names_csv: String,
-    pub(super) tail_ids_csv: String,
-    pub(super) tail_names_csv: String,
-    pub(super) non_release_rops: String,
-    pub(super) total_count: usize,
-    pub(super) truncated: bool,
-    pub(super) all_release: bool,
-    pub(super) handle_count: usize,
-    pub(super) handle_table_summary: String,
-    pub(super) request_payload_bytes: usize,
-    pub(super) handle_table_bytes: usize,
-    pub(super) raw_frame_count: usize,
-    pub(super) raw_frames: String,
-    pub(super) extended: bool,
-    pub(super) parse_error: String,
+pub(in crate::mapi) struct RopRequestDebugSummary {
+    pub(in crate::mapi) full_ids: Vec<u8>,
+    pub(in crate::mapi) full_response_handle_indexes: Vec<Option<u8>>,
+    pub(in crate::mapi) ids: Vec<u8>,
+    pub(in crate::mapi) response_handle_indexes: Vec<Option<u8>>,
+    pub(in crate::mapi) ids_csv: String,
+    pub(in crate::mapi) names_csv: String,
+    pub(in crate::mapi) tail_ids_csv: String,
+    pub(in crate::mapi) tail_names_csv: String,
+    pub(in crate::mapi) non_release_rops: String,
+    pub(in crate::mapi) total_count: usize,
+    pub(in crate::mapi) truncated: bool,
+    pub(in crate::mapi) all_release: bool,
+    pub(in crate::mapi) handle_count: usize,
+    pub(in crate::mapi) handle_table_summary: String,
+    pub(in crate::mapi) request_payload_bytes: usize,
+    pub(in crate::mapi) handle_table_bytes: usize,
+    pub(in crate::mapi) raw_frame_count: usize,
+    pub(in crate::mapi) raw_frames: String,
+    pub(in crate::mapi) extended: bool,
+    pub(in crate::mapi) parse_error: String,
 }
 
 #[derive(Debug, Default)]
@@ -383,7 +383,7 @@ pub(super) fn summarize_handle_table(
     }
 }
 
-pub(super) fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
+pub(in crate::mapi) fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     let mut summary = RopRequestDebugSummary {
         extended: is_rpc_header_ext_rop_buffer(rop_buffer),
         all_release: true,
