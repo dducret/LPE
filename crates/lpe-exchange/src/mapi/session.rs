@@ -869,6 +869,9 @@ impl MapiSession {
             return None;
         }
 
+        self.next_named_property_id = self
+            .next_named_property_id
+            .max(DYNAMIC_NAMED_PROPERTY_ID_START);
         while self.next_named_property_id <= MAX_NAMED_PROPERTY_ID
             && (self
                 .named_property_ids

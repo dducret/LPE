@@ -433,6 +433,28 @@ fn cached_named_property_updates_bidirectional_registry() {
 }
 
 #[test]
+fn dynamic_named_property_allocation_starts_at_project_dynamic_range() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("custom-low-range-guard".to_string()),
+    };
+
+    assert_eq!(
+        session.property_id_for_name(property.clone(), true),
+        Some(0x9001)
+    );
+    assert_eq!(
+        session.property_id_for_name(property.clone(), false),
+        Some(0x9001)
+    );
+    assert_eq!(session.property_name_for_id(0x9001), property);
+    assert_eq!(session.next_named_property_id, 0x9002);
+}
+
+#[test]
 fn cached_well_known_named_property_keeps_dynamic_id_as_alias() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");

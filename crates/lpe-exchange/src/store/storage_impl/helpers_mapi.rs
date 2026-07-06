@@ -413,7 +413,7 @@ async fn allocate_next_mapi_named_property_id(
         .into_iter()
         .filter_map(|id| u16::try_from(id).ok())
         .collect::<std::collections::HashSet<_>>();
-    for property_id in crate::mapi::properties::FIRST_NAMED_PROPERTY_ID
+    for property_id in crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START
         ..=crate::mapi::properties::MAX_NAMED_PROPERTY_ID
     {
         if existing.contains(&property_id) || is_reserved_named_property_id(property_id) {

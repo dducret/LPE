@@ -324,9 +324,16 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         return;
     }
     let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
+    let unresolved_properties = unresolved_named_properties(&properties, &property_ids);
+    let unresolved_named_property_count = unresolved_properties.len();
     let property_id_source_summary = format_named_property_id_sources(&property_id_sources);
     let property_id_mapping_summary =
         format_named_property_resolution_mappings(&properties, &property_ids, &property_id_sources);
+    let allocated_or_store_resolved_named_property_count = property_id_sources
+        .iter()
+        .filter(|source| matches!(**source, "store_existing_or_allocated" | "newly_allocated"))
+        .count();
+    let legacy_low_dynamic_property_id_count = legacy_low_dynamic_property_id_count(&property_ids);
     let named_property_response = rop_get_property_ids_from_names_response(request, &property_ids);
     tracing::info!(
         rca_debug = true,
@@ -341,8 +348,13 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         create_missing = request.named_property_create(),
         requested_named_property_count = properties.len(),
         requested_named_properties = %requested_named_properties,
+        pre_resolution_missing_named_property_count = missing_properties.len(),
         missing_named_property_count = missing_properties.len(),
         missing_named_properties = %format_debug_named_properties(&missing_properties),
+        allocated_or_store_resolved_named_property_count,
+        unresolved_returned_property_id_count = unresolved_named_property_count,
+        unresolved_returned_named_properties = %format_debug_named_properties(&unresolved_properties),
+        legacy_low_dynamic_property_id_count,
         returned_property_id_count = property_ids.len(),
         returned_property_ids = %format_debug_property_ids(&property_ids),
         returned_property_id_sources = %property_id_source_summary,
@@ -361,6 +373,9 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         request_id,
         properties.len(),
         missing_properties.len(),
+        allocated_or_store_resolved_named_property_count,
+        unresolved_named_property_count,
+        legacy_low_dynamic_property_id_count,
         property_ids.len(),
         duplicate_summary.0,
         duplicate_summary.1,
@@ -399,6 +414,9 @@ fn record_post_calendar_query_position_named_property_probe(
     request_id: &str,
     requested_count: usize,
     missing_count: usize,
+    allocated_or_store_resolved_count: usize,
+    unresolved_count: usize,
+    legacy_low_dynamic_property_id_count: usize,
     returned_count: usize,
     duplicate_requested_count: usize,
     duplicate_returned_id_count: usize,
@@ -458,7 +476,7 @@ fn record_post_calendar_query_position_named_property_probe(
     let live_handle_summaries = format_live_handle_debug_summary(session);
     let next_debug_focus = "calendar_query_rows_missing_after_named_property_probe";
     let context = format!(
-        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};missing={missing_count};missing_sample={missing_named_property_sample};returned={returned_count};property_id_sources={property_id_source_summary};response_rop_payload_bytes={response_rop_payload_bytes};input_handle_table={input_handle_table_summary};live_handles={live_handle_summaries};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};visible_inbox_release_without_query_rows={visible_inbox_release_without_query_rows};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
+        "request_id={request_id};object={object_kind};create_missing={};requested={requested_count};pre_resolution_missing={missing_count};missing_sample={missing_named_property_sample};allocated_or_store_resolved={allocated_or_store_resolved_count};unresolved_returned={unresolved_count};legacy_low_dynamic_property_ids={legacy_low_dynamic_property_id_count};returned={returned_count};property_id_sources={property_id_source_summary};response_rop_payload_bytes={response_rop_payload_bytes};input_handle_table={input_handle_table_summary};live_handles={live_handle_summaries};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};collision_summary={returned_id_collisions};visible_inbox_release_without_query_rows={visible_inbox_release_without_query_rows};inbox_normal_contents_table_observed={inbox_normal_contents_table_observed};inbox_normal_contents_table_setcolumns_observed={inbox_normal_contents_table_setcolumns_observed};inbox_normal_contents_table_query_rows_observed={inbox_normal_contents_table_query_rows_observed};last_inbox_normal_contents_table={last_inbox_normal_contents_table_context};last_inbox_normal_setcolumns={last_inbox_normal_contents_table_setcolumns_context};last_inbox_normal_query_position={last_inbox_normal_contents_table_query_position_context};last_inbox_normal_query_rows={last_inbox_normal_contents_table_query_rows_context};after_calendar_query_position={calendar_query_position_context}",
         request.named_property_create()
     );
     tracing::info!(
@@ -471,8 +489,12 @@ fn record_post_calendar_query_position_named_property_probe(
         object_kind,
         create_missing = request.named_property_create(),
         requested_named_property_count = requested_count,
+        pre_resolution_missing_named_property_count = missing_count,
         missing_named_property_count = missing_count,
         missing_named_property_sample = %missing_named_property_sample,
+        allocated_or_store_resolved_named_property_count = allocated_or_store_resolved_count,
+        unresolved_returned_property_id_count = unresolved_count,
+        legacy_low_dynamic_property_id_count,
         returned_property_id_count = returned_count,
         returned_property_id_sources = %property_id_source_summary,
         returned_named_property_mappings = %property_id_mapping_summary,
@@ -512,6 +534,28 @@ fn format_named_property_id_sources(sources: &[&str]) -> String {
         .map(|(source, count)| format!("{source}={count}"))
         .collect::<Vec<_>>()
         .join(";")
+}
+
+fn unresolved_named_properties(
+    properties: &[MapiNamedProperty],
+    property_ids: &[u16],
+) -> Vec<MapiNamedProperty> {
+    properties
+        .iter()
+        .zip(property_ids.iter().copied())
+        .filter_map(|(property, property_id)| (property_id == 0).then_some(property.clone()))
+        .collect()
+}
+
+fn legacy_low_dynamic_property_id_count(property_ids: &[u16]) -> usize {
+    property_ids
+        .iter()
+        .copied()
+        .filter(|property_id| {
+            (FIRST_NAMED_PROPERTY_ID..DYNAMIC_NAMED_PROPERTY_ID_START).contains(property_id)
+                && !is_reserved_named_property_id(*property_id)
+        })
+        .count()
 }
 
 fn format_named_property_resolution_mappings(

@@ -864,13 +864,32 @@ pub(in crate::mapi) fn format_associated_config_0e0b_debug(
         .as_ref()
         .map(mapi_value_shape_for_debug)
         .unwrap_or_else(|| "missing".to_string());
+    let roaming_dictionary_shape =
+        associated_config_property_value(message, PID_TAG_ROAMING_DICTIONARY)
+            .as_ref()
+            .map(mapi_value_shape_for_debug)
+            .unwrap_or_else(|| "missing".to_string());
+    let datatypes = associated_config_property_value(message, PID_TAG_ROAMING_DATATYPES)
+        .and_then(|value| value.into_u32());
+    let dictionary_advertised = datatypes.is_some_and(|value| value & 0x0000_0004 != 0);
+    let dictionary_payload_consistent = !dictionary_advertised
+        || matches!(
+            semantic_value.as_ref(),
+            Some(MapiValue::Binary(value)) if !value.is_empty()
+        );
     format!(
-        "requested=true;public_ms_oxprops_name=unmapped;stored={};stored_shape={};semantic_shape={};fallback_default={};property_json_tags={}",
+        "requested=true;public_ms_oxprops_name=unmapped;stored={};stored_shape={};semantic_shape={};roaming_datatypes={};dictionary_advertised={};roaming_dictionary_shape={};dictionary_payload_consistent={};fallback_default={};property_json_tags={}",
         stored_value.is_some(),
         stored_value
             .map(mapi_value_shape_for_debug)
             .unwrap_or_else(|| "missing".to_string()),
         semantic_shape,
+        datatypes
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        dictionary_advertised,
+        roaming_dictionary_shape,
+        dictionary_payload_consistent,
         fallback_tags.contains(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
         format_property_tags_for_debug(&property_json_tags)
     )

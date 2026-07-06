@@ -1771,6 +1771,10 @@ fn associated_config_0e0b_debug_reports_stored_value_and_fallback() {
     assert!(summary.contains("stored=true"));
     assert!(summary.contains("stored_shape=binary:bytes=4:preview=01020304"));
     assert!(summary.contains("semantic_shape=binary:bytes=4:preview=01020304"));
+    assert!(summary.contains("roaming_datatypes=0x00000004"));
+    assert!(summary.contains("dictionary_advertised=true"));
+    assert!(summary.contains("roaming_dictionary_shape=binary:bytes="));
+    assert!(summary.contains("dictionary_payload_consistent=true"));
     assert!(summary.contains("fallback_default=true"));
     assert!(summary.contains("property_json_tags=0x0e0b0102"));
 }

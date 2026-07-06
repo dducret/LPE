@@ -1292,7 +1292,7 @@ async fn mapi_over_http_microsoft_oxcmsg_name_to_id_mapping_works_on_message_obj
     ]);
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&0x8503u16.to_le_bytes());
-    rops.extend_from_slice(&0x8100u16.to_le_bytes());
+    rops.extend_from_slice(&0x9001u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -1310,7 +1310,7 @@ async fn mapi_over_http_microsoft_oxcmsg_name_to_id_mapping_works_on_message_obj
     assert!(contains_bytes(&response_rops, &[0x06, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
-        &[0x56, 0x02, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x00, 0x81]
+        &[0x56, 0x02, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x01, 0x90]
     ));
     assert!(contains_bytes(&response_rops, &[0x55, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(

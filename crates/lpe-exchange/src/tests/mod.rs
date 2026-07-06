@@ -39,10 +39,7 @@ use crate::{
     mapi::{
         notifications::{MapiNotificationEvent, MapiNotificationKind},
         permissions::{rights_from_grant, MapiFolderPermission},
-        properties::{
-            MapiNamedProperty, MapiNamedPropertyKind, FIRST_NAMED_PROPERTY_ID,
-            MAX_NAMED_PROPERTY_ID,
-        },
+        properties::{MapiNamedProperty, MapiNamedPropertyKind, MAX_NAMED_PROPERTY_ID},
         MapiEndpoint,
     },
     mapi_mailstore,
@@ -3899,7 +3896,7 @@ impl ExchangeStore for FakeStore {
                     continue;
                 }
 
-                let mut property_id = FIRST_NAMED_PROPERTY_ID;
+                let mut property_id = crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START;
                 while (store.by_id.contains_key(&(account_id, property_id))
                     || crate::mapi::properties::is_reserved_named_property_id(property_id))
                     && property_id < MAX_NAMED_PROPERTY_ID
