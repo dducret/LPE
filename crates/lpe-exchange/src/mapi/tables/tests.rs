@@ -7139,7 +7139,7 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
         Some(MapiValue::Binary(view_descriptor_strings_binary(
-            &outlook_mail_view_definition("Compact")
+            &outlook_folder_view_definition(INBOX_FOLDER_ID, "Compact")
         )))
     );
     assert_eq!(

@@ -723,7 +723,8 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
-                let definition = outlook_mail_view_definition(&message.subject);
+                let definition =
+                    outlook_folder_view_definition(message.folder_id, &message.subject);
                 log_view_definition_diagnostics(
                     message.folder_id,
                     message.id,
@@ -744,7 +745,8 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
-                let definition = outlook_mail_view_definition(&message.subject);
+                let definition =
+                    outlook_folder_view_definition(message.folder_id, &message.subject);
                 log_view_definition_diagnostics(
                     message.folder_id,
                     message.id,
@@ -757,7 +759,8 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 if message.message_class
                     == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
             {
-                let definition = outlook_mail_view_definition(&message.subject);
+                let definition =
+                    outlook_folder_view_definition(message.folder_id, &message.subject);
                 log_view_definition_diagnostics(
                     message.folder_id,
                     message.id,
