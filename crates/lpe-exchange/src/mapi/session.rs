@@ -878,9 +878,10 @@ impl MapiSession {
             .post_visible_inbox_release_create_save_batch_count
             .saturating_add(1);
         let context = format!(
-            "request_rops={rop_names};batch_count={};last_visible_release={}",
+            "request_rops={rop_names};batch_count={};last_visible_release={};recent_actions={}",
             actions.post_visible_inbox_release_create_save_batch_count,
-            actions.last_inbox_related_release_context
+            actions.last_inbox_related_release_context,
+            actions.recent_probe_actions.join(">")
         );
         actions.last_post_visible_inbox_release_create_save_batch_context = context.clone();
         self.record_outlook_view_failure_trace_event(format!(
