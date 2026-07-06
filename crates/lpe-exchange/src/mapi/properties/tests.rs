@@ -5047,6 +5047,21 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
 
     assert_eq!(mail.kind, ViewDefinitionKind::MailCompact);
+    assert_eq!(
+        descriptor_column_property_tags(&view_descriptor_binary(&mail)),
+        vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ]
+    );
+    assert_eq!(
+        view_descriptor_strings(&mail),
+        "\nFolder\nMessage\nInstance\nInstance Number\nSubject\nReceived\n"
+    );
 }
 
 #[test]

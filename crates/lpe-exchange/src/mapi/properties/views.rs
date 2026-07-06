@@ -251,6 +251,9 @@ pub(in crate::mapi) fn outlook_folder_view_definition(
     view_name: &str,
 ) -> ViewDefinition {
     match folder_id {
+        INBOX_FOLDER_ID if view_name.eq_ignore_ascii_case("Compact") => {
+            outlook_inbox_compact_view_definition()
+        }
         CALENDAR_FOLDER_ID => outlook_calendar_view_definition(view_name),
         CONTACTS_FOLDER_ID
         | SUGGESTED_CONTACTS_FOLDER_ID
@@ -261,6 +264,22 @@ pub(in crate::mapi) fn outlook_folder_view_definition(
         NOTES_FOLDER_ID => outlook_note_view_definition(view_name),
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => outlook_task_view_definition(view_name),
         _ => outlook_mail_view_definition(view_name),
+    }
+}
+
+fn outlook_inbox_compact_view_definition() -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::MailCompact,
+        columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_SUBJECT_W, 0x11, 0x0000_2F00, "Subject"),
+            view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
+        ],
+        sort_column: 5,
+        sort_descending: true,
     }
 }
 

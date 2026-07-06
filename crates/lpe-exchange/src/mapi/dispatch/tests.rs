@@ -376,23 +376,34 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
 }
 
 #[test]
-fn inbox_view_descriptor_set_columns_contract_reports_missing_descriptor_columns() {
+fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_inbox_view_descriptor_set_columns_behavior_contract(
         INBOX_FOLDER_ID,
         false,
-        &[PID_TAG_SUBJECT_W, PID_TAG_MESSAGE_DELIVERY_TIME],
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
         &snapshot,
     );
 
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
     assert!(contract
-        .contains("descriptor_columns=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b"));
+        .contains("descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
-    assert!(contract.contains("selected_columns=0x0037001f,0x0e060040"));
-    assert!(contract.contains("selected_missing_descriptor_columns=0x00170003,0x8514000b"));
-    assert!(!contract.contains("selected_missing_descriptor_columns=0x00040001"));
+    assert!(contract.contains(
+        "selected_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
+    ));
+    assert!(
+        contract.ends_with("selected_missing_descriptor_columns="),
+        "{contract}"
+    );
 }
 
 #[test]
@@ -425,9 +436,9 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
         &snapshot,
     );
 
-    assert!(contract.contains("descriptor_columns=0x00170003"));
-    assert!(contract.contains("0x0e1b000b"));
-    assert!(contract.contains("0x0042001f"));
+    assert!(contract.contains(
+        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
+    ));
     assert!(
         contract.ends_with("selected_missing_descriptor_columns="),
         "{contract}"
