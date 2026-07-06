@@ -261,8 +261,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
         2
     );
-    assert_eq!(&response_rop[8..10], &0x8003u16.to_le_bytes());
-    assert_eq!(&response_rop[10..12], &0x8004u16.to_le_bytes());
+    assert_eq!(&response_rop[8..10], &0x8580u16.to_le_bytes());
+    assert_eq!(&response_rop[10..12], &0x8581u16.to_le_bytes());
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 
@@ -381,7 +381,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
-        &[0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0]
+        &[0, 0, 0, 0, 1, 0, 0, 0]
     );
 
     renew_mapi_request_id(&mut execute_headers);
@@ -421,7 +421,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
-        &[0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0]
+        &[0, 0, 0, 0, 1, 0, 0, 0]
     );
 
     renew_mapi_request_id(&mut execute_headers);

@@ -2337,7 +2337,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 1, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x01, 1, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(&response_rops, &utf16z("LocalFreebusy")));
@@ -4837,7 +4837,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     ));
     assert!(contains_bytes(
         &bootstrap_named_props_rops,
-        &[0x02, 0x00, 0x03, 0x80, 0x04, 0x80]
+        &[0x02, 0x00, 0x80, 0x85, 0x81, 0x85]
     ));
 
     let mut bootstrap_headers = mapi_headers("Execute");

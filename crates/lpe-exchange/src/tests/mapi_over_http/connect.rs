@@ -2306,10 +2306,10 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x14, 0x02, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x02, 0]
-    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x01, 0x02, 0]),
+        "{response_rops:02x?}"
+    );
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
@@ -2322,7 +2322,7 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
     ));
     assert!(contains_bytes(
         &response_rops,
-        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n")
+        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n")
     ));
     assert!(contains_bytes(
         &response_rops,

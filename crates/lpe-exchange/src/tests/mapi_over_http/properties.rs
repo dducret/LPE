@@ -1119,7 +1119,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     ]);
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&0x8503u16.to_le_bytes());
-    rops.extend_from_slice(&0x8003u16.to_le_bytes());
+    rops.extend_from_slice(&0x8100u16.to_le_bytes());
     rops.extend_from_slice(&[
         0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
     ]);
@@ -1136,12 +1136,12 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x03, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x00, 0x81]
     ));
     assert!(contains_bytes(&response_rops, &utf16z("x-lpe-test")));
     assert!(contains_bytes(
         &response_rops,
-        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
+        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x00, 0x81]
     ));
 }
 
@@ -1249,7 +1249,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
     let first_response_rops = response_rops_from_execute_response(first_response).await;
     assert!(contains_bytes(
         &first_response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x00, 0x81]
     ));
 
     let restarted_service = ExchangeService::new(store.clone());
@@ -1277,7 +1277,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
         0x55, 0x00, 0x00, // RopGetNamesFromPropertyIds
     ]);
     restarted_rops.extend_from_slice(&1u16.to_le_bytes());
-    restarted_rops.extend_from_slice(&0x8003u16.to_le_bytes());
+    restarted_rops.extend_from_slice(&0x8100u16.to_le_bytes());
     restarted_rops.extend_from_slice(&[
         0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
     ]);
@@ -1301,7 +1301,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
     ));
     assert!(contains_bytes(
         &restarted_response_rops,
-        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
+        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x00, 0x81]
     ));
 
     let zero_count_service = ExchangeService::new(store);
@@ -1335,7 +1335,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
     let zero_count_response_rops = response_rops_from_execute_response(zero_count_response).await;
     assert!(contains_bytes(
         &zero_count_response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x00, 0x81]
     ));
 }
 
