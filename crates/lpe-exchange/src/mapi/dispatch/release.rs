@@ -302,6 +302,42 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
         session.record_outlook_view_failure_trace_event(format!(
             "visible_inbox_release_without_query_rows:{context}"
         ));
+        if !session
+            .post_hierarchy_actions
+            .last_outlook_umolk_named_property_probe_context
+            .is_empty()
+            && !session
+                .post_hierarchy_actions
+                .outlook_umolk_visible_inbox_release_logged
+        {
+            session
+                .post_hierarchy_actions
+                .outlook_umolk_visible_inbox_release_logged = true;
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = %request_id,
+                request_rop_id = "0x01",
+                input_handle_index = request.input_handle_index().unwrap_or(0),
+                input_handle_value = %format_optional_debug_handle(released_handle),
+                umolk_named_property_probe_context = %session
+                    .post_hierarchy_actions
+                    .last_outlook_umolk_named_property_probe_context,
+                umolk_getprops_materialization_context = %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_outlook_umolk_getprops_materialization_context
+                ),
+                release_without_query_rows_context = %context,
+                content_sync_started_after_hierarchy = session
+                    .post_hierarchy_actions
+                    .content_sync_configure_observed,
+                "rca debug mapi umolk to visible inbox release before query rows"
+            );
+        }
         if has_defaulted_columns {
             tracing::warn!(
                 rca_debug = true,

@@ -38,6 +38,17 @@ pub(super) fn append_open_message_response(
             email,
             response.len(),
         );
+        record_visible_inbox_message_open(
+            session,
+            request_id,
+            request,
+            handle,
+            folder_id,
+            message_id,
+            "mailbox",
+            email,
+            response.len(),
+        );
         responses.extend_from_slice(&response);
         output_handles.push(handle);
     } else if let Some(message) = search_folder_message_for_id(snapshot, folder_id, message_id) {
@@ -102,6 +113,17 @@ pub(super) fn append_open_message_response(
             rop_open_message_response(request, &email.subject, message_recipients(email).len());
         log_open_message_debug(
             principal,
+            request,
+            handle,
+            handle_folder_id,
+            message_id,
+            "unique_message_id_folder_mismatch",
+            email,
+            response.len(),
+        );
+        record_visible_inbox_message_open(
+            session,
+            request_id,
             request,
             handle,
             handle_folder_id,
@@ -431,6 +453,30 @@ pub(super) fn append_open_message_response(
             ));
         }
     } else {
+        if folder_id == INBOX_FOLDER_ID {
+            session
+                .post_hierarchy_actions
+                .visible_inbox_message_open_missing_count = session
+                .post_hierarchy_actions
+                .visible_inbox_message_open_missing_count
+                .saturating_add(1);
+            session
+                .post_hierarchy_actions
+                .last_visible_inbox_message_open_context = format!(
+                "request_id={request_id};folder=0x{folder_id:016x};message=0x{message_id:016x};source=missing;loaded_email_count={};same_id_email_count={}",
+                emails.len(),
+                emails
+                    .iter()
+                    .filter(|email| mapi_item_id_matches(&email.id, message_id))
+                    .count()
+            );
+            session.record_outlook_view_failure_trace_event(format!(
+                "visible_inbox_message_open:{}",
+                session
+                    .post_hierarchy_actions
+                    .last_visible_inbox_message_open_context
+            ));
+        }
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -455,4 +501,44 @@ pub(super) fn append_open_message_response(
             0x8004_010F,
         ));
     }
+}
+
+fn record_visible_inbox_message_open(
+    session: &mut MapiSession,
+    request_id: &str,
+    request: &RopRequest,
+    handle: u32,
+    folder_id: u64,
+    message_id: u64,
+    source: &str,
+    email: &JmapEmail,
+    response_len: usize,
+) {
+    if folder_id != INBOX_FOLDER_ID {
+        return;
+    }
+    session
+        .post_hierarchy_actions
+        .last_visible_inbox_message_open_context = format!(
+        "request_id={request_id};input_index={};output_index={};handle={handle};folder=0x{folder_id:016x};message=0x{message_id:016x};source={source};subject_chars={};class={};body_text_bytes={};body_html_bytes={};recipient_count={};has_attachments={};unread={};size_octets={};response_rop_bytes={response_len}",
+        request.input_handle_index().unwrap_or(0),
+        request.output_handle_index.unwrap_or(0),
+        email.subject.chars().count(),
+        message_class_for_email(email),
+        email.body_text.len(),
+        email.body_html_sanitized
+            .as_ref()
+            .map(|body| body.len())
+            .unwrap_or(0),
+        message_recipients(email).len(),
+        email.has_attachments,
+        email.unread,
+        email.size_octets,
+    );
+    session.record_outlook_view_failure_trace_event(format!(
+        "visible_inbox_message_open:{}",
+        session
+            .post_hierarchy_actions
+            .last_visible_inbox_message_open_context
+    ));
 }

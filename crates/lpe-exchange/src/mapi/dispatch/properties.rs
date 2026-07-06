@@ -237,15 +237,18 @@ pub(super) async fn append_get_properties_specific_response<S>(
     );
     log_message_getprops_response_debug(
         principal,
+        session,
+        request_id,
         request,
         object,
         mailboxes,
         emails_for_request,
         snapshot,
-        property_response.len(),
+        &property_response,
     );
     log_get_properties_specific_response_debug(
         principal,
+        session,
         request_id,
         request,
         object,

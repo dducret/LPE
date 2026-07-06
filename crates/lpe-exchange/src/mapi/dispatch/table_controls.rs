@@ -792,7 +792,7 @@ pub(super) fn append_query_rows_response(
         }) if *folder_id == INBOX_FOLDER_ID && !*associated => Some((
             input_handle_value,
             format!(
-                "handle={};input_index={};position={};requested_forward_read={};requested_row_count={};columns={};column_support={};sort={};restriction={}",
+                "handle={};input_index={};position={};requested_forward_read={};requested_row_count={};columns={};column_support={};sort={};restriction={};row_summary={}",
                 format_optional_debug_handle(input_handle_value),
                 request.input_handle_index().unwrap_or(0),
                 position,
@@ -801,7 +801,20 @@ pub(super) fn append_query_rows_response(
                 format_debug_property_tags(columns),
                 normal_message_table_column_support_summary(columns),
                 format_debug_sort_orders(sort_orders),
-                format_debug_restriction_option(restriction.as_ref())
+                format_debug_restriction_option(restriction.as_ref()),
+                format_normal_message_query_row_summary(
+                    *folder_id,
+                    *associated,
+                    *position,
+                    request.query_forward_read(),
+                    request.query_row_count().unwrap_or(0) as usize,
+                    sort_orders,
+                    restriction.as_ref(),
+                    columns,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                )
             ),
         )),
         _ => None,
@@ -1183,6 +1196,9 @@ pub(super) fn append_query_rows_response(
     }
     if let Some((handle, context)) = inbox_normal_query_rows_context {
         session.record_inbox_normal_contents_table_query_rows(handle, context.clone());
+        session
+            .post_hierarchy_actions
+            .last_visible_inbox_message_row_context = context.clone();
         session
             .record_outlook_view_failure_trace_event(format!("visible_inbox_query_rows:{context}"));
         tracing::info!(

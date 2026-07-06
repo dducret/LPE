@@ -525,6 +525,22 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_release_before_content_sync"
     } else if visible_inbox_release_without_query_rows_observed(actions) {
         "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
+    } else if actions.visible_inbox_message_open_missing_count > 0 {
+        "outlook_visible_inbox_message_open_missing_before_content_sync"
+    } else if actions.visible_inbox_message_getprops_not_found_count > 50 {
+        "outlook_visible_inbox_message_getprops_mostly_not_found_before_content_sync"
+    } else if !actions.last_visible_inbox_message_row_context.is_empty()
+        && actions.last_visible_inbox_message_open_context.is_empty()
+    {
+        "outlook_visible_inbox_row_returned_without_message_open_before_content_sync"
+    } else if !actions
+        .last_outlook_umolk_getprops_materialization_context
+        .is_empty()
+        && actions.outlook_umolk_getprops_not_found_count > 50
+    {
+        "outlook_umolk_getprops_mostly_not_found_before_content_sync"
+    } else if actions.outlook_umolk_named_property_probe_count > 0 {
+        "outlook_umolk_named_property_burst_before_content_sync"
     } else if actions.post_calendar_query_position_named_property_probe_count > 0
         && !actions.calendar_normal_contents_table_query_rows_observed
     {
@@ -546,9 +562,9 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         && actions.default_view_normal_contents_table_query_rows_observed
         && actions
             .last_successful_non_release_execute_context
-            .contains("request_rops=GetHierarchyTable,SetColumns,QueryPosition")
+            .contains("request_rops=")
     {
-        "outlook_default_view_hierarchy_sweep_after_visible_inbox_handoff"
+        "outlook_default_view_followup_after_visible_inbox_handoff"
     } else if actions.inbox_normal_contents_table_observed
         && !actions.inbox_normal_contents_table_query_rows_observed
         && actions.default_view_normal_contents_table_query_rows_observed

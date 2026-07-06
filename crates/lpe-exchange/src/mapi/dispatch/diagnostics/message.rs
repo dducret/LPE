@@ -45,12 +45,14 @@ pub(in crate::mapi::dispatch) fn log_open_message_debug(
 
 pub(in crate::mapi::dispatch) fn log_message_getprops_response_debug(
     principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
-    response_len: usize,
+    property_response: &[u8],
 ) {
     let Some(MapiObject::Message {
         folder_id,
@@ -73,6 +75,31 @@ pub(in crate::mapi::dispatch) fn log_message_getprops_response_debug(
         ("missing", None)
     };
     let property_tags = request.property_tags();
+    let materialization =
+        summarize_message_getprops_materialization(&property_tags, property_response);
+    if *folder_id == INBOX_FOLDER_ID {
+        session
+            .post_hierarchy_actions
+            .visible_inbox_message_getprops_not_found_count = materialization.not_found_count;
+        session
+            .post_hierarchy_actions
+            .last_visible_inbox_message_getprops_context = format!(
+            "request_id={request_id};handle={};folder=0x{folder_id:016x};message=0x{message_id:016x};source={message_source};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};response_bytes={}",
+            request.input_handle_index().unwrap_or(0),
+            property_tags.len(),
+            materialization.returned_value_count,
+            materialization.problem_count,
+            materialization.not_found_count,
+            materialization.first_problem_tags,
+            property_response.len(),
+        );
+        session.record_outlook_view_failure_trace_event(format!(
+            "visible_inbox_message_getprops:{}",
+            session
+                .post_hierarchy_actions
+                .last_visible_inbox_message_getprops_context
+        ));
+    }
     tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
@@ -89,6 +116,10 @@ pub(in crate::mapi::dispatch) fn log_message_getprops_response_debug(
         item_id = %format!("0x{message_id:016x}"),
         requested_property_tag_count = property_tags.len(),
         requested_property_tags = %format_debug_property_tags(&property_tags),
+        returned_value_count = materialization.returned_value_count,
+        property_problem_count = materialization.problem_count,
+        not_found_property_problem_count = materialization.not_found_count,
+        first_problem_tags = %materialization.first_problem_tags,
         requested_body_or_rendering_property_count = property_tags
             .iter()
             .filter(|tag| matches!(
@@ -113,9 +144,75 @@ pub(in crate::mapi::dispatch) fn log_message_getprops_response_debug(
             .unwrap_or(0),
         has_attachments = email.map(|email| email.has_attachments).unwrap_or(false),
         unread = email.map(|email| email.unread).unwrap_or(false),
-        response_rop_bytes = response_len,
+        response_rop_bytes = property_response.len(),
         "rca debug mapi message get properties response"
     );
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct MessageGetPropsMaterializationSummary {
+    returned_value_count: usize,
+    problem_count: usize,
+    not_found_count: usize,
+    first_problem_tags: String,
+}
+
+fn summarize_message_getprops_materialization(
+    property_tags: &[u32],
+    response: &[u8],
+) -> MessageGetPropsMaterializationSummary {
+    let mut summary = MessageGetPropsMaterializationSummary::default();
+    let Some(row_kind) = response.get(6).copied() else {
+        summary.first_problem_tags = "truncated".to_string();
+        return summary;
+    };
+    if row_kind == 0 {
+        summary.returned_value_count = property_tags.len();
+        return summary;
+    }
+    if row_kind != 1 {
+        summary.first_problem_tags = format!("unsupported_row_kind={row_kind}");
+        return summary;
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut first_problem_tags = Vec::new();
+    for tag in property_tags {
+        let Ok(flag) = cursor.read_u8() else {
+            first_problem_tags.push(format!("{tag:#010x}:truncated"));
+            break;
+        };
+        match flag {
+            0 => match parse_property_value_for_tag(&mut cursor, *tag) {
+                Ok(_) => summary.returned_value_count += 1,
+                Err(error) => {
+                    summary.problem_count += 1;
+                    if first_problem_tags.len() < 12 {
+                        first_problem_tags.push(format!("{tag:#010x}:parse_error={error}"));
+                    }
+                    break;
+                }
+            },
+            0x0A => {
+                let error = cursor.read_u32().unwrap_or(0);
+                summary.problem_count += 1;
+                if error == 0x8004_010F {
+                    summary.not_found_count += 1;
+                }
+                if first_problem_tags.len() < 12 {
+                    first_problem_tags.push(format!("{tag:#010x}:{error:#010x}"));
+                }
+            }
+            other => {
+                summary.problem_count += 1;
+                if first_problem_tags.len() < 12 {
+                    first_problem_tags.push(format!("{tag:#010x}:flag={other:#04x}"));
+                }
+                break;
+            }
+        }
+    }
+    summary.first_problem_tags = first_problem_tags.join(",");
+    summary
 }
 
 pub(in crate::mapi::dispatch) fn normal_message_debug_property_value(

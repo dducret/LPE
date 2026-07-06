@@ -386,6 +386,25 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         &property_id_mapping_summary,
         named_property_response.len(),
     );
+    record_outlook_umolk_named_property_probe(
+        session,
+        handle_slots,
+        request,
+        request_id,
+        properties.len(),
+        missing_properties.len(),
+        allocated_or_store_resolved_named_property_count,
+        unresolved_named_property_count,
+        legacy_low_dynamic_property_id_count,
+        property_ids.len(),
+        duplicate_summary.0,
+        duplicate_summary.1,
+        duplicate_summary.2,
+        &duplicate_summary.3,
+        &property_id_source_summary,
+        &property_id_mapping_summary,
+        named_property_response.len(),
+    );
     if contains_outlook_osc_contact_source_probe(&properties) {
         session.record_outlook_view_failure_trace_event(format!(
             "resolve_osc_contact_sources:request_id={request_id};object={};create_missing={};requested={};returned={}",
@@ -405,6 +424,74 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         ));
     }
     responses.extend_from_slice(&named_property_response);
+}
+
+fn record_outlook_umolk_named_property_probe(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    request_id: &str,
+    requested_count: usize,
+    missing_count: usize,
+    allocated_or_store_resolved_count: usize,
+    unresolved_count: usize,
+    legacy_low_dynamic_property_id_count: usize,
+    returned_count: usize,
+    duplicate_requested_count: usize,
+    duplicate_returned_id_count: usize,
+    returned_id_collision_count: usize,
+    returned_id_collisions: &str,
+    property_id_source_summary: &str,
+    property_id_mapping_summary: &str,
+    response_rop_payload_bytes: usize,
+) {
+    if !request.named_property_create() || requested_count <= 50 {
+        return;
+    }
+    let Some((config_id, message_class)) =
+        input_object(session, handle_slots, request).and_then(|object| match object {
+            MapiObject::AssociatedConfig {
+                folder_id: INBOX_FOLDER_ID,
+                config_id,
+                saved_message: Some(saved_message),
+            } if saved_message.message_class == "IPM.Configuration.UMOLK.UserOptions" => {
+                Some((*config_id, saved_message.message_class.clone()))
+            }
+            _ => None,
+        })
+    else {
+        return;
+    };
+    session
+        .post_hierarchy_actions
+        .outlook_umolk_named_property_probe_count = session
+        .post_hierarchy_actions
+        .outlook_umolk_named_property_probe_count
+        .saturating_add(1);
+    session
+        .post_hierarchy_actions
+        .last_outlook_umolk_named_property_probe_context = format!(
+        "request_id={request_id};handle={};config=0x{config_id:016x};class={};create_missing=true;requested={requested_count};pre_resolution_missing={missing_count};allocated_or_store_resolved={allocated_or_store_resolved_count};unresolved={unresolved_count};legacy_low_dynamic_ids={legacy_low_dynamic_property_id_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};returned_id_collision_detail={};sources={};mappings={};response_rop_payload_bytes={response_rop_payload_bytes}",
+        request.input_handle_index().unwrap_or(0),
+        message_class,
+        debug_context_or_none(returned_id_collisions),
+        property_id_source_summary,
+        truncate_named_property_debug_field(property_id_mapping_summary, 2048),
+    );
+    session.record_outlook_view_failure_trace_event(format!(
+        "umolk_named_property_burst:{}",
+        session
+            .post_hierarchy_actions
+            .last_outlook_umolk_named_property_probe_context
+    ));
+}
+
+fn truncate_named_property_debug_field(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
+        value.to_string()
+    } else {
+        format!("{}...", &value[..limit])
+    }
 }
 
 fn record_post_calendar_query_position_named_property_probe(

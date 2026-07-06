@@ -187,6 +187,7 @@ pub(in crate::mapi::dispatch) fn log_get_properties_default_folder_response_debu
 
 pub(in crate::mapi::dispatch) fn log_get_properties_specific_response_debug(
     principal: &AccountPrincipal,
+    session: &mut MapiSession,
     request_id: &str,
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -200,6 +201,18 @@ pub(in crate::mapi::dispatch) fn log_get_properties_specific_response_debug(
     let response_shape = summarize_get_properties_probe_response(property_response, 0, &probe);
     let response_values =
         get_properties_specific_response_values_for_debug(&probe.property_tags, property_response);
+    let associated_config_debug = associated_config_debug_identity(object);
+    record_outlook_umolk_getprops_materialization(
+        principal,
+        session,
+        request_id,
+        request,
+        object,
+        associated_config_debug.as_ref(),
+        &probe.property_tags,
+        property_response,
+        &response_shape,
+    );
     let contacts_associated_named_probe = matches!(
         object,
         Some(MapiObject::AssociatedConfig { folder_id, .. })
@@ -269,6 +282,187 @@ pub(in crate::mapi::dispatch) fn log_get_properties_specific_response_debug(
             "rca debug mapi getprops specific response"
         );
     }
+}
+
+fn associated_config_debug_identity(
+    object: Option<&MapiObject>,
+) -> Option<(String, String, String)> {
+    let Some(MapiObject::AssociatedConfig {
+        config_id,
+        saved_message,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    Some(
+        saved_message
+            .as_ref()
+            .map(|message| {
+                (
+                    format!("0x{:016x}", message.id),
+                    message.message_class.clone(),
+                    message.subject.clone(),
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    format!("0x{config_id:016x}"),
+                    "missing".into(),
+                    "missing".into(),
+                )
+            }),
+    )
+}
+
+fn record_outlook_umolk_getprops_materialization(
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    request_id: &str,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    associated_config_debug: Option<&(String, String, String)>,
+    property_tags: &[u32],
+    property_response: &[u8],
+    response_shape: &str,
+) {
+    let Some(MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    let Some((config_id, message_class, subject)) = associated_config_debug else {
+        return;
+    };
+    if message_class != "IPM.Configuration.UMOLK.UserOptions" {
+        return;
+    }
+    if session
+        .post_hierarchy_actions
+        .last_outlook_umolk_named_property_probe_context
+        .is_empty()
+        && !property_tags
+            .iter()
+            .any(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID)
+    {
+        return;
+    }
+    let materialization =
+        summarize_flagged_getprops_materialization(property_tags, property_response);
+    session
+        .post_hierarchy_actions
+        .outlook_umolk_getprops_not_found_count = materialization.not_found_count;
+    session
+        .post_hierarchy_actions
+        .last_outlook_umolk_getprops_materialization_context = format!(
+        "request_id={request_id};handle={};config={config_id};class={message_class};subject={subject};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};response_shape={};response_bytes={}",
+        request.input_handle_index().unwrap_or(0),
+        property_tags.len(),
+        materialization.returned_value_count,
+        materialization.problem_count,
+        materialization.not_found_count,
+        materialization.first_problem_tags,
+        truncate_debug_field(response_shape, 1024),
+        property_response.len(),
+    );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        associated_config_id = config_id,
+        associated_config_class = message_class,
+        associated_config_subject = subject,
+        umolk_named_property_probe_context = %debug_context_or_none(
+            &session
+                .post_hierarchy_actions
+                .last_outlook_umolk_named_property_probe_context
+        ),
+        umolk_getprops_materialization_context = %session
+            .post_hierarchy_actions
+            .last_outlook_umolk_getprops_materialization_context,
+        "rca debug mapi umolk getprops materialization"
+    );
+    session.record_outlook_view_failure_trace_event(format!(
+        "umolk_getprops_materialization:{}",
+        session
+            .post_hierarchy_actions
+            .last_outlook_umolk_getprops_materialization_context
+    ));
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct GetPropsMaterializationSummary {
+    returned_value_count: usize,
+    problem_count: usize,
+    not_found_count: usize,
+    first_problem_tags: String,
+}
+
+fn summarize_flagged_getprops_materialization(
+    property_tags: &[u32],
+    response: &[u8],
+) -> GetPropsMaterializationSummary {
+    let mut summary = GetPropsMaterializationSummary::default();
+    let Some(row_kind) = response.get(6).copied() else {
+        summary.first_problem_tags = "truncated".to_string();
+        return summary;
+    };
+    if row_kind == 0 {
+        summary.returned_value_count = property_tags.len();
+        return summary;
+    }
+    if row_kind != 1 {
+        summary.first_problem_tags = format!("unsupported_row_kind={row_kind}");
+        return summary;
+    }
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    let mut first_problem_tags = Vec::new();
+    for tag in property_tags {
+        let Ok(flag) = cursor.read_u8() else {
+            first_problem_tags.push(format!("{tag:#010x}:truncated"));
+            break;
+        };
+        match flag {
+            0 => match parse_property_value_for_tag(&mut cursor, *tag) {
+                Ok(_) => summary.returned_value_count += 1,
+                Err(error) => {
+                    summary.problem_count += 1;
+                    if first_problem_tags.len() < 12 {
+                        first_problem_tags.push(format!("{tag:#010x}:parse_error={error}"));
+                    }
+                    break;
+                }
+            },
+            0x0A => {
+                let error = cursor.read_u32().unwrap_or(0);
+                summary.problem_count += 1;
+                if error == 0x8004_010F {
+                    summary.not_found_count += 1;
+                }
+                if first_problem_tags.len() < 12 {
+                    first_problem_tags.push(format!("{tag:#010x}:{error:#010x}"));
+                }
+            }
+            other => {
+                summary.problem_count += 1;
+                if first_problem_tags.len() < 12 {
+                    first_problem_tags.push(format!("{tag:#010x}:flag={other:#04x}"));
+                }
+                break;
+            }
+        }
+    }
+    summary.first_problem_tags = first_problem_tags.join(",");
+    summary
 }
 
 pub(in crate::mapi::dispatch) fn log_get_properties_view_response_debug(

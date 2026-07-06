@@ -659,6 +659,65 @@ fn post_hierarchy_close_kind_classifies_calendar_named_property_burst_without_qu
 }
 
 #[test]
+fn post_hierarchy_close_kind_classifies_umolk_named_property_burst() {
+    let mut state = PostHierarchyActionState {
+        outlook_umolk_named_property_probe_count: 1,
+        last_outlook_umolk_named_property_probe_context:
+            "request_id={A}:112;requested=218;returned=218".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_umolk_named_property_burst_before_content_sync"
+    );
+
+    state.last_outlook_umolk_getprops_materialization_context =
+        "request_id={A}:113;problem_count=206;not_found_count=206".to_string();
+    state.outlook_umolk_getprops_not_found_count = 206;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_umolk_getprops_mostly_not_found_before_content_sync"
+    );
+}
+
+#[test]
+fn post_hierarchy_close_kind_classifies_visible_inbox_message_faults() {
+    let mut state = PostHierarchyActionState {
+        visible_inbox_message_open_missing_count: 1,
+        last_visible_inbox_message_open_context:
+            "request_id={A}:121;folder=0x0000000000050001;source=missing".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_message_open_missing_before_content_sync"
+    );
+
+    state.visible_inbox_message_open_missing_count = 0;
+    state.visible_inbox_message_getprops_not_found_count = 87;
+    state.last_visible_inbox_message_getprops_context =
+        "request_id={A}:122;problem_count=87;not_found_count=87".to_string();
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_message_getprops_mostly_not_found_before_content_sync"
+    );
+
+    state.visible_inbox_message_getprops_not_found_count = 0;
+    state.last_visible_inbox_message_row_context =
+        "request_id={A}:123;row_summary=returned=1".to_string();
+    state.last_visible_inbox_message_open_context.clear();
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_row_returned_without_message_open_before_content_sync"
+    );
+}
+
+#[test]
 fn post_hierarchy_close_kind_classifies_default_view_sweep_before_inbox_query_rows() {
     let mut state = PostHierarchyActionState {
         inbox_normal_contents_table_observed: true,
@@ -682,7 +741,7 @@ fn post_hierarchy_close_kind_classifies_default_view_sweep_before_inbox_query_ro
 }
 
 #[test]
-fn post_hierarchy_close_kind_classifies_default_view_hierarchy_sweep() {
+fn post_hierarchy_close_kind_classifies_default_view_followup() {
     let state = PostHierarchyActionState {
         inbox_normal_contents_table_observed: true,
         default_view_normal_contents_table_query_rows_observed: true,
@@ -695,7 +754,22 @@ fn post_hierarchy_close_kind_classifies_default_view_hierarchy_sweep() {
 
     assert_eq!(
         post_hierarchy_close_kind(&state, false),
-        "outlook_default_view_hierarchy_sweep_after_visible_inbox_handoff"
+        "outlook_default_view_followup_after_visible_inbox_handoff"
+    );
+
+    let state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        default_view_normal_contents_table_query_rows_observed: true,
+        last_default_view_normal_contents_table_query_rows_context:
+            "folder=0x00000000000e0001;role=drafts".to_string(),
+        last_successful_non_release_execute_context:
+            "request_id={A}:109;request_rops=Release,OpenMessage,GetPropertiesSpecific;response_rops=OpenMessage,GetPropertiesSpecific;response_results=0x00000000,0x00000000;response_rop_bytes=395;cached=false".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_default_view_followup_after_visible_inbox_handoff"
     );
 }
 
