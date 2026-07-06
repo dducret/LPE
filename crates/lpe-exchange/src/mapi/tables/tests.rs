@@ -1071,7 +1071,7 @@ fn sync_issues_query_rows_returns_no_children_until_backed() {
         rop_id: RopId::QueryRows.as_u8(),
         input_handle_index: Some(0),
         output_handle_index: None,
-        payload: vec![0, 1, 10, 0],
+        payload: vec![0, 1, 30, 0],
     };
 
     let response = rop_query_rows_response(
@@ -2322,7 +2322,7 @@ fn query_rows_clamps_stale_cursor_to_current_row_count() {
         rop_id: RopId::QueryRows.as_u8(),
         input_handle_index: Some(0),
         output_handle_index: None,
-        payload: vec![0, 1, 10, 0],
+        payload: vec![0, 1, 30, 0],
     };
 
     let response =
@@ -3569,13 +3569,13 @@ fn microsoft_oxosrch_common_views_projects_search_folder_definition_messages() {
 
     assert_eq!(
         associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-        7
+        20
     );
     let response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], 0x15);
-    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 7);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 20);
     let mut shortcut_class = Vec::new();
     for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
         shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -4379,7 +4379,7 @@ fn common_views_query_rows_uses_account_bound_wlink_entry_ids() {
         rop_id: RopId::QueryRows.as_u8(),
         input_handle_index: Some(0),
         output_handle_index: None,
-        payload: vec![0, 1, 10, 0],
+        payload: vec![0, 1, 30, 0],
     };
 
     let response =

@@ -1473,7 +1473,7 @@ fn common_views_preserves_persisted_navigation_shortcuts() {
     assert_eq!(shortcut.subject, "Alpha");
     assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
     assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-    assert_eq!(messages.len(), 6);
+    assert_eq!(messages.len(), 19);
     assert_eq!(
         messages
             .iter()
@@ -1696,13 +1696,13 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
 
     assert_eq!(snapshot.navigation_shortcut_messages().len(), 3);
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    assert_eq!(table_messages.len(), 6);
+    assert_eq!(table_messages.len(), 19);
     assert_eq!(
         table_messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        4
+        17
     );
     assert!(table_messages.iter().any(|message| matches!(
         message,

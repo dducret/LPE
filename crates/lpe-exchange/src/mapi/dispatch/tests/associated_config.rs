@@ -857,7 +857,7 @@ fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
         true,
         0,
         true,
-        10,
+        20,
         &[],
         None,
         &columns,
