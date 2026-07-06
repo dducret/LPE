@@ -322,7 +322,6 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
             message.message_class.as_str(),
             "IPM.Configuration.ELC"
                 | "IPM.Configuration.MRM"
-                | "IPM.Configuration.UMOLK.UserOptions"
                 | "IPM.Sharing.Configuration"
                 | "IPM.Sharing.Index"
                 | "IPM.Aggregation"

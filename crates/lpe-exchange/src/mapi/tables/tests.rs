@@ -6538,7 +6538,7 @@ fn inbox_associated_query_rows_uses_standard_property_rows_for_complete_rows() {
 }
 
 #[test]
-fn inbox_associated_query_rows_returns_umolk_user_options_default() {
+fn inbox_associated_query_rows_suppresses_empty_virtual_umolk_user_options() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -6572,8 +6572,8 @@ fn inbox_associated_query_rows_returns_umolk_user_options_default() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
 }
 
 #[test]

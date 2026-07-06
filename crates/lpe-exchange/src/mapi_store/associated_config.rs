@@ -112,7 +112,6 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
         OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MRM_CONFIG_ID
-            | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID
             | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
             | OUTLOOK_INBOX_SHARING_INDEX_ID
@@ -302,7 +301,6 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
         message_class,
         OUTLOOK_INBOX_ELC_CONFIG_CLASS
             | OUTLOOK_INBOX_MRM_CONFIG_CLASS
-            | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
             | OUTLOOK_INBOX_SHARING_INDEX_CLASS
             | OUTLOOK_INBOX_AGGREGATION_CLASS
