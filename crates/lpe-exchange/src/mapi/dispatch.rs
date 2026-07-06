@@ -1164,6 +1164,23 @@ where
         if responses.len() != response_len_before {
             response_handle_indexes.push(request.response_handle_index());
             response_handle_slots = handle_slots.clone();
+            if matches!(
+                RopId::from_u8(typed_request.rop_id()),
+                Some(RopId::SaveChangesMessage)
+            ) {
+                if let Some(handle) = input_handle(&response_handle_slots, &request) {
+                    if let Some(folder_id) =
+                        session.handles.get(&handle).and_then(MapiObject::folder_id)
+                    {
+                        restore_save_changes_containing_folder_response_handle(
+                            session,
+                            &mut response_handle_slots,
+                            &request,
+                            folder_id,
+                        );
+                    }
+                }
+            }
         }
         record_execute_sync_observations(
             session,

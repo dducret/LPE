@@ -1911,21 +1911,17 @@ fn save_changes_navigation_shortcut_restores_common_views_folder_response_handle
             shortcut_id: 0x0000_0000_0358_0001,
         },
     );
-    let mut responses = Vec::new();
-    let mut handle_slots = vec![26, 76];
+    let mut response_handle_slots = vec![26, 76];
 
-    append_save_changes_message_response(
+    let restored = restore_save_changes_containing_folder_response_handle(
         &session,
-        &mut responses,
-        &mut handle_slots,
+        &mut response_handle_slots,
         &request,
-        76,
-        0x0000_0000_0358_0001,
+        COMMON_VIEWS_FOLDER_ID,
     );
 
-    assert_eq!(handle_slots, vec![9, 76]);
-    assert_eq!(responses[0], 0x0c);
-    assert_eq!(responses[1], 0);
+    assert_eq!(restored, Some(9));
+    assert_eq!(response_handle_slots, vec![9, 76]);
 }
 
 #[test]
