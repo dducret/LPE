@@ -1046,6 +1046,9 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "mail_change_log_object_shape_check",
             "associated_config",
             "mapi_low_dynamic_property_count",
+            "WITH mapped AS",
+            "property_tag::bigint >> 16",
+            "jsonb_object_keys(config.properties_json)",
             "MAPI low dynamic named-property ids are migrated",
         ],
     );
