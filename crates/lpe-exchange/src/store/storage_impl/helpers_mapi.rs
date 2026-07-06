@@ -965,6 +965,7 @@ fn mapi_content_table_order_by(sort_orders: &[MapiContentTableSort]) -> String {
         .map(|sort| {
             let column = match sort.field {
                 MapiContentTableSortField::ReceivedAt => "received_at",
+                MapiContentTableSortField::ClientSubmitTime => "client_submit_time_key",
                 MapiContentTableSortField::Subject => "subject_key",
                 MapiContentTableSortField::SenderName => "sender_name_key",
                 MapiContentTableSortField::SenderEmail => "sender_email_key",
@@ -989,6 +990,7 @@ mod tests {
     fn mapi_content_table_order_by_uses_projected_columns() {
         let sort_fields = [
             MapiContentTableSortField::ReceivedAt,
+            MapiContentTableSortField::ClientSubmitTime,
             MapiContentTableSortField::Subject,
             MapiContentTableSortField::SenderName,
             MapiContentTableSortField::SenderEmail,
@@ -1009,6 +1011,7 @@ mod tests {
 
         assert!(!order_by.contains("mm."));
         assert!(!order_by.contains("m."));
+        assert!(order_by.contains("client_submit_time_key ASC"));
         assert!(order_by.contains("message_flags ASC"));
         assert!(order_by.ends_with("id DESC"));
     }

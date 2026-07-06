@@ -84,6 +84,7 @@ macro_rules! store_impl_messages {
                     SELECT
                         m.id,
                         m.received_at,
+                        COALESCE(m.sent_at, m.received_at) AS client_submit_time_key,
                         lower(COALESCE(m.normalized_subject, '')) AS subject_key,
                         lower(COALESCE(fr.display_name, fr.address, '')) AS sender_name_key,
                         lower(COALESCE(fr.address, '')) AS sender_email_key,

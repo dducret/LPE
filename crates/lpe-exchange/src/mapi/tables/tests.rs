@@ -1,10 +1,11 @@
 use super::*;
 use crate::mapi::wire::MapiRestrictionType;
 use crate::mapi::wire::RopId;
+use crate::mapi_store::MapiJournalEntry;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationRights, MailboxRule,
-    SearchFolderDefinition,
+    AccessibleContact, AccessibleEvent, ClientTask, CollaborationCollection, CollaborationRights,
+    JournalEntry, MailboxRule, SearchFolderDefinition,
 };
 
 fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
@@ -21,6 +22,49 @@ fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
     .into_iter()
     .map(str::to_string)
     .collect()
+}
+
+fn test_client_task(title: &str, due_at: Option<&str>, updated_at: &str) -> ClientTask {
+    ClientTask {
+        id: Uuid::new_v4(),
+        owner_account_id: Uuid::nil(),
+        owner_email: "owner@example.test".to_string(),
+        owner_display_name: "Owner".to_string(),
+        is_owned: true,
+        rights: CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        },
+        task_list_id: Uuid::nil(),
+        task_list_sort_order: 0,
+        title: title.to_string(),
+        description: String::new(),
+        status: "needsAction".to_string(),
+        due_at: due_at.map(str::to_string),
+        completed_at: None,
+        recurrence_rule: String::new(),
+        sort_order: 0,
+        updated_at: updated_at.to_string(),
+    }
+}
+
+fn test_journal_entry(subject: &str, starts_at: Option<&str>, updated_at: &str) -> JournalEntry {
+    JournalEntry {
+        id: Uuid::new_v4(),
+        subject: subject.to_string(),
+        body_text: String::new(),
+        entry_type: "Phone call".to_string(),
+        message_class: "IPM.Activity".to_string(),
+        starts_at: starts_at.map(str::to_string),
+        ends_at: None,
+        occurred_at: None,
+        companies_json: "[]".to_string(),
+        contacts_json: "[]".to_string(),
+        created_at: updated_at.to_string(),
+        updated_at: updated_at.to_string(),
+    }
 }
 
 #[test]
@@ -54,6 +98,109 @@ fn default_hierarchy_columns_cover_table_projection_contract() {
 fn default_store_identity_columns_include_offline_reminders_entry_id() {
     assert!(default_store_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
     assert!(default_folder_identity_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
+}
+
+#[test]
+fn task_default_view_sort_orders_by_due_date() {
+    let later = MapiTask {
+        id: 1,
+        folder_id: TASKS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x11111111_1111_4111_8111_111111111111),
+        task: test_client_task(
+            "Later",
+            Some("2026-05-21T12:00:00Z"),
+            "2026-05-20T09:00:00Z",
+        ),
+    };
+    let earlier = MapiTask {
+        id: 2,
+        folder_id: TASKS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x22222222_2222_4222_8222_222222222222),
+        task: test_client_task(
+            "Earlier",
+            Some("2026-05-21T09:00:00Z"),
+            "2026-05-20T10:00:00Z",
+        ),
+    };
+    let mut rows = vec![&later, &earlier];
+
+    sort_tasks(
+        &mut rows,
+        &[MapiSortOrder {
+            property_tag: PID_LID_TASK_DUE_DATE_TAG,
+            order: 0,
+        }],
+    );
+
+    assert_eq!(rows[0].task.title, "Earlier");
+    assert_eq!(rows[1].task.title, "Later");
+}
+
+#[test]
+fn journal_default_view_sort_orders_by_log_start() {
+    let later = MapiJournalEntry {
+        id: 1,
+        folder_id: JOURNAL_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x33333333_3333_4333_8333_333333333333),
+        entry: test_journal_entry(
+            "Later",
+            Some("2026-05-21T12:00:00Z"),
+            "2026-05-20T09:00:00Z",
+        ),
+    };
+    let earlier = MapiJournalEntry {
+        id: 2,
+        folder_id: JOURNAL_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x44444444_4444_4444_8444_444444444444),
+        entry: test_journal_entry(
+            "Earlier",
+            Some("2026-05-21T09:00:00Z"),
+            "2026-05-20T10:00:00Z",
+        ),
+    };
+    let mut rows = vec![&later, &earlier];
+
+    sort_journal_entries(
+        &mut rows,
+        &[MapiSortOrder {
+            property_tag: PID_LID_LOG_START_TAG,
+            order: 0,
+        }],
+    );
+
+    assert_eq!(rows[0].entry.subject, "Earlier");
+    assert_eq!(rows[1].entry.subject, "Later");
+}
+
+#[test]
+fn sent_default_view_sort_orders_by_client_submit_time() {
+    let mailbox_id = Uuid::from_u128(0x99999999_9999_4999_8999_999999999999);
+    let mut later = test_table_email(
+        Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa),
+        mailbox_id,
+        "Later",
+    );
+    later.received_at = "2026-05-21T08:00:00Z".to_string();
+    later.sent_at = Some("2026-05-21T12:00:00Z".to_string());
+    let mut earlier = test_table_email(
+        Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb),
+        mailbox_id,
+        "Earlier",
+    );
+    earlier.received_at = "2026-05-21T09:00:00Z".to_string();
+    earlier.sent_at = Some("2026-05-21T10:00:00Z".to_string());
+    let mut rows = vec![&later, &earlier];
+
+    sort_emails(
+        &mut rows,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_CLIENT_SUBMIT_TIME,
+            order: 0,
+        }],
+    );
+
+    assert_eq!(rows[0].subject, "Earlier");
+    assert_eq!(rows[1].subject, "Later");
 }
 
 #[test]

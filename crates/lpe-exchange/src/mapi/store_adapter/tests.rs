@@ -601,6 +601,100 @@ fn default_contacts_object_id_requires_snapshot_backed_contents() {
 }
 
 #[test]
+fn special_content_folder_ids_require_snapshot_backed_contents() {
+    for folder_id in [
+        TODO_SEARCH_FOLDER_ID,
+        REMINDERS_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
+        crate::mapi::identity::RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
+        crate::mapi::identity::RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
+    ] {
+        let plan = MapiAccessPlan {
+            requires_full_snapshot: false,
+            requires_associated_contents: false,
+            object_ids: vec![folder_id],
+            content_queries: Vec::new(),
+        };
+
+        assert!(
+            requires_snapshot_backed_contents(&plan, &[]),
+            "folder_id=0x{folder_id:016x}"
+        );
+    }
+}
+
+#[test]
+fn access_plan_does_not_apply_mail_default_sort_to_contacts_contents_table() {
+    let mut session = empty_session();
+    session.handles.insert(
+        1,
+        MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: false,
+            columns: Vec::new(),
+            columns_set: false,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+                order: 0x01,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.next_handle = 2;
+    let mut rops = vec![
+        0x15, 0x00, 0x00, 0x00, 0x01, // RopQueryRows
+    ];
+    rops.extend_from_slice(&1u16.to_le_bytes());
+
+    let plan = plan_mapi_store_access(&session, &rop_buffer(&rops, &[1]));
+
+    assert!(plan.requires_full_snapshot, "plan={plan:?}");
+    assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+}
+
+#[test]
+fn access_plan_query_position_does_not_window_contacts_contents_table() {
+    let mut session = empty_session();
+    session.handles.insert(
+        1,
+        MapiObject::ContentsTable {
+            folder_id: CONTACTS_FOLDER_ID,
+            associated: false,
+            columns: Vec::new(),
+            columns_set: false,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+                order: 0x01,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.next_handle = 2;
+    let rops = [0x17, 0x00, 0x00];
+
+    let plan = plan_mapi_store_access(&session, &rop_buffer(&rops, &[1]));
+
+    assert!(plan.requires_full_snapshot, "plan={plan:?}");
+    assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+}
+
+#[test]
 fn access_plan_merges_seek_total_query_with_following_query_rows_window() {
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,

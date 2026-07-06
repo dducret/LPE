@@ -179,7 +179,7 @@ fn format_view_handoff_invariant_warnings(
 
 pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     folder_id: u64,
-    _associated: bool,
+    associated: bool,
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
@@ -196,6 +196,33 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
         folder_id == COMMON_VIEWS_FOLDER_ID || common_views_default_id.is_some();
     let expected_common_views_id = common_views_default_id
         .unwrap_or(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID);
+    if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
+        let view = snapshot.common_view_named_view_message_for_id(expected_common_views_id);
+        let descriptor_summary = view
+            .as_ref()
+            .map(|message| {
+                let definition = outlook_folder_view_definition(message.folder_id, &message.name);
+                let descriptor = view_descriptor_binary(&definition);
+                format_view_descriptor_binary_summary(&descriptor)
+            })
+            .unwrap_or_default();
+        let selected_view_name = view
+            .as_ref()
+            .map(|message| message.name.as_str())
+            .unwrap_or("");
+        return format!(
+            "folder_local_default_supported=false;\
+             folder_local_default_visible_in_fai_table=false;\
+             associated_navigation_table=true;\
+             advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x};\
+             selected_view_name={selected_view_name};\
+             expected_view_message_id=0x{expected_common_views_id:016x};\
+             selected_property_tag_count={};\
+             descriptor_comparison=not_applicable_common_views_associated_table;\
+             descriptor_summary={descriptor_summary}",
+            columns.len()
+        );
+    }
     let (view_folder_id, expected_view_message_id, view) = if uses_common_views {
         (
             COMMON_VIEWS_FOLDER_ID,
@@ -621,7 +648,12 @@ mod tests {
         assert!(summary.contains("folder_local_default_supported=false"));
         assert!(summary.contains("advertised_default_view_folder_id=0x0000000000090001"));
         assert!(summary.contains("expected_view_message_id=0x7ffffffffff70001"));
+        assert!(summary.contains("associated_navigation_table=true"));
+        assert!(
+            summary.contains("descriptor_comparison=not_applicable_common_views_associated_table")
+        );
         assert!(summary.contains("descriptor_summary=version=8"));
+        assert!(!summary.contains("selected_missing_descriptor_columns="));
     }
 
     #[test]

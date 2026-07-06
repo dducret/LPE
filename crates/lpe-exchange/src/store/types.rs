@@ -603,6 +603,7 @@ pub(crate) struct MapiContentTableSort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiContentTableSortField {
     ReceivedAt,
+    ClientSubmitTime,
     Subject,
     SenderName,
     SenderEmail,

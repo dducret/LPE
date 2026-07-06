@@ -5482,7 +5482,7 @@ fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         &snapshot,
     )
     .expect("modeled associated config stream");
-    assert!(modeled_stream.is_empty());
+    assert!(!modeled_stream.is_empty());
     assert!(writable_target.is_none());
 }
 

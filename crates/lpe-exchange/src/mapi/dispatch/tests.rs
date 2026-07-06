@@ -61,6 +61,60 @@ fn contents_table_named_property_context_reports_selected_columns() {
 }
 
 #[test]
+fn default_view_contents_table_starts_with_descriptor_sort() {
+    let initial_sort = default_view_contents_table_initial_sort(INBOX_FOLDER_ID, false, "IPF.Note");
+    let table =
+        contents_table_object_with_default_view_sort(INBOX_FOLDER_ID, false, initial_sort.clone());
+
+    let MapiObject::ContentsTable { sort_orders, .. } = table else {
+        panic!("expected contents table");
+    };
+
+    assert_eq!(
+        initial_sort,
+        vec![MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 0x01,
+        }]
+    );
+    assert_eq!(sort_orders, initial_sort);
+}
+
+#[test]
+fn sent_default_view_contents_table_uses_sent_to_descriptor_sort() {
+    let initial_sort = default_view_contents_table_initial_sort(SENT_FOLDER_ID, false, "IPF.Note");
+    let table =
+        contents_table_object_with_default_view_sort(SENT_FOLDER_ID, false, initial_sort.clone());
+
+    let MapiObject::ContentsTable { sort_orders, .. } = table else {
+        panic!("expected contents table");
+    };
+
+    assert_eq!(
+        initial_sort,
+        vec![MapiSortOrder {
+            property_tag: PID_TAG_CLIENT_SUBMIT_TIME,
+            order: 0x01,
+        }]
+    );
+    assert_eq!(sort_orders, initial_sort);
+}
+
+#[test]
+fn associated_contents_table_does_not_start_with_default_view_sort() {
+    let initial_sort = default_view_contents_table_initial_sort(INBOX_FOLDER_ID, true, "IPF.Note");
+    let table =
+        contents_table_object_with_default_view_sort(INBOX_FOLDER_ID, true, initial_sort.clone());
+
+    let MapiObject::ContentsTable { sort_orders, .. } = table else {
+        panic!("expected contents table");
+    };
+
+    assert!(initial_sort.is_empty());
+    assert!(sort_orders.is_empty());
+}
+
+#[test]
 fn outlook_view_descriptor_probe_detection_tracks_collaboration_view_named_properties() {
     let properties = vec![
         MapiNamedProperty {

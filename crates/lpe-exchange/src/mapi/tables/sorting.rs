@@ -86,6 +86,9 @@ pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiS
                 PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
                     left.received_at.cmp(&right.received_at)
                 }
+                PID_TAG_CLIENT_SUBMIT_TIME => {
+                    client_submit_sort_key(left).cmp(client_submit_sort_key(right))
+                }
                 PID_TAG_MESSAGE_FLAGS => message_flags(left).cmp(&message_flags(right)),
                 PID_TAG_MESSAGE_SIZE | PID_TAG_MESSAGE_SIZE_EXTENDED => {
                     left.size_octets.cmp(&right.size_octets)
@@ -130,6 +133,9 @@ pub(in crate::mapi) fn sort_mapi_messages(
                 PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
                     left.email.received_at.cmp(&right.email.received_at)
                 }
+                PID_TAG_CLIENT_SUBMIT_TIME => {
+                    client_submit_sort_key(&left.email).cmp(client_submit_sort_key(&right.email))
+                }
                 PID_TAG_MESSAGE_FLAGS => {
                     message_flags(&left.email).cmp(&message_flags(&right.email))
                 }
@@ -149,6 +155,10 @@ pub(in crate::mapi) fn sort_mapi_messages(
         }
         Ordering::Equal
     });
+}
+
+fn client_submit_sort_key(email: &JmapEmail) -> &str {
+    email.sent_at.as_deref().unwrap_or(&email.received_at)
 }
 
 pub(super) fn sort_associated_table_rows(
@@ -334,6 +344,8 @@ pub(in crate::mapi) fn sort_tasks(
                 PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
                     left.task.updated_at.cmp(&right.task.updated_at)
                 }
+                PID_LID_TASK_DUE_DATE_TAG => left.task.due_at.cmp(&right.task.due_at),
+                PID_LID_TASK_START_DATE_TAG => left.task.updated_at.cmp(&right.task.updated_at),
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
             };
@@ -387,7 +399,7 @@ pub(in crate::mapi) fn sort_journal_entries(
                 PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
                     compare_case_insensitive(&left.entry.subject, &right.entry.subject)
                 }
-                PID_TAG_START_DATE | PID_TAG_MESSAGE_DELIVERY_TIME => {
+                PID_TAG_START_DATE | PID_LID_LOG_START_TAG | PID_TAG_MESSAGE_DELIVERY_TIME => {
                     journal_entry_start_sort_key(&left.entry)
                         .cmp(&journal_entry_start_sort_key(&right.entry))
                 }

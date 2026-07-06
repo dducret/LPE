@@ -267,6 +267,26 @@ pub(in crate::mapi) fn outlook_folder_view_definition(
     }
 }
 
+pub(in crate::mapi) fn outlook_folder_view_sort_orders(
+    folder_id: u64,
+    view_name: &str,
+) -> Vec<MapiSortOrder> {
+    let definition = outlook_folder_view_definition(folder_id, view_name);
+    definition
+        .columns
+        .get(definition.sort_column)
+        .map(|column| MapiSortOrder {
+            property_tag: column.property_tag,
+            order: if definition.sort_descending {
+                0x01
+            } else {
+                0x00
+            },
+        })
+        .into_iter()
+        .collect()
+}
+
 fn outlook_inbox_compact_view_definition() -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::MailCompact,

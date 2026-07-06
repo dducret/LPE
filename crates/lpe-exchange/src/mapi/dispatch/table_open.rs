@@ -221,9 +221,19 @@ pub(super) async fn append_open_table_response<S>(
                 ));
                 return;
             }
+            let (_, _, container_class) = debug_open_folder_metadata(contents_folder_id, mailboxes);
+            let initial_sort = default_view_contents_table_initial_sort(
+                contents_folder_id,
+                associated,
+                &container_class,
+            );
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
-                contents_table_object(contents_folder_id, associated),
+                contents_table_object_with_default_view_sort(
+                    contents_folder_id,
+                    associated,
+                    initial_sort.clone(),
+                ),
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = contents_table_open_row_count(
@@ -251,10 +261,10 @@ pub(super) async fn append_open_table_response<S>(
                 handle,
                 debug_role_for_folder_id(contents_folder_id)
             ));
-            let (_, _, container_class) = debug_open_folder_metadata(contents_folder_id, mailboxes);
             if !associated && default_view_supported_folder(contents_folder_id, &container_class) {
+                let initial_sort_summary = format_debug_sort_orders(&initial_sort);
                 let context = format!(
-                    "request_id={request_id};handle={handle};folder=0x{contents_folder_id:016x};role={};container_class={container_class};row_count={row_count};table_flags=0x{table_flags:02x}",
+                    "request_id={request_id};handle={handle};folder=0x{contents_folder_id:016x};role={};container_class={container_class};row_count={row_count};table_flags=0x{table_flags:02x};initial_sort={initial_sort_summary}",
                     debug_role_for_folder_id(contents_folder_id)
                 );
                 session.record_outlook_view_failure_trace_event(format!(
@@ -273,6 +283,7 @@ pub(super) async fn append_open_table_response<S>(
                     container_class,
                     output_handle = handle,
                     row_count,
+                    initial_sort = %initial_sort_summary,
                     default_view_normal_table_open = %context,
                     next_expected_client_step = "set_columns_or_query_rows_on_default_view_contents_table",
                     "rca debug mapi default view normal contents table opened"
@@ -349,4 +360,36 @@ pub(super) async fn append_open_table_response<S>(
         }
         _ => {}
     }
+}
+
+pub(super) fn contents_table_object_with_default_view_sort(
+    folder_id: u64,
+    associated: bool,
+    sort_orders: Vec<MapiSortOrder>,
+) -> MapiObject {
+    let mut object = contents_table_object(folder_id, associated);
+    if let MapiObject::ContentsTable {
+        sort_orders: object_sort_orders,
+        ..
+    } = &mut object
+    {
+        *object_sort_orders = sort_orders;
+    }
+    object
+}
+
+pub(super) fn default_view_contents_table_initial_sort(
+    folder_id: u64,
+    associated: bool,
+    container_class: &str,
+) -> Vec<MapiSortOrder> {
+    if associated || !default_view_supported_folder(folder_id, container_class) {
+        return Vec::new();
+    }
+    let view_name = if folder_id == SENT_FOLDER_ID {
+        "Sent To"
+    } else {
+        crate::mapi_store::outlook_default_folder_named_view_name(folder_id)
+    };
+    outlook_folder_view_sort_orders(folder_id, view_name)
 }

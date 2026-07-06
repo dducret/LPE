@@ -176,6 +176,15 @@ fn is_snapshot_backed_collaboration_folder(folder_id: u64) -> bool {
             | CONTACTS_SEARCH_FOLDER_ID
             | CALENDAR_FOLDER_ID
             | TASKS_FOLDER_ID
+            | TODO_SEARCH_FOLDER_ID
+            | REMINDERS_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | JOURNAL_FOLDER_ID
+            | TRACKED_MAIL_PROCESSING_FOLDER_ID
+            | crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID
+            | crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
+            | crate::mapi::identity::RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
+            | crate::mapi::identity::RECOVERABLE_ITEMS_PURGES_FOLDER_ID
     )
 }
 
@@ -273,6 +282,7 @@ pub(in crate::mapi) fn simulate_table_access(
             if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
                 plan.requires_associated_contents = true;
             }
+            let sort_orders = simulated_default_view_content_sort(folder_id, associated);
             let handle = simulate_allocate_handle(
                 handles,
                 next_handle,
@@ -282,7 +292,7 @@ pub(in crate::mapi) fn simulate_table_access(
                     associated,
                     columns: Vec::new(),
                     columns_set: false,
-                    sort_orders: Vec::new(),
+                    sort_orders,
                     category_count: 0,
                     expanded_count: 0,
                     collapsed_categories: HashSet::new(),
@@ -431,7 +441,9 @@ pub(in crate::mapi) fn simulate_table_access(
         0x17 => {
             let Some(MapiObject::ContentsTable {
                 folder_id,
+                associated,
                 sort_orders,
+                category_count,
                 restriction,
                 position,
                 ..
@@ -439,7 +451,14 @@ pub(in crate::mapi) fn simulate_table_access(
             else {
                 return;
             };
+            if *associated {
+                return;
+            }
             if restriction.is_some() {
+                plan.requires_full_snapshot = true;
+                return;
+            }
+            if *category_count > 0 || !is_windowable_mail_contents_folder(*folder_id) {
                 plan.requires_full_snapshot = true;
                 return;
             }
@@ -565,6 +584,18 @@ pub(in crate::mapi) fn simulate_table_access(
     }
 }
 
+fn simulated_default_view_content_sort(folder_id: u64, associated: bool) -> Vec<MapiSortOrder> {
+    if associated || !is_windowable_mail_contents_folder(folder_id) {
+        return Vec::new();
+    }
+    let view_name = if folder_id == SENT_FOLDER_ID {
+        "Sent To"
+    } else {
+        crate::mapi_store::outlook_default_folder_named_view_name(folder_id)
+    };
+    outlook_folder_view_sort_orders(folder_id, view_name)
+}
+
 fn simulate_allocate_handle(
     handles: &mut HashMap<u32, MapiObject>,
     next_handle: &mut u32,
@@ -654,6 +685,9 @@ fn content_query_ranges_can_merge(
 }
 
 fn is_windowable_mail_contents_folder(folder_id: u64) -> bool {
+    if is_snapshot_backed_collaboration_folder(folder_id) {
+        return false;
+    }
     match role_for_folder_id(folder_id) {
         Some(
             "inbox"
@@ -681,6 +715,7 @@ fn mapi_content_table_sort_orders(
                 PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
                     MapiContentTableSortField::ReceivedAt
                 }
+                PID_TAG_CLIENT_SUBMIT_TIME => MapiContentTableSortField::ClientSubmitTime,
                 PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                     MapiContentTableSortField::Subject
                 }

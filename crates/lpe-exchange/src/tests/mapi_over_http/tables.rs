@@ -682,18 +682,26 @@ async fn mapi_over_http_microsoft_reset_table_requires_new_set_columns() {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                "81818181-8181-8181-8181-818181818181",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "First page message",
-            ),
-            FakeStore::email(
-                "82828282-8282-8282-8282-828282828282",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Second page message",
-            ),
+            {
+                let mut email = FakeStore::email(
+                    "81818181-8181-8181-8181-818181818181",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "First page message",
+                );
+                email.received_at = "2026-05-03T12:00:00Z".to_string();
+                email
+            },
+            {
+                let mut email = FakeStore::email(
+                    "82828282-8282-8282-8282-828282828282",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Second page message",
+                );
+                email.received_at = "2026-05-03T11:00:00Z".to_string();
+                email
+            },
         ])),
         ..Default::default()
     };
@@ -1379,18 +1387,26 @@ async fn mapi_over_http_query_rows_reads_backward_from_table_position() {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                "91919191-9191-9191-9191-919191919191",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Backward first",
-            ),
-            FakeStore::email(
-                "92929292-9292-9292-9292-929292929292",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Backward second",
-            ),
+            {
+                let mut email = FakeStore::email(
+                    "91919191-9191-9191-9191-919191919191",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Backward first",
+                );
+                email.received_at = "2026-05-03T12:00:00Z".to_string();
+                email
+            },
+            {
+                let mut email = FakeStore::email(
+                    "92929292-9292-9292-9292-929292929292",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Backward second",
+                );
+                email.received_at = "2026-05-03T11:00:00Z".to_string();
+                email
+            },
         ])),
         ..Default::default()
     };
@@ -2478,24 +2494,36 @@ async fn mapi_over_http_query_rows_uses_paged_content_table_lookup() {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                "87878787-8787-8787-8787-878787878787",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Paged first",
-            ),
-            FakeStore::email(
-                "88888888-8888-8888-8888-888888888888",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Paged second",
-            ),
-            FakeStore::email(
-                "89898989-8989-8989-8989-898989898989",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Paged third",
-            ),
+            {
+                let mut email = FakeStore::email(
+                    "87878787-8787-8787-8787-878787878787",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Paged first",
+                );
+                email.received_at = "2026-05-03T12:00:00Z".to_string();
+                email
+            },
+            {
+                let mut email = FakeStore::email(
+                    "88888888-8888-8888-8888-888888888888",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Paged second",
+                );
+                email.received_at = "2026-05-03T11:00:00Z".to_string();
+                email
+            },
+            {
+                let mut email = FakeStore::email(
+                    "89898989-8989-8989-8989-898989898989",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Paged third",
+                );
+                email.received_at = "2026-05-03T10:00:00Z".to_string();
+                email
+            },
         ])),
         ..Default::default()
     };
@@ -2535,18 +2563,26 @@ async fn mapi_over_http_microsoft_seek_row_moves_contents_table_cursor() {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                "87878787-8787-8787-8787-878787878787",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Seek first",
-            ),
-            FakeStore::email(
-                "88888888-8888-8888-8888-888888888888",
-                "55555555-5555-5555-5555-555555555555",
-                "inbox",
-                "Seek second",
-            ),
+            {
+                let mut email = FakeStore::email(
+                    "87878787-8787-8787-8787-878787878787",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Seek first",
+                );
+                email.received_at = "2026-05-03T12:00:00Z".to_string();
+                email
+            },
+            {
+                let mut email = FakeStore::email(
+                    "88888888-8888-8888-8888-888888888888",
+                    "55555555-5555-5555-5555-555555555555",
+                    "inbox",
+                    "Seek second",
+                );
+                email.received_at = "2026-05-03T11:00:00Z".to_string();
+                email
+            },
         ])),
         ..Default::default()
     };

@@ -1666,6 +1666,10 @@ fn display_to_for_test(email: &JmapEmail) -> String {
         .join("; ")
 }
 
+fn test_client_submit_time(email: &JmapEmail) -> &str {
+    email.sent_at.as_deref().unwrap_or(&email.received_at)
+}
+
 fn test_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = 0u32;
     if !email.unread {
@@ -5917,6 +5921,9 @@ impl ExchangeStore for FakeStore {
                     let ordering = match sort.field {
                         MapiContentTableSortField::ReceivedAt => {
                             left.received_at.cmp(&right.received_at)
+                        }
+                        MapiContentTableSortField::ClientSubmitTime => {
+                            test_client_submit_time(left).cmp(test_client_submit_time(right))
                         }
                         MapiContentTableSortField::Subject => left
                             .subject

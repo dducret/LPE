@@ -438,7 +438,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         request.query_row_count().unwrap_or(0),
                     )
                 };
-                if let Some((_, window_emails)) = window_emails {
+                if let Some((window_total, window_emails)) = window_emails {
+                    total_row_count = window_total;
                     position_base = window_offset;
                     start_position = if request.query_forward_read() {
                         0
