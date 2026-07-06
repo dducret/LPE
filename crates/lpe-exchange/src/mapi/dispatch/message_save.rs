@@ -620,6 +620,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 endpoint = "emsmdb",
                 mailbox = %principal.email,
                 request_type = "Execute",
+                mapi_request_id = %mapi_request_id,
                 request_rop_id = "0x0c",
                 folder_id = format_args!("0x{:016x}", folder_id),
                 decoded_shortcut =
@@ -641,6 +642,27 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             };
             match store.upsert_mapi_navigation_shortcut(input).await {
                 Ok(saved) => {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        mapi_request_id = %mapi_request_id,
+                        request_rop_id = "0x0c",
+                        folder_id = format_args!("0x{:016x}", folder_id),
+                        navigation_shortcut_id = %saved.id,
+                        subject = %saved.subject,
+                        target_folder_id = saved
+                            .target_folder_id
+                            .map(|id| format!("0x{id:016x}"))
+                            .unwrap_or_else(|| "none".to_string()),
+                        shortcut_type = saved.shortcut_type,
+                        section = saved.section,
+                        ordinal = saved.ordinal,
+                        group_name = %saved.group_name,
+                        "rca debug persisted navigation shortcut"
+                    );
                     let shortcut_id = match remember_created_mapi_identity(
                         store,
                         principal,
