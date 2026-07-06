@@ -61,6 +61,7 @@ pub(super) fn persisted_message_delete_is_best_effort(object: Option<&MapiObject
 
 pub(super) fn append_create_message_response(
     principal: &AccountPrincipal,
+    mapi_request_id: &str,
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
@@ -167,6 +168,24 @@ pub(super) fn append_create_message_response(
         }
     };
     let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
+    if let Some(created) = session.handles.get(&handle) {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = %mapi_request_id,
+            request_rop_id = "0x06",
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            output_handle_index = request.output_handle_index.unwrap_or(0),
+            output_handle = handle,
+            folder_id = %format!("{folder_id:#018x}"),
+            create_associated = request.create_message_associated(),
+            object_kind = mapi_object_debug_kind(Some(created)),
+            "rca debug mapi create message"
+        );
+    }
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     responses.extend_from_slice(&rop_create_message_response(request));
     output_handles.push(handle);

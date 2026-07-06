@@ -49,6 +49,7 @@ pub(super) async fn append_message_dispatch_response<S>(
         Some(RopId::CreateMessage) => {
             append_create_message_response(
                 principal,
+                request_id,
                 session,
                 handle_slots,
                 request,
@@ -62,6 +63,7 @@ pub(super) async fn append_message_dispatch_response<S>(
             append_save_changes_message_route_response(
                 store,
                 principal,
+                request_id,
                 session,
                 handle_slots,
                 request,

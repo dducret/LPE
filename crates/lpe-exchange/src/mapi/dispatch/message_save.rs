@@ -3,6 +3,7 @@ use super::*;
 pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
+    mapi_request_id: &str,
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
@@ -42,6 +43,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         endpoint = "emsmdb",
         mailbox = %principal.email,
         request_type = "Execute",
+        mapi_request_id = %mapi_request_id,
         request_rop_id = "0x0c",
         input_handle_index = request.input_handle_index().unwrap_or(0),
         input_handle_value = handle,
@@ -149,6 +151,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         endpoint = "emsmdb",
                         mailbox = %principal.email,
                         request_type = "Execute",
+                        mapi_request_id = %mapi_request_id,
                         request_rop_id = "0x0c",
                         folder_id = %format!("{folder_id:#018x}"),
                         associated_message_class = %message_class,
@@ -1074,10 +1077,14 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         endpoint = "emsmdb",
                         mailbox = %principal.email,
                         request_type = "Execute",
+                        mapi_request_id = %mapi_request_id,
                         request_rop_id = "0x0c",
                         folder_id = %format!("{folder_id:#018x}"),
                         associated_config_id = %saved.id,
                         mapi_message_id = %format!("{message_id:#018x}"),
+                        associated_message_class = %saved.message_class,
+                        associated_subject = %saved.subject,
+                        property_count = saved.properties_json.as_object().map_or(0, |properties| properties.len()),
                         "rca debug persisted associated config message"
                     );
                 }
