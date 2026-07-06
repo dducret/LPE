@@ -342,13 +342,37 @@ pub(in crate::mapi) fn simulate_table_access(
         }
         0x12 => {
             if let Some(MapiObject::ContentsTable {
+                folder_id,
+                associated,
                 columns,
                 columns_set,
+                sort_orders,
+                category_count,
+                restriction,
+                position,
                 ..
             }) = input_handle(handle_slots, request).and_then(|handle| handles.get_mut(&handle))
             {
                 *columns = request.property_tags();
                 *columns_set = true;
+                if !*associated
+                    && restriction.is_none()
+                    && *category_count == 0
+                    && is_windowable_mail_contents_folder(*folder_id)
+                {
+                    let Some(sql_sort_orders) = mapi_content_table_sort_orders(sort_orders) else {
+                        plan.requires_full_snapshot = true;
+                        return;
+                    };
+                    add_content_query(
+                        plan,
+                        *folder_id,
+                        table_view_signature(sort_orders, restriction.as_ref()),
+                        *position,
+                        1,
+                        sql_sort_orders,
+                    );
+                }
             }
         }
         0x13 => {

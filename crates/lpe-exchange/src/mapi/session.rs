@@ -594,6 +594,15 @@ impl MapiSession {
         )
     }
 
+    pub(in crate::mapi) fn advertised_default_view_pending_open(&self) -> bool {
+        self.post_hierarchy_actions
+            .last_advertised_default_view_owner_folder_id
+            .is_some()
+            && !self
+                .post_hierarchy_actions
+                .last_advertised_default_view_opened
+    }
+
     pub(in crate::mapi) fn record_outlook_stream_batch_observed(&mut self, summary: String) {
         self.post_hierarchy_actions.outlook_stream_batch_observed = true;
         if self

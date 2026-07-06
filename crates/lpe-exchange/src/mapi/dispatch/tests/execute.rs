@@ -142,6 +142,20 @@ fn mixed_setcolumns_trailing_release_returns_invalid_released_handle() {
 }
 
 #[test]
+fn outlook_setcolumns_then_release_same_slot_uses_response_boundary_handle_snapshot() {
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x00, 0, 0, 0, 0, 0],
+        &[28, 80, 79],
+        &[],
+        &[0],
+        true,
+        true,
+    );
+
+    assert_eq!(response_handles, vec![28]);
+}
+
+#[test]
 fn non_release_echo_response_keeps_output_placeholders() {
     let response_handles = execute_response_handle_table(
         &[0x07, 0x01, 0, 0, 0, 0, 0],

@@ -330,6 +330,7 @@ fn default_view_advertisement_state_marks_matching_open() {
     assert!(session
         .default_view_advertisement_state()
         .contains("opened=false"));
+    assert!(session.advertised_default_view_pending_open());
 
     assert!(session.record_default_view_opened(
         "request:144",
@@ -337,6 +338,7 @@ fn default_view_advertisement_state_marks_matching_open() {
         crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
     ));
 
+    assert!(!session.advertised_default_view_pending_open());
     let state = session.default_view_advertisement_state();
     assert!(state.contains("name=Sent To"));
     assert!(state.contains("opened=true"));

@@ -193,12 +193,31 @@ pub(super) fn append_create_message_response(
 
 pub(super) fn append_save_changes_message_response(
     responses: &mut Vec<u8>,
-    _handle_slots: &mut Vec<u32>,
+    handle_slots: &mut Vec<u32>,
     request: &RopRequest,
-    _handle: u32,
+    handle: u32,
     message_id: u64,
 ) {
     // MS-OXCMSG 2.2.3.3 and 3.2.5.3: ResponseHandleIndex references the containing folder.
+    let response_handle_index = request.response_handle_index();
+    let response_slot_handle = handle_slots
+        .get(response_handle_index as usize)
+        .copied()
+        .unwrap_or(u32::MAX);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        request_rop_id = "0x0c",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        input_message_handle = handle,
+        response_handle_index,
+        response_slot_handle = %format_optional_debug_handle(Some(response_slot_handle)),
+        message_id = %format!("{message_id:#018x}"),
+        contract = "MS-OXCMSG 2.2.3.3/3.2.5.3 response handle is containing folder",
+        "rca debug mapi save changes response handle contract"
+    );
     responses.extend_from_slice(&rop_save_changes_message_response(request, message_id));
 }
 

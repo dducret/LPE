@@ -832,10 +832,14 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let final_phase_abandoned_after_inbox_fai_query_rows =
         session.abandoned_after_inbox_fai_query_rows();
     let outlook_startup_gates = outlook_startup_gate_summary(session);
+    let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
+    let default_view_advertisement_state = session.default_view_advertisement_state();
     let final_phase_next_debug_focus = if final_phase_abandoned_after_inbox_fai_query_rows {
         "client_abandoned_after_inbox_fai_query_rows"
     } else if visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions) {
         "visible_inbox_released_after_setcolumns_before_query_rows"
+    } else if advertised_default_view_pending_open {
+        "advertised_default_view_not_opened"
     } else if session
         .post_hierarchy_actions
         .post_calendar_query_position_named_property_probe_count
@@ -938,6 +942,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .inbox_associated_exact_ipm_configuration_findrow_matched,
+            advertised_default_view_pending_open,
+            default_view_advertisement_state = %default_view_advertisement_state,
             outlook_smart_input_variant_result =
                 if session.outlook_smart_input_variant_applied {
                     "applied"
@@ -946,6 +952,32 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 },
             next_debug_focus = final_phase_next_debug_focus,
             "rca debug mapi outlook startup gate summary"
+        );
+    }
+
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && advertised_default_view_pending_open
+    {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            session_id_suffix = %session_cookie_debug.suffix,
+            session_id_hash = %session_cookie_debug.hash,
+            default_view_advertisement_state = %default_view_advertisement_state,
+            outlook_view_trace_events = %outlook_view_failure_trace_summary,
+            visible_inbox_release_without_query_rows =
+                visible_inbox_release_without_query_rows_observed(
+                    &session.post_hierarchy_actions
+                ),
+            next_debug_focus = "open_advertised_default_view_message_or_fix_view_advertisement",
+            "rca debug mapi advertised default view not opened"
         );
     }
 

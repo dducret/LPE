@@ -485,6 +485,43 @@ fn access_plan_normal_mail_contents_seek_uses_content_window_total() {
 }
 
 #[test]
+fn access_plan_normal_mail_contents_setcolumns_prefetches_first_row() {
+    let mut session = empty_session();
+    session.handles.insert(
+        1,
+        MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: false,
+            columns: Vec::new(),
+            columns_set: false,
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+                order: 0x01,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.next_handle = 2;
+    let mut set_columns = vec![0x12, 0x00, 0x00, 0x00];
+    set_columns.extend_from_slice(&1u16.to_le_bytes());
+    set_columns.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+
+    let plan = plan_mapi_store_access(&session, &single_rop_buffer(&set_columns));
+
+    assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+    assert_eq!(plan.content_queries.len(), 1, "plan={plan:?}");
+    assert_eq!(plan.content_queries[0].folder_id, INBOX_FOLDER_ID);
+    assert_eq!(plan.content_queries[0].offset, 0);
+    assert_eq!(plan.content_queries[0].limit, 1);
+}
+
+#[test]
 fn access_plan_non_mail_contents_query_rows_requires_full_snapshot() {
     let mut session = empty_session();
     session.handles.insert(
