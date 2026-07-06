@@ -547,11 +547,7 @@ pub(super) fn format_debug_named_property_sample(
     properties: &[MapiNamedProperty],
     limit: usize,
 ) -> String {
-    let mut sample = properties
-        .iter()
-        .take(limit)
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut sample = properties.iter().take(limit).cloned().collect::<Vec<_>>();
     let mut formatted = format_debug_named_properties(&sample);
     if properties.len() > sample.len() {
         if !formatted.is_empty() {

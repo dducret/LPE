@@ -7115,11 +7115,11 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         Some(MapiValue::String("Compact".to_string()))
     );
     assert_eq!(
-            associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
-            Some(MapiValue::String(
-                "\nFolder\nMessage\nInstance\nInstance Number\nSubject\nReceived\n".to_string()
-            ))
-        );
+        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+        Some(MapiValue::String(
+            "\nFolder\nMessage\nInstance\nInstance Number\nSubject\nReceived\n".to_string()
+        ))
+    );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
         Some(MapiValue::U32(0))

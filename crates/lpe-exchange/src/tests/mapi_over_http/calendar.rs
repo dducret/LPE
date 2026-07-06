@@ -6786,11 +6786,7 @@ async fn mapi_over_http_root_get_properties_specific_returns_collaboration_defau
     let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
     append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
-    append_rop_get_properties_specific(
-        &mut rops,
-        1,
-        &[0x36D2_0102, 0x36D3_0102, 0x36D4_0102],
-    );
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D2_0102, 0x36D3_0102, 0x36D4_0102]);
 
     let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
 

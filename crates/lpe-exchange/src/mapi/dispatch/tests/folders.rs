@@ -1104,9 +1104,7 @@ fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
         default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
 
     assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-    assert!(debug.contains(&format!(
-        "decoded_folder_id=0x{INBOX_FOLDER_ID:016x}"
-    )));
+    assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
     assert!(debug.contains("decoded_folder_name=inbox"));
     assert!(debug.contains(&format!(
         "decoded_message_id=0x{:016x}",

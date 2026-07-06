@@ -483,7 +483,12 @@ impl Storage {
         Ok(task_lists
             .into_iter()
             .map(|task_list| CollaborationCollection {
-                id: task_list.id.to_string(),
+                id: task_collection_id_for_list(
+                    principal_account_id,
+                    task_list.owner_account_id,
+                    task_list.id,
+                    task_list.role.as_deref(),
+                ),
                 kind: CollaborationResourceKind::Tasks.as_str().to_string(),
                 owner_account_id: task_list.owner_account_id,
                 owner_email: task_list.owner_email.clone(),
@@ -1475,5 +1480,48 @@ impl Storage {
         .fetch_one(&mut **tx)
         .await
         .map_err(Into::into)
+    }
+}
+
+fn task_collection_id_for_list(
+    principal_account_id: Uuid,
+    owner_account_id: Uuid,
+    task_list_id: Uuid,
+    role: Option<&str>,
+) -> String {
+    if role == Some(DEFAULT_TASK_LIST_ROLE) {
+        collection_id_for_owner(
+            CollaborationResourceKind::Tasks,
+            principal_account_id,
+            owner_account_id,
+            DEFAULT_TASK_LIST_ROLE,
+        )
+    } else {
+        task_list_id.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_task_list_uses_stable_default_collection_id() {
+        let account_id = Uuid::from_u128(0x11111111_2222_3333_4444_555555555555);
+        let task_list_id = Uuid::from_u128(0xaaaaaaaa_bbbb_cccc_dddd_eeeeeeeeeeee);
+
+        assert_eq!(
+            task_collection_id_for_list(
+                account_id,
+                account_id,
+                task_list_id,
+                Some(DEFAULT_TASK_LIST_ROLE),
+            ),
+            DEFAULT_COLLECTION_ID
+        );
+        assert_eq!(
+            task_collection_id_for_list(account_id, account_id, task_list_id, Some("custom")),
+            task_list_id.to_string()
+        );
     }
 }

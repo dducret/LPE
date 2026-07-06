@@ -394,8 +394,9 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
 
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
-    assert!(contract
-        .contains("descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"));
+    assert!(contract.contains(
+        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
+    ));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
     assert!(contract.contains(
         "selected_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
@@ -1373,11 +1374,12 @@ fn calendar_associated_sort_trace_reports_missing_query_rows_handoff() {
     assert!(trace.contains("handle=134"));
     assert!(trace.contains("associated=true"));
     assert!(trace.contains("row_count="));
-    assert!(trace.contains("columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x30080040,0x685d0003"));
-    assert!(trace.contains("sort=0x001a001f:0"));
     assert!(trace.contains(
-        "next_expected_client_step=query_rows_on_calendar_associated_contents_table"
+        "columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x30080040,0x685d0003"
     ));
+    assert!(trace.contains("sort=0x001a001f:0"));
+    assert!(trace
+        .contains("next_expected_client_step=query_rows_on_calendar_associated_contents_table"));
 }
 
 #[test]

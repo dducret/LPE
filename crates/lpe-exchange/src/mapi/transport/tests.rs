@@ -658,9 +658,11 @@ fn records_default_view_normal_query_rows_without_marking_inbox_complete() {
             .last_default_view_normal_contents_table_query_rows_handle,
         Some(42)
     );
-    assert!(!session
-        .post_hierarchy_actions
-        .inbox_normal_contents_table_query_rows_observed);
+    assert!(
+        !session
+            .post_hierarchy_actions
+            .inbox_normal_contents_table_query_rows_observed
+    );
 }
 
 #[test]

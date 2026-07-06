@@ -76,17 +76,15 @@ pub(in crate::mapi::dispatch) fn outlook_bootstrap_query_rows_total_count(
             associated,
             restriction,
             ..
-        }) if *associated => {
-            Some(
-                restricted_associated_folder_message_count(
-                    *folder_id,
-                    snapshot,
-                    restriction.as_ref(),
-                    mailbox_guid,
-                )
-                .min(u32::MAX as usize) as u32,
+        }) if *associated => Some(
+            restricted_associated_folder_message_count(
+                *folder_id,
+                snapshot,
+                restriction.as_ref(),
+                mailbox_guid,
             )
-        }
+            .min(u32::MAX as usize) as u32,
+        ),
         Some(MapiObject::ContentsTable { associated, .. })
             if !*associated && *folder_id == INBOX_FOLDER_ID =>
         {

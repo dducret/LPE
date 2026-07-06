@@ -70,8 +70,7 @@ fn release_only_execute_batch_is_store_independent() {
 
 #[test]
 fn release_only_execute_response_echoes_input_handle_table() {
-    let response_handles =
-        execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, true);
+    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, true);
 
     assert_eq!(response_handles, vec![u32::MAX]);
 }
@@ -92,14 +91,8 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
 
 #[test]
 fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
-    let response_handles = execute_response_handle_table(
-        &[0x12, 0x01, 0, 0, 0, 0, 0],
-        &[25],
-        &[],
-        &[0],
-        true,
-        true,
-    );
+    let response_handles =
+        execute_response_handle_table(&[0x12, 0x01, 0, 0, 0, 0, 0], &[25], &[], &[0], true, true);
 
     assert_eq!(response_handles, vec![25]);
 }
