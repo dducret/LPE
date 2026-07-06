@@ -192,6 +192,7 @@ pub(super) fn append_create_message_response(
 }
 
 pub(super) fn append_save_changes_message_response(
+    session: &MapiSession,
     responses: &mut Vec<u8>,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
@@ -200,6 +201,14 @@ pub(super) fn append_save_changes_message_response(
 ) {
     // MS-OXCMSG 2.2.3.3 and 3.2.5.3: ResponseHandleIndex references the containing folder.
     let response_handle_index = request.response_handle_index();
+    if let Some(folder_id) = session.handles.get(&handle).and_then(MapiObject::folder_id) {
+        restore_save_changes_containing_folder_response_handle(
+            session,
+            handle_slots,
+            request,
+            folder_id,
+        );
+    }
     let response_slot_handle = handle_slots
         .get(response_handle_index as usize)
         .copied()

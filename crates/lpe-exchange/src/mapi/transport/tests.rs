@@ -124,6 +124,17 @@ fn mapi_http_date_formats_imf_fixdate_in_gmt() {
     );
 }
 
+#[test]
+fn mapi_response_debug_retains_logical_payload_for_outlook_trace() {
+    let response = mapi_response("Execute", "request:1", 0, vec![0x01, 0x02, 0x03], None);
+
+    assert_eq!(mapi_response_payload_bytes(&response), Some(3));
+    assert_eq!(
+        mapi_response_payload(&response),
+        Some(&[0x01, 0x02, 0x03][..])
+    );
+}
+
 #[tokio::test]
 async fn mapi_response_start_time_uses_current_http_date_not_sentinel() {
     let response = mapi_response("Execute", "request:1", 0, Vec::new(), None);

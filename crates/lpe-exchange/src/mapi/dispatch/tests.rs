@@ -1838,6 +1838,7 @@ fn save_changes_success_response_preserves_containing_folder_handle_slot() {
     let mut handle_slots = vec![77, 42];
 
     append_save_changes_message_response(
+        &test_mapi_session(),
         &mut responses,
         &mut handle_slots,
         &request,
@@ -1885,6 +1886,46 @@ fn save_changes_associated_message_restores_containing_folder_response_handle_sl
 
     assert_eq!(restored, Some(6));
     assert_eq!(handle_slots, vec![u32::MAX, 6, 25, 26]);
+}
+
+#[test]
+fn save_changes_navigation_shortcut_restores_common_views_folder_response_handle_slot() {
+    let request = RopRequest {
+        rop_id: 0x0c,
+        input_handle_index: Some(1),
+        output_handle_index: Some(0),
+        payload: vec![0],
+    };
+    let mut session = test_mapi_session();
+    session.handles.insert(
+        9,
+        MapiObject::Folder {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    session.handles.insert(
+        76,
+        MapiObject::NavigationShortcut {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            shortcut_id: 0x0000_0000_0358_0001,
+        },
+    );
+    let mut responses = Vec::new();
+    let mut handle_slots = vec![26, 76];
+
+    append_save_changes_message_response(
+        &session,
+        &mut responses,
+        &mut handle_slots,
+        &request,
+        76,
+        0x0000_0000_0358_0001,
+    );
+
+    assert_eq!(handle_slots, vec![9, 76]);
+    assert_eq!(responses[0], 0x0c);
+    assert_eq!(responses[1], 0);
 }
 
 #[test]

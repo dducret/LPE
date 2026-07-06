@@ -681,6 +681,25 @@ mod tests {
         assert!(rr.contains(&BASE64_STANDARD.encode(b"raw-body")));
     }
 
+    #[test]
+    fn rr_trace_names_outbound_payload_as_response_body() {
+        let dir = temp_trace_dir("outbound-raw");
+        let config = OutlookTraceConfig {
+            enabled: true,
+            raw_payloads: true,
+            directory: dir.clone(),
+        };
+        let mut event = sample_event("session-5", b"response-body");
+        event.direction = OutlookTraceDirection::Outbound;
+
+        write_outlook_trace_with_config(&config, &event);
+
+        let rr = fs::read_to_string(trace_file_with_suffix(&dir, ".rr.jsonl")).unwrap();
+        assert!(rr.contains("response_body_base64"));
+        assert!(rr.contains(&BASE64_STANDARD.encode(b"response-body")));
+        assert!(!rr.contains("request_body_base64"));
+    }
+
     fn sample_event<'a>(session_key: &'a str, payload: &'a [u8]) -> OutlookTraceEvent<'a> {
         OutlookTraceEvent {
             component: "mapi",

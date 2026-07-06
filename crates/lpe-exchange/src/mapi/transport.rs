@@ -1037,6 +1037,7 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     let mut response = (StatusCode::OK, framed_body).into_response();
     response.extensions_mut().insert(MapiResponseDebug {
         payload_bytes: body.len(),
+        payload: body,
     });
     response
         .headers_mut()
@@ -1079,9 +1080,10 @@ fn mapi_http_date(time: SystemTime) -> String {
     )
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(in crate::mapi) struct MapiResponseDebug {
     payload_bytes: usize,
+    payload: Vec<u8>,
 }
 
 pub(crate) fn mapi_response_payload_bytes(response: &Response) -> Option<usize> {
@@ -1089,6 +1091,13 @@ pub(crate) fn mapi_response_payload_bytes(response: &Response) -> Option<usize> 
         .extensions()
         .get::<MapiResponseDebug>()
         .map(|debug| debug.payload_bytes)
+}
+
+pub(in crate::mapi) fn mapi_response_payload(response: &Response) -> Option<&[u8]> {
+    response
+        .extensions()
+        .get::<MapiResponseDebug>()
+        .map(|debug| debug.payload.as_slice())
 }
 
 pub(in crate::mapi) fn finalize_mapi_response(
@@ -1302,7 +1311,7 @@ fn trace_mapi_connection(
         account: Some(&principal.email),
         status: Some(status),
         metadata: outbound_metadata,
-        payload: None,
+        payload: mapi_response_payload(response),
     });
 }
 
