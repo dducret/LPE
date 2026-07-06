@@ -625,7 +625,7 @@ fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
 }
 
 #[test]
-fn empty_persisted_umolk_placeholder_is_suppressed() {
+fn empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let stale_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001);
     crate::mapi::identity::remember_mapi_identity(
@@ -648,10 +648,22 @@ fn empty_persisted_umolk_placeholder_is_suppressed() {
     assert!(messages
         .iter()
         .all(|message| message.message_class != OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS));
-    assert!(snapshot
+    let modeled = snapshot
         .associated_config_message_for_id(crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa))
-        .is_none());
-    assert!(!snapshot.associated_config_identity_matches_folder(
+        .expect("exact modeled UMOLK row");
+    assert_eq!(
+        modeled.message_class,
+        OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+    );
+    assert_eq!(
+        modeled.subject,
+        OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+    );
+    assert_eq!(
+        modeled.properties_json["0x7c070102"]["value"],
+        serde_json::json!("3c786d6c2f3e")
+    );
+    assert!(snapshot.associated_config_identity_matches_folder(
         crate::mapi::identity::INBOX_FOLDER_ID,
         crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa)
     ));
