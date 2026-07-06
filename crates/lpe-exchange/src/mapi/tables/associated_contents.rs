@@ -677,7 +677,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
                 if message.message_class.starts_with("IPM.Configuration.") =>
             {
-                Some(MapiValue::Binary(Vec::new()))
+                Some(MapiValue::Binary(configuration_fallback_binary_stream(
+                    &message.message_class,
+                )))
             }
             PID_NAME_CONTENT_CLASS_W_TAG
                 if message.message_class.starts_with("IPM.Configuration.") =>
@@ -902,6 +904,15 @@ fn configuration_roaming_datatypes(
         }
     } else {
         datatypes
+    }
+}
+
+fn configuration_fallback_binary_stream(message_class: &str) -> Vec<u8> {
+    match message_class {
+        "IPM.Configuration.WorkHours" => minimal_working_hours_roaming_xml_stream(),
+        "IPM.Configuration.CategoryList" => minimal_category_list_roaming_xml_stream(),
+        "IPM.Configuration.MRM" => minimal_mrm_roaming_xml_stream(),
+        _ => minimal_roaming_dictionary_stream(),
     }
 }
 

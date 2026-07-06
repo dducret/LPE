@@ -283,6 +283,8 @@ pub(super) fn append_set_columns_response(
             associated,
             columns,
             columns_set,
+            restriction,
+            sort_orders,
             ..
         }) => {
             if !set_columns_request_is_valid(request) {
@@ -356,7 +358,7 @@ pub(super) fn append_set_columns_response(
                 inbox_normal_setcolumns_context = Some((
                     input_handle_value,
                     format!(
-                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};view_handoff={};descriptor_behavior={}",
+                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};view_handoff={};table_compatibility={};descriptor_behavior={}",
                         format_optional_debug_handle(input_handle_value),
                         request.input_handle_index().unwrap_or(0),
                         row_count,
@@ -365,6 +367,14 @@ pub(super) fn append_set_columns_response(
                         normal_message_defaulted_column_detail(columns),
                         selected_named_property_context,
                         view_handoff_table_contract,
+                        format_default_view_table_compatibility_contract(
+                            *folder_id,
+                            *associated,
+                            columns,
+                            sort_orders,
+                            restriction.as_ref(),
+                            snapshot,
+                        ),
                         descriptor_behavior
                     ),
                 ));

@@ -6772,10 +6772,12 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         associated_config_property_value(&message, 0x685D_0003),
         Some(MapiValue::U32(value)) if value != 0
     ));
-    assert_eq!(
+    assert!(matches!(
         associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
-        Some(MapiValue::Binary(Vec::new()))
-    );
+        Some(MapiValue::Binary(value))
+            if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+                && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
+    ));
     assert_eq!(
         associated_config_property_value(&message, PID_NAME_CONTENT_CLASS_W_TAG),
         Some(MapiValue::String("urn:content-classes:message".to_string()))
@@ -6924,7 +6926,7 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         ],
     );
 
-    assert_eq!(row.len(), 46);
+    assert!(row.len() > 46);
     let mut row_cursor = Cursor::new(&row);
     for column in [
         PID_TAG_FOLDER_ID,
@@ -6936,10 +6938,11 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     ] {
         parse_mapi_property_value(&mut row_cursor, column).unwrap();
     }
-    assert_eq!(
+    assert!(matches!(
         parse_mapi_property_value(&mut row_cursor, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
+        MapiValue::Binary(value)
+            if value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
+    ));
 
     let entry_id_row = serialize_associated_config_row_with_mailbox_guid(
         &message,
