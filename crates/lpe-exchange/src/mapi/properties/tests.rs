@@ -724,14 +724,14 @@ fn mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view() {
 }
 
 #[test]
-fn collaboration_classes_advertise_type_specific_default_views() {
+fn incomplete_collaboration_view_classes_do_not_advertise_default_views() {
     for (folder_id, container_class) in [
         (TASKS_FOLDER_ID, "IPF.Task"),
         (TODO_SEARCH_FOLDER_ID, "IPF.Task"),
         (NOTES_FOLDER_ID, "IPF.StickyNote"),
         (JOURNAL_FOLDER_ID, "IPF.Journal"),
     ] {
-        assert!(default_view_supported_folder(folder_id, container_class));
+        assert!(!default_view_supported_folder(folder_id, container_class));
     }
 }
 

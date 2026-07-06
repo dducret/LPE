@@ -332,6 +332,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
                 let broad_outlook_configuration_probe = *folder_id == INBOX_FOLDER_ID
                     && is_broad_outlook_configuration_find_row(&restriction);
+                let outlook_smart_input_variant = configured_smart_input_variant();
                 let suppressed_virtual_default_count = if broad_outlook_configuration_probe {
                     rows.iter()
                         .filter_map(associated_table_row_config)
@@ -443,7 +444,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                     } else {
                         *position = index;
                     }
-                    if broad_outlook_configuration_probe {
+                    if broad_outlook_configuration_probe
+                        && outlook_smart_input_variant != "broad_findrow_no_handoff"
+                    {
                         *table_restriction = Some(outlook_configuration_prefix_restriction());
                         *position = 0;
                         tracing::info!(
@@ -457,8 +460,23 @@ pub(in crate::mapi) fn rop_find_row_response(
                             associated = true,
                             matched_row_index = index,
                             matched_message_class = %associated_table_row_message_class(message),
-                            outlook_smart_input_variant = %configured_smart_input_variant(),
+                            outlook_smart_input_variant = %outlook_smart_input_variant,
                             "rca debug outlook associated config broad find row followup query restricted"
+                        );
+                    } else if broad_outlook_configuration_probe {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            request_type = "Execute",
+                            request_rop_id = "0x4f",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                            associated = true,
+                            matched_row_index = index,
+                            matched_message_class = %associated_table_row_message_class(message),
+                            outlook_smart_input_variant = %outlook_smart_input_variant,
+                            "rca debug outlook associated config broad find row no handoff"
                         );
                     }
                     response.push(1);
@@ -467,7 +485,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                         &serialize_associated_table_row(message, mailbox_guid, &columns),
                     );
                 } else {
-                    if broad_outlook_configuration_probe {
+                    if broad_outlook_configuration_probe
+                        && outlook_smart_input_variant != "broad_findrow_no_handoff"
+                    {
                         *table_restriction = Some(outlook_configuration_prefix_restriction());
                         *position = 0;
                         tracing::info!(
@@ -480,6 +500,19 @@ pub(in crate::mapi) fn rop_find_row_response(
                             folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
                             associated = true,
                             "rca debug outlook associated config broad find row no match followup query restricted"
+                        );
+                    } else if broad_outlook_configuration_probe {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            request_type = "Execute",
+                            request_rop_id = "0x4f",
+                            folder_id = %format!("0x{folder_id:016x}"),
+                            folder_role = role_for_folder_id(*folder_id).unwrap_or(""),
+                            associated = true,
+                            outlook_smart_input_variant = %outlook_smart_input_variant,
+                            "rca debug outlook associated config broad find row no match no handoff"
                         );
                     }
                     return rop_find_row_no_match_response(request);

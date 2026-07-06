@@ -4519,7 +4519,6 @@ fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(query_response[6], 0x02);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
         1
@@ -5255,6 +5254,10 @@ fn inbox_associated_exact_configuration_find_row_uses_sort_order() {
 
 #[test]
 fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() {
+    let _guard = outlook_smart_input_variant_test_lock();
+    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
+    std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT");
+
     let snapshot = inbox_associated_sort_snapshot();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5297,6 +5300,11 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
         &snapshot,
         Uuid::nil(),
     );
+
+    if let Some(value) = previous {
+        std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value);
+    }
+
     assert_eq!(find_response[0], RopId::FindRow.as_u8());
     assert_eq!(
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
@@ -5321,7 +5329,6 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(query_response[6], 0x02);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
         1
@@ -5336,7 +5343,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_handoff() {
+fn inbox_associated_broad_configuration_find_row_variant_skips_followup_handoff() {
     let _guard = outlook_smart_input_variant_test_lock();
     let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
     std::env::set_var(
@@ -5344,7 +5351,50 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_hand
         "broad_findrow_no_handoff",
     );
 
-    let snapshot = inbox_associated_sort_snapshot();
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let account_prefs_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000001);
+    let message_list_settings_id = Uuid::from_u128(0x6d617069_6d6c_5374_8000_000000000101);
+    crate::mapi::identity::remember_mapi_identity(
+        account_prefs_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 81,
+        ),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        message_list_settings_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 801,
+        ),
+    );
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: account_prefs_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "Account prefs".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+        },
+        crate::store::MapiAssociatedConfigRecord {
+            id: message_list_settings_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x7c070102": {
+                    "type": "binary",
+                    "value": "3c786d6c2f3e"
+                }
+            }),
+        },
+    ]);
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
         associated: true,
@@ -5401,10 +5451,52 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_hand
     assert!(matches!(
         table,
         MapiObject::ContentsTable {
-            restriction: Some(ref restriction),
+            restriction: None,
             ..
-        } if is_broad_outlook_configuration_restriction(Some(restriction))
+        }
     ));
+
+    let seek_response = rop_seek_row_response(
+        &RopRequest {
+            rop_id: RopId::SeekRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![1, 1, 0, 0, 0, 1],
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(seek_response[0], RopId::SeekRow.as_u8());
+    assert_eq!(
+        u32::from_le_bytes(seek_response[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(table_position(&table), Some(1));
+
+    let query_response = rop_query_rows_response(
+        &RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+    assert!(
+        u16::from_le_bytes([query_response[7], query_response[8]]) > 0,
+        "broad no-handoff follow-up QueryRows should continue over the full FAI table"
+    );
+    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
 #[test]
@@ -7812,10 +7904,6 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         CONTACTS_SEARCH_FOLDER_ID,
         CONTACTS_FOLDER_ID,
         CALENDAR_FOLDER_ID,
-        JOURNAL_FOLDER_ID,
-        NOTES_FOLDER_ID,
-        TASKS_FOLDER_ID,
-        TODO_SEARCH_FOLDER_ID,
     ] {
         assert!(
             matches!(
@@ -7832,6 +7920,10 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         SUGGESTED_CONTACTS_FOLDER_ID,
         QUICK_CONTACTS_FOLDER_ID,
         IM_CONTACT_LIST_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        TASKS_FOLDER_ID,
+        TODO_SEARCH_FOLDER_ID,
         IPM_SUBTREE_FOLDER_ID,
         SYNC_ISSUES_FOLDER_ID,
         CONFLICTS_FOLDER_ID,

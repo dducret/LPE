@@ -28,14 +28,14 @@ pub(in crate::mapi) fn default_view_supported_folder(
     if container_class == "IPF.Appointment" || container_class.starts_with("IPF.Appointment.") {
         return folder_id == CALENDAR_FOLDER_ID;
     }
-    if container_class == "IPF.Task" || container_class.starts_with("IPF.Task.") {
-        return matches!(folder_id, TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID);
-    }
-    if container_class == "IPF.StickyNote" || container_class.starts_with("IPF.StickyNote.") {
-        return folder_id == NOTES_FOLDER_ID;
-    }
-    if container_class == "IPF.Journal" || container_class.starts_with("IPF.Journal.") {
-        return folder_id == JOURNAL_FOLDER_ID;
+    if container_class == "IPF.Task"
+        || container_class.starts_with("IPF.Task.")
+        || container_class == "IPF.StickyNote"
+        || container_class.starts_with("IPF.StickyNote.")
+        || container_class == "IPF.Journal"
+        || container_class.starts_with("IPF.Journal.")
+    {
+        return false;
     }
     if matches!(
         folder_id,
