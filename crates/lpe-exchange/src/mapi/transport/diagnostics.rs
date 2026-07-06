@@ -544,6 +544,14 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
     } else if actions.inbox_normal_contents_table_observed
         && !actions.inbox_normal_contents_table_query_rows_observed
         && actions.default_view_normal_contents_table_query_rows_observed
+        && actions
+            .last_successful_non_release_execute_context
+            .contains("request_rops=GetHierarchyTable,SetColumns,QueryPosition")
+    {
+        "outlook_default_view_hierarchy_sweep_after_visible_inbox_handoff"
+    } else if actions.inbox_normal_contents_table_observed
+        && !actions.inbox_normal_contents_table_query_rows_observed
+        && actions.default_view_normal_contents_table_query_rows_observed
     {
         "outlook_default_view_sweep_before_visible_inbox_query_rows"
     } else if actions.execute_count > 0 {

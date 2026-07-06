@@ -682,6 +682,24 @@ fn post_hierarchy_close_kind_classifies_default_view_sweep_before_inbox_query_ro
 }
 
 #[test]
+fn post_hierarchy_close_kind_classifies_default_view_hierarchy_sweep() {
+    let state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        default_view_normal_contents_table_query_rows_observed: true,
+        last_default_view_normal_contents_table_query_rows_context:
+            "folder=0x00000000000e0001;role=drafts".to_string(),
+        last_successful_non_release_execute_context:
+            "request_id={A}:168;request_rops=GetHierarchyTable,SetColumns,QueryPosition;response_rops=GetHierarchyTable,SetColumns,QueryPosition;response_results=0x00000000,0x00000000,0x00000000;response_rop_bytes=22;cached=false".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_default_view_hierarchy_sweep_after_visible_inbox_handoff"
+    );
+}
+
+#[test]
 fn records_default_view_normal_query_rows_without_marking_inbox_complete() {
     let mut session = test_session(HashMap::new());
 
