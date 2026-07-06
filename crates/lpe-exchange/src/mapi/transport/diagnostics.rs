@@ -327,6 +327,8 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) last_getprops_request_contract: String,
     pub(in crate::mapi) last_setprops_request_contract: String,
     pub(in crate::mapi) request_contract_sequence: String,
+    pub(in crate::mapi) post_visible_inbox_release_create_save_batch_count: usize,
+    pub(in crate::mapi) last_post_visible_inbox_release_create_save_batch_context: String,
     pub(in crate::mapi) outlook_view_trace_events: String,
 }
 
@@ -376,6 +378,11 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
             .map(|(index, contract)| format!("{}:{contract}", index + 1))
             .collect::<Vec<_>>()
             .join("|"),
+        post_visible_inbox_release_create_save_batch_count: actions
+            .post_visible_inbox_release_create_save_batch_count,
+        last_post_visible_inbox_release_create_save_batch_context: actions
+            .last_post_visible_inbox_release_create_save_batch_context
+            .clone(),
         outlook_view_trace_events: actions.outlook_view_failure_trace_events.join(">"),
     }
 }
@@ -522,6 +529,10 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_release_logoff_before_content_sync"
     } else if actions.release_client_initiated {
         "outlook_release_before_content_sync"
+    } else if visible_inbox_release_without_query_rows_observed(actions)
+        && actions.post_visible_inbox_release_create_save_batch_count > 0
+    {
+        "outlook_create_save_after_visible_inbox_release_before_query_rows"
     } else if visible_inbox_release_without_query_rows_observed(actions) {
         "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
     } else if actions.visible_inbox_message_open_missing_count > 0 {

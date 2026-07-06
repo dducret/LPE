@@ -1,5 +1,6 @@
 use super::*;
 use crate::mapi::transport::diagnostics::post_hierarchy_close_kind;
+use crate::mapi::wire::RopId;
 
 fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
     MapiSession {
@@ -310,7 +311,10 @@ fn session_cookie_lookup_debug_reports_endpoint_and_principal_mismatch() {
 fn post_hierarchy_action_summary_stays_empty_before_completed_hierarchy() {
     let mut session = test_session(HashMap::new());
 
-    session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
+    session.record_execute_after_hierarchy_completion(
+        &[0x01, 0x70],
+        "Release,SynchronizationImportMessageChange",
+    );
     let summary = post_hierarchy_action_summary(&session, true);
 
     assert_eq!(summary.execute_count, 0);
@@ -333,8 +337,14 @@ fn post_hierarchy_action_summary_records_execute_rops_and_client_actions() {
         "folder=0x0000000000040001;status=0x0003".to_string(),
         "calendar:row_present=true".to_string(),
     );
-    let first = session.record_execute_after_hierarchy_completion(&[0x02, 0x70, 0x4e]);
-    let second = session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
+    let first = session.record_execute_after_hierarchy_completion(
+        &[0x02, 0x70, 0x4e],
+        "OpenFolder,SynchronizationImportMessageChange,OpenStream",
+    );
+    let second = session.record_execute_after_hierarchy_completion(
+        &[0x01, 0x70],
+        "Release,SynchronizationImportMessageChange",
+    );
     session.record_content_sync_configure();
     session.record_logoff_after_hierarchy_completion();
     let summary = post_hierarchy_action_summary(&session, true);
@@ -586,6 +596,49 @@ fn post_hierarchy_close_kind_prioritizes_visible_inbox_release_without_query_row
     assert_eq!(
         post_hierarchy_close_kind(&state, false),
         "outlook_calendar_query_position_named_property_burst_before_query_rows"
+    );
+}
+
+#[test]
+fn post_hierarchy_summary_tracks_create_save_after_visible_inbox_release() {
+    let mut session = test_session(HashMap::new());
+    session.record_completed_hierarchy_sync(
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "folder=0x0000000000040001;status=0x0003".to_string(),
+        "calendar:row_present=true".to_string(),
+    );
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_observed = true;
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_setcolumns_observed = true;
+    session
+        .post_hierarchy_actions
+        .last_inbox_related_release_context =
+        "visible_inbox_release_without_query_rows=true;handle=27".to_string();
+
+    session.record_execute_after_hierarchy_completion(
+        &[
+            RopId::CreateMessage.as_u8(),
+            RopId::SetProperties.as_u8(),
+            RopId::SaveChangesMessage.as_u8(),
+        ],
+        "CreateMessage,SetProperties,SaveChangesMessage",
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(
+        summary.post_visible_inbox_release_create_save_batch_count,
+        1
+    );
+    assert!(summary
+        .last_post_visible_inbox_release_create_save_batch_context
+        .contains("request_rops=CreateMessage,SetProperties,SaveChangesMessage"));
+    assert_eq!(
+        summary.close_kind,
+        "outlook_create_save_after_visible_inbox_release_before_query_rows"
     );
 }
 
@@ -902,7 +955,7 @@ fn post_hierarchy_action_summary_classifies_release_logoff_without_content_sync(
         "folder=0x0000000000040001;status=0x0003".to_string(),
         "calendar:row_present=true".to_string(),
     );
-    session.record_execute_after_hierarchy_completion(&[0x01]);
+    session.record_execute_after_hierarchy_completion(&[0x01], "Release");
     session.record_logoff_after_hierarchy_completion();
     let summary = post_hierarchy_action_summary(&session, true);
 
@@ -926,12 +979,16 @@ fn post_hierarchy_observation_logs_first_execute_and_later_first_bootstrap_probe
         "folder=0x0000000000040001;status=0x0003".to_string(),
         "calendar:row_present=true".to_string(),
     );
-    let receive_folder_probe = session.record_execute_after_hierarchy_completion(&[0x01, 0x27]);
-    let default_folder_probe = session.record_execute_after_hierarchy_completion(&[0x02, 0x07]);
-    let later_default_folder_probe =
-        session.record_execute_after_hierarchy_completion(&[0x02, 0x0a]);
-    let second_set_properties_probe =
-        session.record_execute_after_hierarchy_completion(&[0x02, 0x0a]);
+    let receive_folder_probe = session
+        .record_execute_after_hierarchy_completion(&[0x01, 0x27], "Release,GetReceiveFolder");
+    let default_folder_probe = session.record_execute_after_hierarchy_completion(
+        &[0x02, 0x07],
+        "OpenFolder,GetPropertiesSpecific",
+    );
+    let later_default_folder_probe = session
+        .record_execute_after_hierarchy_completion(&[0x02, 0x0a], "OpenFolder,SetProperties");
+    let second_set_properties_probe = session
+        .record_execute_after_hierarchy_completion(&[0x02, 0x0a], "OpenFolder,SetProperties");
 
     assert!(receive_folder_probe.first_execute);
     assert!(!receive_folder_probe.first_bootstrap_probe);

@@ -256,7 +256,10 @@ where
         if cached.rop_fingerprint == rop_fingerprint {
             let post_hierarchy_observation =
                 if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
-                    session.record_execute_after_hierarchy_completion(&request_debug.ids)
+                    session.record_execute_after_hierarchy_completion(
+                        &request_debug.ids,
+                        &request_debug.names_csv,
+                    )
                 } else {
                     PostHierarchyExecuteObservation::default()
                 };
@@ -356,7 +359,10 @@ where
         .await;
         let post_hierarchy_observation =
             if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
-                session.record_execute_after_hierarchy_completion(&request_debug.ids)
+                session.record_execute_after_hierarchy_completion(
+                    &request_debug.ids,
+                    &request_debug.names_csv,
+                )
             } else {
                 PostHierarchyExecuteObservation::default()
             };
@@ -511,12 +517,14 @@ where
         &request_debug.non_release_rops,
     )
     .await;
-    let post_hierarchy_observation =
-        if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
-            session.record_execute_after_hierarchy_completion(&request_debug.ids)
-        } else {
-            PostHierarchyExecuteObservation::default()
-        };
+    let post_hierarchy_observation = if endpoint == MapiEndpoint::Emsmdb
+        && hierarchy_completed_before_execute
+    {
+        session
+            .record_execute_after_hierarchy_completion(&request_debug.ids, &request_debug.names_csv)
+    } else {
+        PostHierarchyExecuteObservation::default()
+    };
     log_execute_rop_debug(
         endpoint,
         principal,

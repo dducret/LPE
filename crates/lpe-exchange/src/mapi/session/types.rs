@@ -140,6 +140,8 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_hierarchy_query_context: String,
     pub(in crate::mapi) last_inbox_related_release_context: String,
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
+    pub(in crate::mapi) post_visible_inbox_release_create_save_batch_count: usize,
+    pub(in crate::mapi) last_post_visible_inbox_release_create_save_batch_context: String,
     pub(in crate::mapi) last_successful_execute_context: String,
     pub(in crate::mapi) last_successful_non_release_execute_context: String,
     pub(in crate::mapi) last_table_context: String,

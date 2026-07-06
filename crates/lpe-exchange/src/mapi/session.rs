@@ -7,6 +7,7 @@ use super::store_adapter::*;
 use super::sync::*;
 use super::transport::*;
 use super::*;
+use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiAssociatedConfigMessage;
 use lpe_storage::{AttachmentUploadInput, JmapEmail, SearchFolderDefinition};
 
@@ -809,6 +810,7 @@ impl MapiSession {
     pub(in crate::mapi) fn record_execute_after_hierarchy_completion(
         &mut self,
         rop_ids: &[u8],
+        rop_names: &str,
     ) -> PostHierarchyExecuteObservation {
         if !self.hierarchy_sync_completed() {
             return PostHierarchyExecuteObservation::default();
@@ -839,11 +841,51 @@ impl MapiSession {
         if rop_ids.contains(&0x01) {
             self.post_hierarchy_actions.release_client_initiated = true;
         }
+        self.record_post_visible_inbox_release_create_save_batch(rop_ids, rop_names);
         PostHierarchyExecuteObservation {
             first_execute,
             first_bootstrap_probe,
             first_set_properties_probe,
         }
+    }
+
+    fn record_post_visible_inbox_release_create_save_batch(
+        &mut self,
+        rop_ids: &[u8],
+        rop_names: &str,
+    ) {
+        let has_create = rop_ids.contains(&RopId::CreateMessage.as_u8());
+        let has_save = rop_ids.contains(&RopId::SaveChangesMessage.as_u8());
+        let has_set_properties = rop_ids.iter().any(|rop_id| {
+            matches!(
+                RopId::from_u8(*rop_id),
+                Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate)
+            )
+        });
+        if !has_create || !has_save || !has_set_properties {
+            return;
+        }
+        let actions = &mut self.post_hierarchy_actions;
+        if !actions.inbox_normal_contents_table_setcolumns_observed
+            || actions.inbox_normal_contents_table_query_rows_observed
+            || !actions
+                .last_inbox_related_release_context
+                .contains("visible_inbox_release_without_query_rows=true")
+        {
+            return;
+        }
+        actions.post_visible_inbox_release_create_save_batch_count = actions
+            .post_visible_inbox_release_create_save_batch_count
+            .saturating_add(1);
+        let context = format!(
+            "request_rops={rop_names};batch_count={};last_visible_release={}",
+            actions.post_visible_inbox_release_create_save_batch_count,
+            actions.last_inbox_related_release_context
+        );
+        actions.last_post_visible_inbox_release_create_save_batch_context = context.clone();
+        self.record_outlook_view_failure_trace_event(format!(
+            "post_visible_inbox_release_create_save_batch:{context}"
+        ));
     }
 
     pub(in crate::mapi) fn property_id_for_name(

@@ -110,6 +110,12 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         outlook_smart_input_variant = %session.outlook_smart_input_variant,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
+        post_visible_inbox_release_create_save_batch_count =
+            post_hierarchy.post_visible_inbox_release_create_save_batch_count,
+        last_post_visible_inbox_release_create_save_batch_context =
+            %debug_context_or_none(
+                &post_hierarchy.last_post_visible_inbox_release_create_save_batch_context
+            ),
         outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
         logon_response_present = logon.present,
         logon_error_code = %logon.error_code,
