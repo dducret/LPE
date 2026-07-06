@@ -6782,6 +6782,37 @@ async fn mapi_over_http_root_get_properties_specific_returns_calendar_default_en
 }
 
 #[tokio::test]
+async fn mapi_over_http_root_get_properties_specific_returns_collaboration_default_entry_ids() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.push(0);
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[0x36D2_0102, 0x36D3_0102, 0x36D4_0102],
+    );
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("Root collaboration default EntryID GetProps should return a standard row");
+    for folder_id in [
+        crate::mapi::identity::JOURNAL_FOLDER_ID,
+        crate::mapi::identity::NOTES_FOLDER_ID,
+        crate::mapi::identity::TASKS_FOLDER_ID,
+    ] {
+        assert!(
+            contains_bytes(
+                &response_rops,
+                &crate::mapi::identity::long_term_id_from_object_id(folder_id).unwrap(),
+            ),
+            "default entry id for folder 0x{folder_id:016x} should be present"
+        );
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_inbox_get_properties_all_lists_calendar_default_entry_id() {
     let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Inbox.
     append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
