@@ -75,6 +75,7 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         last_completed_hierarchy_sync_root = %post_hierarchy.last_completed_hierarchy_sync_root,
         content_sync_started_after_hierarchy =
             post_hierarchy.content_sync_configure_observed,
+        post_hierarchy_close_kind = post_hierarchy.close_kind,
         outlook_bootstrap_phase = post_hierarchy.outlook_bootstrap_phase,
         outlook_bootstrap_phase_name = post_hierarchy.outlook_bootstrap_phase_name,
         outlook_bootstrap_stall_code = post_hierarchy.outlook_bootstrap_stall_code,
@@ -96,6 +97,16 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             session
                 .post_hierarchy_actions
                 .inbox_associated_exact_ipm_configuration_findrow_matched,
+        default_view_normal_query_rows_observed =
+            session
+                .post_hierarchy_actions
+                .default_view_normal_contents_table_query_rows_observed,
+        last_default_view_normal_query_rows_context =
+            %debug_context_or_none(
+                &session
+                    .post_hierarchy_actions
+                    .last_default_view_normal_contents_table_query_rows_context
+            ),
         outlook_smart_input_variant = %session.outlook_smart_input_variant,
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,

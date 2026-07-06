@@ -639,6 +639,29 @@ fn post_hierarchy_close_kind_classifies_calendar_named_property_burst_without_qu
 }
 
 #[test]
+fn post_hierarchy_close_kind_classifies_default_view_sweep_before_inbox_query_rows() {
+    let mut state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        default_view_normal_contents_table_query_rows_observed: true,
+        last_default_view_normal_contents_table_query_rows_context:
+            "folder=0x00000000000e0001;role=drafts".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_default_view_sweep_before_visible_inbox_query_rows"
+    );
+
+    state.inbox_normal_contents_table_query_rows_observed = true;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "post_hierarchy_no_close"
+    );
+}
+
+#[test]
 fn records_default_view_normal_query_rows_without_marking_inbox_complete() {
     let mut session = test_session(HashMap::new());
 

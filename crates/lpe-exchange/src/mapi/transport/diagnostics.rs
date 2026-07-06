@@ -540,6 +540,11 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         && !actions.inbox_normal_contents_table_query_rows_observed
     {
         "outlook_visible_inbox_query_position_before_query_rows"
+    } else if actions.inbox_normal_contents_table_observed
+        && !actions.inbox_normal_contents_table_query_rows_observed
+        && actions.default_view_normal_contents_table_query_rows_observed
+    {
+        "outlook_default_view_sweep_before_visible_inbox_query_rows"
     } else if actions.execute_count > 0 {
         "outlook_post_hierarchy_execute_before_content_sync"
     } else if disconnect_client_initiated && actions.last_completed_hierarchy_sync_root.is_some() {
