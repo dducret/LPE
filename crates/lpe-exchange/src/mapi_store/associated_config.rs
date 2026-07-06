@@ -28,6 +28,7 @@ pub(super) const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS: &str =
     "IPM.Configuration.UMOLK.UserOptions";
 pub(super) const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
+const OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX: &str = "3c786d6c2f3e";
 pub(crate) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
 pub(super) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
@@ -112,6 +113,7 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
         OUTLOOK_INBOX_EAS_CONFIG_ID
             | OUTLOOK_INBOX_ELC_CONFIG_ID
             | OUTLOOK_INBOX_MRM_CONFIG_ID
+            | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID
             | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_ID
             | OUTLOOK_INBOX_SHARING_INDEX_ID
@@ -242,7 +244,13 @@ pub(super) fn outlook_inbox_associated_config_defaults(
             canonical_id: Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001),
             message_class: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
             subject: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
-            properties_json: serde_json::json!({}),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {
+                    "type": "binary",
+                    "value": OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX
+                }
+            }),
         },
         MapiAssociatedConfigMessage {
             id: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID,
@@ -301,6 +309,7 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
         message_class,
         OUTLOOK_INBOX_ELC_CONFIG_CLASS
             | OUTLOOK_INBOX_MRM_CONFIG_CLASS
+            | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
             | OUTLOOK_INBOX_SHARING_INDEX_CLASS
             | OUTLOOK_INBOX_AGGREGATION_CLASS

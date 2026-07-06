@@ -317,7 +317,10 @@ non-canonical LPE state.
   sharing, EAS, ELC, rule organizer, account preferences, message-list
   settings, or extended-rule messages during broad Inbox associated-table
   scans. Exact, bounded lookups may expose persisted backed rows with valid
-  payloads.
+  payloads, and the Inbox `IPM.Configuration.UMOLK.UserOptions` exact lookup
+  exposes a non-empty modeled roaming-dictionary row because Outlook 2016/2019
+  startup traces abandon the Inbox normal contents table after a missing exact
+  UMOLK lookup.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`
