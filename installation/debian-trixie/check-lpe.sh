@@ -145,6 +145,12 @@ mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_S
   || fail "MAPI associated configuration replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "MAPI associated configuration replay shape constraint is current"
 
+mapi_low_dynamic_property_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "WITH low_ids AS (SELECT property_id FROM public.mapi_named_properties WHERE property_id >= 32768 AND property_id < 36864 AND NOT ((property_id BETWEEN 32768 AND 33023) OR (property_id BETWEEN 33280 AND 33535) OR (property_id BETWEEN 34048 AND 34303) OR (property_id BETWEEN 34560 AND 34815) OR (property_id BETWEEN 35072 AND 35078) OR (property_id BETWEEN 35328 AND 35839) OR property_id IN (33005, 33261, 33643, 33872, 36615))), custom_values AS (SELECT 1 FROM public.mapi_custom_property_values WHERE ((property_tag::bigint >> 16)::integer) IN (SELECT property_id FROM low_ids)), folder_values AS (SELECT 1 FROM public.mapi_folder_profile_property_values WHERE ((property_tag::bigint >> 16)::integer) IN (SELECT property_id FROM low_ids)), config_keys AS (SELECT 1 FROM public.mapi_associated_config_messages config, jsonb_object_keys(config.properties_json) key WHERE key ~ '^0x[0-9a-fA-F]{8}$' AND (('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) IN (SELECT property_id FROM low_ids)) SELECT (SELECT COUNT(*) FROM low_ids) + (SELECT COUNT(*) FROM custom_values) + (SELECT COUNT(*) FROM folder_values) + (SELECT COUNT(*) FROM config_keys);")" \
+  || fail "Unable to inspect MAPI low dynamic named-property ids"
+[[ "$mapi_low_dynamic_property_count" == "0" ]] \
+  || fail "MAPI low dynamic named-property ids remain. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI low dynamic named-property ids are migrated"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');" | grep -qx 'search_folders_user_saved_name_idx' \
   || fail "User-saved Search Folder uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "User-saved Search Folder uniqueness index is present"

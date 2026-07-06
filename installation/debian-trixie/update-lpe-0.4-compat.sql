@@ -1502,3 +1502,125 @@ END $$;
 CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx
     ON public.mail_change_log (tenant_id, account_id, object_kind, cursor)
     WHERE object_kind = 'recoverable_item';
+
+DO $$
+BEGIN
+    IF to_regclass('public.mapi_named_properties') IS NOT NULL THEN
+        CREATE TEMP TABLE IF NOT EXISTS mapi_named_property_low_dynamic_renumber (
+            tenant_id UUID NOT NULL,
+            account_id UUID NOT NULL,
+            old_property_id INTEGER NOT NULL, new_property_id INTEGER NOT NULL,
+            PRIMARY KEY (tenant_id, account_id, old_property_id)
+        ) ON COMMIT DROP;
+        TRUNCATE mapi_named_property_low_dynamic_renumber;
+        WITH low_dynamic AS (
+            SELECT tenant_id, account_id, property_id,
+                   row_number() OVER (
+                       PARTITION BY tenant_id, account_id ORDER BY property_id, property_guid, property_kind, property_lid NULLS LAST, property_name NULLS LAST
+                   ) AS row_number
+            FROM public.mapi_named_properties
+            WHERE property_id >= 32769
+              AND property_id < 36864
+              AND NOT (
+                  property_id BETWEEN 32768 AND 33023
+                  OR property_id BETWEEN 33280 AND 33535
+                  OR property_id BETWEEN 34048 AND 34303
+                  OR property_id BETWEEN 34560 AND 34815
+                  OR property_id BETWEEN 35328 AND 35839
+                  OR property_id BETWEEN 35072 AND 35078
+                  OR property_id IN (33005, 33261, 33643, 33872, 36615)
+              )
+        ),
+        account_bases AS (
+            SELECT low_dynamic.tenant_id, low_dynamic.account_id,
+                   GREATEST(36864, COALESCE(MAX(existing.property_id), 0)) AS base_property_id
+            FROM low_dynamic
+            LEFT JOIN public.mapi_named_properties existing
+              ON existing.tenant_id = low_dynamic.tenant_id
+             AND existing.account_id = low_dynamic.account_id
+             AND existing.property_id >= 36864
+            GROUP BY low_dynamic.tenant_id, low_dynamic.account_id
+        )
+        INSERT INTO mapi_named_property_low_dynamic_renumber (
+            tenant_id, account_id, old_property_id, new_property_id
+        )
+        SELECT low_dynamic.tenant_id, low_dynamic.account_id, low_dynamic.property_id,
+               account_bases.base_property_id + low_dynamic.row_number
+        FROM low_dynamic
+        JOIN account_bases
+          ON account_bases.tenant_id = low_dynamic.tenant_id
+         AND account_bases.account_id = low_dynamic.account_id;
+        IF EXISTS (
+            SELECT 1 FROM mapi_named_property_low_dynamic_renumber
+            WHERE new_property_id > 65534
+        ) THEN
+            RAISE EXCEPTION 'MAPI named property id space exhausted while renumbering low dynamic ids';
+        END IF;
+        IF to_regclass('public.mapi_custom_property_values') IS NOT NULL THEN
+            UPDATE public.mapi_custom_property_values values
+            SET property_tag = (renumber.new_property_id::BIGINT << 16) | (values.property_tag::BIGINT & 65535),
+                updated_at = NOW()
+            FROM mapi_named_property_low_dynamic_renumber renumber
+            WHERE values.tenant_id = renumber.tenant_id
+              AND values.account_id = renumber.account_id
+              AND ((values.property_tag::BIGINT >> 16)::INTEGER) = renumber.old_property_id;
+        END IF;
+        IF to_regclass('public.mapi_folder_profile_property_values') IS NOT NULL THEN
+            UPDATE public.mapi_folder_profile_property_values values
+            SET property_tag = (renumber.new_property_id::BIGINT << 16) | (values.property_tag::BIGINT & 65535),
+                updated_at = NOW()
+            FROM mapi_named_property_low_dynamic_renumber renumber
+            WHERE values.tenant_id = renumber.tenant_id
+              AND values.account_id = renumber.account_id
+              AND ((values.property_tag::BIGINT >> 16)::INTEGER) = renumber.old_property_id;
+        END IF;
+        IF to_regclass('public.mapi_associated_config_messages') IS NOT NULL THEN
+            IF EXISTS (
+                SELECT 1
+                FROM public.mapi_associated_config_messages config
+                CROSS JOIN LATERAL jsonb_object_keys(config.properties_json) key
+                JOIN mapi_named_property_low_dynamic_renumber renumber
+                  ON renumber.tenant_id = config.tenant_id AND renumber.account_id = config.account_id
+                 AND key ~ '^0x[0-9a-fA-F]{8}$' AND (('x' || substring(key FROM 3 FOR 4))::BIT(16)::INTEGER) = renumber.old_property_id
+                WHERE config.properties_json ? ('0x' || lpad(to_hex(renumber.new_property_id), 4, '0') || substring(key FROM 7 FOR 4))
+            ) THEN
+                RAISE EXCEPTION 'MAPI associated config property key collision while renumbering low dynamic ids';
+            END IF;
+            WITH expanded AS (
+                SELECT config.tenant_id, config.id,
+                       jsonb_object_agg(
+                           CASE
+                               WHEN renumber.new_property_id IS NULL THEN entries.key
+                               ELSE '0x' || lpad(to_hex(renumber.new_property_id), 4, '0') || substring(entries.key FROM 7 FOR 4)
+                           END, entries.value
+                       ) AS properties_json
+                FROM public.mapi_associated_config_messages config
+                CROSS JOIN LATERAL jsonb_each(config.properties_json) entries(key, value)
+                LEFT JOIN mapi_named_property_low_dynamic_renumber renumber
+                  ON renumber.tenant_id = config.tenant_id
+                 AND renumber.account_id = config.account_id
+                 AND entries.key ~ '^0x[0-9a-fA-F]{8}$'
+                 AND (('x' || substring(entries.key FROM 3 FOR 4))::BIT(16)::INTEGER) = renumber.old_property_id
+                WHERE EXISTS (
+                    SELECT 1 FROM jsonb_object_keys(config.properties_json) key
+                    JOIN mapi_named_property_low_dynamic_renumber renumber_exists
+                     ON renumber_exists.tenant_id = config.tenant_id AND renumber_exists.account_id = config.account_id
+                     AND key ~ '^0x[0-9a-fA-F]{8}$'
+                     AND (('x' || substring(key FROM 3 FOR 4))::BIT(16)::INTEGER) = renumber_exists.old_property_id
+                )
+                GROUP BY config.tenant_id, config.id
+            )
+            UPDATE public.mapi_associated_config_messages config
+            SET properties_json = expanded.properties_json, updated_at = NOW()
+            FROM expanded
+            WHERE config.tenant_id = expanded.tenant_id
+              AND config.id = expanded.id;
+        END IF;
+        UPDATE public.mapi_named_properties properties
+        SET property_id = renumber.new_property_id
+        FROM mapi_named_property_low_dynamic_renumber renumber
+        WHERE properties.tenant_id = renumber.tenant_id
+          AND properties.account_id = renumber.account_id
+          AND properties.property_id = renumber.old_property_id;
+    END IF;
+END $$;

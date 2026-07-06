@@ -1021,6 +1021,20 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         ],
     );
     assert_source_contains_all(
+        "update-lpe.sh MAPI low dynamic named-property renumbering patch",
+        UPDATE_LPE_COMPAT_SQL,
+        &[
+            "mapi_named_property_low_dynamic_renumber",
+            "property_id >= 32769",
+            "property_id < 36864",
+            "property_id IN (33005, 33261, 33643, 33872, 36615)",
+            "UPDATE public.mapi_custom_property_values",
+            "UPDATE public.mapi_folder_profile_property_values",
+            "UPDATE public.mapi_associated_config_messages",
+            "UPDATE public.mapi_named_properties",
+        ],
+    );
+    assert_source_contains_all(
         "check-lpe.sh MAPI associated configuration compatibility check",
         CHECK_LPE_SCRIPT,
         &[
@@ -1031,6 +1045,8 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "mapi_associated_config_shape_constraint_ok",
             "mail_change_log_object_shape_check",
             "associated_config",
+            "mapi_low_dynamic_property_count",
+            "MAPI low dynamic named-property ids are migrated",
         ],
     );
     assert_source_contains_all(
