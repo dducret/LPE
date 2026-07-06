@@ -51,7 +51,38 @@ pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE6);
 pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE5);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDF);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDE);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDD);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDC);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_SUGGESTED_CONTACTS_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDB);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_QUICK_CONTACTS_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFDA);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_IM_CONTACT_LIST_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD9);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD8);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD7);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD6);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD5);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD4);
+pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD3);
 pub(super) const OUTLOOK_MAIL_FAVORITES_GROUP_NAME: &str = "Favorites";
+const OUTLOOK_CALENDAR_GROUP_NAME: &str = "My Calendars";
+const OUTLOOK_CONTACTS_GROUP_NAME: &str = "My Contacts";
+const OUTLOOK_TASKS_GROUP_NAME: &str = "My Tasks";
+const OUTLOOK_NOTES_GROUP_NAME: &str = "My Notes";
+const OUTLOOK_JOURNAL_GROUP_NAME: &str = "My Journal";
 pub(super) const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
 pub(super) const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
@@ -183,6 +214,19 @@ pub(crate) fn is_outlook_common_views_default_navigation_shortcut_id(item_id: u6
             | OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
             | OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
             | OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_SUGGESTED_CONTACTS_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_QUICK_CONTACTS_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_IM_CONTACT_LIST_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID
+            | OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID
     )
 }
 
@@ -514,6 +558,8 @@ pub(super) fn outlook_common_views_default_named_views() -> Vec<MapiCommonViewNa
 
 pub(super) fn outlook_common_views_default_navigation_shortcuts(
 ) -> Vec<MapiNavigationShortcutMessage> {
+    let outlook_group_id =
+        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").expect("valid Outlook GUID");
     vec![
         MapiNavigationShortcutMessage {
             id: OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID,
@@ -570,6 +616,188 @@ pub(super) fn outlook_common_views_default_navigation_shortcuts(
             ordinal: 129,
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4367_8000_000000000001),
+            subject: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 0,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4361_8000_000000000001),
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4367_8000_000000000002),
+            subject: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_SUGGESTED_CONTACTS_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000001),
+            subject: "Suggested Contacts".to_string(),
+            target_folder_id: Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 15,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000002),
+            subject: "Contacts".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 31,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_QUICK_CONTACTS_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000003),
+            subject: "Quick Contacts".to_string(),
+            target_folder_id: Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 63,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_IM_CONTACT_LIST_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000004),
+            subject: "IM Contact List".to_string(),
+            target_folder_id: Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_5467_8000_000000000001),
+            subject: OUTLOOK_TASKS_GROUP_NAME.to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 0,
+            section: 5,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_TASKS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_5461_8000_000000000001),
+            subject: "Tasks".to_string(),
+            target_folder_id: Some(crate::mapi::identity::TASKS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 5,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_TASKS_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4e67_8000_000000000001),
+            subject: OUTLOOK_NOTES_GROUP_NAME.to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 0,
+            section: 6,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_NOTES_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4e6f_8000_000000000001),
+            subject: "Notes".to_string(),
+            target_folder_id: Some(crate::mapi::identity::NOTES_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 6,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_NOTES_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4a67_8000_000000000001),
+            subject: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 0,
+            section: 7,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4a6f_8000_000000000001),
+            subject: "Journal".to_string(),
+            target_folder_id: Some(crate::mapi::identity::JOURNAL_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 0,
+            section: 7,
+            ordinal: 127,
+            group_header_id: Some(outlook_group_id),
+            group_name: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
         },
     ]
 }

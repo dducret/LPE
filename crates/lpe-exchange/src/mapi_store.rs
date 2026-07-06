@@ -1094,6 +1094,14 @@ fn common_views_table_projects_navigation_shortcut(
         Some(crate::mapi::identity::INBOX_FOLDER_ID)
             | Some(crate::mapi::identity::SENT_FOLDER_ID)
             | Some(crate::mapi::identity::TRASH_FOLDER_ID)
+            | Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            | Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            | Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
+            | Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID)
+            | Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID)
+            | Some(crate::mapi::identity::TASKS_FOLDER_ID)
+            | Some(crate::mapi::identity::NOTES_FOLDER_ID)
+            | Some(crate::mapi::identity::JOURNAL_FOLDER_ID)
     )
 }
 
@@ -1109,7 +1117,6 @@ fn append_missing_default_common_views_shortcuts(
                     && shortcut.group_name == default_shortcut.group_name
             } else {
                 shortcut.shortcut_type == default_shortcut.shortcut_type
-                    && shortcut.section == default_shortcut.section
                     && shortcut.target_folder_id == default_shortcut.target_folder_id
             }
         });

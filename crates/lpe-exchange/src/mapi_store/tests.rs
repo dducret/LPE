@@ -1257,13 +1257,13 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
     assert_eq!(snapshot.common_views_messages().count(), 0);
     let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-    assert_eq!(messages.len(), 6);
+    assert_eq!(messages.len(), 19);
     assert_eq!(
         messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        4
+        17
     );
     let named_views = messages
         .iter()
@@ -1296,6 +1296,56 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID
+        )
+        .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID
         )
         .is_some());
     for named_view in named_views {
@@ -1669,7 +1719,7 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
 }
 
 #[test]
-fn common_views_keeps_non_mail_shortcuts_out_of_startup_table() {
+fn common_views_projects_supported_module_shortcuts_in_startup_table() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let first_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000020);
     let second_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000021);
@@ -1731,7 +1781,7 @@ fn common_views_keeps_non_mail_shortcuts_out_of_startup_table() {
         .navigation_shortcut_table_message_for_id(crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90
         ))
-        .is_none());
+        .is_some());
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
     assert_eq!(
         table_messages
@@ -1743,7 +1793,7 @@ fn common_views_keeps_non_mail_shortcuts_out_of_startup_table() {
                         == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
             ))
             .count(),
-        0
+        1
     );
 }
 
