@@ -403,9 +403,7 @@ fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessag
             .as_object()
             .is_some_and(|object| object.is_empty());
     }
-    if !message.message_class.starts_with("IPM.Configuration.")
-        || message.message_class == "IPM.Configuration.UMOLK.UserOptions"
-    {
+    if !message.message_class.starts_with("IPM.Configuration.") {
         return false;
     }
     let properties = mapi_properties_from_json(&message.properties_json);

@@ -625,6 +625,39 @@ fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
 }
 
 #[test]
+fn empty_persisted_umolk_placeholder_is_suppressed() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let stale_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000001);
+    crate::mapi::identity::remember_mapi_identity(
+        stale_id,
+        crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa),
+    );
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: stale_id,
+            account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
+    ]);
+
+    let messages =
+        snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
+    assert!(messages
+        .iter()
+        .all(|message| message.message_class != OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS));
+    assert!(snapshot
+        .associated_config_message_for_id(crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa))
+        .is_none());
+    assert!(!snapshot.associated_config_identity_matches_folder(
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa)
+    ));
+}
+
+#[test]
 fn associated_config_sync_messages_use_persisted_rows_before_narrow_defaults() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let persisted_umolk_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000002);
