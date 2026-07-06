@@ -193,12 +193,12 @@ pub(super) fn append_create_message_response(
 
 pub(super) fn append_save_changes_message_response(
     responses: &mut Vec<u8>,
-    handle_slots: &mut Vec<u32>,
+    _handle_slots: &mut Vec<u32>,
     request: &RopRequest,
-    handle: u32,
+    _handle: u32,
     message_id: u64,
 ) {
-    set_handle_slot(handle_slots, Some(request.response_handle_index()), handle);
+    // MS-OXCMSG 2.2.3.3 and 3.2.5.3: ResponseHandleIndex references the containing folder.
     responses.extend_from_slice(&rop_save_changes_message_response(request, message_id));
 }
 

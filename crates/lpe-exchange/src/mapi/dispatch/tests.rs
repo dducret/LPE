@@ -1040,6 +1040,38 @@ fn normal_inbox_query_row_summary_reports_message_shapes() {
     assert!(summary.contains("0x10160003=3"));
     assert!(summary.contains("0x1035001f=<message@example.test>"));
 
+    let compact_summary = format_normal_message_query_row_summary(
+        INBOX_FOLDER_ID,
+        false,
+        0,
+        true,
+        1,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 1,
+        }],
+        None,
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
+        std::slice::from_ref(&mailbox),
+        std::slice::from_ref(&email),
+        &empty_snapshot(),
+    );
+
+    assert!(compact_summary.contains("returned=1"), "{compact_summary}");
+    assert!(
+        compact_summary.contains("status_row_len="),
+        "{compact_summary}"
+    );
+    assert!(compact_summary.contains("0x0037001f=Preview target"));
+    assert!(compact_summary.contains("0x0e060040="));
+
     let restricted = format_normal_message_query_row_summary(
         INBOX_FOLDER_ID,
         false,
@@ -1793,7 +1825,7 @@ fn post_sync_release_flags_counts_outlook_close_handles() {
 }
 
 #[test]
-fn save_changes_success_response_updates_response_handle_slot() {
+fn save_changes_success_response_preserves_containing_folder_handle_slot() {
     let request = RopRequest {
         rop_id: 0x0c,
         input_handle_index: Some(0),
@@ -1801,7 +1833,7 @@ fn save_changes_success_response_updates_response_handle_slot() {
         payload: vec![0],
     };
     let mut responses = Vec::new();
-    let mut handle_slots = vec![77, u32::MAX];
+    let mut handle_slots = vec![77, 42];
 
     append_save_changes_message_response(
         &mut responses,
@@ -1811,7 +1843,7 @@ fn save_changes_success_response_updates_response_handle_slot() {
         0x0000_0000_0000_1234,
     );
 
-    assert_eq!(handle_slots, vec![77, 77]);
+    assert_eq!(handle_slots, vec![77, 42]);
     assert_eq!(responses[0], 0x0c);
     assert_eq!(responses[1], 1);
 }

@@ -90,6 +90,22 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
 }
 
 #[test]
+fn mixed_create_save_batch_preserves_save_response_folder_handle_slot() {
+    let response_handles = execute_response_handle_table(
+        &[
+            0x05, 0x02, 0, 0, 0, 0, 0, 0, 0, 0x06, 0x03, 0, 0, 0, 0, 0, 0x0c, 0x01, 0, 0, 0, 0,
+        ],
+        &[u32::MAX, 6, 28, 29],
+        &[28, 29],
+        &[2, 3, 1],
+        true,
+        true,
+    );
+
+    assert_eq!(response_handles, vec![0, 6, 28, 29]);
+}
+
+#[test]
 fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
     let response_handles =
         execute_response_handle_table(&[0x12, 0x01, 0, 0, 0, 0, 0], &[25], &[], &[0], true, true);

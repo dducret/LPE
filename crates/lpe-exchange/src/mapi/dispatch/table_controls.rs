@@ -355,10 +355,23 @@ pub(super) fn append_set_columns_response(
                         columns,
                         snapshot,
                     );
+                let first_row_preview = format_normal_message_query_row_summary(
+                    *folder_id,
+                    *associated,
+                    0,
+                    true,
+                    1,
+                    sort_orders,
+                    restriction.as_ref(),
+                    columns,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                );
                 inbox_normal_setcolumns_context = Some((
                     input_handle_value,
                     format!(
-                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};view_handoff={};table_compatibility={};descriptor_behavior={}",
+                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};first_row_preview={};view_handoff={};table_compatibility={};descriptor_behavior={}",
                         format_optional_debug_handle(input_handle_value),
                         request.input_handle_index().unwrap_or(0),
                         row_count,
@@ -366,6 +379,7 @@ pub(super) fn append_set_columns_response(
                         normal_message_table_column_support_summary(columns),
                         normal_message_defaulted_column_detail(columns),
                         selected_named_property_context,
+                        first_row_preview,
                         view_handoff_table_contract,
                         format_default_view_table_compatibility_contract(
                             *folder_id,
@@ -1012,8 +1026,15 @@ pub(super) fn append_query_rows_response(
         } else {
             columns.clone()
         };
+        let after_visible_inbox_release_without_query_rows = session
+            .post_hierarchy_actions
+            .last_inbox_related_release_context
+            .contains("visible_inbox_release_without_query_rows=true")
+            && !session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed;
         session.record_outlook_view_failure_trace_event(format!(
-            "hierarchy_query_rows:request_id={request_id};folder=0x{folder_id:016x};role={};input_index={};handle={};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_origin=0x{response_origin:02x};response_row_count={row_count};columns={};after_view_handoff={}",
+            "hierarchy_query_rows:request_id={request_id};folder=0x{folder_id:016x};role={};input_index={};handle={};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_origin=0x{response_origin:02x};response_row_count={row_count};columns={};after_view_handoff={};after_visible_inbox_release_without_query_rows={};last_visible_release={}",
             debug_role_for_folder_id(*folder_id),
             request.input_handle_index().unwrap_or(0),
             format_optional_debug_handle(input_handle_value),
@@ -1024,7 +1045,9 @@ pub(super) fn append_query_rows_response(
                 .post_hierarchy_actions
                 .outlook_view_failure_trace_events
                 .iter()
-                .any(|event| event.starts_with("view_handoff:"))
+                .any(|event| event.starts_with("view_handoff:")),
+            after_visible_inbox_release_without_query_rows,
+            session.post_hierarchy_actions.last_inbox_related_release_context
         ));
     }
     let mut inbox_associated_query_rows_returned_non_empty = false;
