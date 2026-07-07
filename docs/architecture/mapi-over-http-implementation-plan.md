@@ -246,21 +246,22 @@ non-canonical LPE state.
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
   `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
   message with `WLink` properties.
-- Outlook default-view EntryID properties can point at bounded synthetic view
-  objects for startup compatibility, but LPE does not advertise synthetic
-  folder-local `IPM.Microsoft.FolderDesign.NamedView` rows in folder-associated
-  tables. Outlook-created or imported associated configuration rows remain
-  durable, but Inbox startup enumeration does not replay broad persisted
-  `IPM.Configuration.*` rows or `IPM.ExtendedRule.Message` rows; only the
-  modeled `IPM.Configuration.MessageListSettings` row is exposed in the Inbox
-  associated table and for Outlook's broad startup prefix probe, and exact,
-  bounded lookups expose supported configuration rows.
-  Inbox mail folders advertise the Common Views `Compact` named view as their
-  default view so `PidTagDefaultViewEntryId` targets a visible Common Views FAI
-  row instead of a hidden folder-local named-view projection. Bounded Common
-  Views named-view rows remain visible only through Common Views.
-  This avoids presenting incomplete folder-local view definitions or stale
-  Outlook client preferences as mailbox state.
+- Outlook default-view EntryID properties point at bounded synthetic
+  `IPM.Microsoft.FolderDesign.NamedView` objects for startup compatibility.
+  Folder-local named-view rows are projected in folder-associated tables only
+  for supported folders with type-specific descriptors: Inbox and mail folders,
+  Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
+  search/reminder views. Common Views still owns the bounded Common Views
+  `Sent To` row and navigation shortcuts.
+  Outlook-created or imported associated configuration rows remain durable, but
+  Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
+  rows or `IPM.ExtendedRule.Message` rows; only the modeled
+  `IPM.Configuration.MessageListSettings` row is exposed in the Inbox associated
+  table and for Outlook's broad startup prefix probe, and exact, bounded lookups
+  expose supported configuration rows. Synthetic folder-local named views use
+  deterministic folder-specific virtual message IDs, SourceKeys, RecordKeys,
+  SearchKeys, change keys, and descriptor CLSIDs so Outlook cached-mode state
+  does not collapse default views across folders.
   Mail named-view descriptor binaries list only real message-table property
   tags used by the visible columns; they must not include synthetic placeholder
   tags or named-property IDs that are not resolvable in the active session.
@@ -275,11 +276,11 @@ non-canonical LPE state.
   state, not an IPM subtree startup hierarchy row. This keeps Outlook from
   walking unsupported virtual hierarchy branches before opening normal Inbox
   contents.
-  Tasks, To-Do, Notes, and Journal do not advertise `PidTagDefaultViewEntryId`
-  and must not inherit the mail default-view descriptor until LPE has
-  type-specific Outlook view descriptors and contents row projections for those
-  container classes. Delete attempts against synthetic folder-local default view
-  objects are acknowledged as no-op success because the objects are
+  Tasks, Notes, and Journal advertise `PidTagDefaultViewEntryId` through their
+  type-specific Outlook view descriptors and contents row projections; To-Do
+  search behavior remains bounded to the supported task/search projections.
+  Delete attempts against synthetic folder-local default view objects are
+  acknowledged as no-op success because the objects are
   compatibility projections, not canonical FAI messages.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
@@ -615,6 +616,9 @@ Durable compatibility metadata is intentionally narrower than canonical state:
 - `mapi_associated_config_messages` stores bounded associated/configuration FAI
   messages for view, form, and client configuration sync replay. These rows are
   not normal mailbox messages and are not exposed through non-MAPI message APIs.
+  Their logical key includes folder, message class, and subject because
+  MS-OXOCFG view definitions can share `IPM.Microsoft.FolderDesign.NamedView`
+  while representing different folder views.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS cursor state only. Checkpoints may
   resume canonical change replay, but they do not store mailbox content.
 

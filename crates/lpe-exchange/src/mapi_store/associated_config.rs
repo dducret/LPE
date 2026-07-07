@@ -42,6 +42,7 @@ pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
 pub(crate) const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
+const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE: u64 = 0x7FFF_FFFE_0000;
 pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
 pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
@@ -191,6 +192,27 @@ pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> boo
 
 pub(crate) fn is_outlook_default_folder_named_view_id(item_id: u64) -> bool {
     item_id == OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        || crate::mapi::identity::global_counter_from_store_id(item_id).is_some_and(|counter| {
+            counter >= OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE
+                && counter < OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE + 0x1_0000
+        })
+}
+
+pub(crate) fn outlook_default_folder_named_view_id(folder_id: u64) -> u64 {
+    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+        return OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID;
+    }
+    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
+        .unwrap_or(folder_id & 0xffff);
+    crate::mapi::identity::mapi_store_id(
+        OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE | (folder_counter & 0xffff),
+    )
+}
+
+pub(crate) fn outlook_default_folder_named_view_canonical_id(folder_id: u64) -> Uuid {
+    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
+        .unwrap_or(folder_id & 0xffff);
+    Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000000 | u128::from(folder_counter & 0xffff))
 }
 
 pub(crate) fn outlook_default_folder_named_view_name(folder_id: u64) -> &'static str {

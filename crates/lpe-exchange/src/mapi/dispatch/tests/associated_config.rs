@@ -162,12 +162,23 @@ fn folder_default_named_view_open_materializes_for_supported_contact_folder() {
     let selected = common_view_named_view_message_for_open(
         &MapiMailStoreSnapshot::empty(),
         CONTACTS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID),
     );
 
     assert_eq!(
         selected.map(|message| (message.folder_id, message.name)),
         Some((CONTACTS_FOLDER_ID, "Contacts".to_string()))
+    );
+    let legacy = common_view_named_view_message_for_open(
+        &MapiMailStoreSnapshot::empty(),
+        CONTACTS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+    );
+    assert_eq!(
+        legacy.map(|message| message.id),
+        Some(crate::mapi_store::outlook_default_folder_named_view_id(
+            CONTACTS_FOLDER_ID
+        ))
     );
 }
 
@@ -819,8 +830,12 @@ fn inbox_associated_named_view_debug_summaries_report_folder_local_default_view(
         wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
         "{wire}"
     );
-    assert!(values.contains("id=0x7fffffffffe90001"), "{values}");
-    assert!(wire.contains("id=0x7fffffffffe90001"), "{wire}");
+    let expected_id = format!(
+        "id=0x{:016x}",
+        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID)
+    );
+    assert!(values.contains(&expected_id), "{values}");
+    assert!(wire.contains(&expected_id), "{wire}");
 }
 
 #[test]

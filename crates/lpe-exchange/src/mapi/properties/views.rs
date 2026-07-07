@@ -90,7 +90,7 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
         } else {
             (
                 folder_id,
-                crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+                crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
             )
         };
     crate::mapi::identity::message_entry_id_from_object_ids(mailbox_guid, view_folder_id, view_id)
@@ -319,6 +319,7 @@ pub(in crate::mapi) fn outlook_folder_view_sort_orders(
 }
 
 fn outlook_inbox_compact_view_definition() -> ViewDefinition {
+    // MS-OXOCFG 2.2.6.1 stores visible view columns in PidTagViewDescriptorBinary.
     ViewDefinition {
         kind: ViewDefinitionKind::MailCompact,
         columns: vec![

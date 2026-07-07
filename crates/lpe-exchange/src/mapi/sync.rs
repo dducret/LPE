@@ -328,7 +328,7 @@ fn default_folder_named_view_sync_message(
     {
         snapshot.default_folder_named_view_message(
             folder_id,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
         )
     } else {
         None

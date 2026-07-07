@@ -2278,7 +2278,7 @@ CREATE INDEX mapi_associated_config_messages_account_folder_idx
     ON mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
 CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx
-    ON mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class);
+    ON mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject);
 
 CREATE TABLE submission_queue (
     id UUID PRIMARY KEY,

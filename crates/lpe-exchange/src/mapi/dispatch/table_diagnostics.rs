@@ -565,7 +565,7 @@ pub(super) fn debug_default_folder_associated_named_view(
     } else {
         snapshot.default_folder_named_view_message(
             folder_id,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
         )
     }
 }

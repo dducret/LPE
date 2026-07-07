@@ -1139,13 +1139,16 @@ impl MapiMailStoreSnapshot {
         folder_id: u64,
         item_id: u64,
     ) -> Option<MapiCommonViewNamedViewMessage> {
-        is_outlook_default_folder_named_view_id(item_id).then(|| MapiCommonViewNamedViewMessage {
-            id: OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-            folder_id,
-            canonical_id: Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001),
-            name: outlook_default_folder_named_view_name(folder_id).to_string(),
-            view_flags: 14_745_605,
-            view_type: 8,
+        let view_id = outlook_default_folder_named_view_id(folder_id);
+        (item_id == view_id || item_id == OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID).then(|| {
+            MapiCommonViewNamedViewMessage {
+                id: view_id,
+                folder_id,
+                canonical_id: outlook_default_folder_named_view_canonical_id(folder_id),
+                name: outlook_default_folder_named_view_name(folder_id).to_string(),
+                view_flags: 14_745_605,
+                view_type: 8,
+            }
         })
     }
 

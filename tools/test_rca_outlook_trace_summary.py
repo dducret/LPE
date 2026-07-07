@@ -31,6 +31,9 @@ def empty_log_summary() -> dict:
         "setcolumns_release_response_frames": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
+        "post_visible_release_terminal_events": Counter(),
+        "post_visible_release_terminal_tail": deque(maxlen=12),
+        "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
         "default_view_folder_open_without_rows": Counter(),
@@ -367,6 +370,40 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["visible_release_classifications"],
             Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
+    def test_view_trace_records_terminal_events_after_visible_release(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_view_trace(
+            summary,
+            "visible_inbox_release_without_query_rows:row_count=1;defaulted=;"
+            "selected_missing_descriptor_columns=;table_sort_matches_descriptor=true>"
+            "hierarchy_query_rows:request_id={A}:199;role=ipm_subtree;"
+            "queried_position=9;response_row_count=6;"
+            "after_visible_inbox_release_without_query_rows=true>"
+            "default_view_folder_open:request_id={A}:201;role=journal;name=Journal",
+        )
+
+        self.assertEqual(
+            summary["post_visible_release_terminal_events"],
+            Counter(
+                {
+                    "event=hierarchy_query_rows;role=ipm_subtree;"
+                    "queried=9;rows=6;request={A}:199": 1,
+                    "event=default_view_folder_open;role=journal;"
+                    "view=Journal;request={A}:201": 1,
+                }
+            ),
+        )
+        self.assertEqual(
+            list(summary["post_visible_release_terminal_tail"]),
+            [
+                "event=hierarchy_query_rows;role=ipm_subtree;"
+                "queried=9;rows=6;request={A}:199",
+                "event=default_view_folder_open;role=journal;"
+                "view=Journal;request={A}:201",
+            ],
         )
 
     def test_setcolumns_release_response_frame_is_counted_from_execute_fields(self) -> None:

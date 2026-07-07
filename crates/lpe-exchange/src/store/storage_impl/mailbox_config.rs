@@ -285,7 +285,7 @@ macro_rules! store_impl_mailbox_config {
                        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                 FROM mapi_associated_config_messages
                 WHERE tenant_id = $1 AND account_id = $2
-                ORDER BY folder_id, message_class, updated_at DESC, id
+                ORDER BY folder_id, message_class, subject, updated_at DESC, id
                 "#,
             )
             .bind(tenant_id)
@@ -298,7 +298,11 @@ macro_rules! store_impl_mailbox_config {
                 .map(mapi_associated_config_from_row)
                 .filter_map(|result| match result {
                     Ok(config) => {
-                        if seen.insert((config.folder_id, config.message_class.clone())) {
+                        if seen.insert((
+                            config.folder_id,
+                            config.message_class.clone(),
+                            config.subject.clone(),
+                        )) {
                             Some(Ok(config))
                         } else {
                             None
@@ -346,6 +350,7 @@ macro_rules! store_impl_mailbox_config {
                   AND account_id = $2
                   AND folder_id = $3
                   AND message_class = $4
+                  AND subject = $5
                 ORDER BY updated_at DESC, id
                 LIMIT 1
                 "#,
@@ -354,6 +359,7 @@ macro_rules! store_impl_mailbox_config {
             .bind(input.account_id)
             .bind(input.folder_id as i64)
             .bind(&message_class)
+            .bind(&subject)
             .fetch_optional(&mut *tx)
             .await?;
             let id = match input.id {
@@ -366,7 +372,7 @@ macro_rules! store_impl_mailbox_config {
                 }
                 None => logical_id.unwrap_or_else(Uuid::new_v4),
             };
-            let has_logical_index = sqlx::query_scalar::<_, bool>(
+            let has_subject_logical_index = sqlx::query_scalar::<_, bool>(
                 r#"
                 SELECT EXISTS (
                     SELECT 1
@@ -375,6 +381,7 @@ macro_rules! store_impl_mailbox_config {
                       ON index_class.oid = index_info.indexrelid
                     WHERE index_info.indrelid = 'mapi_associated_config_messages'::regclass
                       AND index_class.relname = 'mapi_associated_config_messages_logical_idx'
+                      AND pg_get_indexdef(index_class.oid) LIKE '%subject%'
                 )
                 "#,
             )
@@ -410,16 +417,15 @@ macro_rules! store_impl_mailbox_config {
                 .fetch_optional(&mut *tx)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
-            } else if has_logical_index {
+            } else if has_subject_logical_index {
                 sqlx::query(
                     r#"
                     INSERT INTO mapi_associated_config_messages (
                         tenant_id, id, account_id, folder_id, message_class, subject, properties_json
                     )
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (tenant_id, account_id, folder_id, message_class)
+                    ON CONFLICT (tenant_id, account_id, folder_id, message_class, subject)
                     DO UPDATE SET
-                        subject = EXCLUDED.subject,
                         properties_json = EXCLUDED.properties_json,
                         updated_at = NOW()
                     RETURNING id, account_id, folder_id, message_class, subject, properties_json,
@@ -476,6 +482,7 @@ macro_rules! store_impl_mailbox_config {
                   AND id <> $3
                   AND folder_id = $4
                   AND message_class = $5
+                  AND subject = $6
                 "#,
             )
             .bind(tenant_id)
@@ -483,6 +490,7 @@ macro_rules! store_impl_mailbox_config {
             .bind(saved.id)
             .bind(saved.folder_id as i64)
             .bind(&saved.message_class)
+            .bind(&saved.subject)
             .execute(&mut *tx)
             .await?;
             insert_mapi_associated_config_change(

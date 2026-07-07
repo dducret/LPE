@@ -531,6 +531,57 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
 }
 
 #[tokio::test]
+async fn mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+
+    let compact = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: None,
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            subject: "Compact".to_string(),
+            properties_json: serde_json::json!({"view": "compact"}),
+        })
+        .await
+        .unwrap();
+    let messages = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: None,
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            subject: "Messages".to_string(),
+            properties_json: serde_json::json!({"view": "messages"}),
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(messages.id, compact.id);
+    let configs = fixture
+        .storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await
+        .unwrap();
+    assert!(configs.iter().any(|config| {
+        config.message_class == "IPM.Microsoft.FolderDesign.NamedView"
+            && config.subject == "Compact"
+            && config.properties_json == serde_json::json!({"view": "compact"})
+    }));
+    assert!(configs.iter().any(|config| {
+        config.message_class == "IPM.Microsoft.FolderDesign.NamedView"
+            && config.subject == "Messages"
+            && config.properties_json == serde_json::json!({"view": "messages"})
+    }));
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

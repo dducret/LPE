@@ -215,8 +215,9 @@ WITH ranked_associated_configs AS (
            id,
            folder_id,
            message_class,
+           subject,
            row_number() OVER (
-               PARTITION BY tenant_id, account_id, folder_id, message_class
+               PARTITION BY tenant_id, account_id, folder_id, message_class, subject
                ORDER BY updated_at DESC, id
            ) AS row_number
     FROM public.mapi_associated_config_messages
@@ -227,8 +228,10 @@ WHERE config.tenant_id = ranked.tenant_id
   AND config.id = ranked.id
   AND ranked.row_number > 1;
 
+DROP INDEX IF EXISTS public.mapi_associated_config_messages_logical_idx;
+
 CREATE UNIQUE INDEX IF NOT EXISTS mapi_associated_config_messages_logical_idx
-    ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class);
+    ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject);
 
 DELETE FROM public.mapi_associated_config_messages
 WHERE message_class IN (

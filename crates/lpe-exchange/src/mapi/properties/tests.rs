@@ -789,7 +789,7 @@ fn collaboration_folder_projects_default_post_message_class_for_contacts() {
         crate::mapi::identity::message_entry_id_from_object_ids(
             account_id,
             CONTACTS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID),
         )
         .map(MapiValue::Binary)
     );
@@ -828,7 +828,7 @@ fn collaboration_calendar_advertises_calendar_default_view() {
         crate::mapi::identity::message_entry_id_from_object_ids(
             account_id,
             CALENDAR_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(CALENDAR_FOLDER_ID),
         )
         .map(MapiValue::Binary)
     );

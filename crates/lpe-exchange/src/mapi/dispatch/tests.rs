@@ -402,7 +402,7 @@ fn default_view_match_state_reports_pre_advertised_folder_open() {
         "request:175",
         OUTBOX_FOLDER_ID,
         OUTBOX_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        crate::mapi_store::outlook_default_folder_named_view_id(OUTBOX_FOLDER_ID),
         "Messages",
     );
 
@@ -410,7 +410,7 @@ fn default_view_match_state_reports_pre_advertised_folder_open() {
         OUTBOX_FOLDER_ID,
         Some((
             OUTBOX_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(OUTBOX_FOLDER_ID),
         )),
     );
 
@@ -435,7 +435,7 @@ fn default_view_advertisement_state_tracks_multiple_owner_folders() {
         "request:129",
         CONTACTS_FOLDER_ID,
         CONTACTS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID),
         "Contacts",
     );
 
@@ -472,7 +472,7 @@ fn default_view_advertisement_state_tracks_multiple_owner_folders() {
         TASKS_FOLDER_ID,
         Some((
             TASKS_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(TASKS_FOLDER_ID),
         )),
     );
     assert!(tasks_match_state.contains("advertised=false"));
@@ -542,7 +542,7 @@ fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
     )));
     assert!(contract.contains(&format!(
         "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        crate::mapi_store::outlook_default_folder_named_view_id(JUNK_FOLDER_ID)
     )));
 }
 
@@ -561,7 +561,10 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
     assert!(contract.contains(
         "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
     ));
-    assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    assert!(contract.contains(&format!(
+        "expected_view_message_id=0x{:016x}",
+        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID)
+    )));
 }
 
 #[test]
@@ -579,7 +582,10 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
     assert!(contract.contains(
         "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
     ));
-    assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    assert!(contract.contains(&format!(
+        "expected_view_message_id=0x{:016x}",
+        crate::mapi_store::outlook_default_folder_named_view_id(CALENDAR_FOLDER_ID)
+    )));
 }
 
 #[test]
@@ -610,7 +616,10 @@ fn task_note_journal_handoff_contracts_report_standard_identity_columns() {
         assert!(contract.contains("folder_local_default_supported=true"));
         assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
         assert!(contract.contains(expected_columns), "{contract}");
-        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+        assert!(contract.contains(&format!(
+            "expected_view_message_id=0x{:016x}",
+            crate::mapi_store::outlook_default_folder_named_view_id(folder_id)
+        )));
     }
 }
 

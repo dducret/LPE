@@ -331,6 +331,9 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "setcolumns_release_response_frames": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
+        "post_visible_release_terminal_events": Counter(),
+        "post_visible_release_terminal_tail": deque(maxlen=12),
+        "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
         "default_view_folder_open_without_rows": Counter(),
@@ -563,6 +566,7 @@ def first_hierarchy_row(row_summary: str) -> str:
 def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
     if not trace_events:
         return
+    after_visible_release = False
     for segment in trace_events.split(">"):
         if not segment:
             continue
@@ -574,13 +578,68 @@ def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
                     summary["stale_default_view_contexts"].add(segment)
                     summary["stale_default_view_states"][f"{role}->{owner_role}"] += 1
         if segment.startswith("visible_inbox_release_without_query_rows:"):
+            after_visible_release = True
             if segment not in summary["visible_release_contexts"]:
                 summary["visible_release_contexts"].add(segment)
                 record_visible_release_classification(summary, segment)
                 record_visible_release_descriptor_window(summary, segment)
+        if (
+            after_visible_release
+            or "after_visible_inbox_release_without_query_rows=true" in segment
+        ):
+            record_post_visible_release_terminal_event(summary, segment)
         record_default_view_query_position_without_rows(summary, segment)
         record_descriptor_gap(summary, segment)
         inspect_contract(summary, segment)
+
+
+def record_post_visible_release_terminal_event(
+    summary: dict[str, Any], segment: str
+) -> None:
+    event_name = segment.split(":", 1)[0]
+    if event_name == "visible_inbox_release_without_query_rows":
+        return
+    if event_name not in {
+        "default_view_folder_open",
+        "default_view_advertised",
+        "getprops_folder",
+        "hierarchy_table_open",
+        "hierarchy_query_position",
+        "hierarchy_query_rows",
+    }:
+        return
+    contexts = summary.setdefault("post_visible_release_terminal_contexts", set())
+    if segment in contexts:
+        return
+    contexts.add(segment)
+    event_fields = segment.split(":", 1)[1] if ":" in segment else segment
+    role = (
+        first_field(event_fields, "role")
+        or first_field(event_fields, "owner_role")
+        or first_field(event_fields, "folder_role")
+        or "unknown"
+    )
+    request_id = first_field(event_fields, "request_id") or "unknown"
+    view_name = first_field(event_fields, "name") or first_field(
+        event_fields, "selected_view_name"
+    )
+    detail_parts = [f"event={event_name}", f"role={role}"]
+    if view_name:
+        detail_parts.append(f"view={view_name}")
+    if event_name == "hierarchy_query_rows":
+        queried_position = first_field(event_fields, "queried_position") or "?"
+        response_row_count = first_field(event_fields, "response_row_count") or "?"
+        detail_parts.append(f"queried={queried_position}")
+        detail_parts.append(f"rows={response_row_count}")
+    elif event_name == "hierarchy_query_position":
+        response_position = first_field(event_fields, "response_position") or "?"
+        response_row_count = first_field(event_fields, "response_row_count") or "?"
+        detail_parts.append(f"position={response_position}")
+        detail_parts.append(f"rows={response_row_count}")
+    detail_parts.append(f"request={request_id}")
+    detail = ";".join(detail_parts)
+    summary["post_visible_release_terminal_events"][detail] += 1
+    summary["post_visible_release_terminal_tail"].append(detail)
 
 
 def record_visible_release_classification(summary: dict[str, Any], text: str) -> None:
@@ -1097,6 +1156,15 @@ def print_single_summary(
             log["post_visible_release_followups"],
             limit=8,
         )
+        print_counter(
+            "Post-visible-release terminal events",
+            log["post_visible_release_terminal_events"],
+            limit=12,
+        )
+        if log["post_visible_release_terminal_tail"]:
+            print("Post-visible-release terminal tail:")
+            for event in log["post_visible_release_terminal_tail"]:
+                print(f"  {event}")
         print_counter("UMOLK dictionary shapes", log["umolk_dictionary_shapes"], limit=8)
         print(
             "Post-visible-release hierarchy QueryPosition max: "
@@ -1159,6 +1227,7 @@ def print_batch_summary(
     aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
+    aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
@@ -1180,6 +1249,7 @@ def print_batch_summary(
     current_setcolumns_release_response_frames: Counter[str] = Counter()
     current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
+    current_post_visible_release_terminal_events: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
@@ -1228,6 +1298,9 @@ def print_batch_summary(
         aggregate_descriptor_gap_windows.update(log["descriptor_gap_windows"])
         aggregate_post_visible_release_followups.update(
             log["post_visible_release_followups"]
+        )
+        aggregate_post_visible_release_terminal_events.update(
+            log["post_visible_release_terminal_events"]
         )
         aggregate_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
         aggregate_default_view_folder_open_without_rows.update(
@@ -1279,6 +1352,9 @@ def print_batch_summary(
             current_descriptor_gap_windows.update(log["descriptor_gap_windows"])
             current_post_visible_release_followups.update(
                 log["post_visible_release_followups"]
+            )
+            current_post_visible_release_terminal_events.update(
+                log["post_visible_release_terminal_events"]
             )
             current_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
             current_default_view_folder_open_without_rows.update(
@@ -1388,6 +1464,11 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate post-visible-release terminal events",
+        aggregate_post_visible_release_terminal_events,
+        limit=20,
+    )
+    print_counter(
         "Aggregate UMOLK dictionary shapes",
         aggregate_umolk_dictionary_shapes,
         limit=20,
@@ -1482,6 +1563,11 @@ def print_batch_summary(
         print_counter(
             "Current-build post-visible-release followups",
             current_post_visible_release_followups,
+            limit=20,
+        )
+        print_counter(
+            "Current-build post-visible-release terminal events",
+            current_post_visible_release_terminal_events,
             limit=20,
         )
         print_counter(

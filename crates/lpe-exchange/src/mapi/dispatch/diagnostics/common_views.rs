@@ -232,7 +232,7 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     } else {
         (
             folder_id,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
             debug_default_folder_associated_named_view(snapshot, folder_id),
         )
     };
@@ -244,7 +244,7 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             .and_then(|_| {
                 snapshot.default_folder_named_view_message(
                     folder_id,
-                    crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+                    crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
                 )
             })
     };
@@ -263,7 +263,8 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
         )
         .iter()
         .any(|row| {
-            debug_associated_row_id(row) == crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+            debug_associated_row_id(row)
+                == crate::mapi_store::outlook_default_folder_named_view_id(folder_id)
         });
     let descriptor_summary = view
         .as_ref()

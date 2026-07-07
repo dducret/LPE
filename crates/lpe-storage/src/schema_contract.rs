@@ -763,6 +763,8 @@ fn mapi_associated_config_messages_are_bounded_mapi_only_state() {
     }
     assert_schema_contains_all(&[
         "CREATE INDEX mapi_associated_config_messages_account_folder_idx",
+        "CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx",
+        "ON mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject)",
     ]);
 }
 
@@ -1006,6 +1008,8 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "associated_config",
             "mail_change_log_object_shape_check",
             "CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx",
+            "DROP INDEX IF EXISTS public.mapi_associated_config_messages_logical_idx",
+            "ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject)",
             "public.mapi_associated_config_messages",
             "IPM.Microsoft.PendingChange.MigrateFlags",
         ],
