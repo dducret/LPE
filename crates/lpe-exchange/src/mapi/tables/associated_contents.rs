@@ -674,7 +674,15 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 PID_TAG_NATIVE_BODY => Some(MapiValue::U32(1)),
                 PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
                 PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
-                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG => Some(MapiValue::U32(0)),
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG
+                    if message
+                        .message_class
+                        .eq_ignore_ascii_case(
+                            crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
+                        ) =>
+                {
+                    Some(MapiValue::U32(0))
+                }
                 PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
                 PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
                 PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(

@@ -2883,6 +2883,7 @@ fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_
         PID_TAG_ROAMING_DICTIONARY,
         0x9001_0003,
         0x0F02_0040,
+        OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
     ];
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -2919,7 +2920,7 @@ fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_
         parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DICTIONARY).unwrap(),
         MapiValue::Binary(value) if value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
     ));
-    for _ in 0..2 {
+    for _ in 0..3 {
         assert_eq!(cursor.read_u8().unwrap(), 0x0A);
         assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
     }
