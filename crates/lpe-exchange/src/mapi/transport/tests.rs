@@ -674,6 +674,15 @@ fn outlook_bootstrap_phase_classifies_current_wall_and_successful_progress() {
         outlook_bootstrap_phase_name(outlook_bootstrap_phase(&state)),
         "inbox_normal_contents_table_opened"
     );
+    assert_eq!(outlook_bootstrap_stall_code(&state), 0);
+    assert_eq!(
+        outlook_bootstrap_stall_name(outlook_bootstrap_stall_code(&state)),
+        "none"
+    );
+    assert_eq!(
+        outlook_bootstrap_next_expected_phase(&state),
+        "inbox_normal_contents_setcolumns"
+    );
 }
 
 #[test]

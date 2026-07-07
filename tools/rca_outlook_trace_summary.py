@@ -1345,14 +1345,7 @@ def verdict_for_summary(
 ) -> str:
     if rr["nonzero_response_codes"] or rr["parse_errors"]:
         return "RR trace shows protocol/parse errors before client stoppage."
-    if log_path and (
-        log["visible_release_without_query_rows"]
-        or log["raw_umolk_placeholder"]
-        or log["stale_default_view_states"]
-        or log["default_view_folder_open_without_rows"]
-        or log["default_view_query_position_without_rows"]
-        or log["post_calendar_query_position_named_property_probes"]
-    ):
+    if log_path and actionable_issue_buckets(rr, log, log_path):
         return "transport is clean; journal diagnostics contain actionable MAPI/view issues."
     if log_path and log["stall_warnings"]:
         return "transport is clean; startup stall diagnostics identify a server-side MAPI bootstrap stop."
@@ -1419,6 +1412,7 @@ def print_batch_summary(
     build_issue_counts: Counter[tuple[str, str]] = Counter()
     current_issue_counts: Counter[tuple[str, str]] = Counter()
     actionable_runs = 0
+    current_run_count = 0
 
     print(
         "run,matched_log,build_commit,build_dirty,build_scope,rr_events,nonzero_mapi,parse_errors,missing_gate,"
@@ -1502,6 +1496,7 @@ def print_batch_summary(
             if is_current_build:
                 current_issue_counts[(f"{build_commit}/{build_dirty}", issue)] += 1
         if is_current_build:
+            current_run_count += 1
             current_missing_gates.update(log["startup_missing_gates"])
             current_stalls.update(log["stall_warnings"])
             current_unknown_tags.update(log["unknown_getprops_tags"])
@@ -1703,6 +1698,12 @@ def print_batch_summary(
         limit=20,
     )
     if current_build:
+        print(f"Current-build runs matched: {current_run_count}")
+        if current_run_count == 0:
+            print(
+                "Current-build warning: no Outlook trace/log pair matched the "
+                f"requested build prefix {current_build}"
+            )
         print_counter(
             "Current-build non-zero MAPI response codes",
             current_nonzero_response_codes,
@@ -1850,7 +1851,7 @@ def issue_buckets(
         issues.append("nonzero_mapi_response")
     if rr["parse_errors"]:
         issues.append("rop_parse_error")
-    if log["visible_release_without_query_rows"]:
+    if visible_release_needs_action(log):
         issues.append("visible_inbox_release_before_query_rows")
     if log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
@@ -1870,7 +1871,8 @@ def issue_buckets(
                 issues.append(f"rr_setcolumns_release_response_handle:{name}")
     if log.get("post_visible_release_followups"):
         for name, _count in log["post_visible_release_followups"].most_common(2):
-            issues.append(f"post_visible_release:{name}")
+            if post_visible_release_followup_is_actionable(name):
+                issues.append(f"post_visible_release:{name}")
     if log.get("default_view_folder_open_without_rows"):
         for name, _count in log["default_view_folder_open_without_rows"].most_common(2):
             issues.append(f"default_view_folder_open_without_rows:{name}")
@@ -1904,9 +1906,32 @@ def issue_buckets(
     if log_path and log["startup_missing_gates"]:
         gate = log["startup_missing_gates"].most_common(1)[0][0]
         issues.append(f"missing_gate:{gate}")
+    issues = suppress_symptom_only_issues(issues)
     if not issues:
         issues.append("no_server_issue_detected")
     return issues
+
+
+def suppress_symptom_only_issues(issues: list[str]) -> list[str]:
+    concrete = [
+        issue
+        for issue in issues
+        if not (issue.startswith("stall:") or issue.startswith("missing_gate:"))
+    ]
+    if concrete:
+        return concrete
+    return issues
+
+
+def actionable_issue_buckets(
+    rr: dict[str, Any], log: dict[str, Any], log_path: Path | None
+) -> list[str]:
+    return [
+        issue
+        for issue in issue_buckets(rr, log, log_path)
+        if issue != "no_server_issue_detected"
+        and not (issue.startswith("stall:") or issue.startswith("missing_gate:"))
+    ]
 
 
 def setcolumns_release_response_handle_classification_is_actionable(name: str) -> bool:
@@ -1914,6 +1939,19 @@ def setcolumns_release_response_handle_classification_is_actionable(name: str) -
         "released_slot_invalidated_in_response_handle_table",
         "released_slot_trimmed_from_response_handle_table",
     }
+
+
+def visible_release_needs_action(log: dict[str, Any]) -> bool:
+    if not log.get("visible_release_without_query_rows"):
+        return False
+    classifications = log.get("visible_release_classifications")
+    if not classifications:
+        return True
+    return any(visible_release_classification_is_actionable(name) for name in classifications)
+
+
+def post_visible_release_followup_is_actionable(name: str) -> bool:
+    return name in {"create_save_batch_after_visible_release"}
 
 
 def visible_release_classification_is_actionable(name: str) -> bool:

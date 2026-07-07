@@ -488,7 +488,9 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
         && !actions.inbox_normal_contents_table_observed
     {
         5
-    } else if actions.post_inbox_fai_folder_type_probe_loop_logged {
+    } else if actions.post_inbox_fai_folder_type_probe_loop_logged
+        && !actions.inbox_normal_contents_table_observed
+    {
         3
     } else if !actions.last_inbox_hierarchy_query_context.is_empty()
         && actions.inbox_open_folder_probe_count >= 2

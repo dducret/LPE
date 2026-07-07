@@ -274,6 +274,36 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
+    def test_issue_buckets_suppresses_stall_symptoms_when_concrete_issue_exists(self) -> None:
+        log = empty_log_summary()
+        log["zero_default_tags"] = Counter({"0x120c0102": 3})
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            ["zero_default:undocumented_folder_binary_120c"],
+        )
+
+    def test_issue_buckets_keeps_stall_symptoms_without_concrete_issue(self) -> None:
+        log = empty_log_summary()
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            [
+                "stall:after_common_views_inbox_notification_without_contents",
+                "missing_gate:normal_inbox_visible_row_observed",
+            ],
+        )
+
     def test_actionable_descriptor_gap_counts_filters_backed_columns(self) -> None:
         counts = rca.actionable_descriptor_gap_counts(
             Counter(
@@ -832,23 +862,28 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_issue_buckets_reports_post_visible_release_followup(self) -> None:
-        log = {
-            "visible_release_without_query_rows": 0,
-            "post_visible_release_followups": Counter(
-                {"hierarchy_query_position_after_visible_release": 3}
-            ),
-            "default_view_query_position_without_rows": Counter(),
-            "raw_umolk_placeholder": 0,
-            "stale_default_view_states": Counter(),
-            "descriptor_gap_windows": Counter(),
-            "stall_warnings": Counter(),
-            "startup_missing_gates": Counter(),
-        }
+    def test_issue_buckets_ignores_context_only_post_visible_release_followup(self) -> None:
+        log = empty_log_summary()
+        log["post_visible_release_followups"] = Counter(
+            {
+                "hierarchy_query_position_after_visible_release": 3,
+                "default_view_rows_elsewhere_without_inbox_rows": 2,
+                "umolk_materialized_before_stop": 1,
+            }
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
+
+    def test_issue_buckets_reports_actionable_post_visible_release_followup(self) -> None:
+        log = empty_log_summary()
+        log["post_visible_release_followups"] = Counter(
+            {"create_save_batch_after_visible_release": 1}
+        )
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
         self.assertIn(
-            "post_visible_release:hierarchy_query_position_after_visible_release",
+            "post_visible_release:create_save_batch_after_visible_release",
             rca.issue_buckets(rr, log, None),
         )
 
@@ -927,30 +962,21 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
 
     def test_issue_buckets_ignores_non_actionable_visible_release_classification(self) -> None:
-        log = {
-            "visible_release_without_query_rows": 1,
-            "visible_release_classifications": Counter(
-                {"valid_projection_complete_setcolumns_before_query_rows": 1}
-            ),
-            "post_visible_release_followups": Counter(),
-            "default_view_folder_open_without_rows": Counter(),
-            "default_view_query_position_without_rows": Counter(),
-            "default_view_id_collisions": Counter(),
-            "calendar_zero_duration_timed_query_position_rows": Counter(),
-            "post_calendar_query_position_named_property_probes": Counter(),
-            "raw_umolk_placeholder": 0,
-            "stale_default_view_states": Counter(),
-            "descriptor_gap_windows": Counter(),
-            "stall_warnings": Counter(),
-            "startup_missing_gates": Counter(),
-        }
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"valid_projection_complete_setcolumns_before_query_rows": 1}
+        )
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
-        self.assertNotIn(
-            "visible_inbox_release_classification:"
-            "valid_projection_complete_setcolumns_before_query_rows",
-            rca.issue_buckets(rr, log, None),
-        )
+        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
+
+    def test_issue_buckets_reports_unclassified_visible_release(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn("visible_inbox_release_before_query_rows", rca.issue_buckets(rr, log, None))
 
     def test_issue_buckets_reports_actionable_visible_release_classification(self) -> None:
         log = empty_log_summary()
@@ -963,6 +989,46 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertIn(
             "visible_inbox_release_classification:incomplete_projection_before_query_rows",
             rca.issue_buckets(rr, log, None),
+        )
+
+    def test_verdict_ignores_non_actionable_visible_release_classification(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"descriptor_superset_client_subset_before_query_rows": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.verdict_for_summary(rr, log, Path("LPE_last_test.log")),
+            "transport is clean; if Outlook still crashes, ETL/client crash data may be useful.",
+        )
+
+    def test_verdict_prioritizes_concrete_issue_over_stall_symptoms(self) -> None:
+        log = empty_log_summary()
+        log["zero_default_tags"] = Counter({"0x120c0102": 1})
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.verdict_for_summary(rr, log, Path("LPE_last_test.log")),
+            "transport is clean; journal diagnostics contain actionable MAPI/view issues.",
+        )
+
+    def test_verdict_keeps_stall_message_when_only_stall_symptoms_exist(self) -> None:
+        log = empty_log_summary()
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.verdict_for_summary(rr, log, Path("LPE_last_test.log")),
+            "transport is clean; startup stall diagnostics identify a server-side MAPI bootstrap stop.",
         )
 
     def test_issue_buckets_reports_post_calendar_named_property_probe(self) -> None:
@@ -1163,6 +1229,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 shutil.rmtree(trace_root)
 
             text = output.getvalue()
+            self.assertIn("Current-build runs matched: 1", text)
             self.assertIn(
                 "Current-build Journal SetColumns+Release response handle classifications",
                 text,
@@ -1173,6 +1240,61 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "released_slot_reused_in_response_handle_table: 1",
                 text,
             )
+
+    def test_batch_summary_warns_when_current_build_has_no_matching_runs(self) -> None:
+        trace_root = Path(self._testMethodName)
+        trace_dir = trace_root / "202607071736"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+
+        log = empty_log_summary()
+        log.update(
+            {
+                "build": {
+                    "git_commit": "aae96d21ed4b",
+                    "git_dirty": "",
+                },
+                "sequence_counts": Counter(),
+                "startup_missing_gates": Counter(),
+                "stall_warnings": Counter(),
+                "raw_umolk_placeholder": 0,
+            }
+        )
+        rr = {
+            "events": 1,
+            "nonzero_response_codes": Counter(),
+            "parse_errors": Counter(),
+            "setcolumns_release_response_frames": Counter(),
+            "setcolumns_release_response_handle_classifications": Counter(),
+        }
+        log_path = Path("LPE_last_202607071736.log")
+
+        original_indexed_log_files = rca.indexed_log_files
+        original_matching_log_for_run = rca.matching_log_for_run
+        original_summarize_rr = rca.summarize_rr
+        original_summarize_log = rca.summarize_log
+        try:
+            rca.indexed_log_files = lambda _logs_root: {}
+            rca.matching_log_for_run = lambda _run, _logs: log_path
+            rca.summarize_rr = lambda _trace_dir: rr
+            rca.summarize_log = lambda _log_path: log
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rca.print_batch_summary(trace_root, Path("."), "af25fd18")
+        finally:
+            rca.indexed_log_files = original_indexed_log_files
+            rca.matching_log_for_run = original_matching_log_for_run
+            rca.summarize_rr = original_summarize_rr
+            rca.summarize_log = original_summarize_log
+            shutil.rmtree(trace_root)
+
+        text = output.getvalue()
+        self.assertIn("Current-build runs matched: 0", text)
+        self.assertIn(
+            "Current-build warning: no Outlook trace/log pair matched the "
+            "requested build prefix af25fd18",
+            text,
+        )
 
 
 if __name__ == "__main__":
