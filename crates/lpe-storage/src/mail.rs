@@ -1,5 +1,6 @@
 use anyhow::Result;
 use lpe_magika::{collect_mime_attachment_parts, extract_visible_body_parts};
+use sqlx::types::chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
 use crate::{AttachmentUploadInput, SubmittedRecipientInput};
@@ -165,6 +166,25 @@ pub fn parse_header_records(raw_message: &[u8]) -> Vec<ParsedRfc822Header> {
     headers
 }
 
+pub fn parse_message_date_header(raw_message: &[u8]) -> Option<String> {
+    parse_header_records(raw_message)
+        .into_iter()
+        .find(|header| header.name.eq_ignore_ascii_case("date"))
+        .and_then(|header| parse_mail_datetime(&header.value))
+}
+
+fn parse_mail_datetime(value: &str) -> Option<String> {
+    DateTime::parse_from_rfc2822(value)
+        .or_else(|_| DateTime::parse_from_rfc3339(value))
+        .ok()
+        .map(|value| {
+            value
+                .with_timezone(&Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string()
+        })
+}
+
 fn parse_headers(input: &str) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     let mut current_name: Option<String> = None;
@@ -267,7 +287,10 @@ fn trim_single_structural_crlf(bytes: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_header_recipients, parse_message_attachments, parse_rfc822_message};
+    use super::{
+        parse_header_recipients, parse_message_attachments, parse_message_date_header,
+        parse_rfc822_message,
+    };
 
     #[test]
     fn parse_header_recipients_unfolds_and_normalizes_addresses() {
@@ -288,6 +311,39 @@ mod tests {
         assert_eq!(to[0].display_name.as_deref(), Some("Primary"));
         assert_eq!(to[1].address, "second@example.test");
         assert_eq!(cc[0].address, "copy@example.test");
+    }
+
+    #[test]
+    fn parse_message_date_header_normalizes_rfc2822_date_to_utc() {
+        let raw = concat!(
+            "From: Sender <sender@example.test>\r\n",
+            "Date: Tue, 9 Jun 2026 19:25:15 +0000\r\n",
+            "Subject: Date\r\n",
+            "\r\n",
+            "Body\r\n"
+        );
+
+        assert_eq!(
+            parse_message_date_header(raw.as_bytes()).as_deref(),
+            Some("2026-06-09T19:25:15Z")
+        );
+    }
+
+    #[test]
+    fn parse_message_date_header_unfolds_before_parsing() {
+        let raw = concat!(
+            "From: Sender <sender@example.test>\r\n",
+            "Date: Tue, 9 Jun 2026\r\n",
+            "  21:25:15 +0200\r\n",
+            "Subject: Date\r\n",
+            "\r\n",
+            "Body\r\n"
+        );
+
+        assert_eq!(
+            parse_message_date_header(raw.as_bytes()).as_deref(),
+            Some("2026-06-09T19:25:15Z")
+        );
     }
 
     #[test]

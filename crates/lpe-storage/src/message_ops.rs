@@ -924,6 +924,7 @@ impl Storage {
                 &raw_message,
             )
             .await?;
+        let sent_at = crate::mail::parse_message_date_header(&raw_message);
         sqlx::query(
             r#"
             INSERT INTO messages (
@@ -932,7 +933,7 @@ impl Storage {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, NULL, NOW(), $8, FALSE
+                $7, $8::timestamptz, COALESCE($9::timestamptz, NOW()), $10, FALSE
             )
             "#,
         )
@@ -943,6 +944,8 @@ impl Storage {
         .bind(input.internet_message_id)
         .bind(sha256_hex(&raw_message))
         .bind(crate::normalize_subject(&input.subject))
+        .bind(sent_at.as_deref())
+        .bind(input.received_at.as_deref())
         .bind(input.size_octets.max(0))
         .execute(&mut *tx)
         .await?;

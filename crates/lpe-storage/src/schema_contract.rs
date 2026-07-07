@@ -2298,6 +2298,27 @@ fn jmap_email_projection_preserves_multi_mailbox_memberships() {
 }
 
 #[test]
+fn imported_and_inbound_mail_persist_message_date_metadata() {
+    let inbound_body = function_body(INBOUND_STORAGE, "async fn store_inbound_message_in_tx");
+    let import_body = function_body(MESSAGE_OPS_STORAGE, "pub async fn import_jmap_email");
+    assert!(
+        inbound_body.contains("parse_message_date_header(&request.raw_message)")
+            && inbound_body.contains("$8::timestamptz, NOW()"),
+        "inbound storage must persist RFC Date as messages.sent_at while using receive time for messages.received_at"
+    );
+    assert!(
+        import_body.contains("parse_message_date_header(&raw_message)")
+            && import_body.contains("COALESCE($9::timestamptz, NOW())")
+            && import_body.contains("input.received_at.as_deref()"),
+        "JMAP/MAPI imports must persist RFC Date as sent_at and honor explicit imported received_at"
+    );
+    assert!(
+        !inbound_body.contains("$7, NULL, NOW()") && !import_body.contains("$7, NULL, NOW()"),
+        "message insertion paths must not discard available message date metadata"
+    );
+}
+
+#[test]
 fn jmap_mailbox_storage_uses_shared_name_policy() {
     for (name, body) in [
         (

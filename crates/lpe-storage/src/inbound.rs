@@ -451,6 +451,7 @@ impl Storage {
                 &request.raw_message,
             )
             .await?;
+        let sent_at = crate::mail::parse_message_date_header(&request.raw_message);
 
         sqlx::query(
             r#"
@@ -460,7 +461,7 @@ impl Storage {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, NULL, NOW(), $8, FALSE
+                $7, $8::timestamptz, NOW(), $9, FALSE
             )
             "#,
         )
@@ -471,6 +472,7 @@ impl Storage {
         .bind(request.internet_message_id.as_deref())
         .bind(crate::sha256_hex(&request.raw_message))
         .bind(subject)
+        .bind(sent_at.as_deref())
         .bind(size_octets.max(0))
         .execute(&mut **tx)
         .await?;
