@@ -614,6 +614,67 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
                 PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
                 PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+                PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
+                PID_TAG_PRIORITY | PID_TAG_SENSITIVITY | PID_TAG_ORIGINAL_SENSITIVITY => {
+                    Some(MapiValue::U32(0))
+                }
+                PID_TAG_REPLY_REQUESTED
+                | PID_TAG_RESPONSE_REQUESTED
+                | PID_TAG_ALTERNATE_RECIPIENT_ALLOWED
+                | PID_TAG_AUTO_FORWARDED
+                | PID_TAG_DELETE_AFTER_SUBMIT
+                | PID_TAG_HAS_ATTACHMENTS
+                | PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED
+                | PID_TAG_PROCESSED
+                | PID_TAG_READ
+                | PID_TAG_READ_RECEIPT_REQUESTED
+                | PID_TAG_RECIPIENT_REASSIGNMENT_PROHIBITED
+                | PID_TAG_RTF_IN_SYNC => Some(MapiValue::Bool(false)),
+                PID_TAG_ICON_INDEX
+                | PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
+                | PID_TAG_LAST_VERB_EXECUTED
+                | PID_TAG_MESSAGE_EDITOR_FORMAT
+                | PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(0)),
+                PID_TAG_FLAG_STATUS => Some(MapiValue::U32(0)),
+                PID_TAG_FOLLOWUP_ICON | PID_TAG_TODO_ITEM_FLAGS => Some(MapiValue::I32(0)),
+                PID_TAG_RTF_COMPRESSED
+                | PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID
+                | PID_TAG_PARENT_KEY
+                | PID_TAG_REPLY_RECIPIENT_ENTRIES
+                | PID_TAG_REPORT_TAG => Some(MapiValue::Binary(Vec::new())),
+                PID_TAG_DISPLAY_BCC_W
+                | PID_TAG_DISPLAY_CC_W
+                | PID_TAG_DISPLAY_TO_W
+                | PID_TAG_IN_REPLY_TO_ID_W
+                | PID_TAG_INTERNET_REFERENCES_W
+                | PID_TAG_NEXT_SEND_ACCOUNT_W
+                | PID_TAG_ORIGINAL_AUTHOR_NAME_W
+                | PID_TAG_ORIGINAL_DISPLAY_BCC_W
+                | PID_TAG_ORIGINAL_DISPLAY_CC_W
+                | PID_TAG_ORIGINAL_DISPLAY_TO_W
+                | PID_TAG_PRIMARY_SEND_ACCOUNT_W
+                | PID_TAG_REPLY_RECIPIENT_NAMES_W
+                | PID_TAG_REPORT_DISPOSITION_W
+                | PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(String::new())),
+                PID_TAG_CLIENT_SUBMIT_TIME | PID_TAG_CREATION_TIME => Some(MapiValue::I64(
+                    associated_config_last_modified_filetime(message).unwrap_or_else(|| {
+                        mapi_mailstore::filetime_from_change_number(change_number)
+                    }) as i64,
+                )),
+                PID_TAG_DEFERRED_DELIVERY_TIME
+                | PID_TAG_DEFERRED_SEND_TIME
+                | PID_TAG_END_DATE
+                | PID_TAG_EXPIRY_TIME
+                | PID_TAG_FLAG_COMPLETE_TIME
+                | PID_TAG_LAST_VERB_EXECUTION_TIME
+                | PID_TAG_ORIGINAL_SUBMIT_TIME
+                | PID_TAG_REPLY_TIME
+                | PID_TAG_REPORT_TIME
+                | PID_TAG_START_DATE => Some(MapiValue::I64(0)),
+                PID_TAG_NATIVE_BODY => Some(MapiValue::U32(1)),
+                PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
+                PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG => Some(MapiValue::U32(0)),
                 PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
                 PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
                 PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(

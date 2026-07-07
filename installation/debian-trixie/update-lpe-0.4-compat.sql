@@ -1,5 +1,76 @@
 SET client_min_messages = warning;
 
+CREATE OR REPLACE FUNCTION pg_temp.lpe_try_parse_message_date_header(value TEXT)
+RETURNS TIMESTAMPTZ
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN value::TIMESTAMPTZ;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NULL;
+END $$;
+
+WITH first_date_header AS (
+    SELECT DISTINCT ON (tenant_id, message_id)
+           tenant_id,
+           message_id,
+           pg_temp.lpe_try_parse_message_date_header(header_value) AS sent_at
+    FROM public.message_headers
+    WHERE lower(header_name) = 'date'
+    ORDER BY tenant_id, message_id, ordinal
+),
+backfillable_messages AS (
+    SELECT messages.tenant_id,
+           messages.id,
+           first_date_header.sent_at
+    FROM public.messages messages
+    JOIN first_date_header
+      ON first_date_header.tenant_id = messages.tenant_id
+     AND first_date_header.message_id = messages.id
+    WHERE messages.sent_at IS NULL
+      AND first_date_header.sent_at IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.mailbox_messages mailbox_messages
+          JOIN public.mailboxes mailboxes
+            ON mailboxes.tenant_id = mailbox_messages.tenant_id
+           AND mailboxes.account_id = mailbox_messages.account_id
+           AND mailboxes.id = mailbox_messages.mailbox_id
+          WHERE mailbox_messages.tenant_id = messages.tenant_id
+            AND mailbox_messages.message_id = messages.id
+            AND (mailbox_messages.is_draft OR mailboxes.role = 'drafts')
+      )
+)
+UPDATE public.messages messages
+SET sent_at = backfillable_messages.sent_at
+FROM backfillable_messages
+WHERE messages.tenant_id = backfillable_messages.tenant_id
+  AND messages.id = backfillable_messages.id;
+
+WITH backfillable_messages AS (
+    SELECT messages.tenant_id,
+           messages.id,
+           messages.received_at
+    FROM public.messages messages
+    WHERE messages.sent_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM public.mailbox_messages mailbox_messages
+          JOIN public.mailboxes mailboxes
+            ON mailboxes.tenant_id = mailbox_messages.tenant_id
+           AND mailboxes.account_id = mailbox_messages.account_id
+           AND mailboxes.id = mailbox_messages.mailbox_id
+          WHERE mailbox_messages.tenant_id = messages.tenant_id
+            AND mailbox_messages.message_id = messages.id
+            AND (mailbox_messages.is_draft OR mailboxes.role = 'drafts')
+      )
+)
+UPDATE public.messages messages
+SET sent_at = backfillable_messages.received_at
+FROM backfillable_messages
+WHERE messages.tenant_id = backfillable_messages.tenant_id
+  AND messages.id = backfillable_messages.id;
+
 DO $$
 DECLARE
     constraint_name TEXT;

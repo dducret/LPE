@@ -2878,6 +2878,9 @@ fn umolk_associated_config_property_burst_projects_empty_defaults() {
             properties_json: serde_json::json!({}),
         }),
     };
+    let expected_config_filetime = mapi_mailstore::filetime_from_change_number(
+        mapi_mailstore::change_number_for_store_id(config_id),
+    ) as i64;
     let tags: [u32; 30] = [
         0x9000_0002,
         0x9001_0003,
@@ -3032,7 +3035,7 @@ fn umolk_associated_config_property_burst_projects_empty_defaults() {
     );
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, 0x0039_0040).unwrap(),
-        MapiValue::I64(0)
+        MapiValue::I64(expected_config_filetime)
     );
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, 0x0F02_0040).unwrap(),

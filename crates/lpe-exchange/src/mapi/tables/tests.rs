@@ -7035,6 +7035,66 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         Some(MapiValue::U32(1))
     );
     assert_eq!(
+        associated_config_property_value(&message, PID_TAG_IMPORTANCE),
+        Some(MapiValue::U32(1))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_PRIORITY),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_SENSITIVITY),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_HAS_ATTACHMENTS),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_RTF_IN_SYNC),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_RTF_COMPRESSED),
+        Some(MapiValue::Binary(Vec::new()))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_FLAG_STATUS),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_TODO_ITEM_FLAGS),
+        Some(MapiValue::I32(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_NATIVE_BODY),
+        Some(MapiValue::U32(1))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_INTERNET_CODEPAGE),
+        Some(MapiValue::U32(65001))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_REPLY_TIME),
+        Some(MapiValue::I64(0))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_CLIENT_SUBMIT_TIME),
+        Some(MapiValue::I64(
+            mapi_mailstore::filetime_from_change_number(change_number) as i64
+        ))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, PID_TAG_CREATION_TIME),
+        Some(MapiValue::I64(
+            mapi_mailstore::filetime_from_change_number(change_number) as i64
+        ))
+    );
+    assert_eq!(
         associated_config_property_value(&message, PID_TAG_SENT_MAIL_SVR_EID),
         Some(MapiValue::Binary(Vec::new()))
     );

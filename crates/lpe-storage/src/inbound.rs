@@ -461,7 +461,7 @@ impl Storage {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8::timestamptz, NOW(), $9, FALSE
+                $7, COALESCE($8::timestamptz, NOW()), NOW(), $9, FALSE
             )
             "#,
         )

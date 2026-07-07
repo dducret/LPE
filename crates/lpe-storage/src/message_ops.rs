@@ -933,7 +933,11 @@ impl Storage {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8::timestamptz, COALESCE($9::timestamptz, NOW()), $10, FALSE
+                $7,
+                CASE WHEN $11 THEN NULL ELSE COALESCE($8::timestamptz, $9::timestamptz, NOW()) END,
+                COALESCE($9::timestamptz, NOW()),
+                $10,
+                FALSE
             )
             "#,
         )
@@ -947,6 +951,7 @@ impl Storage {
         .bind(sent_at.as_deref())
         .bind(input.received_at.as_deref())
         .bind(input.size_octets.max(0))
+        .bind(target_role == "drafts")
         .execute(&mut *tx)
         .await?;
 

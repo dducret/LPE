@@ -2303,14 +2303,15 @@ fn imported_and_inbound_mail_persist_message_date_metadata() {
     let import_body = function_body(MESSAGE_OPS_STORAGE, "pub async fn import_jmap_email");
     assert!(
         inbound_body.contains("parse_message_date_header(&request.raw_message)")
-            && inbound_body.contains("$8::timestamptz, NOW()"),
-        "inbound storage must persist RFC Date as messages.sent_at while using receive time for messages.received_at"
+            && inbound_body.contains("COALESCE($8::timestamptz, NOW()), NOW()"),
+        "inbound storage must persist RFC Date as messages.sent_at and fall back to receive time"
     );
     assert!(
         import_body.contains("parse_message_date_header(&raw_message)")
             && import_body.contains("COALESCE($9::timestamptz, NOW())")
+            && import_body.contains("CASE WHEN $11 THEN NULL ELSE COALESCE($8::timestamptz, $9::timestamptz, NOW()) END")
             && import_body.contains("input.received_at.as_deref()"),
-        "JMAP/MAPI imports must persist RFC Date as sent_at and honor explicit imported received_at"
+        "JMAP/MAPI imports must persist non-draft sent_at from RFC Date or received_at while preserving draft null sent_at"
     );
     assert!(
         !inbound_body.contains("$7, NULL, NOW()") && !import_body.contains("$7, NULL, NOW()"),
