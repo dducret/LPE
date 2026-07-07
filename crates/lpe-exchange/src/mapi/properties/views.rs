@@ -251,6 +251,9 @@ pub(in crate::mapi) fn outlook_folder_view_definition(
     view_name: &str,
 ) -> ViewDefinition {
     match folder_id {
+        INBOX_FOLDER_ID if view_name.eq_ignore_ascii_case("Compact") => {
+            outlook_inbox_compact_view_definition()
+        }
         CALENDAR_FOLDER_ID => outlook_calendar_view_definition(view_name),
         CONTACTS_FOLDER_ID
         | SUGGESTED_CONTACTS_FOLDER_ID
@@ -282,6 +285,41 @@ pub(in crate::mapi) fn outlook_folder_view_sort_orders(
         })
         .into_iter()
         .collect()
+}
+
+fn outlook_inbox_compact_view_definition() -> ViewDefinition {
+    ViewDefinition {
+        kind: ViewDefinitionKind::MailCompact,
+        columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
+            view_named_id_column(
+                PID_LID_OUTLOOK_COMMON_8514_TAG,
+                0x12,
+                0x0000_3F40,
+                PSETID_COMMON_GUID,
+                PID_LID_OUTLOOK_COMMON_8514,
+                "Reminder",
+            ),
+            view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
+            view_column(PID_TAG_HAS_ATTACHMENTS, 0x12, 0x0000_2F4A, "Attachment"),
+            view_column(PID_TAG_SENT_REPRESENTING_NAME_W, 0x0C, 0x0000_2F00, "From"),
+            view_column(PID_TAG_SUBJECT_W, 0x11, 0x0000_2F00, "Subject"),
+            view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
+            view_column(
+                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+                0x0C,
+                0x0000_2740,
+                "Size",
+            ),
+        ],
+        sort_column: 11,
+        sort_descending: true,
+    }
 }
 
 fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {

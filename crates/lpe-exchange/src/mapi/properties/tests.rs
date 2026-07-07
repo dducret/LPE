@@ -5053,21 +5053,24 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&mail)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
             PID_TAG_IMPORTANCE,
-            PID_LID_REMINDER_SET_TAG,
+            PID_LID_OUTLOOK_COMMON_8514_TAG,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_MESSAGE_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
-            PID_TAG_MESSAGE_SIZE,
-            PID_NAME_KEYWORDS_TAG,
+            OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
         ]
     );
     assert_eq!(
         view_descriptor_strings(&mail),
-        "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n"
     );
 }
 
