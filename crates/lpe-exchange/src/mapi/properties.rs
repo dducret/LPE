@@ -534,7 +534,6 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
-        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
         }
@@ -723,7 +722,6 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
-        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
         }
@@ -821,7 +819,6 @@ pub(in crate::mapi) fn public_folder_property_value(
         PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
             Some(MapiValue::Binary(Vec::new()))
         }
-        OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
         }

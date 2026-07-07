@@ -8380,6 +8380,14 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
     );
     assert_eq!(
         special_folder_property_value(
+            INBOX_FOLDER_ID,
+            OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
+            Uuid::nil()
+        ),
+        None
+    );
+    assert_eq!(
+        special_folder_property_value(
             FREEBUSY_DATA_FOLDER_ID,
             PID_TAG_CONTAINER_CLASS_W,
             account_id

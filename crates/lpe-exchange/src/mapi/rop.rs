@@ -764,9 +764,6 @@ pub(in crate::mapi) fn property_is_unsupported_for_object(
     principal: &AccountPrincipal,
     tag: u32,
 ) -> bool {
-    if canonical_property_storage_tag(tag) == OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C {
-        return false;
-    }
     let value_tag = get_properties_specific_value_tag(object, tag);
     if MapiPropertyTag::new(value_tag).property_type().is_none() {
         return true;
@@ -919,7 +916,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
-                        | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE
@@ -945,7 +941,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_FORM_FLAGS
                         | PID_TAG_FOLDER_WEBVIEWINFO
                         | PID_TAG_FOLDER_XVIEWINFO_E
-                        | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE

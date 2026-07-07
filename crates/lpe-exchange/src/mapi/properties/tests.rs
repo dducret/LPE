@@ -624,6 +624,18 @@ fn folder_properties_report_deleted_count_total() {
         collaboration_folder_property_value(&collection, PID_TAG_RETENTION_PERIOD),
         Some(MapiValue::U32(0))
     );
+    assert_eq!(
+        mailbox_property_value_with_context(
+            &mailbox,
+            std::slice::from_ref(&mailbox),
+            OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
+        ),
+        None
+    );
+    assert_eq!(
+        collaboration_folder_property_value(&collection, OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
+        None
+    );
 }
 
 #[test]
@@ -981,6 +993,15 @@ fn microsoft_oxocfg_search_folder_flags_match_search_folder_id_property() {
     assert!(extended_flags
         .windows(expected_subproperty.len())
         .any(|window| window == expected_subproperty.as_slice()));
+    assert_eq!(
+        search_folder_definition_property_value(
+            &definition,
+            CONTACTS_SEARCH_FOLDER_ID,
+            OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C,
+            Uuid::nil(),
+        ),
+        None
+    );
 }
 
 #[test]
@@ -1637,6 +1658,10 @@ fn public_folder_projects_default_post_message_class_from_folder_class() {
     assert_eq!(
         public_folder_property_value(&folder, PID_TAG_RETENTION_PERIOD),
         Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        public_folder_property_value(&folder, OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
+        None
     );
 }
 

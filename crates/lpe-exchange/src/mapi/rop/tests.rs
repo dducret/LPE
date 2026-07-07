@@ -3084,7 +3084,7 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
 }
 
 #[test]
-fn undocumented_folder_binary_120c_returns_empty_binary() {
+fn undocumented_folder_binary_120c_returns_not_found() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -3112,7 +3112,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
         "OutlookUndocumentedFolderBinary120C"
     );
-    assert!(!fallback_default_specific_property(
+    assert!(fallback_default_specific_property(
         Some(&folder),
         &principal,
         &[],
@@ -3130,8 +3130,12 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
-    assert_eq!(&response[7..], &[0x00, 0x00]);
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+    assert_eq!(response[7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(response[8..12].try_into().unwrap()),
+        ROP_ERROR_NOT_FOUND
+    );
 
     for folder_id in [
         CALENDAR_FOLDER_ID,
@@ -3277,7 +3281,13 @@ fn fallback_property_errors_for_debug_match_wire_error_codes() {
         &MapiMailStoreSnapshot::empty(),
         &folder_error_tags,
     );
-    assert!(folder_errors.is_empty());
+    assert_eq!(
+        folder_errors,
+        format!(
+            "0x120c0102:{}:0x8004010f",
+            property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C)
+        )
+    );
 
     let config = MapiObject::AssociatedConfig {
         folder_id: INBOX_FOLDER_ID,

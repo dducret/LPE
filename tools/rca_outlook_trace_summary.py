@@ -174,6 +174,9 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     "0x85780003",  # Outlook calendar auxiliary status
     "0x85ef000b",  # PidLidOutlookCommon85EF
 }
+ACTIONABLE_ZERO_DEFAULT_TAGS = {
+    "0x120c0102": "undocumented_folder_binary_120c",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -723,10 +726,15 @@ def record_visible_release_classification(summary: dict[str, Any], text: str) ->
     row_count = int_text_field(text, "row_count")
     defaulted = first_field(text, "defaulted")
     missing_descriptor = first_field(text, "selected_missing_descriptor_columns")
+    descriptor_missing_from_table = first_field(text, "descriptor_columns_missing_from_table")
     table_sort_matches = first_field(text, "table_sort_matches_descriptor")
     descriptor_sort = first_field(text, "descriptor_sort_tag")
     table_sort = first_field(text, "table_primary_sort_tag")
-    if row_count > 0 and defaulted == "" and missing_descriptor == "":
+    if descriptor_missing_from_table and missing_descriptor == "" and row_count > 0:
+        key = "descriptor_superset_client_subset_before_query_rows"
+    elif descriptor_missing_from_table:
+        key = "descriptor_table_mismatch_before_query_rows"
+    elif row_count > 0 and defaulted == "" and missing_descriptor == "":
         if table_sort_matches == "true" or (
             descriptor_sort and table_sort and descriptor_sort == table_sort
         ):
@@ -765,7 +773,10 @@ def classify_setcolumns_release_response_handle_table(
         for match in re.finditer(r"0x01@[^|]*:in=(\d+):", request_frames)
     ]
     if not release_indexes:
-        return "release_input_slot_unknown"
+        if field_text(fields, "request_rop_names") == "SetColumns,Release,Release,Release":
+            release_indexes = [0]
+        else:
+            return "release_input_slot_unknown"
     handles = parse_handle_table_summary(handle_table)
     if not handles:
         return "response_handle_table_unknown"
@@ -1235,6 +1246,11 @@ def print_single_summary(
             limit=20,
         )
         print_counter("Zero-default tags", log["zero_default_tags"], limit=20)
+        print_counter(
+            "Actionable zero-default tags",
+            actionable_zero_default_tag_counts(log["zero_default_tags"]),
+            limit=20,
+        )
         print_counter("Stale default-view owner states", log["stale_default_view_states"])
         print_counter("Descriptor gap windows", log["descriptor_gap_windows"], limit=12)
         print_counter(
@@ -1364,6 +1380,8 @@ def print_batch_summary(
     aggregate_visible_release_classifications: Counter[str] = Counter()
     aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
+    aggregate_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
+    aggregate_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
@@ -1387,6 +1405,8 @@ def print_batch_summary(
     current_visible_release_classifications: Counter[str] = Counter()
     current_setcolumns_release_response_frames: Counter[str] = Counter()
     current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
+    current_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
+    current_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
     current_post_visible_release_terminal_events: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
@@ -1468,6 +1488,12 @@ def print_batch_summary(
         aggregate_rr_setcolumns_release_response_frames.update(
             rr["setcolumns_release_response_frames"]
         )
+        aggregate_setcolumns_release_response_handle_classifications.update(
+            log["setcolumns_release_response_handle_classifications"]
+        )
+        aggregate_rr_setcolumns_release_response_handle_classifications.update(
+            rr["setcolumns_release_response_handle_classifications"]
+        )
         aggregate_nonzero_response_codes.update(rr["nonzero_response_codes"])
         build_commit = str(log["build"].get("git_commit", "unknown"))
         build_dirty = format_build_dirty(log["build"].get("git_dirty"))
@@ -1522,6 +1548,12 @@ def print_batch_summary(
             )
             current_rr_setcolumns_release_response_frames.update(
                 rr["setcolumns_release_response_frames"]
+            )
+            current_setcolumns_release_response_handle_classifications.update(
+                log["setcolumns_release_response_handle_classifications"]
+            )
+            current_rr_setcolumns_release_response_handle_classifications.update(
+                rr["setcolumns_release_response_handle_classifications"]
             )
             current_nonzero_response_codes.update(rr["nonzero_response_codes"])
         missing_gate = (
@@ -1660,6 +1692,16 @@ def print_batch_summary(
         aggregate_rr_setcolumns_release_response_frames,
         limit=20,
     )
+    print_counter(
+        "Aggregate Journal SetColumns+Release response handle classifications",
+        aggregate_setcolumns_release_response_handle_classifications,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate RR SetColumns+Release response handle classifications",
+        aggregate_rr_setcolumns_release_response_handle_classifications,
+        limit=20,
+    )
     if current_build:
         print_counter(
             "Current-build non-zero MAPI response codes",
@@ -1767,6 +1809,16 @@ def print_batch_summary(
             current_rr_setcolumns_release_response_frames,
             limit=20,
         )
+        print_counter(
+            "Current-build Journal SetColumns+Release response handle classifications",
+            current_setcolumns_release_response_handle_classifications,
+            limit=20,
+        )
+        print_counter(
+            "Current-build RR SetColumns+Release response handle classifications",
+            current_rr_setcolumns_release_response_handle_classifications,
+            limit=20,
+        )
         print_build_issue_counts(current_issue_counts, "Current-build issue buckets")
     print_build_issue_counts(build_issue_counts)
     return 0
@@ -1802,7 +1854,20 @@ def issue_buckets(
         issues.append("visible_inbox_release_before_query_rows")
     if log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
-            issues.append(f"visible_inbox_release_classification:{name}")
+            if visible_release_classification_is_actionable(name):
+                issues.append(f"visible_inbox_release_classification:{name}")
+    if log.get("setcolumns_release_response_handle_classifications"):
+        for name, _count in log[
+            "setcolumns_release_response_handle_classifications"
+        ].most_common(2):
+            if setcolumns_release_response_handle_classification_is_actionable(name):
+                issues.append(f"setcolumns_release_response_handle:{name}")
+    if rr.get("setcolumns_release_response_handle_classifications"):
+        for name, _count in rr[
+            "setcolumns_release_response_handle_classifications"
+        ].most_common(2):
+            if setcolumns_release_response_handle_classification_is_actionable(name):
+                issues.append(f"rr_setcolumns_release_response_handle:{name}")
     if log.get("post_visible_release_followups"):
         for name, _count in log["post_visible_release_followups"].most_common(2):
             issues.append(f"post_visible_release:{name}")
@@ -1815,6 +1880,11 @@ def issue_buckets(
     if log.get("default_view_id_collisions"):
         for name, _count in log["default_view_id_collisions"].most_common(2):
             issues.append(f"default_view_id_collision:{name}")
+    if log.get("zero_default_tags"):
+        for name, _count in actionable_zero_default_tag_counts(
+            log["zero_default_tags"]
+        ).most_common(2):
+            issues.append(f"zero_default:{name}")
     if log.get("calendar_zero_duration_timed_query_position_rows"):
         issues.append("calendar_zero_duration_timed_query_position_row")
     if log.get("post_calendar_query_position_named_property_probes"):
@@ -1837,6 +1907,30 @@ def issue_buckets(
     if not issues:
         issues.append("no_server_issue_detected")
     return issues
+
+
+def setcolumns_release_response_handle_classification_is_actionable(name: str) -> bool:
+    return name not in {
+        "released_slot_invalidated_in_response_handle_table",
+        "released_slot_trimmed_from_response_handle_table",
+    }
+
+
+def visible_release_classification_is_actionable(name: str) -> bool:
+    return name not in {
+        "descriptor_superset_client_subset_before_query_rows",
+        "valid_projection_complete_setcolumns_before_query_rows",
+    }
+
+
+def actionable_zero_default_tag_counts(counter: Counter[str]) -> Counter[str]:
+    return Counter(
+        {
+            ACTIONABLE_ZERO_DEFAULT_TAGS[tag]: count
+            for tag, count in counter.items()
+            if tag in ACTIONABLE_ZERO_DEFAULT_TAGS
+        }
+    )
 
 
 def print_build_issue_counts(

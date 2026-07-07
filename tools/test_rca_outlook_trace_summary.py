@@ -17,6 +17,9 @@ SPEC.loader.exec_module(rca)
 
 def empty_log_summary() -> dict:
     return {
+        "stall_warnings": Counter(),
+        "startup_missing_gates": Counter(),
+        "raw_umolk_placeholder": 0,
         "unknown_getprops_tags": Counter(),
         "unknown_getprops_contexts": Counter(),
         "unknown_defaulted_getprops_tags": Counter(),
@@ -261,6 +264,16 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertNotIn("visible_descriptor_gap", rca.issue_buckets(rr, log, None))
 
+    def test_issue_buckets_reports_actionable_zero_default_tag(self) -> None:
+        log = empty_log_summary()
+        log["zero_default_tags"] = Counter({"0x120c0102": 3, "0x36df0102": 4})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn(
+            "zero_default:undocumented_folder_binary_120c",
+            rca.issue_buckets(rr, log, None),
+        )
+
     def test_actionable_descriptor_gap_counts_filters_backed_columns(self) -> None:
         counts = rca.actionable_descriptor_gap_counts(
             Counter(
@@ -360,6 +373,40 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["visible_release_classifications"],
             Counter({"incomplete_projection_before_query_rows": 1}),
+        )
+
+    def test_visible_release_classifies_descriptor_table_mismatch_before_query_rows(
+        self,
+    ) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_classification(
+            summary,
+            "visible_inbox_release_without_query_rows=true;row_count=1;"
+            "defaulted=;selected_missing_descriptor_columns=0xdead0003;"
+            "descriptor_columns_missing_from_table=0x00170003,0x8514000b;"
+            "descriptor_sort_tag=0x0e060040;table_primary_sort_tag=0x0e060040",
+        )
+
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"descriptor_table_mismatch_before_query_rows": 1}),
+        )
+
+    def test_visible_release_classifies_descriptor_superset_client_subset(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_classification(
+            summary,
+            "visible_inbox_release_without_query_rows=true;row_count=1;"
+            "defaulted=;selected_missing_descriptor_columns=;"
+            "descriptor_columns_missing_from_table=0x00170003,0x8514000b;"
+            "descriptor_sort_tag=0x0e060040;table_primary_sort_tag=0x0e060040",
+        )
+
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"descriptor_superset_client_subset_before_query_rows": 1}),
         )
 
     def test_view_trace_classifies_only_direct_visible_release_event(self) -> None:
@@ -506,6 +553,24 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["setcolumns_release_response_handle_classifications"],
             Counter({"released_slot_reused_in_response_handle_table": 1}),
+        )
+
+    def test_setcolumns_release_response_classifies_generic_execute_copy_without_raw_frames(
+        self,
+    ) -> None:
+        summary = empty_log_summary()
+
+        rca.record_setcolumns_release_response(
+            summary,
+            {
+                "request_rop_names": "SetColumns,Release,Release,Release",
+                "output_handle_table_summary": "count=1;handles=0x00000000",
+            },
+        )
+
+        self.assertEqual(
+            summary["setcolumns_release_response_handle_classifications"],
+            Counter({"released_slot_invalidated_in_response_handle_table": 1}),
         )
 
     def test_rr_summary_counts_setcolumns_release_response_frame(self) -> None:
@@ -861,7 +926,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
-    def test_issue_buckets_reports_visible_release_classification(self) -> None:
+    def test_issue_buckets_ignores_non_actionable_visible_release_classification(self) -> None:
         log = {
             "visible_release_without_query_rows": 1,
             "visible_release_classifications": Counter(
@@ -881,9 +946,22 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         }
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
-        self.assertIn(
+        self.assertNotIn(
             "visible_inbox_release_classification:"
             "valid_projection_complete_setcolumns_before_query_rows",
+            rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_reports_actionable_visible_release_classification(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"incomplete_projection_before_query_rows": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn(
+            "visible_inbox_release_classification:incomplete_projection_before_query_rows",
             rca.issue_buckets(rr, log, None),
         )
 
@@ -956,6 +1034,145 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertIn("Current-build issue buckets", output.getvalue())
         self.assertIn("fb8dd0e77a76/clean,visible_descriptor_gap: 1", output.getvalue())
+
+    def test_issue_buckets_reports_setcolumns_release_handle_classifications(self) -> None:
+        log = {
+            "visible_release_without_query_rows": 0,
+            "visible_release_classifications": Counter(),
+            "setcolumns_release_response_handle_classifications": Counter(
+                {"released_slot_reused_in_response_handle_table": 1}
+            ),
+            "post_visible_release_followups": Counter(),
+            "default_view_folder_open_without_rows": Counter(),
+            "default_view_query_position_without_rows": Counter(),
+            "default_view_id_collisions": Counter(),
+            "calendar_zero_duration_timed_query_position_rows": Counter(),
+            "post_calendar_query_position_named_property_probes": Counter(),
+            "raw_umolk_placeholder": 0,
+            "stale_default_view_states": Counter(),
+            "descriptor_gap_windows": Counter(),
+            "stall_warnings": Counter(),
+            "startup_missing_gates": Counter(),
+        }
+        rr = {
+            "nonzero_response_codes": Counter(),
+            "parse_errors": Counter(),
+            "setcolumns_release_response_handle_classifications": Counter(
+                {"released_slot_reused_in_response_handle_table": 1}
+            ),
+        }
+
+        self.assertIn(
+            "setcolumns_release_response_handle:"
+            "released_slot_reused_in_response_handle_table",
+            rca.issue_buckets(rr, log, None),
+        )
+        self.assertIn(
+            "rr_setcolumns_release_response_handle:"
+            "released_slot_reused_in_response_handle_table",
+            rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_ignores_expected_setcolumns_release_handle_classifications(
+        self,
+    ) -> None:
+        log = {
+            "visible_release_without_query_rows": 0,
+            "visible_release_classifications": Counter(),
+            "setcolumns_release_response_handle_classifications": Counter(
+                {
+                    "released_slot_invalidated_in_response_handle_table": 1,
+                    "released_slot_trimmed_from_response_handle_table": 1,
+                }
+            ),
+            "post_visible_release_followups": Counter(),
+            "default_view_folder_open_without_rows": Counter(),
+            "default_view_query_position_without_rows": Counter(),
+            "default_view_id_collisions": Counter(),
+            "calendar_zero_duration_timed_query_position_rows": Counter(),
+            "post_calendar_query_position_named_property_probes": Counter(),
+            "raw_umolk_placeholder": 0,
+            "stale_default_view_states": Counter(),
+            "descriptor_gap_windows": Counter(),
+            "stall_warnings": Counter(),
+            "startup_missing_gates": Counter(),
+        }
+        rr = {
+            "nonzero_response_codes": Counter(),
+            "parse_errors": Counter(),
+            "setcolumns_release_response_handle_classifications": Counter(
+                {"released_slot_invalidated_in_response_handle_table": 1}
+            ),
+        }
+
+        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
+
+    def test_batch_summary_prints_current_setcolumns_release_handle_classifications(
+        self,
+    ) -> None:
+        with self.subTest("current build aggregation"):
+            trace_root = Path(self._testMethodName)
+            trace_dir = trace_root / "202607071712"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+
+            log = empty_log_summary()
+            log.update(
+                {
+                    "build": {
+                        "git_commit": "aae96d21ed4b",
+                        "git_dirty": "",
+                    },
+                    "sequence_counts": Counter(),
+                    "startup_missing_gates": Counter(),
+                    "stall_warnings": Counter(),
+                    "raw_umolk_placeholder": 0,
+                }
+            )
+            log["setcolumns_release_response_handle_classifications"] = Counter(
+                {"released_slot_reused_in_response_handle_table": 1}
+            )
+            rr = {
+                "events": 1,
+                "nonzero_response_codes": Counter(),
+                "parse_errors": Counter(),
+                "setcolumns_release_response_frames": Counter(),
+                "setcolumns_release_response_handle_classifications": Counter(
+                    {"released_slot_reused_in_response_handle_table": 1}
+                ),
+            }
+            log_path = Path("LPE_last_202607071712.log")
+
+            original_indexed_log_files = rca.indexed_log_files
+            original_matching_log_for_run = rca.matching_log_for_run
+            original_summarize_rr = rca.summarize_rr
+            original_summarize_log = rca.summarize_log
+            try:
+                rca.indexed_log_files = lambda _logs_root: {}
+                rca.matching_log_for_run = lambda _run, _logs: log_path
+                rca.summarize_rr = lambda _trace_dir: rr
+                rca.summarize_log = lambda _log_path: log
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    rca.print_batch_summary(trace_root, Path("."), "aae96d21")
+            finally:
+                rca.indexed_log_files = original_indexed_log_files
+                rca.matching_log_for_run = original_matching_log_for_run
+                rca.summarize_rr = original_summarize_rr
+                rca.summarize_log = original_summarize_log
+                shutil.rmtree(trace_root)
+
+            text = output.getvalue()
+            self.assertIn(
+                "Current-build Journal SetColumns+Release response handle classifications",
+                text,
+            )
+            self.assertIn("released_slot_reused_in_response_handle_table: 1", text)
+            self.assertIn(
+                "aae96d21ed4b/clean,setcolumns_release_response_handle:"
+                "released_slot_reused_in_response_handle_table: 1",
+                text,
+            )
 
 
 if __name__ == "__main__":
