@@ -2301,6 +2301,90 @@ fn calendar_contents_table_projects_canonical_events() {
 }
 
 #[test]
+fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
+    let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
+    let zero_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
+    let one_minute_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d727);
+    crate::mapi::identity::remember_mapi_identity(
+        zero_id,
+        crate::mapi::identity::mapi_store_id(0x4270),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        one_minute_id,
+        crate::mapi::identity::mapi_store_id(0x4271),
+    );
+    let zero_duration = AccessibleEvent {
+        id: zero_id,
+        uid: "zero-duration".to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account_id,
+        owner_email: "test@l-p-e.ch".to_string(),
+        owner_display_name: "test".to_string(),
+        rights: CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        },
+        date: "2026-06-01".to_string(),
+        time: "10:00".to_string(),
+        time_zone: String::new(),
+        duration_minutes: 0,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Zero".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let mut one_minute = zero_duration.clone();
+    one_minute.id = one_minute_id;
+    one_minute.uid = "one-minute".to_string();
+    one_minute.title = "One minute".to_string();
+    one_minute.duration_minutes = 1;
+
+    let rows = [
+        crate::mapi_store::MapiEvent {
+            id: mapi_item_id(&zero_duration.id),
+            folder_id: CALENDAR_FOLDER_ID,
+            canonical_id: zero_duration.id,
+            event: zero_duration,
+            attachments: Vec::new(),
+        },
+        crate::mapi_store::MapiEvent {
+            id: mapi_item_id(&one_minute.id),
+            folder_id: CALENDAR_FOLDER_ID,
+            canonical_id: one_minute.id,
+            event: one_minute,
+            attachments: Vec::new(),
+        },
+    ];
+    let mut row_refs = rows.iter().collect::<Vec<_>>();
+
+    sort_events(
+        &mut row_refs,
+        &[MapiSortOrder {
+            property_tag: PID_LID_APPOINTMENT_END_WHOLE_TAG,
+            order: 0,
+        }],
+    );
+
+    assert_eq!(
+        event_end_filetime(&row_refs[0].event),
+        event_end_filetime(&row_refs[1].event)
+    );
+    assert_eq!(row_refs[0].event.title, "Zero");
+    assert_eq!(row_refs[1].event.title, "One minute");
+}
+
+#[test]
 fn query_rows_clamps_stale_cursor_to_current_row_count() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {

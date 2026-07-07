@@ -363,6 +363,64 @@ fn default_view_advertisement_state_marks_matching_open() {
 }
 
 #[test]
+fn default_view_advertisement_preserves_matching_open_state() {
+    let mut session = test_mapi_session();
+
+    session.record_default_view_advertised(
+        "request:143",
+        SENT_FOLDER_ID,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        "Sent To",
+    );
+    assert!(session.record_default_view_opened(
+        "request:144",
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    ));
+
+    session.record_default_view_advertised(
+        "request:145",
+        SENT_FOLDER_ID,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        "Sent To",
+    );
+
+    assert!(!session.advertised_default_view_pending_open());
+    let state = session.default_view_advertisement_state_for_folder(SENT_FOLDER_ID);
+    assert!(state.contains("advertised_request=request:145"));
+    assert!(state.contains("opened=true"));
+    assert!(state.contains("open_request=request:144"));
+}
+
+#[test]
+fn default_view_match_state_reports_pre_advertised_folder_open() {
+    let mut session = test_mapi_session();
+
+    session.record_default_view_advertised(
+        "request:175",
+        OUTBOX_FOLDER_ID,
+        OUTBOX_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        "Messages",
+    );
+
+    let match_state = session.default_view_folder_open_match_state(
+        OUTBOX_FOLDER_ID,
+        Some((
+            OUTBOX_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )),
+    );
+
+    assert!(match_state.contains("advertised=true"));
+    assert!(match_state.contains("opened_folder_matches_owner=true"));
+    assert!(match_state.contains("entry_id_matches_advertised=true"));
+    assert!(match_state.contains("pending_open=true"));
+}
+
+#[test]
 fn default_view_advertisement_state_tracks_multiple_owner_folders() {
     let mut session = test_mapi_session();
 

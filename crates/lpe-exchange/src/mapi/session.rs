@@ -642,6 +642,13 @@ impl MapiSession {
         view_message_id: u64,
         view_name: &str,
     ) {
+        let prior_open = self
+            .default_view_advertisements
+            .get(&owner_folder_id)
+            .filter(|state| {
+                state.view_folder_id == view_folder_id && state.view_message_id == view_message_id
+            })
+            .map(|state| (state.opened, state.open_request_id.clone()));
         self.post_hierarchy_actions
             .last_advertised_default_view_owner_folder_id = Some(owner_folder_id);
         self.post_hierarchy_actions
@@ -653,10 +660,15 @@ impl MapiSession {
         self.post_hierarchy_actions
             .last_advertised_default_view_request_id = request_id.to_string();
         self.post_hierarchy_actions
-            .last_advertised_default_view_opened = false;
+            .last_advertised_default_view_opened = prior_open
+            .as_ref()
+            .map(|(opened, _)| *opened)
+            .unwrap_or(false);
         self.post_hierarchy_actions
-            .last_advertised_default_view_open_request_id
-            .clear();
+            .last_advertised_default_view_open_request_id = prior_open
+            .as_ref()
+            .map(|(_, open_request_id)| open_request_id.clone())
+            .unwrap_or_default();
         self.default_view_advertisements.insert(
             owner_folder_id,
             DefaultViewAdvertisementState {
@@ -665,8 +677,13 @@ impl MapiSession {
                 view_message_id,
                 view_name: view_name.to_string(),
                 request_id: request_id.to_string(),
-                opened: false,
-                open_request_id: String::new(),
+                opened: prior_open
+                    .as_ref()
+                    .map(|(opened, _)| *opened)
+                    .unwrap_or(false),
+                open_request_id: prior_open
+                    .map(|(_, open_request_id)| open_request_id)
+                    .unwrap_or_default(),
             },
         );
         self.record_outlook_view_failure_trace_event(format!(

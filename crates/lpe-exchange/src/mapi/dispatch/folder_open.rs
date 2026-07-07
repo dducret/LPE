@@ -216,6 +216,19 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
         };
         default_view_entry_id_target_for_debug(bytes)
     });
+    if default_view_supported_folder(folder_id, &folder_container_class)
+        && default_view_target.is_some()
+    {
+        if let Some(view) = debug_advertised_default_named_view(snapshot, folder_id) {
+            session.record_default_view_advertised(
+                request_id,
+                folder_id,
+                view.folder_id,
+                view.id,
+                &view.name,
+            );
+        }
+    }
     let default_view_match_state =
         session.default_view_folder_open_match_state(folder_id, default_view_target);
     let default_view_advertisement_state =

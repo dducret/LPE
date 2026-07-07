@@ -306,16 +306,9 @@ pub(in crate::mapi) fn sort_events(
                     (left.event.date.as_str(), left.event.time.as_str())
                         .cmp(&(right.event.date.as_str(), right.event.time.as_str()))
                 }
-                PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => (
-                    left.event.date.as_str(),
-                    left.event.time.as_str(),
-                    left.event.duration_minutes,
-                )
-                    .cmp(&(
-                        right.event.date.as_str(),
-                        right.event.time.as_str(),
-                        right.event.duration_minutes,
-                    )),
+                PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
+                    event_end_filetime(&left.event).cmp(&event_end_filetime(&right.event))
+                }
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
             };
