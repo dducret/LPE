@@ -279,7 +279,7 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             let definition = outlook_folder_view_definition(message.folder_id, &message.name);
             let descriptor = view_descriptor_binary(&definition);
             let descriptor_columns = view_descriptor_property_tags(&descriptor);
-            missing_debug_property_tags(&descriptor_columns, columns)
+            missing_debug_property_tags(columns, &descriptor_columns)
         })
         .unwrap_or_default();
     let selected_view_name = view
@@ -352,7 +352,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
     sort_emails(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let selected_missing_descriptor_columns =
-        missing_debug_property_tags(&descriptor_columns, columns);
+        missing_debug_property_tags(columns, &descriptor_columns);
     let sample_values = selected
         .iter()
         .take(3)
@@ -423,7 +423,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
     let selected_missing_descriptor_columns =
-        missing_debug_property_tags(&descriptor_columns, columns);
+        missing_debug_property_tags(columns, &descriptor_columns);
 
     format!(
         "phase=setcolumns;default_view_id=0x{:016x};view_name={};\

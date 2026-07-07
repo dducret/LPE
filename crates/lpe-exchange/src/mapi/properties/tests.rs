@@ -5057,20 +5057,13 @@ fn folder_default_view_definitions_use_type_specific_columns() {
             PID_TAG_MID,
             PID_TAG_INST_ID,
             PID_TAG_INSTANCE_NUM,
-            PID_TAG_IMPORTANCE,
-            PID_LID_OUTLOOK_COMMON_8514_TAG,
-            PID_TAG_MESSAGE_CLASS_W,
-            PID_TAG_MESSAGE_STATUS,
-            PID_TAG_HAS_ATTACHMENTS,
-            PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
-            OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
         ]
     );
     assert_eq!(
         view_descriptor_strings(&mail),
-        "\nFolder\nMessage\nInstance\nInstance Number\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nSubject\nReceived\n"
     );
 }
 

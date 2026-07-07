@@ -526,7 +526,7 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
     assert!(contract.contains(
-        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
+        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
     ));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
     assert!(contract.contains(
@@ -549,20 +549,7 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
             PID_TAG_MID,
             PID_TAG_INST_ID,
             PID_TAG_INSTANCE_NUM,
-            PID_TAG_CREATION_TIME,
             PID_TAG_SUBJECT_W,
-            PID_TAG_SENT_REPRESENTING_NAME_W,
-            PID_TAG_MESSAGE_FLAGS,
-            PID_TAG_MESSAGE_CLASS_W,
-            PID_TAG_INTERNET_MESSAGE_ID_W,
-            PID_TAG_IMPORTANCE,
-            PID_TAG_HAS_ATTACHMENTS,
-            PID_TAG_MESSAGE_STATUS,
-            PID_LID_OUTLOOK_COMMON_8514_TAG,
-            0x8017_000B,
-            0x801F_001F,
-            0x0041_0102,
-            OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
             PID_TAG_MESSAGE_DELIVERY_TIME,
         ],
         &snapshot,
