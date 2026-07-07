@@ -20,6 +20,8 @@ def empty_log_summary() -> dict:
         "unknown_getprops_contexts": Counter(),
         "unknown_defaulted_getprops_tags": Counter(),
         "unknown_defaulted_getprops_contexts": Counter(),
+        "associated_config_optional_defaulted_getprops_tags": Counter(),
+        "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
         "zero_default_tags": Counter(),
         "descriptor_gap_windows": Counter(),
@@ -31,6 +33,7 @@ def empty_log_summary() -> dict:
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
+        "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "stale_default_view_contexts": set(),
         "stale_default_view_states": Counter(),
@@ -106,12 +109,14 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["unknown_getprops_tags"], Counter({"0x33330003": 1}))
+        self.assertEqual(summary["unknown_defaulted_getprops_tags"], Counter())
         self.assertEqual(
-            summary["unknown_defaulted_getprops_tags"],
+            summary["associated_config_optional_defaulted_getprops_tags"],
             Counter({"0x22220003": 1}),
         )
+        self.assertEqual(summary["unknown_defaulted_getprops_contexts"], Counter())
         self.assertEqual(
-            summary["unknown_defaulted_getprops_contexts"],
+            summary["associated_config_optional_defaulted_getprops_contexts"],
             Counter(
                 {
                     "0x22220003;object=associated_config;role=inbox;"
@@ -120,6 +125,23 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 }
             ),
         )
+
+    def test_non_config_unknown_getprops_defaulted_tags_remain_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=message;folder=0x0000000000050001;"
+            "role=inbox;tags=0x22220003;names=unknown;"
+            "problem_tags=;zero_default_tags=0x22220003;response=0x00000000)",
+            {"object_kind": "message"},
+        )
+
+        self.assertEqual(
+            summary["unknown_defaulted_getprops_tags"],
+            Counter({"0x22220003": 1}),
+        )
+        self.assertEqual(summary["associated_config_optional_defaulted_getprops_tags"], Counter())
 
     def test_resolved_named_context_suppresses_unknown_getprops_tags(self) -> None:
         summary = empty_log_summary()
@@ -165,6 +187,26 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 {
                     "associated;role=inbox;view=Compact;missing=0x0037001f": 1,
                     "visible;role=calendar;view=Calendar;missing=0x0e070003": 1,
+                }
+            ),
+        )
+
+    def test_calendar_query_position_without_rows_flags_zero_duration_timed_row(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_query_position_without_rows(
+            summary,
+            "calendar_query_position_wire:query_rows_observed=false;"
+            "next_expected_client_step=query_rows_on_calendar_contents_table;"
+            "selected_row_projection=event_total=1;index=0;title=Test;"
+            "duration_minutes=0;all_day=false;zero_duration_timed=true",
+        )
+
+        self.assertEqual(
+            summary["calendar_zero_duration_timed_query_position_rows"],
+            Counter(
+                {
+                    "title=Test;duration=0;next=query_rows_on_calendar_contents_table": 1
                 }
             ),
         )

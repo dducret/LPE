@@ -325,6 +325,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
+        "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
         "stale_default_view_contexts": set(),
@@ -332,6 +333,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "unknown_getprops_contexts": Counter(),
         "unknown_defaulted_getprops_tags": Counter(),
         "unknown_defaulted_getprops_contexts": Counter(),
+        "associated_config_optional_defaulted_getprops_tags": Counter(),
+        "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
         "zero_default_tags": Counter(),
         "hierarchy_query_windows": Counter(),
@@ -565,13 +568,14 @@ def record_default_view_query_position_without_rows(
     event_name = text.split(":", 1)[0]
     if not event_name.endswith("_query_position_wire"):
         return
-    if first_field(text, "query_rows_observed") != "false":
+    event_fields = text.split(":", 1)[1] if ":" in text else text
+    if first_field(event_fields, "query_rows_observed") != "false":
         return
     contexts = summary.setdefault("default_view_query_position_without_rows_contexts", set())
     if text in contexts:
         return
     contexts.add(text)
-    role = first_field(text, "role") or first_field(text, "folder_role")
+    role = first_field(event_fields, "role") or first_field(event_fields, "folder_role")
     if not role:
         if event_name.startswith("calendar_"):
             role = "calendar"
@@ -579,9 +583,15 @@ def record_default_view_query_position_without_rows(
             role = "inbox"
         else:
             role = event_name.removesuffix("_query_position_wire")
-    next_step = first_field(text, "next_expected_client_step") or ""
+    next_step = first_field(event_fields, "next_expected_client_step") or ""
     key = f"role={role};next={next_step}"
     summary["default_view_query_position_without_rows"][key] += 1
+    if role == "calendar" and "zero_duration_timed=true" in text:
+        row_title = first_field(event_fields, "title") or "unknown"
+        duration = first_field(event_fields, "duration_minutes") or "unknown"
+        summary["calendar_zero_duration_timed_query_position_rows"][
+            f"title={row_title};duration={duration};next={next_step}"
+        ] += 1
 
 
 def record_query_position_wire_fields(
@@ -758,7 +768,6 @@ def record_unknown_getprops_tag(
     else:
         tag_counter = "unknown_getprops_tags"
         context_counter = "unknown_getprops_contexts"
-    summary[tag_counter][tag] += 1
     request_id = field_text(fields or {}, "mapi_request_id") or first_field(
         contract, "request_id"
     )
@@ -768,6 +777,15 @@ def record_unknown_getprops_tag(
     role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
     folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
     response = (first_field(contract, "response") or "").rstrip(")")
+    optional_associated_config_default = (
+        source.endswith("-defaulted")
+        and object_kind == "associated_config"
+        and response == "0x00000000"
+    )
+    if optional_associated_config_default:
+        tag_counter = "associated_config_optional_defaulted_getprops_tags"
+        context_counter = "associated_config_optional_defaulted_getprops_contexts"
+    summary[tag_counter][tag] += 1
     context = (
         f"{tag};object={object_kind or 'unknown'};role={role or 'unknown'};"
         f"folder={folder or 'unknown'};request={request_id or 'unknown'};"
@@ -959,6 +977,16 @@ def print_single_summary(
             log["unknown_defaulted_getprops_contexts"],
             limit=20,
         )
+        print_counter(
+            "Associated-config optional defaulted GetProps tags",
+            log["associated_config_optional_defaulted_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "Associated-config optional defaulted GetProps contexts",
+            log["associated_config_optional_defaulted_getprops_contexts"],
+            limit=20,
+        )
         print_counter("Zero-default tags", log["zero_default_tags"], limit=20)
         print_counter("Stale default-view owner states", log["stale_default_view_states"])
         print_counter("Descriptor gap windows", log["descriptor_gap_windows"], limit=12)
@@ -976,6 +1004,11 @@ def print_single_summary(
         print_counter(
             "Default-view QueryPosition without QueryRows",
             log["default_view_query_position_without_rows"],
+            limit=12,
+        )
+        print_counter(
+            "Calendar zero-duration timed rows at QueryPosition",
+            log["calendar_zero_duration_timed_query_position_rows"],
             limit=12,
         )
         print_counter(
@@ -1043,12 +1076,15 @@ def print_batch_summary(
     aggregate_unknown_contexts: Counter[str] = Counter()
     aggregate_unknown_defaulted_tags: Counter[str] = Counter()
     aggregate_unknown_defaulted_contexts: Counter[str] = Counter()
+    aggregate_associated_config_optional_defaulted_tags: Counter[str] = Counter()
+    aggregate_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_hierarchy_windows: Counter[str] = Counter()
     aggregate_visible_release_descriptor_windows: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
+    aggregate_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     aggregate_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     aggregate_descriptor_gap_windows: Counter[str] = Counter()
     aggregate_nonzero_response_codes: Counter[str] = Counter()
@@ -1058,12 +1094,15 @@ def print_batch_summary(
     current_unknown_contexts: Counter[str] = Counter()
     current_unknown_defaulted_tags: Counter[str] = Counter()
     current_unknown_defaulted_contexts: Counter[str] = Counter()
+    current_associated_config_optional_defaulted_tags: Counter[str] = Counter()
+    current_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     current_descriptor_gap_windows: Counter[str] = Counter()
     current_visible_release_descriptor_windows: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
+    current_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     current_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     current_nonzero_response_codes: Counter[str] = Counter()
     build_issue_counts: Counter[tuple[str, str]] = Counter()
@@ -1098,6 +1137,12 @@ def print_batch_summary(
         aggregate_unknown_defaulted_contexts.update(
             log["unknown_defaulted_getprops_contexts"]
         )
+        aggregate_associated_config_optional_defaulted_tags.update(
+            log["associated_config_optional_defaulted_getprops_tags"]
+        )
+        aggregate_associated_config_optional_defaulted_contexts.update(
+            log["associated_config_optional_defaulted_getprops_contexts"]
+        )
         aggregate_hierarchy_windows.update(log["hierarchy_query_windows"])
         aggregate_descriptor_gap_windows.update(log["descriptor_gap_windows"])
         aggregate_post_visible_release_followups.update(
@@ -1109,6 +1154,9 @@ def print_batch_summary(
         )
         aggregate_default_view_query_position_without_rows.update(
             log["default_view_query_position_without_rows"]
+        )
+        aggregate_calendar_zero_duration_timed_query_position_rows.update(
+            log["calendar_zero_duration_timed_query_position_rows"]
         )
         aggregate_post_calendar_query_position_named_property_probes.update(
             log["post_calendar_query_position_named_property_probes"]
@@ -1132,6 +1180,12 @@ def print_batch_summary(
             current_unknown_defaulted_contexts.update(
                 log["unknown_defaulted_getprops_contexts"]
             )
+            current_associated_config_optional_defaulted_tags.update(
+                log["associated_config_optional_defaulted_getprops_tags"]
+            )
+            current_associated_config_optional_defaulted_contexts.update(
+                log["associated_config_optional_defaulted_getprops_contexts"]
+            )
             current_descriptor_gap_windows.update(log["descriptor_gap_windows"])
             current_post_visible_release_followups.update(
                 log["post_visible_release_followups"]
@@ -1142,6 +1196,9 @@ def print_batch_summary(
             )
             current_default_view_query_position_without_rows.update(
                 log["default_view_query_position_without_rows"]
+            )
+            current_calendar_zero_duration_timed_query_position_rows.update(
+                log["calendar_zero_duration_timed_query_position_rows"]
             )
             current_post_calendar_query_position_named_property_probes.update(
                 log["post_calendar_query_position_named_property_probes"]
@@ -1206,6 +1263,16 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate associated-config optional defaulted GetProps tags",
+        aggregate_associated_config_optional_defaulted_tags,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate associated-config optional defaulted GetProps contexts",
+        aggregate_associated_config_optional_defaulted_contexts,
+        limit=20,
+    )
+    print_counter(
         "Aggregate descriptor gap windows",
         aggregate_descriptor_gap_windows,
         limit=20,
@@ -1234,6 +1301,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate default-view QueryPosition without QueryRows",
         aggregate_default_view_query_position_without_rows,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Calendar zero-duration timed rows at QueryPosition",
+        aggregate_calendar_zero_duration_timed_query_position_rows,
         limit=20,
     )
     print_counter(
@@ -1274,6 +1346,16 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build associated-config optional defaulted GetProps tags",
+            current_associated_config_optional_defaulted_tags,
+            limit=20,
+        )
+        print_counter(
+            "Current-build associated-config optional defaulted GetProps contexts",
+            current_associated_config_optional_defaulted_contexts,
+            limit=20,
+        )
+        print_counter(
             "Current-build descriptor gap windows",
             current_descriptor_gap_windows,
             limit=20,
@@ -1301,6 +1383,11 @@ def print_batch_summary(
         print_counter(
             "Current-build default-view QueryPosition without QueryRows",
             current_default_view_query_position_without_rows,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Calendar zero-duration timed rows at QueryPosition",
+            current_calendar_zero_duration_timed_query_position_rows,
             limit=20,
         )
         print_counter(
@@ -1355,6 +1442,8 @@ def issue_buckets(
     if log.get("default_view_query_position_without_rows"):
         for name, _count in log["default_view_query_position_without_rows"].most_common(2):
             issues.append(f"default_view_query_position_without_rows:{name}")
+    if log.get("calendar_zero_duration_timed_query_position_rows"):
+        issues.append("calendar_zero_duration_timed_query_position_row")
     if log.get("post_calendar_query_position_named_property_probes"):
         for name, _count in log[
             "post_calendar_query_position_named_property_probes"

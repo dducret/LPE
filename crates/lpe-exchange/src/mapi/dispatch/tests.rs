@@ -2176,6 +2176,8 @@ fn calendar_query_position_summary_projects_observed_outlook_columns() {
 
     assert!(summary.contains("event_total=1"));
     assert!(summary.contains("title=Calendar row"));
+    assert!(summary.contains("duration_minutes=30"));
+    assert!(summary.contains("zero_duration_timed=false"));
     assert!(summary.contains("0x85780003=0"));
     assert!(summary.contains("0x85100003=353"));
     assert!(!summary.contains("0x67480014=default"));
@@ -2183,6 +2185,69 @@ fn calendar_query_position_summary_projects_observed_outlook_columns() {
     assert!(!summary.contains("0x674e0003=default"));
     assert!(!summary.contains("0x001a001f=default"));
     assert!(!summary.contains("0x0e170003=default"));
+}
+
+#[test]
+fn calendar_query_position_summary_flags_zero_duration_timed_events() {
+    let event_id = uuid::Uuid::from_u128(0x7175);
+    crate::mapi::identity::remember_mapi_identity(
+        event_id,
+        crate::mapi::identity::mapi_store_id(0x7175),
+    );
+    let event = lpe_storage::AccessibleEvent {
+        id: event_id,
+        uid: "zero-duration-calendar-row".to_string(),
+        collection_id: DEFAULT_CALENDAR_COLLECTION_ID.to_string(),
+        owner_account_id: uuid::Uuid::from_u128(0x8184),
+        owner_email: "test@example.test".to_string(),
+        owner_display_name: "Test User".to_string(),
+        rights: default_mapping_rights(),
+        date: "2026-06-23".to_string(),
+        time: "15:00".to_string(),
+        time_zone: "Europe/Berlin".to_string(),
+        duration_minutes: 0,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Zero duration".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let snapshot = MapiMailStoreSnapshot::new(
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![event],
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let summary = format_calendar_event_query_position_summary(
+        CALENDAR_FOLDER_ID,
+        false,
+        0,
+        1,
+        &[],
+        None,
+        &[PID_TAG_SUBJECT_W],
+        &snapshot,
+    );
+
+    assert!(summary.contains("title=Zero duration"));
+    assert!(summary.contains("duration_minutes=0"));
+    assert!(summary.contains("all_day=false"));
+    assert!(summary.contains("zero_duration_timed=true"));
 }
 
 #[test]

@@ -733,10 +733,13 @@ pub(super) fn format_calendar_event_query_position_summary(
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "index={};mid=0x{:016x};title={};value_len={};status_row_len={};values={}",
+                "index={};mid=0x{:016x};title={};duration_minutes={};all_day={};zero_duration_timed={};value_len={};status_row_len={};values={}",
                 index,
                 event.id,
                 event.event.title,
+                event.event.duration_minutes,
+                event.event.all_day,
+                event.event.duration_minutes <= 0 && !event.event.all_day,
                 serialized.len(),
                 standard_row.len(),
                 values
