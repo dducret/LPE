@@ -228,6 +228,8 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
         "emsmdb_session_event_tails": defaultdict(lambda: deque(maxlen=12)),
         "parse_errors": Counter(),
         "request_sequences": Counter(),
+        "setcolumns_release_response_frames": Counter(),
+        "setcolumns_release_response_previews": Counter(),
     }
     for path in trace_jsonl_paths(trace_dir):
         summary["files"] += 1
@@ -263,6 +265,13 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
                     if names:
                         summary["request_sequences"][names] += 1
                         summary["sessions"][session_id].append(names)
+                if event.get("direction") == "outbound" and event.get("phase") == "Execute":
+                    names = str(metadata.get("request_rop_names") or "")
+                    if names == "SetColumns,Release,Release,Release":
+                        frames = str(metadata.get("response_rop_frames") or "missing")
+                        preview = str(metadata.get("response_rop_buffer_preview") or "missing")
+                        summary["setcolumns_release_response_frames"][frames] += 1
+                        summary["setcolumns_release_response_previews"][preview] += 1
     return summary
 
 
@@ -318,6 +327,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "raw_umolk_placeholder": 0,
         "stale_default_view_states": Counter(),
         "visible_release_contexts": set(),
+        "visible_release_classifications": Counter(),
+        "setcolumns_release_response_frames": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_hierarchy_query_position_max": 0,
@@ -393,6 +404,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                     ),
                 }
                 inspect_view_trace(summary, str(fields.get("outlook_view_trace_events") or ""))
+                record_setcolumns_release_response(summary, fields)
                 record_post_visible_release_followup(summary, fields)
                 record_umolk_dictionary_shapes(
                     summary,
@@ -496,6 +508,13 @@ def int_field(fields: dict[str, Any], key: str) -> int:
         return 0
 
 
+def int_text_field(text: str, key: str) -> int:
+    try:
+        return int(first_field(text, key) or "0")
+    except ValueError:
+        return 0
+
+
 def is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -554,12 +573,48 @@ def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
                 if segment not in summary["stale_default_view_contexts"]:
                     summary["stale_default_view_contexts"].add(segment)
                     summary["stale_default_view_states"][f"{role}->{owner_role}"] += 1
-        if "visible_inbox_release_without_query_rows=true" in segment:
-            summary["visible_release_contexts"].add(segment)
-            record_visible_release_descriptor_window(summary, segment)
+        if segment.startswith("visible_inbox_release_without_query_rows:"):
+            if segment not in summary["visible_release_contexts"]:
+                summary["visible_release_contexts"].add(segment)
+                record_visible_release_classification(summary, segment)
+                record_visible_release_descriptor_window(summary, segment)
         record_default_view_query_position_without_rows(summary, segment)
         record_descriptor_gap(summary, segment)
         inspect_contract(summary, segment)
+
+
+def record_visible_release_classification(summary: dict[str, Any], text: str) -> None:
+    if text.startswith("visible_inbox_release_without_query_rows:"):
+        text = text.split(":", 1)[1]
+    row_count = int_text_field(text, "row_count")
+    defaulted = first_field(text, "defaulted")
+    missing_descriptor = first_field(text, "selected_missing_descriptor_columns")
+    table_sort_matches = first_field(text, "table_sort_matches_descriptor")
+    descriptor_sort = first_field(text, "descriptor_sort_tag")
+    table_sort = first_field(text, "table_primary_sort_tag")
+    if row_count > 0 and defaulted == "" and missing_descriptor == "":
+        if table_sort_matches == "true" or (
+            descriptor_sort and table_sort and descriptor_sort == table_sort
+        ):
+            key = "valid_projection_complete_setcolumns_before_query_rows"
+        else:
+            key = "valid_projection_sort_mismatch_before_query_rows"
+    elif defaulted or missing_descriptor:
+        key = "incomplete_projection_before_query_rows"
+    else:
+        key = "empty_or_unknown_projection_before_query_rows"
+    summary["visible_release_classifications"][key] += 1
+
+
+def record_setcolumns_release_response(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if field_text(fields, "request_rop_names") != "SetColumns,Release,Release,Release":
+        return
+    frames = field_text(fields, "response_rop_frames")
+    if not frames:
+        return
+    summary["setcolumns_release_response_frames"][frames] += 1
 
 
 def record_default_view_query_position_without_rows(
@@ -918,6 +973,16 @@ def print_single_summary(
     print_counter("Non-zero MAPI response codes", rr["nonzero_response_codes"])
     print_counter("ROP parse errors", rr["parse_errors"])
     print_counter("Inbound Execute ROP sequences", rr["request_sequences"], limit=20)
+    print_counter(
+        "RR SetColumns+Release response frames",
+        rr["setcolumns_release_response_frames"],
+        limit=8,
+    )
+    print_counter(
+        "RR SetColumns+Release response previews",
+        rr["setcolumns_release_response_previews"],
+        limit=8,
+    )
 
     sessions = rr["sessions"]
     if sessions:
@@ -1018,6 +1083,16 @@ def print_single_summary(
         )
         print(f"Visible Inbox release-before-QueryRows events: {log['visible_release_without_query_rows']}")
         print_counter(
+            "Visible Inbox release classifications",
+            log["visible_release_classifications"],
+            limit=8,
+        )
+        print_counter(
+            "Journal SetColumns+Release response frames",
+            log["setcolumns_release_response_frames"],
+            limit=8,
+        )
+        print_counter(
             "Post-visible-release followups",
             log["post_visible_release_followups"],
             limit=8,
@@ -1080,6 +1155,9 @@ def print_batch_summary(
     aggregate_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_hierarchy_windows: Counter[str] = Counter()
     aggregate_visible_release_descriptor_windows: Counter[str] = Counter()
+    aggregate_visible_release_classifications: Counter[str] = Counter()
+    aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
+    aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
@@ -1098,6 +1176,9 @@ def print_batch_summary(
     current_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     current_descriptor_gap_windows: Counter[str] = Counter()
     current_visible_release_descriptor_windows: Counter[str] = Counter()
+    current_visible_release_classifications: Counter[str] = Counter()
+    current_setcolumns_release_response_frames: Counter[str] = Counter()
+    current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
@@ -1164,6 +1245,15 @@ def print_batch_summary(
         aggregate_visible_release_descriptor_windows.update(
             log["visible_release_descriptor_windows"]
         )
+        aggregate_visible_release_classifications.update(
+            log["visible_release_classifications"]
+        )
+        aggregate_setcolumns_release_response_frames.update(
+            log["setcolumns_release_response_frames"]
+        )
+        aggregate_rr_setcolumns_release_response_frames.update(
+            rr["setcolumns_release_response_frames"]
+        )
         aggregate_nonzero_response_codes.update(rr["nonzero_response_codes"])
         build_commit = str(log["build"].get("git_commit", "unknown"))
         build_dirty = format_build_dirty(log["build"].get("git_dirty"))
@@ -1205,6 +1295,15 @@ def print_batch_summary(
             )
             current_visible_release_descriptor_windows.update(
                 log["visible_release_descriptor_windows"]
+            )
+            current_visible_release_classifications.update(
+                log["visible_release_classifications"]
+            )
+            current_setcolumns_release_response_frames.update(
+                log["setcolumns_release_response_frames"]
+            )
+            current_rr_setcolumns_release_response_frames.update(
+                rr["setcolumns_release_response_frames"]
             )
             current_nonzero_response_codes.update(rr["nonzero_response_codes"])
         missing_gate = (
@@ -1318,6 +1417,21 @@ def print_batch_summary(
         aggregate_visible_release_descriptor_windows,
         limit=20,
     )
+    print_counter(
+        "Aggregate visible Inbox release classifications",
+        aggregate_visible_release_classifications,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Journal SetColumns+Release response frames",
+        aggregate_setcolumns_release_response_frames,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate RR SetColumns+Release response frames",
+        aggregate_rr_setcolumns_release_response_frames,
+        limit=20,
+    )
     if current_build:
         print_counter(
             "Current-build non-zero MAPI response codes",
@@ -1398,6 +1512,21 @@ def print_batch_summary(
         print_counter(
             "Current-build visible Inbox release descriptor windows",
             current_visible_release_descriptor_windows,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release classifications",
+            current_visible_release_classifications,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Journal SetColumns+Release response frames",
+            current_setcolumns_release_response_frames,
+            limit=20,
+        )
+        print_counter(
+            "Current-build RR SetColumns+Release response frames",
+            current_rr_setcolumns_release_response_frames,
             limit=20,
         )
         print_build_issue_counts(current_issue_counts, "Current-build issue buckets")

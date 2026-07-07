@@ -724,7 +724,7 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
     assert!(contract.contains(
-        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
+        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
     ));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
     assert!(contract.contains(
@@ -754,7 +754,7 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
     );
 
     assert!(contract.contains(
-        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
+        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
     ));
     assert!(
         contract.ends_with("selected_missing_descriptor_columns="),

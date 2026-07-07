@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import shutil
 import unittest
 from collections import Counter, deque
@@ -26,6 +27,8 @@ def empty_log_summary() -> dict:
         "zero_default_tags": Counter(),
         "descriptor_gap_windows": Counter(),
         "visible_release_contexts": set(),
+        "visible_release_classifications": Counter(),
+        "setcolumns_release_response_frames": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_hierarchy_query_position_max": 0,
@@ -317,6 +320,103 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                     "umolk_materialized_before_stop": 1,
                 }
             ),
+        )
+
+    def test_visible_release_classifies_valid_projection_before_query_rows(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_classification(
+            summary,
+            "visible_inbox_release_without_query_rows=true;row_count=1;"
+            "column_support=backed=0x67480014,0x0037001f;defaulted=;"
+            "selected_missing_descriptor_columns=;"
+            "descriptor_sort_tag=0x0e060040;table_primary_sort_tag=0x0e060040",
+        )
+
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
+    def test_visible_release_classifies_incomplete_projection_before_query_rows(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_classification(
+            summary,
+            "visible_inbox_release_without_query_rows=true;row_count=1;"
+            "column_support=backed=0x67480014;defaulted=0x0037001f;"
+            "selected_missing_descriptor_columns=0x0037001f",
+        )
+
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"incomplete_projection_before_query_rows": 1}),
+        )
+
+    def test_view_trace_classifies_only_direct_visible_release_event(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_view_trace(
+            summary,
+            "hierarchy_query_rows:last_visible_release=handle=33;"
+            "visible_inbox_release_without_query_rows=true>"
+            "visible_inbox_release_without_query_rows:row_count=1;defaulted=;"
+            "selected_missing_descriptor_columns=;table_sort_matches_descriptor=true",
+        )
+
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
+    def test_setcolumns_release_response_frame_is_counted_from_execute_fields(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_setcolumns_release_response(
+            summary,
+            {
+                "request_rop_names": "SetColumns,Release,Release,Release",
+                "response_rop_frames": "0x12@0..7:len=7:out=33:rv=0x00000000",
+            },
+        )
+
+        self.assertEqual(
+            summary["setcolumns_release_response_frames"],
+            Counter({"0x12@0..7:len=7:out=33:rv=0x00000000": 1}),
+        )
+
+    def test_rr_summary_counts_setcolumns_release_response_frame(self) -> None:
+        event = {
+            "direction": "outbound",
+            "phase": "Execute",
+            "endpoint": "emsmdb",
+            "session_id": "session-1",
+            "response_status": 200,
+            "metadata": {
+                "request_rop_names": "SetColumns,Release,Release,Release",
+                "response_rop_frames": "0x12@0..7:len=7:out=33:rv=0x00000000",
+                "response_rop_buffer_preview": "000004000d000d0009001200000000000021",
+            },
+        }
+
+        class FakePath:
+            def open(self, *args, **kwargs):
+                return io.StringIO(json.dumps(event) + "\n")
+
+        original_trace_jsonl_paths = rca.trace_jsonl_paths
+        try:
+            rca.trace_jsonl_paths = lambda trace_dir: [FakePath()]
+            summary = rca.summarize_rr(Path("unused"))
+        finally:
+            rca.trace_jsonl_paths = original_trace_jsonl_paths
+
+        self.assertEqual(
+            summary["setcolumns_release_response_frames"],
+            Counter({"0x12@0..7:len=7:out=33:rv=0x00000000": 1}),
+        )
+        self.assertEqual(
+            summary["setcolumns_release_response_previews"],
+            Counter({"000004000d000d0009001200000000000021": 1}),
         )
 
     def test_umolk_dictionary_shapes_are_counted_from_context(self) -> None:
