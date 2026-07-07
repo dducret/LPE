@@ -329,6 +329,14 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) request_contract_sequence: String,
     pub(in crate::mapi) post_visible_inbox_release_create_save_batch_count: usize,
     pub(in crate::mapi) last_post_visible_inbox_release_create_save_batch_context: String,
+    pub(in crate::mapi) visible_inbox_open_create_save_batch_count: usize,
+    pub(in crate::mapi) last_visible_inbox_open_create_save_batch_context: String,
+    pub(in crate::mapi) last_post_hierarchy_create_save_object_context: String,
+    pub(in crate::mapi) last_hierarchy_table_query_position_context: String,
+    pub(in crate::mapi) first_post_visible_release_hierarchy_query_position_context: String,
+    pub(in crate::mapi) post_visible_release_hierarchy_query_position_count: usize,
+    pub(in crate::mapi) first_post_visible_findrow_release_hierarchy_query_position_context: String,
+    pub(in crate::mapi) post_visible_findrow_release_hierarchy_query_position_count: usize,
     pub(in crate::mapi) outlook_view_trace_events: String,
 }
 
@@ -383,6 +391,27 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
         last_post_visible_inbox_release_create_save_batch_context: actions
             .last_post_visible_inbox_release_create_save_batch_context
             .clone(),
+        visible_inbox_open_create_save_batch_count: actions
+            .visible_inbox_open_create_save_batch_count,
+        last_visible_inbox_open_create_save_batch_context: actions
+            .last_visible_inbox_open_create_save_batch_context
+            .clone(),
+        last_post_hierarchy_create_save_object_context: actions
+            .last_post_hierarchy_create_save_object_context
+            .clone(),
+        last_hierarchy_table_query_position_context: actions
+            .last_hierarchy_table_query_position_context
+            .clone(),
+        first_post_visible_release_hierarchy_query_position_context: actions
+            .first_post_visible_release_hierarchy_query_position_context
+            .clone(),
+        post_visible_release_hierarchy_query_position_count: actions
+            .post_visible_release_hierarchy_query_position_count,
+        first_post_visible_findrow_release_hierarchy_query_position_context: actions
+            .first_post_visible_findrow_release_hierarchy_query_position_context
+            .clone(),
+        post_visible_findrow_release_hierarchy_query_position_count: actions
+            .post_visible_findrow_release_hierarchy_query_position_count,
         outlook_view_trace_events: actions.outlook_view_failure_trace_events.join(">"),
     }
 }
@@ -390,7 +419,9 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
 pub(in crate::mapi) fn outlook_bootstrap_phase(actions: &PostHierarchyActionState) -> u64 {
     if actions.content_sync_configure_observed {
         11
-    } else if actions.inbox_normal_contents_table_query_rows_observed {
+    } else if actions.inbox_normal_contents_table_query_rows_observed
+        || actions.inbox_normal_contents_table_find_row_observed
+    {
         10
     } else if actions.inbox_normal_contents_table_setcolumns_observed {
         9
@@ -426,7 +457,7 @@ pub(in crate::mapi) fn outlook_bootstrap_phase(actions: &PostHierarchyActionStat
 pub(in crate::mapi) fn outlook_bootstrap_phase_name(phase: u64) -> &'static str {
     match phase {
         11 => "content_sync_configure_observed",
-        10 => "inbox_normal_contents_query_rows_observed",
+        10 => "inbox_normal_visible_row_observed",
         9 => "inbox_normal_contents_setcolumns_observed",
         8 => "inbox_normal_contents_table_opened",
         7 => "repeated_inbox_folder_type_probe_loop",
@@ -490,7 +521,9 @@ pub(in crate::mapi) fn outlook_bootstrap_next_expected_phase(
 ) -> &'static str {
     if actions.content_sync_configure_observed {
         "outlook_running_content_sync"
-    } else if actions.inbox_normal_contents_table_query_rows_observed {
+    } else if actions.inbox_normal_contents_table_query_rows_observed
+        || actions.inbox_normal_contents_table_find_row_observed
+    {
         "content_sync_configure_or_message_open"
     } else if actions.inbox_normal_contents_table_setcolumns_observed {
         "inbox_normal_contents_query_rows"
@@ -506,6 +539,7 @@ pub(in crate::mapi) fn visible_inbox_release_without_query_rows_observed(
 ) -> bool {
     actions.inbox_normal_contents_table_setcolumns_observed
         && !actions.inbox_normal_contents_table_query_rows_observed
+        && !actions.inbox_normal_contents_table_find_row_observed
         && actions
             .last_inbox_related_release_context
             .contains("visible_inbox_release_without_query_rows=true")
@@ -525,24 +559,19 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         && !actions.inbox_normal_contents_table_observed
     {
         "outlook_post_common_views_notification_before_content_sync"
-    } else if actions.release_client_initiated && actions.logoff_client_initiated {
-        "outlook_release_logoff_before_content_sync"
-    } else if actions.release_client_initiated {
-        "outlook_release_before_content_sync"
+    } else if actions.inbox_normal_contents_table_find_row_observed
+        && actions.last_visible_inbox_message_open_context.is_empty()
+    {
+        "outlook_visible_inbox_findrow_returned_without_message_open_before_content_sync"
+    } else if actions.visible_inbox_open_create_save_batch_count > 0
+        && !actions.inbox_normal_contents_table_query_rows_observed
+        && !actions.inbox_normal_contents_table_find_row_observed
+    {
+        "outlook_create_save_after_visible_inbox_open_before_visible_row"
     } else if visible_inbox_release_without_query_rows_observed(actions)
         && actions.post_visible_inbox_release_create_save_batch_count > 0
     {
         "outlook_create_save_after_visible_inbox_release_before_query_rows"
-    } else if visible_inbox_release_without_query_rows_observed(actions) {
-        "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
-    } else if actions.visible_inbox_message_open_missing_count > 0 {
-        "outlook_visible_inbox_message_open_missing_before_content_sync"
-    } else if actions.visible_inbox_message_getprops_not_found_count > 50 {
-        "outlook_visible_inbox_message_getprops_mostly_not_found_before_content_sync"
-    } else if !actions.last_visible_inbox_message_row_context.is_empty()
-        && actions.last_visible_inbox_message_open_context.is_empty()
-    {
-        "outlook_visible_inbox_row_returned_without_message_open_before_content_sync"
     } else if !actions
         .last_outlook_umolk_getprops_materialization_context
         .is_empty()
@@ -551,6 +580,27 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
         "outlook_umolk_getprops_mostly_not_found_before_content_sync"
     } else if actions.outlook_umolk_named_property_probe_count > 0 {
         "outlook_umolk_named_property_burst_before_content_sync"
+    } else if !actions
+        .last_hierarchy_table_query_position_context
+        .is_empty()
+        && visible_inbox_release_without_query_rows_observed(actions)
+        && actions.default_view_normal_contents_table_query_rows_observed
+    {
+        "outlook_default_view_hierarchy_query_position_after_visible_inbox_handoff"
+    } else if visible_inbox_release_without_query_rows_observed(actions) {
+        "outlook_visible_inbox_release_after_setcolumns_before_query_rows"
+    } else if actions.release_client_initiated && actions.logoff_client_initiated {
+        "outlook_release_logoff_before_content_sync"
+    } else if actions.release_client_initiated {
+        "outlook_release_before_content_sync"
+    } else if actions.visible_inbox_message_open_missing_count > 0 {
+        "outlook_visible_inbox_message_open_missing_before_content_sync"
+    } else if actions.visible_inbox_message_getprops_not_found_count > 50 {
+        "outlook_visible_inbox_message_getprops_mostly_not_found_before_content_sync"
+    } else if !actions.last_visible_inbox_message_row_context.is_empty()
+        && actions.last_visible_inbox_message_open_context.is_empty()
+    {
+        "outlook_visible_inbox_row_returned_without_message_open_before_content_sync"
     } else if actions.post_calendar_query_position_named_property_probe_count > 0
         && !actions.calendar_normal_contents_table_query_rows_observed
     {
@@ -834,6 +884,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
     let default_view_advertisement_state = session.default_view_advertisement_state();
+    let default_view_advertisement_summary = session.default_view_advertisement_summary();
     let default_view_folder_open_without_query_rows = !session
         .post_hierarchy_actions
         .last_default_view_folder_open_context
@@ -953,6 +1004,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                     .inbox_associated_exact_ipm_configuration_findrow_matched,
             advertised_default_view_pending_open,
             default_view_advertisement_state = %default_view_advertisement_state,
+            default_view_advertisement_summary = %default_view_advertisement_summary,
             outlook_smart_input_variant_result =
                 if session.outlook_smart_input_variant_applied {
                     "applied"
@@ -980,6 +1032,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             session_id_suffix = %session_cookie_debug.suffix,
             session_id_hash = %session_cookie_debug.hash,
             default_view_advertisement_state = %default_view_advertisement_state,
+            default_view_advertisement_summary = %default_view_advertisement_summary,
             outlook_view_trace_events = %outlook_view_failure_trace_summary,
             visible_inbox_release_without_query_rows =
                 visible_inbox_release_without_query_rows_observed(
@@ -1381,6 +1434,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
+        post_hierarchy_last_hierarchy_query_position_context =
+            %post_hierarchy_summary.last_hierarchy_table_query_position_context,
+        post_hierarchy_post_visible_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_release_hierarchy_query_position_context,
+        post_hierarchy_post_visible_findrow_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_findrow_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_findrow_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
+        post_hierarchy_last_create_save_object_context =
+            %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
@@ -1463,6 +1528,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
+        post_hierarchy_last_hierarchy_query_position_context =
+            %post_hierarchy_summary.last_hierarchy_table_query_position_context,
+        post_hierarchy_post_visible_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_release_hierarchy_query_position_context,
+        post_hierarchy_post_visible_findrow_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_findrow_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_findrow_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
+        post_hierarchy_last_create_save_object_context =
+            %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
         special_folder_contract_summary = %special_folder_contract_summary,
         required_default_folder_coverage = %required_default_folder_coverage,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
@@ -1507,6 +1584,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         all_sync_sources_completed,
         clean_client_close_after_sync,
         post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
+        post_hierarchy_last_hierarchy_query_position_context =
+            %post_hierarchy_summary.last_hierarchy_table_query_position_context,
+        post_hierarchy_post_visible_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_release_hierarchy_query_position_context,
+        post_hierarchy_post_visible_findrow_release_hierarchy_query_position_count =
+            post_hierarchy_summary.post_visible_findrow_release_hierarchy_query_position_count,
+        post_hierarchy_first_post_visible_findrow_release_hierarchy_query_position_context =
+            %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
+        post_hierarchy_last_create_save_object_context =
+            %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
         next_debug_focus =
             if post_fai_inbox_probe_loop_terminal {
                 "post_fai_inbox_folder_type_probe_loop"
@@ -1621,6 +1710,18 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 %post_hierarchy_summary.last_setprops_request_contract,
             post_hierarchy_last_request_contract =
                 %post_hierarchy_summary.request_contract_sequence,
+            post_hierarchy_last_hierarchy_query_position_context =
+                %post_hierarchy_summary.last_hierarchy_table_query_position_context,
+            post_hierarchy_post_visible_release_hierarchy_query_position_count =
+                post_hierarchy_summary.post_visible_release_hierarchy_query_position_count,
+            post_hierarchy_first_post_visible_release_hierarchy_query_position_context =
+                %post_hierarchy_summary.first_post_visible_release_hierarchy_query_position_context,
+            post_hierarchy_post_visible_findrow_release_hierarchy_query_position_count =
+                post_hierarchy_summary.post_visible_findrow_release_hierarchy_query_position_count,
+            post_hierarchy_first_post_visible_findrow_release_hierarchy_query_position_context =
+                %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
+            post_hierarchy_last_create_save_object_context =
+                %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
             sync_source_summaries = %sync_source_summaries,
             live_handle_summaries = %live_handle_summaries,
             "rca debug mapi post hierarchy disconnect before content sync"

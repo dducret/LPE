@@ -11,7 +11,7 @@ const STARTUP_GATES: [&str; 10] = [
     "fai_content_delivered",
     "receive_folder_verification_passed",
     "normal_inbox_contents_table_opened",
-    "normal_inbox_contents_query_rows_observed",
+    "normal_inbox_visible_row_observed",
     "outlook_did_not_abandon_immediately_after_fai",
 ];
 
@@ -84,7 +84,8 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
             || actions.inbox_associated_query_rows_returned_non_empty,
         actions.receive_folder_verification_passed,
         actions.inbox_normal_contents_table_observed,
-        actions.inbox_normal_contents_table_query_rows_observed,
+        actions.inbox_normal_contents_table_query_rows_observed
+            || actions.inbox_normal_contents_table_find_row_observed,
         !abandoned,
     ];
     let first_missing_index = passed.iter().position(|passed| !passed);
@@ -186,11 +187,11 @@ mod tests {
         );
         assert_eq!(
             summary.first_missing_gate,
-            "normal_inbox_contents_query_rows_observed"
+            "normal_inbox_visible_row_observed"
         );
         assert!(summary
             .gates
-            .contains("normal_inbox_contents_query_rows_observed=false"));
+            .contains("normal_inbox_visible_row_observed=false"));
     }
 
     #[test]
@@ -211,7 +212,28 @@ mod tests {
         assert_eq!(summary.first_missing_gate, "none");
         assert!(summary
             .gates
-            .contains("normal_inbox_contents_query_rows_observed=true"));
+            .contains("normal_inbox_visible_row_observed=true"));
+    }
+
+    #[test]
+    fn classifier_accepts_inbox_find_row_after_inbox_table_open() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
+        session.record_opened_folder(INBOX_FOLDER_ID);
+        session.record_inbox_associated_contents_table();
+        session.record_inbox_associated_exact_findrow(true);
+        session.record_inbox_associated_query_rows_returned_non_empty();
+        session.record_receive_folder_verification_passed();
+        session.record_inbox_normal_contents_table();
+        session.record_inbox_normal_contents_table_find_row(Some(27), "role=inbox".into());
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(summary.first_missing_gate, "none");
+        assert!(summary
+            .gates
+            .contains("normal_inbox_visible_row_observed=true"));
     }
 
     #[test]

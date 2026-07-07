@@ -942,6 +942,99 @@ async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
 }
 
 #[tokio::test]
+async fn postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let tenant_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        "#,
+    )
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let mailbox = storage
+        .create_jmap_mailbox(
+            JmapMailboxCreateInput {
+                account_id,
+                name: "Expired MAPI checkpoint".to_string(),
+                parent_id: None,
+                sort_order: Some(310),
+                is_subscribed: true,
+            },
+            lpe_storage::AuditEntryInput {
+                actor: "alice@example.test".to_string(),
+                action: "create-mailbox".to_string(),
+                subject: account_id.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_sync_checkpoints (
+            id, tenant_id, account_id, mailbox_id, checkpoint_kind, mapi_replica_guid,
+            last_change_sequence, last_modseq, cursor_json, created_at, updated_at, expires_at
+        )
+        VALUES (
+            $1, $2, $3, $4, 'content', $5,
+            500, 20, '{"source":"expired"}'::jsonb,
+            NOW() - INTERVAL '31 days',
+            NOW() - INTERVAL '31 days',
+            NOW() - INTERVAL '1 day'
+        )
+        "#,
+    )
+    .bind(Uuid::parse_str("21000000-0000-0000-0000-000000000003").unwrap())
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(mailbox.id)
+    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+    .execute(storage.pool())
+    .await
+    .unwrap();
+
+    let expired = storage
+        .fetch_mapi_sync_checkpoint(account_id, Some(mailbox.id), MapiCheckpointKind::Content)
+        .await
+        .unwrap();
+    assert!(expired.is_none());
+
+    let refreshed = storage
+        .store_mapi_sync_checkpoint(
+            account_id,
+            Some(mailbox.id),
+            MapiCheckpointKind::Content,
+            1,
+            1,
+            serde_json::json!({"source": "fresh"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refreshed.last_change_sequence, 1);
+    assert_eq!(refreshed.last_modseq, 1);
+    assert_eq!(
+        refreshed.cursor_json,
+        serde_json::json!({"source": "fresh"})
+    );
+
+    let fetched = storage
+        .fetch_mapi_sync_checkpoint(account_id, Some(mailbox.id), MapiCheckpointKind::Content)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetched, refreshed);
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_identity_allocator_ignores_high_reserved_counters() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

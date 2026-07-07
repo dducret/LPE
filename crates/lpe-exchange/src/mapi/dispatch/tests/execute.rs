@@ -37,6 +37,47 @@ fn parse_execute_request_keeps_max_rop_out() {
     assert_eq!(parsed.max_rop_out, 0x1234);
 }
 
+#[test]
+fn execute_stall_warning_requires_specific_post_hierarchy_pre_sync_stop() {
+    assert!(should_log_execute_stalled_before_content_sync(
+        "emsmdb",
+        "0x0000000000040001",
+        false,
+        "outlook_umolk_named_property_burst_before_content_sync",
+    ));
+
+    assert!(!should_log_execute_stalled_before_content_sync(
+        "nspi",
+        "0x0000000000040001",
+        false,
+        "outlook_umolk_named_property_burst_before_content_sync",
+    ));
+    assert!(!should_log_execute_stalled_before_content_sync(
+        "emsmdb",
+        "",
+        false,
+        "outlook_umolk_named_property_burst_before_content_sync",
+    ));
+    assert!(!should_log_execute_stalled_before_content_sync(
+        "emsmdb",
+        "0x0000000000040001",
+        true,
+        "outlook_umolk_named_property_burst_before_content_sync",
+    ));
+    assert!(!should_log_execute_stalled_before_content_sync(
+        "emsmdb",
+        "0x0000000000040001",
+        false,
+        "post_hierarchy_no_close",
+    ));
+    assert!(!should_log_execute_stalled_before_content_sync(
+        "emsmdb",
+        "0x0000000000040001",
+        false,
+        "outlook_post_hierarchy_execute_before_content_sync",
+    ));
+}
+
 #[tokio::test]
 async fn execute_active_session_acquire_waits_for_short_outlook_overlap() {
     let session_id = format!("test-overlap-{}", Uuid::new_v4());

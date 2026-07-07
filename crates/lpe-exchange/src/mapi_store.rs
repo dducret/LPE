@@ -510,6 +510,24 @@ impl<T: ExchangeStore> MapiStore for T {
                     "rca debug mapi dropped empty inbox rule organizer associated config"
                 );
             }
+            let dropped_stale_umolk_user_options_configs = associated_configs
+                .iter()
+                .filter(|config| is_stale_outlook_umolk_user_options_placeholder(config))
+                .count();
+            if dropped_stale_umolk_user_options_configs > 0 {
+                associated_configs
+                    .retain(|config| !is_stale_outlook_umolk_user_options_placeholder(config));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    account_id = %account_id,
+                    folder_id = crate::mapi::identity::INBOX_FOLDER_ID,
+                    dropped_stale_umolk_user_options_configs,
+                    message_class = OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS,
+                    stream_property = "0x7c070102",
+                    "rca debug mapi dropped stale inbox umolk user options associated config"
+                );
+            }
             log_outlook_inbox_associated_config_bootstrap(
                 account_id,
                 &associated_configs,
@@ -934,7 +952,10 @@ fn mapi_collaboration_folder_id(
             crate::mapi::identity::TASKS_FOLDER_ID
         }
         _ => collaboration_folder_identity_canonical_id(kind, collection)
-            .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
+            .map(|id| {
+                crate::mapi::identity::mapped_mapi_object_id(&id)
+                    .unwrap_or_else(|| crate::mapi::identity::legacy_migration_object_id(&id))
+            })
             .expect("MAPI collaboration folder identity mapping missing"),
     }
 }

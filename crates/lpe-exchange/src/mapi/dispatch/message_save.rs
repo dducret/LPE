@@ -649,6 +649,19 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             };
             match store.upsert_mapi_navigation_shortcut(input).await {
                 Ok(saved) => {
+                    session.record_last_post_hierarchy_create_save_object_context(format!(
+                        "kind=navigation_shortcut;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};subject={};target_folder={};shortcut_type={};section={};ordinal={};group_name={};canonical_id={}",
+                        debug_role_for_folder_id(folder_id),
+                        saved.subject,
+                        saved.target_folder_id
+                            .map(|id| format!("0x{id:016x}"))
+                            .unwrap_or_else(|| "none".to_string()),
+                        saved.shortcut_type,
+                        saved.section,
+                        saved.ordinal,
+                        saved.group_name,
+                        saved.id
+                    ));
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -1070,6 +1083,14 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             match persist_associated_config_message(store, principal, folder_id, &properties).await
             {
                 Ok((saved, message_id)) => {
+                    session.record_last_post_hierarchy_create_save_object_context(format!(
+                        "kind=associated_config;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={};subject={};mapi_message_id=0x{message_id:016x};canonical_id={};property_count={}",
+                        debug_role_for_folder_id(folder_id),
+                        saved.message_class,
+                        saved.subject,
+                        saved.id,
+                        saved.properties_json.as_object().map_or(0, |properties| properties.len())
+                    ));
                     session.handles.insert(
                         handle,
                         MapiObject::AssociatedConfig {

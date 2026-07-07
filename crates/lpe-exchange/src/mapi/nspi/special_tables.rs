@@ -3,7 +3,6 @@ use super::*;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_CONTAINER_FLAGS: u32 = 0x3600_0003;
 const PID_TAG_DEPTH: u32 = 0x3005_0003;
-const PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID: u32 = 0xFFFC_0102;
 const PID_TAG_ADDRESS_BOOK_CONTAINER_ID: u32 = 0xFFFD_0003;
 const PID_TAG_ADDRESS_BOOK_IS_MASTER: u32 = 0xFFFB_000B;
 const AB_RECIPIENTS: u32 = 0x0000_0001;
@@ -16,7 +15,6 @@ pub(in crate::mapi) const NSPI_UNICODE_STRINGS_FLAG: u32 = 0x0000_0004;
 struct NspiSpecialTableContainer {
     display_name: &'static str,
     dn: &'static str,
-    parent_dn: Option<&'static str>,
     container_id: u32,
     depth: u32,
     flags: u32,
@@ -26,8 +24,7 @@ struct NspiSpecialTableContainer {
 const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "Global Address List",
-        dn: "/",
-        parent_dn: None,
+        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
         container_id: 0,
         depth: 0,
         flags: AB_RECIPIENTS | AB_SUBCONTAINERS | AB_UNMODIFIABLE,
@@ -35,8 +32,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Users",
-        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f11",
-        parent_dn: Some("/"),
+        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Users",
         container_id: 2,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -44,8 +40,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Groups",
-        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f12",
-        parent_dn: Some("/"),
+        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Groups",
         container_id: 3,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -53,8 +48,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Contacts",
-        dn: "/guid=741f6fd38e1a654f9d422dfb451c8f13",
-        parent_dn: Some("/"),
+        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Contacts",
         container_id: 4,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -106,6 +100,8 @@ fn nspi_hierarchy_table_response(
         flags.is_some_and(|value| value & NSPI_UNICODE_STRINGS_FLAG != 0),
         flags.is_some_and(|value| value & NSPI_ADDRESS_CREATION_TEMPLATES_FLAG != 0)
     );
+    // MS-OXNSPI 3.1.4.1.3 defines these six hierarchy columns as mandatory;
+    // 4.1.4.3 shows PidTagAddressBookParentEntryId omitted from a valid response.
     let property_tags = [
         PID_TAG_ENTRY_ID,
         PID_TAG_CONTAINER_FLAGS,
@@ -113,7 +109,6 @@ fn nspi_hierarchy_table_response(
         PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
         0x3001_001F,
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
-        PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
     ];
     let rows = NSPI_SPECIAL_TABLE_CONTAINERS
         .iter()
@@ -160,7 +155,7 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
 fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     let mut table_row = Vec::new();
     write_u32(&mut table_row, 0);
-    write_u32(&mut table_row, 7);
+    write_u32(&mut table_row, 6);
     write_address_book_tagged_property_value(
         &mut table_row,
         PID_TAG_ENTRY_ID,
@@ -190,15 +185,6 @@ fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
         &mut table_row,
         PID_TAG_ADDRESS_BOOK_IS_MASTER,
         &NspiValue::Bool(container.is_master),
-    );
-    let parent_entry_id = container
-        .parent_dn
-        .map(nspi_container_entry_id)
-        .unwrap_or_default();
-    write_address_book_tagged_property_value(
-        &mut table_row,
-        PID_TAG_ADDRESS_BOOK_PARENT_ENTRY_ID,
-        &NspiValue::OwnedBinary(parent_entry_id),
     );
     table_row
 }

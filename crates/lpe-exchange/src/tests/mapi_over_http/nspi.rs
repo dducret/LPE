@@ -1627,60 +1627,45 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     "{request_type}"
                 );
                 let mut offset = 22usize;
-                let container_entry_id = |dn: &[u8]| {
-                    let mut value = Vec::new();
-                    value.extend_from_slice(&[0, 0, 0, 0]);
-                    value.extend_from_slice(&[
-                        0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08, 0x00,
-                        0x2b, 0x2f, 0xe1, 0x82,
-                    ]);
-                    value.extend_from_slice(&1u32.to_le_bytes());
-                    value.extend_from_slice(&0x0000_0100u32.to_le_bytes());
-                    value.extend_from_slice(dn);
-                    value
-                };
-                let gal_entry_id = container_entry_id(b"/\0");
-                let special_rows: [(&str, &[u8], u32, u32, u32, u8, Option<&[u8]>); 4] = [
+                let gal_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List\0";
+                let special_rows: [(&str, &[u8], u32, u32, u32, u8); 4] = [
                     (
                         "Global Address List",
-                        b"/\0".as_slice(),
+                        gal_dn.as_slice(),
                         0u32,
                         0u32,
                         0x0000_000B,
                         0u8,
-                        Some([].as_slice()),
                     ),
                     (
                         "All Users",
-                        b"/guid=741f6fd38e1a654f9d422dfb451c8f11\0".as_slice(),
+                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Users\0"
+                            .as_slice(),
                         1,
                         2,
                         0x0000_0009,
                         0,
-                        Some(gal_entry_id.as_slice()),
                     ),
                     (
                         "All Groups",
-                        b"/guid=741f6fd38e1a654f9d422dfb451c8f12\0".as_slice(),
+                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Groups\0"
+                            .as_slice(),
                         1,
                         3,
                         0x0000_0009,
                         0,
-                        Some(gal_entry_id.as_slice()),
                     ),
                     (
                         "All Contacts",
-                        b"/guid=741f6fd38e1a654f9d422dfb451c8f13\0".as_slice(),
+                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Contacts\0"
+                            .as_slice(),
                         1,
                         4,
                         0x0000_0009,
                         0,
-                        Some(gal_entry_id.as_slice()),
                     ),
                 ];
-                for (name, dn, depth, container_id, flags, is_master, parent_entry_id) in
-                    special_rows
-                {
+                for (name, dn, depth, container_id, flags, is_master) in special_rows {
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         0,
@@ -1689,7 +1674,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     offset += 4;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        7,
+                        6,
                         "{request_type}: {name}"
                     );
                     offset += 4;
@@ -1772,23 +1757,6 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     offset += 8;
                     assert_eq!(body[offset], is_master, "{request_type}: {name}");
                     offset += 1;
-
-                    let parent_entry_id = parent_entry_id.unwrap();
-                    assert_eq!(
-                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        0xFFFC_0102,
-                        "{request_type}: {name}"
-                    );
-                    offset += 8;
-                    let parent_entry_id_len =
-                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
-                    offset += 4;
-                    assert_eq!(
-                        &body[offset..offset + parent_entry_id_len],
-                        parent_entry_id,
-                        "{request_type}: {name}"
-                    );
-                    offset += parent_entry_id_len;
                 }
             }
             "DNToEPH" | "DNToMId" => {

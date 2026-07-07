@@ -31,6 +31,7 @@ where
         }
     }
     let (message_class, subject) = associated_config_class_and_subject(&properties);
+    let properties = normalized_associated_config_persisted_properties(&message_class, &properties);
     store
         .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
             id: Some(existing.canonical_id),
@@ -158,9 +159,10 @@ where
     let reserved_global_counter = source_key
         .as_deref()
         .and_then(persistable_import_source_key_global_counter);
-    let id = associated_config_uuid(properties);
     let (message_class, subject) = associated_config_class_and_subject(properties);
-    if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, properties) {
+    let properties = normalized_associated_config_persisted_properties(&message_class, properties);
+    let id = associated_config_uuid(&properties);
+    if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, &properties) {
         let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
         let reserved_global_counter =
             crate::mapi::identity::global_counter_from_store_id(default.id);
@@ -203,7 +205,7 @@ where
             folder_id,
             message_class,
             subject,
-            properties_json: mapi_properties_to_json(properties),
+            properties_json: mapi_properties_to_json(&properties),
         })
         .await?;
     let message_id = remember_created_mapi_identity(
@@ -227,6 +229,10 @@ pub(super) async fn persist_associated_config_stream_message<S>(
 where
     S: ExchangeStore,
 {
+    let properties = normalized_associated_config_persisted_properties(
+        &message.message_class,
+        &mapi_properties_from_json(&message.properties_json),
+    );
     store
         .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
             id: Some(message.canonical_id),
@@ -234,10 +240,33 @@ where
             folder_id,
             message_class: message.message_class.clone(),
             subject: message.subject.clone(),
-            properties_json: message.properties_json.clone(),
+            properties_json: mapi_properties_to_json(&properties),
         })
         .await?;
     Ok(())
+}
+
+pub(super) fn normalized_associated_config_persisted_properties(
+    message_class: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> HashMap<u32, MapiValue> {
+    let mut normalized = properties.clone();
+    if !message_class
+        .get(..18)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Configuration."))
+    {
+        return normalized;
+    }
+    if matches!(
+        normalized.get(&PID_TAG_ROAMING_DICTIONARY),
+        Some(MapiValue::Binary(value)) if value.as_slice() == b"<xml/>"
+    ) {
+        normalized.insert(
+            PID_TAG_ROAMING_DICTIONARY,
+            MapiValue::Binary(minimal_roaming_dictionary_stream()),
+        );
+    }
+    normalized
 }
 
 pub(super) async fn persist_released_associated_config_stream<S>(

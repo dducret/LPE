@@ -772,6 +772,7 @@ macro_rules! store_impl_mapi_metadata {
                   AND account_id = $2
                   AND checkpoint_kind = $3
                   AND mapi_replica_guid = $4
+                  AND expires_at > NOW()
                   AND (
                       ($5::uuid IS NULL AND mailbox_id IS NULL)
                       OR mailbox_id = $5
@@ -805,7 +806,8 @@ macro_rules! store_impl_mapi_metadata {
             let mut tx = self.pool().begin().await?;
             let existing = sqlx::query(
                 r#"
-                SELECT id, mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
+                SELECT id, mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json,
+                       expires_at > NOW() AS checkpoint_is_live
                 FROM mapi_sync_checkpoints
                 WHERE tenant_id = $1
                   AND account_id = $2
@@ -829,9 +831,11 @@ macro_rules! store_impl_mapi_metadata {
                 let existing_change_sequence =
                     existing.get::<i64, _>("last_change_sequence").max(0) as u64;
                 let existing_modseq = existing.get::<i64, _>("last_modseq").max(0) as u64;
-                if existing_change_sequence > last_change_sequence
+                let checkpoint_is_live = existing.get::<bool, _>("checkpoint_is_live");
+                if checkpoint_is_live
+                    && (existing_change_sequence > last_change_sequence
                     || (existing_change_sequence == last_change_sequence
-                        && existing_modseq > last_modseq)
+                        && existing_modseq > last_modseq))
                 {
                     let checkpoint = MapiSyncCheckpoint {
                         mailbox_id: existing.get::<Option<Uuid>, _>("mailbox_id"),

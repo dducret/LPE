@@ -292,6 +292,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     }
     if !request.named_property_create() && property_ids.contains(&0) {
         let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
+        let property_family_summary = format_named_property_family_summary(&properties);
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -305,6 +306,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             create_missing = request.named_property_create(),
             requested_named_property_count = properties.len(),
             requested_named_properties = %requested_named_properties,
+            requested_named_property_family_summary = %property_family_summary,
             missing_named_property_count = missing_properties.len(),
             missing_named_properties = %format_debug_named_properties(&missing_properties),
             returned_property_id_count = property_ids.len(),
@@ -327,6 +329,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     let unresolved_properties = unresolved_named_properties(&properties, &property_ids);
     let unresolved_named_property_count = unresolved_properties.len();
     let property_id_source_summary = format_named_property_id_sources(&property_id_sources);
+    let property_family_summary = format_named_property_family_summary(&properties);
     let property_id_mapping_summary =
         format_named_property_resolution_mappings(&properties, &property_ids, &property_id_sources);
     let allocated_or_store_resolved_named_property_count = property_id_sources
@@ -348,6 +351,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         create_missing = request.named_property_create(),
         requested_named_property_count = properties.len(),
         requested_named_properties = %requested_named_properties,
+        requested_named_property_family_summary = %property_family_summary,
         pre_resolution_missing_named_property_count = missing_properties.len(),
         missing_named_property_count = missing_properties.len(),
         missing_named_properties = %format_debug_named_properties(&missing_properties),
@@ -402,6 +406,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
         duplicate_summary.2,
         &duplicate_summary.3,
         &property_id_source_summary,
+        &property_family_summary,
         &property_id_mapping_summary,
         named_property_response.len(),
     );
@@ -442,6 +447,7 @@ fn record_outlook_umolk_named_property_probe(
     returned_id_collision_count: usize,
     returned_id_collisions: &str,
     property_id_source_summary: &str,
+    property_family_summary: &str,
     property_id_mapping_summary: &str,
     response_rop_payload_bytes: usize,
 ) {
@@ -471,10 +477,11 @@ fn record_outlook_umolk_named_property_probe(
     session
         .post_hierarchy_actions
         .last_outlook_umolk_named_property_probe_context = format!(
-        "request_id={request_id};handle={};config=0x{config_id:016x};class={};create_missing=true;requested={requested_count};pre_resolution_missing={missing_count};allocated_or_store_resolved={allocated_or_store_resolved_count};unresolved={unresolved_count};legacy_low_dynamic_ids={legacy_low_dynamic_property_id_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};returned_id_collision_detail={};sources={};mappings={};response_rop_payload_bytes={response_rop_payload_bytes}",
+        "request_id={request_id};handle={};config=0x{config_id:016x};class={};create_missing=true;requested={requested_count};pre_resolution_missing={missing_count};allocated_or_store_resolved={allocated_or_store_resolved_count};unresolved={unresolved_count};legacy_low_dynamic_ids={legacy_low_dynamic_property_id_count};returned={returned_count};duplicate_requested={duplicate_requested_count};duplicate_returned_ids={duplicate_returned_id_count};returned_id_collisions={returned_id_collision_count};returned_id_collision_detail={};families={};sources={};mappings={};response_rop_payload_bytes={response_rop_payload_bytes}",
         request.input_handle_index().unwrap_or(0),
         message_class,
         debug_context_or_none(returned_id_collisions),
+        property_family_summary,
         property_id_source_summary,
         truncate_named_property_debug_field(property_id_mapping_summary, 2048),
     );
@@ -619,6 +626,23 @@ fn format_named_property_id_sources(sources: &[&str]) -> String {
     counts
         .into_iter()
         .map(|(source, count)| format!("{source}={count}"))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+pub(super) fn format_named_property_family_summary(properties: &[MapiNamedProperty]) -> String {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for property in properties.iter().cloned().map(normalize_named_property) {
+        let kind = match property.kind {
+            MapiNamedPropertyKind::Lid(lid) => format!("lid_{:#04x}", lid & 0xff00),
+            MapiNamedPropertyKind::Name(_) => "name".to_string(),
+        };
+        let key = format!("{}:{kind}", hex_preview(&property.guid, 16));
+        *counts.entry(key).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(family, count)| format!("{family}={count}"))
         .collect::<Vec<_>>()
         .join(";")
 }

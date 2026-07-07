@@ -28,7 +28,8 @@ pub(super) const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS: &str =
     "IPM.Configuration.UMOLK.UserOptions";
 pub(super) const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
-const OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX: &str = "3c786d6c2f3e";
+pub(super) const OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX: &str = "3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d227574662d38223f3e3c55736572436f6e66696775726174696f6e20786d6c6e733d2264696374696f6e6172792e787364223e3c496e666f2076657273696f6e3d224c50452e31222f3e3c446174613e3c65206b3d2231382d4f4c507265667356657273696f6e2220763d22392d30222f3e3c2f446174613e3c2f55736572436f6e66696775726174696f6e3e";
+const OUTLOOK_STALE_USER_OPTIONS_XML_PLACEHOLDER_HEX: &str = "3c786d6c2f3e";
 pub(crate) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
 pub(super) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
@@ -394,6 +395,7 @@ pub(crate) fn outlook_inbox_broad_startup_associated_config_defaults(
             matches!(
                 message.message_class.as_str(),
                 OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS
+                    | OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
             )
         })
         .collect()
@@ -520,6 +522,29 @@ pub(super) fn is_empty_outlook_rule_organizer_placeholder(
             .and_then(|value| value.get("value"))
             .and_then(|value| value.as_str())
             .is_some_and(|value| !value.is_empty())
+}
+
+pub(super) fn is_stale_outlook_umolk_user_options_placeholder(
+    config: &MapiAssociatedConfigRecord,
+) -> bool {
+    if config.folder_id != crate::mapi::identity::INBOX_FOLDER_ID
+        || config.message_class != OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+    {
+        return false;
+    }
+    config
+        .properties_json
+        .as_object()
+        .and_then(|properties| {
+            properties
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("0x7c070102"))
+                .and_then(|(_, value)| value.get("value"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case(OUTLOOK_STALE_USER_OPTIONS_XML_PLACEHOLDER_HEX)
+        })
 }
 
 pub(super) fn outlook_quick_step_associated_config_defaults(

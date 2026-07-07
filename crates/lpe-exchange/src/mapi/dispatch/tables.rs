@@ -1286,6 +1286,27 @@ pub(super) fn append_table_control_response(
                 }
                 _ => None,
             };
+            let hierarchy_query_position_context =
+                match input_object(session, handle_slots, request) {
+                    Some(MapiObject::HierarchyTable {
+                        folder_id,
+                        columns,
+                        position,
+                        ..
+                    }) => Some(format!(
+                        "request_id={request_id};request_rops={request_rop_names};handle={};input_index={};folder=0x{folder_id:016x};role={};position_before={};columns={};after_visible_inbox_release_without_query_rows={};default_view_query_rows_observed={}",
+                        format_optional_debug_handle(input_handle(handle_slots, request)),
+                        request.input_handle_index().unwrap_or(0),
+                        debug_role_for_folder_id(*folder_id),
+                        position,
+                        format_debug_property_tags(columns),
+                        visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions),
+                        session
+                            .post_hierarchy_actions
+                            .default_view_normal_contents_table_query_rows_observed
+                    )),
+                    _ => None,
+                };
             let response = query_position_response(
                 request,
                 input_object(session, handle_slots, request),
@@ -1368,6 +1389,34 @@ pub(super) fn append_table_control_response(
                     calendar_query_position_wire = %wire_summary,
                     next_debug_focus = "calendar_query_rows_missing_after_query_position",
                     "rca debug mapi calendar query position wire"
+                );
+            }
+            if let Some(context) = hierarchy_query_position_context {
+                let position = response
+                    .get(6..10)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let row_count = response
+                    .get(10..14)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let context = format!(
+                    "{context};response_position={position};response_row_count={row_count}"
+                );
+                session.record_last_hierarchy_table_query_position_context(context.clone());
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x17",
+                    hierarchy_query_position_context = %context,
+                    next_debug_focus = "hierarchy_query_rows_or_default_view_followup",
+                    "rca debug mapi hierarchy query position tracked"
                 );
             }
             if let Some(context) = inbox_normal_query_position_context {

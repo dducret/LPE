@@ -1306,7 +1306,7 @@ pub(super) fn format_inbox_related_release_context(
                 && state.last_inbox_normal_contents_table_setcolumns_handle == handle
                 && state.last_inbox_normal_contents_table_query_rows_handle != handle;
             Some(format!(
-                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};column_support={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};visible_inbox_release_without_query_rows={};last_normal_setcolumns_handle={};last_normal_query_rows_handle={}",
+                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};column_support={};sort={};restriction={};view_handoff={};descriptor_behavior={};after_inbox_associated_query={};normal_contents_table_observed={};normal_setcolumns_observed={};normal_query_rows_observed={};normal_findrow_observed={};visible_inbox_release_without_query_rows={};last_normal_setcolumns_handle={};last_normal_query_rows_handle={};last_normal_findrow_handle={}",
                 format_optional_debug_handle(handle),
                 associated,
                 position,
@@ -1330,9 +1330,11 @@ pub(super) fn format_inbox_related_release_context(
                 state.inbox_normal_contents_table_observed,
                 state.inbox_normal_contents_table_setcolumns_observed,
                 state.inbox_normal_contents_table_query_rows_observed,
+                state.inbox_normal_contents_table_find_row_observed,
                 release_without_query_rows,
                 format_optional_debug_handle(state.last_inbox_normal_contents_table_setcolumns_handle),
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle)
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle),
+                format_optional_debug_handle(state.last_inbox_normal_contents_table_find_row_handle)
             ))
         }
         Some(MapiObject::Folder { folder_id, .. }) if *folder_id == INBOX_FOLDER_ID => {

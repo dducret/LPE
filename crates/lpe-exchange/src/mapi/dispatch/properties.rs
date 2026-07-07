@@ -1477,6 +1477,8 @@ where
                 let mut properties = associated_config_mutation_base_properties(&existing);
                 apply_mapi_property_values_to_map(&mut properties, canonical_values);
                 let (message_class, subject) = associated_config_class_and_subject(&properties);
+                let properties =
+                    normalized_associated_config_persisted_properties(&message_class, &properties);
                 store
                     .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
                         id: Some(existing.canonical_id),

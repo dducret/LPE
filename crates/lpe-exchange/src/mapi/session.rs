@@ -17,6 +17,14 @@ const MAX_OUTLOOK_VIEW_FAILURE_TRACE_EVENTS: usize = 32;
 const MAX_OUTLOOK_STREAM_BATCH_EVENTS: usize = 8;
 const RELEASED_HANDLE_RESPONSE_SENTINEL: u32 = 0;
 
+fn session_debug_context_or_none(context: &str) -> &str {
+    if context.is_empty() {
+        "none"
+    } else {
+        context
+    }
+}
+
 mod lifecycle;
 mod types;
 #[cfg(test)]
@@ -180,6 +188,21 @@ impl MapiSession {
             .last_inbox_normal_contents_table_query_rows_handle = handle;
         self.post_hierarchy_actions
             .last_inbox_normal_contents_table_query_rows_context = context;
+    }
+
+    pub(in crate::mapi) fn record_inbox_normal_contents_table_find_row(
+        &mut self,
+        handle: Option<u32>,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .inbox_normal_contents_table_find_row_observed = true;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_find_row_handle = handle;
+        self.post_hierarchy_actions
+            .last_inbox_normal_contents_table_find_row_context = context.clone();
+        self.post_hierarchy_actions
+            .last_visible_inbox_message_row_context = context;
     }
 
     pub(in crate::mapi) fn record_inbox_normal_contents_table_query_position(
@@ -415,9 +438,82 @@ impl MapiSession {
             .last_inbox_hierarchy_query_context = context;
     }
 
+    pub(in crate::mapi) fn record_last_hierarchy_table_query_position_context(
+        &mut self,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_hierarchy_table_query_position_context = context.clone();
+        if self
+            .post_hierarchy_actions
+            .last_inbox_related_release_context
+            .contains("visible_inbox_release_without_query_rows=true")
+            && self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_setcolumns_observed
+            && !self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed
+            && !self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_find_row_observed
+        {
+            if self
+                .post_hierarchy_actions
+                .first_post_visible_release_hierarchy_query_position_context
+                .is_empty()
+            {
+                self.post_hierarchy_actions
+                    .first_post_visible_release_hierarchy_query_position_context = context.clone();
+            }
+            self.post_hierarchy_actions
+                .post_visible_release_hierarchy_query_position_count += 1;
+        }
+        if self
+            .post_hierarchy_actions
+            .last_inbox_related_release_context
+            .contains("visible_inbox_release_without_query_rows=true")
+            && self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_setcolumns_observed
+            && !self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed
+            && self
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_find_row_observed
+        {
+            if self
+                .post_hierarchy_actions
+                .first_post_visible_findrow_release_hierarchy_query_position_context
+                .is_empty()
+            {
+                self.post_hierarchy_actions
+                    .first_post_visible_findrow_release_hierarchy_query_position_context =
+                    context.clone();
+            }
+            self.post_hierarchy_actions
+                .post_visible_findrow_release_hierarchy_query_position_count += 1;
+        }
+        self.record_outlook_view_failure_trace_event(format!("hierarchy_query_position:{context}"));
+    }
+
     pub(in crate::mapi) fn record_last_inbox_related_release_context(&mut self, context: String) {
         self.post_hierarchy_actions
             .last_inbox_related_release_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_post_hierarchy_create_save_object_context(
+        &mut self,
+        context: String,
+    ) {
+        if self.hierarchy_sync_completed() {
+            self.post_hierarchy_actions
+                .last_post_hierarchy_create_save_object_context = context.clone();
+            self.record_outlook_view_failure_trace_event(format!(
+                "post_hierarchy_create_save_object:{context}"
+            ));
+        }
     }
 
     pub(in crate::mapi) fn record_last_inbox_folder_type_getprops_context(
@@ -561,6 +657,18 @@ impl MapiSession {
         self.post_hierarchy_actions
             .last_advertised_default_view_open_request_id
             .clear();
+        self.default_view_advertisements.insert(
+            owner_folder_id,
+            DefaultViewAdvertisementState {
+                owner_folder_id,
+                view_folder_id,
+                view_message_id,
+                view_name: view_name.to_string(),
+                request_id: request_id.to_string(),
+                opened: false,
+                open_request_id: String::new(),
+            },
+        );
         self.record_outlook_view_failure_trace_event(format!(
             "default_view_advertised:request_id={request_id};owner_folder=0x{owner_folder_id:016x};view_folder=0x{view_folder_id:016x};view=0x{view_message_id:016x};name={view_name}"
         ));
@@ -572,7 +680,21 @@ impl MapiSession {
         view_folder_id: u64,
         view_message_id: u64,
     ) -> bool {
-        let matched = self
+        let matched_owner =
+            self.default_view_advertisements
+                .iter()
+                .find_map(|(owner_folder_id, state)| {
+                    (state.view_folder_id == view_folder_id
+                        && state.view_message_id == view_message_id)
+                        .then_some(*owner_folder_id)
+                });
+        if let Some(owner_folder_id) = matched_owner {
+            if let Some(state) = self.default_view_advertisements.get_mut(&owner_folder_id) {
+                state.opened = true;
+                state.open_request_id = request_id.to_string();
+            }
+        }
+        let last_matched = self
             .post_hierarchy_actions
             .last_advertised_default_view_folder_id
             == Some(view_folder_id)
@@ -580,13 +702,31 @@ impl MapiSession {
                 .post_hierarchy_actions
                 .last_advertised_default_view_message_id
                 == Some(view_message_id);
-        if matched {
+        if last_matched {
             self.post_hierarchy_actions
                 .last_advertised_default_view_opened = true;
             self.post_hierarchy_actions
                 .last_advertised_default_view_open_request_id = request_id.to_string();
         }
-        matched
+        matched_owner.is_some() || last_matched
+    }
+
+    fn format_default_view_advertisement_state(state: &DefaultViewAdvertisementState) -> String {
+        format!(
+            "owner_folder=0x{:016x};owner_role={};view_folder=0x{:016x};view=0x{:016x};name={};advertised_request={};opened={};open_request={}",
+            state.owner_folder_id,
+            debug_role_for_folder_id(state.owner_folder_id),
+            state.view_folder_id,
+            state.view_message_id,
+            state.view_name,
+            state.request_id,
+            state.opened,
+            if state.open_request_id.is_empty() {
+                "none"
+            } else {
+                &state.open_request_id
+            }
+        )
     }
 
     pub(in crate::mapi) fn default_view_advertisement_state(&self) -> String {
@@ -619,7 +759,81 @@ impl MapiSession {
         )
     }
 
+    pub(in crate::mapi) fn default_view_advertisement_state_for_folder(
+        &self,
+        owner_folder_id: u64,
+    ) -> String {
+        if let Some(state) = self.default_view_advertisements.get(&owner_folder_id) {
+            return Self::format_default_view_advertisement_state(state);
+        }
+        if self.default_view_advertisements.is_empty() {
+            return "none".to_string();
+        }
+        format!(
+            "none_for_folder=0x{owner_folder_id:016x};owner_role={};advertisement_summary={}",
+            debug_role_for_folder_id(owner_folder_id),
+            self.default_view_advertisement_summary()
+        )
+    }
+
+    pub(in crate::mapi) fn default_view_advertisement_summary(&self) -> String {
+        if self.default_view_advertisements.is_empty() {
+            return self.default_view_advertisement_state();
+        }
+        let mut states: Vec<_> = self.default_view_advertisements.values().collect();
+        states.sort_by_key(|state| (state.owner_folder_id, state.view_folder_id));
+        states
+            .into_iter()
+            .map(Self::format_default_view_advertisement_state)
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    pub(in crate::mapi) fn default_view_folder_open_match_state(
+        &self,
+        opened_folder_id: u64,
+        default_view_target: Option<(u64, u64)>,
+    ) -> String {
+        if let Some(advertised) = self.default_view_advertisements.get(&opened_folder_id) {
+            let entry_id_decoded = default_view_target.is_some();
+            let entry_id_matches_advertised = default_view_target
+                .map(|(view_folder_id, view_message_id)| {
+                    advertised.view_folder_id == view_folder_id
+                        && advertised.view_message_id == view_message_id
+                })
+                .unwrap_or(false);
+            return format!(
+                "advertised=true;opened_folder_matches_owner=true;entry_id_decoded={entry_id_decoded};entry_id_matches_advertised={entry_id_matches_advertised};pending_open={}",
+                !advertised.opened
+            );
+        }
+        let actions = &self.post_hierarchy_actions;
+        let Some(advertised_owner_folder_id) = actions.last_advertised_default_view_owner_folder_id
+        else {
+            return "advertised=false;opened_folder_matches_owner=false;entry_id_decoded=false;entry_id_matches_advertised=false;pending_open=false".to_string();
+        };
+        let entry_id_decoded = default_view_target.is_some();
+        let entry_id_matches_advertised = default_view_target
+            .map(|(view_folder_id, view_message_id)| {
+                actions.last_advertised_default_view_folder_id == Some(view_folder_id)
+                    && actions.last_advertised_default_view_message_id == Some(view_message_id)
+            })
+            .unwrap_or(false);
+        format!(
+            "advertised=true;opened_folder_matches_owner={};entry_id_decoded={entry_id_decoded};entry_id_matches_advertised={entry_id_matches_advertised};pending_open={}",
+            opened_folder_id == advertised_owner_folder_id,
+            !actions.last_advertised_default_view_opened
+        )
+    }
+
     pub(in crate::mapi) fn advertised_default_view_pending_open(&self) -> bool {
+        if self
+            .default_view_advertisements
+            .values()
+            .any(|state| !state.opened)
+        {
+            return true;
+        }
         self.post_hierarchy_actions
             .last_advertised_default_view_owner_folder_id
             .is_some()
@@ -876,6 +1090,7 @@ impl MapiSession {
             self.post_hierarchy_actions.release_client_initiated = true;
         }
         self.record_post_visible_inbox_release_create_save_batch(rop_ids, rop_names);
+        self.record_visible_inbox_open_create_save_batch(rop_ids, rop_names);
         PostHierarchyExecuteObservation {
             first_execute,
             first_bootstrap_probe,
@@ -883,11 +1098,7 @@ impl MapiSession {
         }
     }
 
-    fn record_post_visible_inbox_release_create_save_batch(
-        &mut self,
-        rop_ids: &[u8],
-        rop_names: &str,
-    ) {
+    fn execute_has_create_save_batch(rop_ids: &[u8]) -> bool {
         let has_create = rop_ids.contains(&RopId::CreateMessage.as_u8());
         let has_save = rop_ids.contains(&RopId::SaveChangesMessage.as_u8());
         let has_set_properties = rop_ids.iter().any(|rop_id| {
@@ -896,7 +1107,49 @@ impl MapiSession {
                 Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate)
             )
         });
-        if !has_create || !has_save || !has_set_properties {
+        has_create && has_save && has_set_properties
+    }
+
+    fn record_visible_inbox_open_create_save_batch(&mut self, rop_ids: &[u8], rop_names: &str) {
+        if !Self::execute_has_create_save_batch(rop_ids) {
+            return;
+        }
+        let actions = &mut self.post_hierarchy_actions;
+        if !actions.inbox_normal_contents_table_observed
+            || actions.inbox_normal_contents_table_query_rows_observed
+            || actions.inbox_normal_contents_table_find_row_observed
+            || actions
+                .last_inbox_related_release_context
+                .contains("visible_inbox_release_without_query_rows=true")
+        {
+            return;
+        }
+        actions.visible_inbox_open_create_save_batch_count = actions
+            .visible_inbox_open_create_save_batch_count
+            .saturating_add(1);
+        let context = format!(
+            "request_rops={rop_names};batch_count={};last_contents_table={};last_setcolumns={};last_query_rows={};last_findrow={};recent_actions={}",
+            actions.visible_inbox_open_create_save_batch_count,
+            session_debug_context_or_none(&actions.last_inbox_contents_table_context),
+            session_debug_context_or_none(
+                &actions.last_inbox_normal_contents_table_setcolumns_context
+            ),
+            session_debug_context_or_none(&actions.last_inbox_normal_contents_table_query_rows_context),
+            session_debug_context_or_none(&actions.last_inbox_normal_contents_table_find_row_context),
+            actions.recent_probe_actions.join(">")
+        );
+        actions.last_visible_inbox_open_create_save_batch_context = context.clone();
+        self.record_outlook_view_failure_trace_event(format!(
+            "visible_inbox_open_create_save_batch:{context}"
+        ));
+    }
+
+    fn record_post_visible_inbox_release_create_save_batch(
+        &mut self,
+        rop_ids: &[u8],
+        rop_names: &str,
+    ) {
+        if !Self::execute_has_create_save_batch(rop_ids) {
             return;
         }
         let actions = &mut self.post_hierarchy_actions;

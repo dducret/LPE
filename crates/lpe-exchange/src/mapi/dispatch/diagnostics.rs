@@ -134,20 +134,20 @@ pub(super) struct SetPropertiesProbeRequest {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct RopResponseDebugSummary {
-    pub(super) ids_csv: String,
-    pub(super) names_csv: String,
-    pub(super) results_csv: String,
-    pub(super) count: usize,
+pub(in crate::mapi) struct RopResponseDebugSummary {
+    pub(in crate::mapi) ids_csv: String,
+    pub(in crate::mapi) names_csv: String,
+    pub(in crate::mapi) results_csv: String,
+    pub(in crate::mapi) count: usize,
     pub(super) handle_count: usize,
     pub(super) handle_table_summary: String,
     pub(super) extended: bool,
     pub(super) buffer_layout: String,
     pub(super) buffer_size_word: String,
-    pub(super) response_payload_bytes: usize,
-    pub(super) handle_table_bytes: usize,
-    pub(super) frames: String,
-    pub(super) parse_error: String,
+    pub(in crate::mapi) response_payload_bytes: usize,
+    pub(in crate::mapi) handle_table_bytes: usize,
+    pub(in crate::mapi) frames: String,
+    pub(in crate::mapi) parse_error: String,
 }
 
 #[derive(Debug, Default)]
@@ -461,7 +461,7 @@ pub(super) fn summarize_response_rop_buffer(
     summarize_response_rop_buffer_with_optional_expected_handles(rop_buffer, request_rop_ids, None)
 }
 
-pub(super) fn summarize_response_rop_buffer_with_expected_handles(
+pub(in crate::mapi) fn summarize_response_rop_buffer_with_expected_handles(
     rop_buffer: &[u8],
     request_rop_ids: &[u8],
     expected_response_handle_indexes: &[Option<u8>],

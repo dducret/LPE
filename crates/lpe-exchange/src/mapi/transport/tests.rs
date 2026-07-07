@@ -41,6 +41,7 @@ fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
+        default_view_advertisements: HashMap::new(),
         inbox_associated_config_stream_handles: HashSet::new(),
         inbox_rule_organizer_stream_handles: HashSet::new(),
         logon_identity: None,
@@ -62,6 +63,126 @@ fn test_principal() -> AccountPrincipal {
         quota_mb: None,
         quota_used_octets: None,
     }
+}
+
+#[test]
+fn execute_response_trace_metadata_summarizes_response_rops() {
+    let mut request_rop_buffer = Vec::new();
+    let mut request_rops = vec![RopId::OpenFolder.as_u8(), 0, 0, 1];
+    request_rops.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
+    request_rops.push(0);
+    request_rop_buffer.extend_from_slice(&((request_rops.len() + 2) as u16).to_le_bytes());
+    request_rop_buffer.extend_from_slice(&request_rops);
+    request_rop_buffer.extend_from_slice(&1u32.to_le_bytes());
+    request_rop_buffer.extend_from_slice(&u32::MAX.to_le_bytes());
+    let mut request_body = Vec::new();
+    request_body.extend_from_slice(&0u32.to_le_bytes());
+    request_body.extend_from_slice(&(request_rop_buffer.len() as u32).to_le_bytes());
+    request_body.extend_from_slice(&request_rop_buffer);
+    request_body.extend_from_slice(&65_536u32.to_le_bytes());
+    request_body.extend_from_slice(&0u32.to_le_bytes());
+
+    let response_rops = [RopId::OpenFolder.as_u8(), 1, 0, 0, 0, 0, 0, 0];
+    let mut response_rop_buffer = Vec::new();
+    response_rop_buffer.extend_from_slice(&((response_rops.len() + 2) as u16).to_le_bytes());
+    response_rop_buffer.extend_from_slice(&response_rops);
+    response_rop_buffer.extend_from_slice(&42u32.to_le_bytes());
+    let response_body = execute_success_body(response_rop_buffer, Vec::new());
+
+    let metadata = execute_response_trace_metadata("Execute", &request_body, &response_body);
+    let value = |key: &str| {
+        metadata
+            .iter()
+            .find(|(candidate, _)| *candidate == key)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("")
+    };
+
+    assert_eq!(value("response_rop_ids"), "0x02");
+    assert_eq!(value("response_rop_names"), "OpenFolder");
+    assert_eq!(value("response_rop_results"), "0x02:0x00000000");
+    assert_eq!(value("response_rop_count"), "1");
+    assert_eq!(value("response_rop_buffer_bytes"), "10");
+    assert!(value("response_rop_buffer_preview").starts_with("0a0002010000000000"));
+    assert_eq!(value("response_handle_table_bytes"), "4");
+    assert_eq!(value("response_rop_parse_error"), "");
+}
+
+#[test]
+fn execute_response_trace_metadata_summarizes_mixed_multi_rop_execute() {
+    let mut request_rop_buffer = Vec::new();
+    let mut request_rops = vec![RopId::Release.as_u8(), 0, 0];
+    request_rops.extend_from_slice(&[RopId::OpenFolder.as_u8(), 0, 0, 1]);
+    request_rops.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
+    request_rops.push(0);
+    request_rops.extend_from_slice(&[RopId::GetPropertiesSpecific.as_u8(), 0, 1]);
+    request_rops.extend_from_slice(&4096u16.to_le_bytes());
+    request_rops.extend_from_slice(&1u16.to_le_bytes());
+    request_rops.extend_from_slice(&0x3601_0003u32.to_le_bytes());
+    request_rop_buffer.extend_from_slice(&((request_rops.len() + 2) as u16).to_le_bytes());
+    request_rop_buffer.extend_from_slice(&request_rops);
+    request_rop_buffer.extend_from_slice(&2u32.to_le_bytes());
+    request_rop_buffer.extend_from_slice(&0x34u32.to_le_bytes());
+    request_rop_buffer.extend_from_slice(&0xffu32.to_le_bytes());
+    let mut request_body = Vec::new();
+    request_body.extend_from_slice(&0u32.to_le_bytes());
+    request_body.extend_from_slice(&(request_rop_buffer.len() as u32).to_le_bytes());
+    request_body.extend_from_slice(&request_rop_buffer);
+    request_body.extend_from_slice(&65_536u32.to_le_bytes());
+    request_body.extend_from_slice(&0u32.to_le_bytes());
+
+    let response_rops = [
+        RopId::OpenFolder.as_u8(),
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        RopId::GetPropertiesSpecific.as_u8(),
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ];
+    let mut response_rop_buffer = Vec::new();
+    response_rop_buffer.extend_from_slice(&((response_rops.len() + 2) as u16).to_le_bytes());
+    response_rop_buffer.extend_from_slice(&response_rops);
+    response_rop_buffer.extend_from_slice(&2u32.to_le_bytes());
+    response_rop_buffer.extend_from_slice(&0x34u32.to_le_bytes());
+    response_rop_buffer.extend_from_slice(&0xffu32.to_le_bytes());
+    let response_body = execute_success_body(response_rop_buffer, Vec::new());
+
+    let metadata = execute_response_trace_metadata("Execute", &request_body, &response_body);
+    let value = |key: &str| {
+        metadata
+            .iter()
+            .find(|(candidate, _)| *candidate == key)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("")
+    };
+
+    assert_eq!(value("response_rop_ids"), "0x02,0x07");
+    assert_eq!(
+        value("response_rop_names"),
+        "OpenFolder,GetPropertiesSpecific"
+    );
+    assert_eq!(
+        value("response_rop_results"),
+        "0x02:0x00000000,0x07:0x00000000"
+    );
+    assert_eq!(value("response_rop_count"), "2");
+    assert_eq!(value("response_handle_table_bytes"), "12");
+    assert_eq!(value("response_rop_parse_error"), "");
 }
 
 #[test]
@@ -388,6 +509,39 @@ fn post_hierarchy_action_summary_records_execute_rops_and_client_actions() {
 }
 
 #[test]
+fn post_hierarchy_action_summary_records_last_create_save_object() {
+    let mut session = test_session(HashMap::new());
+
+    session.record_last_post_hierarchy_create_save_object_context(
+        "kind=associated_config;class=IPM.Configuration.MessageListSettings".to_string(),
+    );
+    assert_eq!(
+        post_hierarchy_action_summary(&session, false)
+            .last_post_hierarchy_create_save_object_context,
+        ""
+    );
+
+    session.record_completed_hierarchy_sync(
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "folder=0x0000000000040001;status=0x0003".to_string(),
+        "calendar:row_present=true".to_string(),
+    );
+    session.record_last_post_hierarchy_create_save_object_context(
+        "kind=associated_config;class=IPM.Configuration.MessageListSettings".to_string(),
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(
+        summary.last_post_hierarchy_create_save_object_context,
+        "kind=associated_config;class=IPM.Configuration.MessageListSettings"
+    );
+    assert!(summary
+        .outlook_view_trace_events
+        .contains("post_hierarchy_create_save_object:kind=associated_config"));
+}
+
+#[test]
 fn post_hierarchy_action_summary_records_last_request_contracts() {
     let mut session = test_session(HashMap::new());
 
@@ -611,6 +765,28 @@ fn post_hierarchy_close_kind_prioritizes_visible_inbox_release_without_query_row
 }
 
 #[test]
+fn visible_inbox_findrow_suppresses_release_without_query_rows_diagnostic() {
+    let state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        inbox_normal_contents_table_find_row_observed: true,
+        last_inbox_related_release_context:
+            "visible_inbox_release_without_query_rows=true;handle=27".to_string(),
+        last_inbox_normal_contents_table_find_row_context:
+            "inbox_find_row:request_id={A}:44;handle=27;associated=false;position_before=0;position_after=1;found=1;response_row_wire_bytes=64".to_string(),
+        last_visible_inbox_message_row_context:
+            "inbox_find_row:request_id={A}:44;handle=27;associated=false;position_before=0;position_after=1;found=1;response_row_wire_bytes=64".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert!(!visible_inbox_release_without_query_rows_observed(&state));
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_visible_inbox_findrow_returned_without_message_open_before_content_sync"
+    );
+}
+
+#[test]
 fn post_hierarchy_summary_tracks_create_save_after_visible_inbox_release() {
     let mut session = test_session(HashMap::new());
     session.record_completed_hierarchy_sync(
@@ -651,6 +827,137 @@ fn post_hierarchy_summary_tracks_create_save_after_visible_inbox_release() {
         summary.close_kind,
         "outlook_create_save_after_visible_inbox_release_before_query_rows"
     );
+}
+
+#[test]
+fn post_hierarchy_summary_tracks_create_save_after_visible_inbox_open() {
+    let mut session = test_session(HashMap::new());
+    session.record_completed_hierarchy_sync(
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "folder=0x0000000000040001;status=0x0003".to_string(),
+        "calendar:row_present=true".to_string(),
+    );
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_observed = true;
+    session
+        .post_hierarchy_actions
+        .last_inbox_contents_table_context = "handle=28;associated=false;row_count=1".to_string();
+
+    session.record_execute_after_hierarchy_completion(
+        &[
+            RopId::GetContentsTable.as_u8(),
+            RopId::CreateMessage.as_u8(),
+            RopId::SetProperties.as_u8(),
+            RopId::SetProperties.as_u8(),
+            RopId::SaveChangesMessage.as_u8(),
+        ],
+        "GetContentsTable,CreateMessage,SetProperties,SetProperties,SaveChangesMessage",
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(summary.visible_inbox_open_create_save_batch_count, 1);
+    assert!(summary
+        .last_visible_inbox_open_create_save_batch_context
+        .contains("request_rops=GetContentsTable,CreateMessage,SetProperties,SetProperties,SaveChangesMessage"));
+    assert_eq!(
+        summary.close_kind,
+        "outlook_create_save_after_visible_inbox_open_before_visible_row"
+    );
+}
+
+#[test]
+fn post_hierarchy_summary_exports_hierarchy_query_position_context() {
+    let mut session = test_session(HashMap::new());
+    session.record_last_hierarchy_table_query_position_context(
+        "request_id={A}:158;folder=0x0000000000040001;role=ipm_subtree;response_row_count=15"
+            .to_string(),
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert!(summary
+        .last_hierarchy_table_query_position_context
+        .contains("role=ipm_subtree"));
+    assert_eq!(
+        summary.post_visible_release_hierarchy_query_position_count,
+        0
+    );
+    assert!(summary
+        .outlook_view_trace_events
+        .contains("hierarchy_query_position:request_id={A}:158"));
+}
+
+#[test]
+fn post_hierarchy_summary_counts_hierarchy_query_position_after_visible_release() {
+    let mut session = test_session(HashMap::new());
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_setcolumns_observed = true;
+    session
+        .post_hierarchy_actions
+        .last_inbox_related_release_context =
+        "visible_inbox_release_without_query_rows=true;handle=24".to_string();
+
+    session.record_last_hierarchy_table_query_position_context(
+        "request_id={A}:158;folder=0x0000000000040001;role=ipm_subtree;response_row_count=15"
+            .to_string(),
+    );
+    session.record_last_hierarchy_table_query_position_context(
+        "request_id={A}:159;folder=0x0000000000050001;role=inbox;response_row_count=0".to_string(),
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(
+        summary.post_visible_release_hierarchy_query_position_count,
+        2
+    );
+    assert_eq!(
+        summary.post_visible_findrow_release_hierarchy_query_position_count,
+        0
+    );
+    assert!(summary
+        .first_post_visible_release_hierarchy_query_position_context
+        .contains("request_id={A}:158"));
+    assert!(summary
+        .last_hierarchy_table_query_position_context
+        .contains("request_id={A}:159"));
+}
+
+#[test]
+fn post_hierarchy_summary_counts_hierarchy_query_position_after_visible_findrow_release() {
+    let mut session = test_session(HashMap::new());
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_setcolumns_observed = true;
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_find_row_observed = true;
+    session
+        .post_hierarchy_actions
+        .last_inbox_related_release_context =
+        "visible_inbox_release_without_query_rows=true;handle=24".to_string();
+
+    session.record_last_hierarchy_table_query_position_context(
+        "request_id={A}:158;folder=0x0000000000040001;role=ipm_subtree;response_row_count=15"
+            .to_string(),
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(
+        summary.post_visible_release_hierarchy_query_position_count,
+        0
+    );
+    assert_eq!(
+        summary.post_visible_findrow_release_hierarchy_query_position_count,
+        1
+    );
+    assert!(summary
+        .first_post_visible_findrow_release_hierarchy_query_position_context
+        .contains("request_id={A}:158"));
 }
 
 #[test]
@@ -751,6 +1058,65 @@ fn post_hierarchy_close_kind_classifies_umolk_named_property_burst() {
     assert_eq!(
         post_hierarchy_close_kind(&state, false),
         "outlook_umolk_getprops_mostly_not_found_before_content_sync"
+    );
+}
+
+#[test]
+fn post_hierarchy_close_kind_prioritizes_umolk_over_visible_inbox_release() {
+    let mut state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        last_inbox_related_release_context:
+            "visible_inbox_release_without_query_rows=true;handle=28".to_string(),
+        outlook_umolk_named_property_probe_count: 1,
+        last_outlook_umolk_named_property_probe_context:
+            "request_id={A}:124;requested=351;returned=351".to_string(),
+        last_outlook_umolk_getprops_materialization_context:
+            "request_id={A}:125;problem_count=339;not_found_count=339".to_string(),
+        outlook_umolk_getprops_not_found_count: 339,
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_umolk_getprops_mostly_not_found_before_content_sync"
+    );
+
+    state
+        .last_outlook_umolk_getprops_materialization_context
+        .clear();
+    state.outlook_umolk_getprops_not_found_count = 0;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_umolk_named_property_burst_before_content_sync"
+    );
+}
+
+#[test]
+fn post_hierarchy_close_kind_classifies_default_view_hierarchy_query_position() {
+    let mut state = PostHierarchyActionState {
+        inbox_normal_contents_table_observed: true,
+        inbox_normal_contents_table_setcolumns_observed: true,
+        default_view_normal_contents_table_query_rows_observed: true,
+        last_inbox_related_release_context:
+            "visible_inbox_release_without_query_rows=true;handle=24".to_string(),
+        last_hierarchy_table_query_position_context:
+            "request_id={A}:158;folder=0x0000000000040001;role=ipm_subtree;response_row_count=15"
+                .to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_default_view_hierarchy_query_position_after_visible_inbox_handoff"
+    );
+
+    state.outlook_umolk_named_property_probe_count = 1;
+
+    assert_eq!(
+        post_hierarchy_close_kind(&state, false),
+        "outlook_umolk_named_property_burst_before_content_sync"
     );
 }
 

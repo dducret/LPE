@@ -863,16 +863,18 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_SERVER_ACCOUNT_ICON
         ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
-        Some(MapiObject::AssociatedConfig { .. }) => matches!(
-            storage_tag,
-            PID_TAG_INSTANCE_NUM
-                | PID_TAG_MESSAGE_FLAGS
-                | PID_TAG_MESSAGE_STATUS
-                | PID_TAG_ACCESS_LEVEL
-                | PID_TAG_SENT_MAIL_SVR_EID
-                | PID_TAG_ASSOCIATED
-                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-        ),
+        Some(MapiObject::AssociatedConfig { .. }) => {
+            matches!(
+                storage_tag,
+                PID_TAG_INSTANCE_NUM
+                    | PID_TAG_MESSAGE_FLAGS
+                    | PID_TAG_MESSAGE_STATUS
+                    | PID_TAG_ACCESS_LEVEL
+                    | PID_TAG_SENT_MAIL_SVR_EID
+                    | PID_TAG_ASSOCIATED
+                    | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+            ) || umolk_associated_config_empty_property_default(object, tag)
+        }
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
@@ -952,6 +954,19 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         }
         _ => false,
     }
+}
+
+fn umolk_associated_config_empty_property_default(object: Option<&MapiObject>, tag: u32) -> bool {
+    let Some(MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        saved_message: Some(saved_message),
+        ..
+    }) = object
+    else {
+        return false;
+    };
+    saved_message.message_class == "IPM.Configuration.UMOLK.UserOptions"
+        && MapiPropertyTag::new(tag).property_type().is_some()
 }
 
 fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u32) -> bool {

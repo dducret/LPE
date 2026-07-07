@@ -1365,9 +1365,37 @@ pub(super) fn append_find_row_response(
     if let Some((handle, associated, position, columns, restriction)) = find_trace {
         let response_return_value = read_response_error_code(&response, 0).unwrap_or(0xffff_ffff);
         let response_found = response.get(7).copied().unwrap_or(0);
-        session.record_outlook_view_failure_trace_event(format!(
-            "inbox_find_row:request_id={request_id};handle={handle};associated={associated};position={position};columns={columns};request_restriction={restriction};response={response_return_value:#010x};found={response_found}"
-        ));
+        let position_after = match input_object(session, handle_slots, request) {
+            Some(MapiObject::ContentsTable { position, .. }) => position.to_string(),
+            _ => "none".to_string(),
+        };
+        let response_row_wire_bytes = if response_found == 1 {
+            response.len().saturating_sub(8)
+        } else {
+            0
+        };
+        let context = format!(
+            "inbox_find_row:request_id={request_id};handle={handle};associated={associated};position_before={position};position_after={position_after};columns={columns};request_restriction={restriction};response={response_return_value:#010x};found={response_found};response_row_wire_bytes={response_row_wire_bytes}"
+        );
+        session.record_outlook_view_failure_trace_event(context.clone());
+        if !associated && response_return_value == 0 && response_found == 1 {
+            session.record_inbox_normal_contents_table_find_row(
+                input_handle(handle_slots, request),
+                context.clone(),
+            );
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = %request_id,
+                request_rop_id = "0x4f",
+                input_handle_value = %handle,
+                find_row_context = %context,
+                "rca debug mapi visible inbox find row tracked"
+            );
+        }
     }
     responses.extend_from_slice(&response);
 }

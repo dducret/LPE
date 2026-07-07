@@ -661,12 +661,51 @@ fn empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row() {
     );
     assert_eq!(
         modeled.properties_json["0x7c070102"]["value"],
-        serde_json::json!("3c786d6c2f3e")
+        serde_json::json!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX)
     );
+    assert!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("392d30"));
     assert!(snapshot.associated_config_identity_matches_folder(
         crate::mapi::identity::INBOX_FOLDER_ID,
         crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa)
     ));
+}
+
+#[test]
+fn stale_persisted_umolk_xml_placeholder_does_not_shadow_exact_modeled_row() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let stale_id = Uuid::from_u128(0x6d617069_756d_6f6c_8000_000000000003);
+    crate::mapi::identity::remember_mapi_identity(
+        stale_id,
+        crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa),
+    );
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: stale_id,
+            account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({
+                "0x7c070102": {
+                    "type": "binary",
+                    "value": "3c786d6c2f3e"
+                }
+            }),
+        },
+    ]);
+
+    let messages =
+        snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
+    assert!(messages
+        .iter()
+        .all(|message| message.message_class != OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS));
+    let modeled = snapshot
+        .associated_config_message_for_id(crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa))
+        .expect("exact modeled UMOLK row");
+    assert_eq!(
+        modeled.properties_json["0x7c070102"]["value"],
+        serde_json::json!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX)
+    );
 }
 
 #[test]
@@ -2215,6 +2254,50 @@ fn snapshot_uses_allocated_identities_for_custom_and_shared_collaboration_folder
             .collect::<std::collections::HashSet<_>>()
             .len(),
         3
+    );
+}
+
+#[test]
+fn snapshot_falls_back_when_custom_collaboration_identity_is_not_loaded() {
+    let owner_id = Uuid::parse_str("99999999-9999-4999-8999-999999999998").unwrap();
+    let collection = CollaborationCollection {
+        id: format!("shared-calendar-{owner_id}"),
+        kind: "calendar".to_string(),
+        owner_account_id: owner_id,
+        owner_email: "owner@example.test".to_string(),
+        owner_display_name: "Owner".to_string(),
+        display_name: "Owner Calendar".to_string(),
+        is_owned: false,
+        rights: CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        },
+    };
+    let canonical_id = collaboration_folder_identity_canonical_id(
+        MapiCollaborationFolderKind::Calendar,
+        &collection,
+    )
+    .unwrap();
+    crate::mapi::identity::forget_mapi_identity(&canonical_id);
+
+    let snapshot = MapiMailStoreSnapshot::new(
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![collection],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        snapshot.collaboration_folders()[0].id,
+        crate::mapi::identity::legacy_migration_object_id(&canonical_id)
     );
 }
 

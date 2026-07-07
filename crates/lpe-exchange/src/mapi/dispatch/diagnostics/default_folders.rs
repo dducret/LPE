@@ -282,7 +282,10 @@ pub(in crate::mapi::dispatch) fn default_folder_getprops_value_for_debug(
     }
 }
 
-fn default_view_entry_id_for_debug(storage_tag: u32, value: &MapiValue) -> String {
+pub(in crate::mapi::dispatch) fn default_view_entry_id_for_debug(
+    storage_tag: u32,
+    value: &MapiValue,
+) -> String {
     let MapiValue::Binary(bytes) = value else {
         return format!(
             "{storage_tag:#010x}:PidTagDefaultViewEntryId:value_type={}",
@@ -303,7 +306,9 @@ fn default_view_entry_id_for_debug(storage_tag: u32, value: &MapiValue) -> Strin
     }
 }
 
-fn default_view_entry_id_target_for_debug(entry_id: &[u8]) -> Option<(u64, u64)> {
+pub(in crate::mapi::dispatch) fn default_view_entry_id_target_for_debug(
+    entry_id: &[u8],
+) -> Option<(u64, u64)> {
     if entry_id.len() != 70
         || entry_id[0..4] != [0, 0, 0, 0]
         || entry_id[20..22] != 0x0007u16.to_le_bytes()

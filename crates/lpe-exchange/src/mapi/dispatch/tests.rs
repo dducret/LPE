@@ -343,6 +343,80 @@ fn default_view_advertisement_state_marks_matching_open() {
     assert!(state.contains("name=Sent To"));
     assert!(state.contains("opened=true"));
     assert!(state.contains("open_request=request:144"));
+
+    let match_state = session.default_view_folder_open_match_state(
+        SENT_FOLDER_ID,
+        Some((
+            COMMON_VIEWS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        )),
+    );
+    assert!(match_state.contains("opened_folder_matches_owner=true"));
+    assert!(match_state.contains("entry_id_decoded=true"));
+    assert!(match_state.contains("entry_id_matches_advertised=true"));
+}
+
+#[test]
+fn default_view_advertisement_state_tracks_multiple_owner_folders() {
+    let mut session = test_mapi_session();
+
+    session.record_default_view_advertised(
+        "request:128",
+        SENT_FOLDER_ID,
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        "Sent To",
+    );
+    session.record_default_view_advertised(
+        "request:129",
+        CONTACTS_FOLDER_ID,
+        CONTACTS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        "Contacts",
+    );
+
+    let sent_state = session.default_view_advertisement_state_for_folder(SENT_FOLDER_ID);
+    assert!(sent_state.contains("owner_role=sent"));
+    assert!(sent_state.contains("name=Sent To"));
+    assert!(sent_state.contains("opened=false"));
+
+    let match_state = session.default_view_folder_open_match_state(
+        SENT_FOLDER_ID,
+        Some((
+            COMMON_VIEWS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+        )),
+    );
+    assert!(match_state.contains("opened_folder_matches_owner=true"));
+    assert!(match_state.contains("entry_id_matches_advertised=true"));
+
+    assert!(session.record_default_view_opened(
+        "request:155",
+        COMMON_VIEWS_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    ));
+
+    let sent_state = session.default_view_advertisement_state_for_folder(SENT_FOLDER_ID);
+    assert!(sent_state.contains("opened=true"));
+    assert!(sent_state.contains("open_request=request:155"));
+    let contacts_state = session.default_view_advertisement_state_for_folder(CONTACTS_FOLDER_ID);
+    assert!(contacts_state.contains("owner_role=contacts"));
+    assert!(contacts_state.contains("opened=false"));
+    assert!(session.advertised_default_view_pending_open());
+
+    let tasks_state = session.default_view_advertisement_state_for_folder(TASKS_FOLDER_ID);
+    assert!(tasks_state.contains("none_for_folder=0x0000000000130001"));
+    assert!(tasks_state.contains("owner_role=tasks"));
+    assert!(tasks_state.contains("owner_role=sent"));
+    assert!(tasks_state.contains("owner_role=contacts"));
+    assert!(!tasks_state.starts_with("owner_folder=0x00000000000f0001;owner_role=contacts"));
+
+    let summary = session.default_view_advertisement_summary();
+    assert!(summary.contains("owner_role=sent"));
+    assert!(summary.contains("name=Sent To"));
+    assert!(summary.contains("open_request=request:155"));
+    assert!(summary.contains("owner_role=contacts"));
+    assert!(summary.contains("name=Contacts"));
 }
 
 #[test]
@@ -368,7 +442,8 @@ fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
         "default_view_id=0x{:016x}",
         crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
     )));
-    assert!(context.contains("current_count=1"));
+    assert!(context.contains("current_count=2"));
+    assert!(context.contains("prefix_ipm_configuration_count=2"));
     assert!(context.contains("exact_named_view_count=1"));
     assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
     assert!(context.contains("subject=Compact"));
@@ -821,6 +896,36 @@ fn named_property_duplicate_summary_separates_repeats_from_collisions() {
     assert_eq!(duplicate_ids, 1);
     assert_eq!(collisions, 1);
     assert_eq!(collision_summary, "0x9001:2");
+}
+
+#[test]
+fn named_property_family_summary_groups_guid_and_kind() {
+    let summary = format_named_property_family_summary(&[
+        MapiNamedProperty {
+            guid: PS_INTERNET_HEADERS_GUID,
+            kind: MapiNamedPropertyKind::Name("Content-Class".to_string()),
+        },
+        MapiNamedProperty {
+            guid: PS_INTERNET_HEADERS_GUID,
+            kind: MapiNamedPropertyKind::Name("content-type".to_string()),
+        },
+        MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Lid(0x8501),
+        },
+        MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Lid(0x85c0),
+        },
+        MapiNamedProperty {
+            guid: PSETID_TASK_GUID,
+            kind: MapiNamedPropertyKind::Lid(0x8102),
+        },
+    ]);
+
+    assert!(summary.contains("8603020000000000c000000000000046:name=2"));
+    assert!(summary.contains("0820060000000000c000000000000046:lid_0x8500=2"));
+    assert!(summary.contains("0320060000000000c000000000000046:lid_0x8100=1"));
 }
 
 fn test_mailbox_state(mailbox_id: Uuid, role: &str) -> lpe_storage::JmapEmailMailboxState {
@@ -2167,6 +2272,7 @@ fn test_mapi_session() -> MapiSession {
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
+        default_view_advertisements: HashMap::new(),
         inbox_associated_config_stream_handles: HashSet::new(),
         inbox_rule_organizer_stream_handles: HashSet::new(),
         logon_identity: None,

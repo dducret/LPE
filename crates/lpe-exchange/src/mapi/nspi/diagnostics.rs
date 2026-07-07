@@ -245,6 +245,12 @@ pub(super) fn log_nspi_response_contract(
         method_return_status = nspi_method_status_name(method_return_value),
         item_not_found_encoded = method_return_value == 0x8004_010f,
         body_contains_item_not_found = nspi_body_contains_status(body, 0x8004_010f),
+        body_contains_no_support = nspi_body_contains_status(body, 0x8004_0102),
+        special_table_contains_parent_entry_id =
+            nspi_body_contains_property_tag(body, 0xFFFC_0102),
+        special_table_contains_synthetic_guid_dn = nspi_body_contains_ascii(body, b"/guid="),
+        special_table_contains_configuration_address_list_dn =
+            nspi_body_contains_ascii(body, b"cn=Configuration/cn=Address Lists"),
         rowset_present = rowset_present,
         returned_row_count = returned_row_count,
         property_tag_count = property_tags.len(),
@@ -261,15 +267,37 @@ fn nspi_body_contains_status(body: &[u8], status: u32) -> bool {
     body.windows(status.len()).any(|bytes| bytes == status)
 }
 
+pub(super) fn nspi_body_contains_property_tag(body: &[u8], property_tag: u32) -> bool {
+    let property_tag = property_tag.to_le_bytes();
+    body.windows(property_tag.len())
+        .any(|bytes| bytes == property_tag)
+}
+
+pub(super) fn nspi_body_contains_ascii(body: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty() && body.windows(needle.len()).any(|bytes| bytes == needle)
+}
+
 fn nspi_method_status_name(value: u32) -> &'static str {
     match value {
         0x0000_0000 => "Success",
         0x0004_03A9 => "ErrorsReturned",
         0x8004_010F => "NotFound",
         0x8004_010B => "InvalidParameter",
-        0x8004_0102 => "NotEnoughMemory",
+        0x8004_0102 => "NotSupported",
+        0x8007_000E => "NotEnoughMemory",
         0x8004_0106 => "InvalidBookmark",
         _ => "Unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nspi_method_status_name;
+
+    #[test]
+    fn nspi_method_status_names_match_microsoft_hresult_labels() {
+        assert_eq!(nspi_method_status_name(0x8004_0102), "NotSupported");
+        assert_eq!(nspi_method_status_name(0x8007_000E), "NotEnoughMemory");
     }
 }
 

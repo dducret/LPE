@@ -393,6 +393,7 @@ impl MapiMailStoreSnapshot {
                 .filter(|config| {
                     !is_empty_synthetic_inbox_associated_config(config)
                         && !is_empty_outlook_inbox_named_view_placeholder(config)
+                        && !is_stale_outlook_umolk_user_options_placeholder(config)
                 })
                 .map(|config| MapiAssociatedConfigMessage {
                     id: mapi_item_id(&config.id),

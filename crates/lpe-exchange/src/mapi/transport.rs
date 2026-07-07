@@ -1264,6 +1264,11 @@ fn trace_mapi_connection(
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
     let execute_trace_metadata = execute_request_trace_metadata(request_type, request_body);
+    let execute_response_trace_metadata = execute_response_trace_metadata(
+        request_type,
+        request_body,
+        mapi_response_payload(response).unwrap_or_default(),
+    );
 
     let mut inbound_metadata = vec![
         ("account_id", account_id.clone()),
@@ -1300,6 +1305,7 @@ fn trace_mapi_connection(
         ("response_payload_bytes", response_payload_bytes.to_string()),
     ];
     outbound_metadata.extend(execute_trace_metadata);
+    outbound_metadata.extend(execute_response_trace_metadata);
     write_outlook_trace(&OutlookTraceEvent {
         component: "mapi",
         endpoint: endpoint_label,
@@ -1313,6 +1319,83 @@ fn trace_mapi_connection(
         metadata: outbound_metadata,
         payload: mapi_response_payload(response),
     });
+}
+
+fn execute_response_trace_metadata(
+    request_type: &str,
+    request_body: &[u8],
+    response_body: &[u8],
+) -> Vec<(&'static str, String)> {
+    if request_type != "Execute" {
+        return Vec::new();
+    }
+    let request_summary = match parse_execute_request(request_body) {
+        Ok(execute) => summarize_request_rop_buffer(&execute.rop_buffer),
+        Err(error) => {
+            return vec![("response_rop_parse_error", format!("request:{error}"))];
+        }
+    };
+    let response_rop_buffer = match execute_response_rop_buffer_for_trace(response_body) {
+        Ok(buffer) => buffer,
+        Err(error) => return vec![("response_rop_parse_error", error)],
+    };
+    let response_summary = summarize_response_rop_buffer_with_expected_handles(
+        response_rop_buffer,
+        &request_summary.full_ids,
+        &request_summary.full_response_handle_indexes,
+    );
+
+    vec![
+        (
+            "response_rop_buffer_bytes",
+            response_summary
+                .response_payload_bytes
+                .saturating_add(2)
+                .to_string(),
+        ),
+        (
+            "response_rop_buffer_preview",
+            hex_preview(response_rop_buffer, 96),
+        ),
+        ("response_rop_ids", response_summary.ids_csv),
+        ("response_rop_names", response_summary.names_csv),
+        ("response_rop_results", response_summary.results_csv),
+        ("response_rop_count", response_summary.count.to_string()),
+        (
+            "response_handle_table_bytes",
+            response_summary.handle_table_bytes.to_string(),
+        ),
+        ("response_rop_frames", response_summary.frames),
+        ("response_rop_parse_error", response_summary.parse_error),
+    ]
+}
+
+fn execute_response_rop_buffer_for_trace(response_body: &[u8]) -> Result<&[u8], String> {
+    let status = response_body
+        .get(0..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(|| "truncated_execute_response_status".to_string())?;
+    if status != 0 {
+        return Err(format!("execute_status_{status:#010x}"));
+    }
+    let error = response_body
+        .get(4..8)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(|| "truncated_execute_response_error".to_string())?;
+    if error != 0 {
+        return Err(format!("execute_error_{error:#010x}"));
+    }
+    let rop_buffer_len = response_body
+        .get(12..16)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .ok_or_else(|| "truncated_execute_response_rop_buffer_length".to_string())?
+        as usize;
+    response_body
+        .get(16..16 + rop_buffer_len)
+        .ok_or_else(|| "truncated_execute_response_rop_buffer".to_string())
 }
 
 fn execute_request_trace_metadata(

@@ -542,6 +542,20 @@ fn associated_config_message_size(message: &MapiAssociatedConfigMessage) -> i64 
         .min(i64::MAX as usize) as i64
 }
 
+fn sanitize_configuration_property_value(
+    message_class: &str,
+    property_tag: u32,
+    value: MapiValue,
+) -> MapiValue {
+    if property_tag == PID_TAG_ROAMING_DICTIONARY
+        && message_class.starts_with("IPM.Configuration.")
+        && matches!(&value, MapiValue::Binary(bytes) if bytes == b"<xml/>")
+    {
+        return MapiValue::Binary(minimal_roaming_dictionary_stream());
+    }
+    value
+}
+
 pub(in crate::mapi) fn associated_config_property_value(
     message: &MapiAssociatedConfigMessage,
     property_tag: u32,
@@ -556,285 +570,293 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
 ) -> Option<MapiValue> {
     let lookup_tag = canonical_property_storage_tag(property_tag);
     let properties = mapi_properties_from_json(&message.properties_json);
-    properties.get(&lookup_tag).cloned().or_else(|| {
-        let change_number = mapi_mailstore::change_number_for_store_id(message.id);
-        match lookup_tag {
-            PID_TAG_MID => Some(MapiValue::U64(message.id)),
-            PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
-            PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
-            PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
-                mailbox_guid,
-                message.folder_id,
-                message.id,
-            )
-            .map(MapiValue::Binary),
-            PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
-                crate::mapi::identity::instance_key_for_object_id(message.id),
-            )),
-            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
-                Some(MapiValue::String(message.subject.clone()))
-            }
-            PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
-                Some(MapiValue::String(message.message_class.clone()))
-            }
-            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
-            PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
-            PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
-            PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
-            PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
-            PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(associated_config_message_size(
-                message,
-            ))),
-            PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
-                associated_config_message_size(message),
-            )),
-            PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
-            PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
-            PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-                message.id,
-            ))),
-            PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-                message.id,
-            ))),
-            PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-                message.id,
-            ))),
-            PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
-                mapi_mailstore::source_key_for_store_id(message.folder_id),
-            )),
-            PID_TAG_PARENT_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
-                mailbox_guid,
-                message.folder_id,
-            )
-            .map(MapiValue::Binary),
-            PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-                mapi_mailstore::change_key_for_change_number(change_number),
-            )),
-            PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-                mapi_mailstore::predecessor_change_list(change_number),
-            )),
-            PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
-            PID_TAG_LAST_MODIFICATION_TIME
-            | PID_TAG_LOCAL_COMMIT_TIME
-            | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
-                associated_config_last_modified_filetime(message)
-                    .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number))
-                    as i64,
-            )),
-            PID_TAG_ROAMING_DATATYPES
-                if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                Some(MapiValue::U32(configuration_roaming_datatypes(
-                    &message.message_class,
-                    &properties,
-                )))
-            }
-            PID_TAG_ROAMING_DICTIONARY
-                if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                (!matches!(
-                    message.message_class.as_str(),
-                    "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
-                ) && !properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
-                .then(|| MapiValue::Binary(minimal_roaming_dictionary_stream()))
-            }
-            PID_TAG_ROAMING_XML_STREAM
-                if message.message_class == "IPM.Configuration.WorkHours" =>
-            {
-                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
-                    .then(|| MapiValue::Binary(minimal_working_hours_roaming_xml_stream()))
-            }
-            PID_TAG_ROAMING_XML_STREAM
-                if message.message_class == "IPM.Configuration.CategoryList" =>
-            {
-                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
-                    .then(|| MapiValue::Binary(minimal_category_list_roaming_xml_stream()))
-            }
-            PID_TAG_ROAMING_XML_STREAM if message.message_class == "IPM.Configuration.MRM" => {
-                (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
-                    .then(|| MapiValue::Binary(minimal_mrm_roaming_xml_stream()))
-            }
-            PID_TAG_ROAMING_DATATYPES
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
-            {
-                Some(MapiValue::U32(0x0000_0002))
-            }
-            PID_TAG_ROAMING_XML_STREAM
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
-            {
-                Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
-            }
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
-            {
-                Some(MapiValue::Binary(Vec::new()))
-            }
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                Some(MapiValue::Binary(configuration_fallback_binary_stream(
-                    &message.message_class,
-                )))
-            }
-            PID_NAME_CONTENT_CLASS_W_TAG
-                if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                Some(MapiValue::String("urn:content-classes:message".to_string()))
-            }
-            PID_NAME_CONTENT_TYPE_W_TAG
-                if message.message_class.starts_with("IPM.Configuration.") =>
-            {
-                Some(MapiValue::String("text/xml".to_string()))
-            }
-            PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
-                Some(MapiValue::U32(0))
-            }
-            0x685D_0003 if is_outlook_contacts_helper_config(message) => {
-                Some(MapiValue::U32(outlook_configuration_stamp(message)))
-            }
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B if is_outlook_contacts_helper_config(message) => {
-                Some(MapiValue::Binary(Vec::new()))
-            }
-            tag if is_outlook_contacts_helper_config(message) => {
-                outlook_contact_link_empty_property_value(tag)
-            }
-            PID_TAG_VIEW_DESCRIPTOR_FLAGS
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                Some(MapiValue::U32(14_745_605))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                Some(MapiValue::U32(8))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_NAME_W
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                Some(MapiValue::String(message.subject.clone()))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                let definition =
-                    outlook_folder_view_definition(message.folder_id, &message.subject);
-                log_view_definition_diagnostics(
+    properties
+        .get(&lookup_tag)
+        .cloned()
+        .map(|value| {
+            sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
+        })
+        .or_else(|| {
+            let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+            match lookup_tag {
+                PID_TAG_MID => Some(MapiValue::U64(message.id)),
+                PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+                PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+                PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+                    mailbox_guid,
                     message.folder_id,
                     message.id,
-                    &message.subject,
-                    &definition,
-                );
-                Some(MapiValue::String(view_descriptor_strings(&definition)))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                Some(MapiValue::U32(0))
-            }
-            PID_TAG_VIEW_DESCRIPTOR_BINARY
-            | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                let definition =
-                    outlook_folder_view_definition(message.folder_id, &message.subject);
-                log_view_definition_diagnostics(
+                )
+                .map(MapiValue::Binary),
+                PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+                    crate::mapi::identity::instance_key_for_object_id(message.id),
+                )),
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
+                    Some(MapiValue::String(message.subject.clone()))
+                }
+                PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
+                    Some(MapiValue::String(message.message_class.clone()))
+                }
+                PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+                PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
+                PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+                PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
+                PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+                PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(
+                    associated_config_message_size(message),
+                )),
+                PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(
+                    associated_config_message_size(message),
+                )),
+                PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+                PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+                PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(
+                    mapi_mailstore::source_key_for_store_id(message.id),
+                )),
+                PID_TAG_RECORD_KEY => Some(MapiValue::Binary(
+                    mapi_mailstore::source_key_for_store_id(message.id),
+                )),
+                PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(
+                    mapi_mailstore::source_key_for_store_id(message.id),
+                )),
+                PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+                    mapi_mailstore::source_key_for_store_id(message.folder_id),
+                )),
+                PID_TAG_PARENT_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+                    mailbox_guid,
                     message.folder_id,
-                    message.id,
-                    &message.subject,
-                    &definition,
-                );
-                Some(MapiValue::Binary(view_descriptor_binary(&definition)))
+                )
+                .map(MapiValue::Binary),
+                PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+                    mapi_mailstore::change_key_for_change_number(change_number),
+                )),
+                PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+                    mapi_mailstore::predecessor_change_list(change_number),
+                )),
+                PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+                PID_TAG_LAST_MODIFICATION_TIME
+                | PID_TAG_LOCAL_COMMIT_TIME
+                | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+                    associated_config_last_modified_filetime(message).unwrap_or_else(|| {
+                        mapi_mailstore::filetime_from_change_number(change_number)
+                    }) as i64,
+                )),
+                PID_TAG_ROAMING_DATATYPES
+                    if message.message_class.starts_with("IPM.Configuration.") =>
+                {
+                    Some(MapiValue::U32(configuration_roaming_datatypes(
+                        &message.message_class,
+                        &properties,
+                    )))
+                }
+                PID_TAG_ROAMING_DICTIONARY
+                    if message.message_class.starts_with("IPM.Configuration.") =>
+                {
+                    (!matches!(
+                        message.message_class.as_str(),
+                        "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
+                    ) && !properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    .then(|| MapiValue::Binary(minimal_roaming_dictionary_stream()))
+                }
+                PID_TAG_ROAMING_XML_STREAM
+                    if message.message_class == "IPM.Configuration.WorkHours" =>
+                {
+                    (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                        .then(|| MapiValue::Binary(minimal_working_hours_roaming_xml_stream()))
+                }
+                PID_TAG_ROAMING_XML_STREAM
+                    if message.message_class == "IPM.Configuration.CategoryList" =>
+                {
+                    (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                        .then(|| MapiValue::Binary(minimal_category_list_roaming_xml_stream()))
+                }
+                PID_TAG_ROAMING_XML_STREAM if message.message_class == "IPM.Configuration.MRM" => {
+                    (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                        .then(|| MapiValue::Binary(minimal_mrm_roaming_xml_stream()))
+                }
+                PID_TAG_ROAMING_DATATYPES
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+                {
+                    Some(MapiValue::U32(0x0000_0002))
+                }
+                PID_TAG_ROAMING_XML_STREAM
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+                {
+                    Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
+                }
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
+                {
+                    Some(MapiValue::Binary(Vec::new()))
+                }
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    if message.message_class.starts_with("IPM.Configuration.") =>
+                {
+                    Some(MapiValue::Binary(configuration_fallback_binary_stream(
+                        &message.message_class,
+                    )))
+                }
+                PID_NAME_CONTENT_CLASS_W_TAG
+                    if message.message_class.starts_with("IPM.Configuration.") =>
+                {
+                    Some(MapiValue::String("urn:content-classes:message".to_string()))
+                }
+                PID_NAME_CONTENT_TYPE_W_TAG
+                    if message.message_class.starts_with("IPM.Configuration.") =>
+                {
+                    Some(MapiValue::String("text/xml".to_string()))
+                }
+                PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
+                    Some(MapiValue::U32(0))
+                }
+                0x685D_0003 if is_outlook_contacts_helper_config(message) => {
+                    Some(MapiValue::U32(outlook_configuration_stamp(message)))
+                }
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    if is_outlook_contacts_helper_config(message) =>
+                {
+                    Some(MapiValue::Binary(Vec::new()))
+                }
+                tag if is_outlook_contacts_helper_config(message) => {
+                    outlook_contact_link_empty_property_value(tag)
+                }
+                PID_TAG_VIEW_DESCRIPTOR_FLAGS
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    Some(MapiValue::U32(14_745_605))
+                }
+                PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    Some(MapiValue::U32(8))
+                }
+                PID_TAG_VIEW_DESCRIPTOR_NAME_W
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    Some(MapiValue::String(message.subject.clone()))
+                }
+                PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    let definition =
+                        outlook_folder_view_definition(message.folder_id, &message.subject);
+                    log_view_definition_diagnostics(
+                        message.folder_id,
+                        message.id,
+                        &message.subject,
+                        &definition,
+                    );
+                    Some(MapiValue::String(view_descriptor_strings(&definition)))
+                }
+                PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    Some(MapiValue::U32(0))
+                }
+                PID_TAG_VIEW_DESCRIPTOR_BINARY
+                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
+                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    let definition =
+                        outlook_folder_view_definition(message.folder_id, &message.subject);
+                    log_view_definition_diagnostics(
+                        message.folder_id,
+                        message.id,
+                        &message.subject,
+                        &definition,
+                    );
+                    Some(MapiValue::Binary(view_descriptor_binary(&definition)))
+                }
+                OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
+                    if message.message_class
+                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
+                {
+                    let definition =
+                        outlook_folder_view_definition(message.folder_id, &message.subject);
+                    log_view_definition_diagnostics(
+                        message.folder_id,
+                        message.id,
+                        &message.subject,
+                        &definition,
+                    );
+                    Some(MapiValue::Binary(view_descriptor_strings_binary(
+                        &definition,
+                    )))
+                }
+                tag if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                    && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_CLSID) =>
+                {
+                    Some(guid_property_value(
+                        property_tag,
+                        *message.canonical_id.as_bytes(),
+                    ))
+                }
+                tag if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                    && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) =>
+                {
+                    Some(guid_property_value(
+                        property_tag,
+                        common_view_named_view_folder_type_guid(),
+                    ))
+                }
+                tag if message.message_class
+                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+                    && property_tag_id_matches(tag, PID_TAG_WLINK_GROUP_HEADER_ID) =>
+                {
+                    Some(guid_property_value(
+                        property_tag,
+                        default_wlink_group_guid(),
+                    ))
+                }
+                PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+                }
+                PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::String(String::new()))
+                }
+                PID_LID_OUTLOOK_SHARING_REMOTE_UID_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::String(String::new()))
+                }
+                PID_LID_OUTLOOK_SHARING_LOCAL_TYPE_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::Guid(Uuid::nil().into_bytes()))
+                }
+                PID_NAME_SHARING_SEND_AS_STATE_TAG | PID_LID_OUTLOOK_SHARING_8AA6_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::U32(0))
+                }
+                PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
+                    if is_outlook_virtual_sharing_state_config(message) =>
+                {
+                    Some(MapiValue::U32(0))
+                }
+                0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
+                    Some(MapiValue::U32(outlook_configuration_stamp(message)))
+                }
+                PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+                _ => None,
             }
-            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
-                if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-            {
-                let definition =
-                    outlook_folder_view_definition(message.folder_id, &message.subject);
-                log_view_definition_diagnostics(
-                    message.folder_id,
-                    message.id,
-                    &message.subject,
-                    &definition,
-                );
-                Some(MapiValue::Binary(view_descriptor_strings_binary(
-                    &definition,
-                )))
-            }
-            tag if message.message_class
-                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_CLSID) =>
-            {
-                Some(guid_property_value(
-                    property_tag,
-                    *message.canonical_id.as_bytes(),
-                ))
-            }
-            tag if message.message_class
-                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) =>
-            {
-                Some(guid_property_value(
-                    property_tag,
-                    common_view_named_view_folder_type_guid(),
-                ))
-            }
-            tag if message.message_class
-                == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                && property_tag_id_matches(tag, PID_TAG_WLINK_GROUP_HEADER_ID) =>
-            {
-                Some(guid_property_value(
-                    property_tag,
-                    default_wlink_group_guid(),
-                ))
-            }
-            PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::Guid(Uuid::nil().into_bytes()))
-            }
-            PID_LID_OUTLOOK_SHARING_REMOTE_NAME_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::String(String::new()))
-            }
-            PID_LID_OUTLOOK_SHARING_REMOTE_UID_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::String(String::new()))
-            }
-            PID_LID_OUTLOOK_SHARING_LOCAL_TYPE_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::Guid(Uuid::nil().into_bytes()))
-            }
-            PID_NAME_SHARING_SEND_AS_STATE_TAG | PID_LID_OUTLOOK_SHARING_8AA6_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::U32(0))
-            }
-            PID_LID_OUTLOOK_SHARING_CAPABILITIES_TAG
-                if is_outlook_virtual_sharing_state_config(message) =>
-            {
-                Some(MapiValue::U32(0))
-            }
-            0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
-                Some(MapiValue::U32(outlook_configuration_stamp(message)))
-            }
-            PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-            _ => None,
-        }
-    })
+        })
 }
 
 fn associated_config_last_modified_filetime(message: &MapiAssociatedConfigMessage) -> Option<u64> {
@@ -915,7 +937,7 @@ fn configuration_fallback_binary_stream(message_class: &str) -> Vec<u8> {
 }
 
 pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn minimal_custom_action_roaming_xml_stream() -> Vec<u8> {

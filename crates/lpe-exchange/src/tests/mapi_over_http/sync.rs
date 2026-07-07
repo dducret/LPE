@@ -7659,6 +7659,11 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
                 .collect::<String>()
         )
     );
+    let dictionary = configs[0].properties_json["0x7c070102"]["value"]
+        .as_str()
+        .expect("dictionary hex");
+    assert_ne!(dictionary, "3c786d6c2f3e");
+    assert!(dictionary.contains("392d30"), "{dictionary}");
 }
 
 #[tokio::test]

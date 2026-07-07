@@ -134,6 +134,7 @@ pub(in crate::mapi) fn create_session(
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
+        default_view_advertisements: HashMap::new(),
         inbox_associated_config_stream_handles: HashSet::new(),
         inbox_rule_organizer_stream_handles: HashSet::new(),
         logon_identity: None,

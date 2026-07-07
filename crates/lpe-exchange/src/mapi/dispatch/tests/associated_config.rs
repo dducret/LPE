@@ -398,6 +398,51 @@ fn associated_config_mutation_uses_saved_handle_when_snapshot_misses_row() {
 }
 
 #[test]
+fn associated_config_persist_normalizes_stale_configuration_roaming_dictionary() {
+    let properties = HashMap::from([
+        (
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string()),
+        ),
+        (
+            PID_TAG_ROAMING_DICTIONARY,
+            MapiValue::Binary(b"<xml/>".to_vec()),
+        ),
+    ]);
+
+    let normalized = normalized_associated_config_persisted_properties(
+        "ipm.configuration.umolk.useroptions",
+        &properties,
+    );
+
+    match normalized.get(&PID_TAG_ROAMING_DICTIONARY) {
+        Some(MapiValue::Binary(value)) => {
+            let text = std::str::from_utf8(value).expect("dictionary xml");
+            assert!(text.contains("18-OLPrefsVersion"), "{text}");
+            assert!(text.contains("9-0"), "{text}");
+            assert_ne!(value.as_slice(), b"<xml/>");
+        }
+        other => panic!("unexpected dictionary value: {other:?}"),
+    }
+}
+
+#[test]
+fn associated_config_persist_leaves_non_configuration_roaming_dictionary_unchanged() {
+    let properties = HashMap::from([(
+        PID_TAG_ROAMING_DICTIONARY,
+        MapiValue::Binary(b"<xml/>".to_vec()),
+    )]);
+
+    let normalized =
+        normalized_associated_config_persisted_properties("IPM.Custom.Message", &properties);
+
+    assert_eq!(
+        normalized.get(&PID_TAG_ROAMING_DICTIONARY),
+        Some(&MapiValue::Binary(b"<xml/>".to_vec()))
+    );
+}
+
+#[test]
 fn calendar_configuration_debug_contract_uses_roaming_properties() {
     let object = mapi_mailstore::SpecialMessageSyncFact {
         folder_id: CALENDAR_FOLDER_ID,
@@ -489,7 +534,7 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
         "{summary}"
     );
     assert!(
-        !summary.contains("class=IPM.Configuration.MessageListSettings"),
+        summary.contains("class=IPM.Configuration.MessageListSettings"),
         "{summary}"
     );
     assert!(

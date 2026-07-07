@@ -86,6 +86,13 @@ pub(super) async fn append_open_table_response<S>(
                 ));
                 return;
             }
+            let input_handle_value = input_handle(handle_slots, request);
+            let input_debug_kind =
+                mapi_object_debug_kind(input_object(session, handle_slots, request));
+            let input_debug_folder =
+                mapi_object_debug_folder_id(input_object(session, handle_slots, request));
+            let input_debug_context =
+                format_handle_lineage_context(input_object(session, handle_slots, request));
             let folder_id = input_object(session, handle_slots, request)
                 .and_then(|object| object.folder_id())
                 .unwrap_or(ROOT_FOLDER_ID);
@@ -120,6 +127,38 @@ pub(super) async fn append_open_table_response<S>(
                 )
             };
             responses.extend_from_slice(&get_hierarchy_table_response(request, row_count));
+            let hierarchy_context = format!(
+                "phase=open;request_id={request_id};request_rops={request_rop_names};input_index={};input_handle={};input_kind={input_debug_kind};input_folder={input_debug_folder};input_context={input_debug_context};output_index={};output_handle={handle};folder=0x{folder_id:016x};role={};row_count={row_count}",
+                request.input_handle_index().unwrap_or(0),
+                format_optional_debug_handle(input_handle_value),
+                request.output_handle_index.unwrap_or(0),
+                debug_role_for_folder_id(folder_id)
+            );
+            session.record_last_table_context(hierarchy_context.clone());
+            session.record_outlook_view_failure_trace_event(format!(
+                "hierarchy_table_open:{hierarchy_context}"
+            ));
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = %request_id,
+                request_rop_id = "0x04",
+                input_handle_index = request.input_handle_index().unwrap_or(0),
+                input_handle_value = %format_optional_debug_handle(input_handle_value),
+                input_object_kind = input_debug_kind,
+                input_folder_id = %input_debug_folder,
+                input_handle_context = %input_debug_context,
+                output_handle_index = request.output_handle_index.unwrap_or(0),
+                output_handle_value = handle,
+                folder_id = %format!("0x{folder_id:016x}"),
+                folder_role = debug_role_for_folder_id(folder_id),
+                hierarchy_row_count = row_count,
+                microsoft_reference = "MS-OXCFOLD 2.2.1.13/3.1.4.4.2.13; MS-OXCROPS 2.2.4.13",
+                "rca debug mapi hierarchy table opened"
+            );
             if folder_id == INBOX_FOLDER_ID {
                 session.record_last_inbox_hierarchy_table_context(format!(
                     "input_index={};output_index={};output_handle={};row_count={row_count};expected_subfolders=false",

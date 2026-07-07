@@ -116,6 +116,43 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             %debug_context_or_none(
                 &post_hierarchy.last_post_visible_inbox_release_create_save_batch_context
             ),
+        visible_inbox_open_create_save_batch_count =
+            post_hierarchy.visible_inbox_open_create_save_batch_count,
+        last_visible_inbox_open_create_save_batch_context =
+            %debug_context_or_none(
+                &post_hierarchy.last_visible_inbox_open_create_save_batch_context
+            ),
+        last_post_hierarchy_create_save_object_context =
+            %debug_context_or_none(
+                &post_hierarchy.last_post_hierarchy_create_save_object_context
+            ),
+        post_visible_release_hierarchy_query_position_count =
+            post_hierarchy.post_visible_release_hierarchy_query_position_count,
+        first_post_visible_release_hierarchy_query_position_context =
+            %debug_context_or_none(
+                &post_hierarchy
+                    .first_post_visible_release_hierarchy_query_position_context
+            ),
+        outlook_umolk_named_property_probe_count =
+            session
+                .post_hierarchy_actions
+                .outlook_umolk_named_property_probe_count,
+        last_outlook_umolk_named_property_probe_context =
+            %debug_context_or_none(
+                &session
+                    .post_hierarchy_actions
+                    .last_outlook_umolk_named_property_probe_context
+            ),
+        outlook_umolk_getprops_not_found_count =
+            session
+                .post_hierarchy_actions
+                .outlook_umolk_getprops_not_found_count,
+        last_outlook_umolk_getprops_materialization_context =
+            %debug_context_or_none(
+                &session
+                    .post_hierarchy_actions
+                    .last_outlook_umolk_getprops_materialization_context
+            ),
         outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
         logon_response_present = logon.present,
         logon_error_code = %logon.error_code,
@@ -125,6 +162,98 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         response_rop_buffer_preview = %hex_preview(response_rop_buffer, 160),
         message = message,
     );
+
+    if should_log_execute_stalled_before_content_sync(
+        endpoint,
+        &post_hierarchy.last_completed_hierarchy_sync_root,
+        post_hierarchy.content_sync_configure_observed,
+        post_hierarchy.close_kind,
+    ) {
+        tracing::warn!(
+            rca_debug = true,
+            rca_warning = %post_hierarchy.close_kind,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
+            request_rop_sequence_signature = %sequence_signature,
+            response_rop_ids = %response.ids_csv,
+            response_rop_results_best_effort = %response.results_csv,
+            post_hierarchy_close_kind = %post_hierarchy.close_kind,
+            outlook_bootstrap_phase = post_hierarchy.outlook_bootstrap_phase,
+            outlook_bootstrap_phase_name = post_hierarchy.outlook_bootstrap_phase_name,
+            outlook_bootstrap_stall_code = post_hierarchy.outlook_bootstrap_stall_code,
+            outlook_bootstrap_stall_name = post_hierarchy.outlook_bootstrap_stall_name,
+            outlook_bootstrap_next_expected_phase =
+                post_hierarchy.outlook_bootstrap_next_expected_phase,
+            post_hierarchy_last_hierarchy_query_position_context =
+                %debug_context_or_none(
+                    &post_hierarchy.last_hierarchy_table_query_position_context
+                ),
+            post_visible_release_hierarchy_query_position_count =
+                post_hierarchy.post_visible_release_hierarchy_query_position_count,
+            first_post_visible_release_hierarchy_query_position_context =
+                %debug_context_or_none(
+                    &post_hierarchy
+                        .first_post_visible_release_hierarchy_query_position_context
+                ),
+            post_visible_findrow_release_hierarchy_query_position_count =
+                post_hierarchy.post_visible_findrow_release_hierarchy_query_position_count,
+            first_post_visible_findrow_release_hierarchy_query_position_context =
+                %debug_context_or_none(
+                    &post_hierarchy
+                        .first_post_visible_findrow_release_hierarchy_query_position_context
+                ),
+            post_visible_inbox_release_create_save_batch_count =
+                post_hierarchy.post_visible_inbox_release_create_save_batch_count,
+            last_post_visible_inbox_release_create_save_batch_context =
+                %debug_context_or_none(
+                    &post_hierarchy.last_post_visible_inbox_release_create_save_batch_context
+                ),
+            visible_inbox_open_create_save_batch_count =
+                post_hierarchy.visible_inbox_open_create_save_batch_count,
+            last_visible_inbox_open_create_save_batch_context =
+                %debug_context_or_none(
+                    &post_hierarchy.last_visible_inbox_open_create_save_batch_context
+                ),
+            last_post_hierarchy_create_save_object_context =
+                %debug_context_or_none(
+                    &post_hierarchy.last_post_hierarchy_create_save_object_context
+                ),
+            outlook_umolk_named_property_probe_count =
+                session
+                    .post_hierarchy_actions
+                    .outlook_umolk_named_property_probe_count,
+            last_outlook_umolk_named_property_probe_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_outlook_umolk_named_property_probe_context
+                ),
+            outlook_umolk_getprops_not_found_count =
+                session
+                    .post_hierarchy_actions
+                    .outlook_umolk_getprops_not_found_count,
+            last_outlook_umolk_getprops_materialization_context =
+                %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_outlook_umolk_getprops_materialization_context
+                ),
+            outlook_view_trace_events = %post_hierarchy.outlook_view_trace_events,
+            next_debug_focus = "outlook_execute_stall_before_content_sync",
+            "rca warn mapi outlook execute stalled before content sync"
+        );
+    }
 
     if logon.present {
         let response_store_identity_matches_session = logon.mailbox_guid
@@ -415,6 +544,21 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             "rca debug mapi post hierarchy execute probe"
         );
     }
+}
+
+pub(in crate::mapi::dispatch) fn should_log_execute_stalled_before_content_sync(
+    endpoint: &str,
+    last_completed_hierarchy_sync_root: &str,
+    content_sync_configure_observed: bool,
+    post_hierarchy_close_kind: &str,
+) -> bool {
+    endpoint == "emsmdb"
+        && !last_completed_hierarchy_sync_root.is_empty()
+        && !content_sync_configure_observed
+        && !matches!(
+            post_hierarchy_close_kind,
+            "post_hierarchy_no_close" | "outlook_post_hierarchy_execute_before_content_sync"
+        )
 }
 
 pub(in crate::mapi::dispatch) fn log_execute_dispatch_start_debug(

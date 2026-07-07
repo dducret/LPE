@@ -1141,12 +1141,176 @@ fn getprops_view_response_values_debug_decodes_default_view_entry_id() {
 #[test]
 fn set_property_debug_names_cover_folder_special_properties() {
     assert_eq!(
+        set_property_debug_name(PID_TAG_DISPLAY_NAME_W),
+        "PidTagDisplayName"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_FOLDER_ID), "PidTagFolderId");
+    assert_eq!(
+        set_property_debug_name(PID_TAG_PARENT_FOLDER_ID),
+        "PidTagParentFolderId"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_TYPE),
+        "PidTagFolderType"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_CONTENT_COUNT),
+        "PidTagContentCount"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_CONTENT_UNREAD_COUNT),
+        "PidTagContentUnreadCount"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_SUBFOLDERS),
+        "PidTagSubfolders"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_PRIVATE), "PidTagPrivate");
+    assert_eq!(
+        set_property_debug_name(PID_TAG_RESOURCE_FLAGS),
+        "PidTagResourceFlags"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_SERIALIZED_REPLID_GUID_MAP),
+        "PidTagSerializedReplidGuidMap"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_USER_ENTRY_ID),
+        "PidTagUserEntryId"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_MAILBOX_OWNER_ENTRY_ID),
+        "PidTagMailboxOwnerEntryId"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_MAILBOX_OWNER_NAME_W),
+        "PidTagMailboxOwnerName"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID),
+        "PidTagIpmPublicFoldersEntryId"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_USER_GUID), "PidTagUserGuid");
+    assert_eq!(
+        set_property_debug_name(PID_TAG_ASSOCIATED_SHARING_PROVIDER),
+        "PidTagAssociatedSharingProvider"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_SERVER_TYPE_DISPLAY_NAME_W),
+        "PidTagServerTypeDisplayName"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_MESSAGE_SIZE_EXTENDED),
+        "PidTagMessageSizeExtended"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_PROHIBIT_RECEIVE_QUOTA),
+        "PidTagProhibitReceiveQuota"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_PROHIBIT_SEND_QUOTA),
+        "PidTagProhibitSendQuota"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_STORAGE_QUOTA_LIMIT),
+        "PidTagStorageQuotaLimit"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_PST_PATH_W), "PidTagPstPath");
+    assert_eq!(
+        set_property_debug_name(PID_TAG_CHANGE_KEY),
+        "PidTagChangeKey"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_LAST_MODIFICATION_TIME),
+        "PidTagLastModificationTime"
+    );
+    assert_eq!(
+        set_property_debug_name(OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+        "OutlookAssociatedConfigBinary0E0B"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_CLSID),
+        "PidTagViewDescriptorCLSID"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_FLAGS),
+        "PidTagViewDescriptorFlags"
+    );
+    assert_eq!(
+        set_property_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
+        "OutlookCommonViewDescriptorBinary6835"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_VERSION),
+        "PidTagViewDescriptorVersion"
+    );
+    assert_eq!(
+        set_property_debug_name(OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
+        "OutlookCommonViewDescriptorStrings683C"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE),
+        "PidTagViewDescriptorFolderType"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
+        "PidTagViewDescriptorViewMode"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_BINARY),
+        "PidTagViewDescriptorBinary"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
+        "PidTagViewDescriptorStrings"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_NAME_W),
+        "PidTagViewDescriptorName"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
+        "PidTagViewDescriptorVersionCanonical"
+    );
+    assert_eq!(
         set_property_debug_name(PID_TAG_CONTAINER_CLASS_W),
         "PidTagContainerClass"
     );
     assert_eq!(
+        set_property_debug_name(PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+        "PidTagDefaultViewEntryId"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+        "PidTagDefaultPostMessageClass"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_DEFAULT_FORM_NAME_W),
+        "PidTagDefaultFormName"
+    );
+    assert_eq!(
         set_property_debug_name(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX),
         "PidTagAdditionalRenEntryIdsEx"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_FORM_FLAGS),
+        "PidTagFolderFormFlags"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_WEBVIEWINFO),
+        "PidTagFolderWebViewInfo"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_XVIEWINFO_E),
+        "PidTagFolderXViewInfoE"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_VIEWS_ONLY),
+        "PidTagFolderViewsOnly"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_FORM_STORAGE),
+        "PidTagFolderFormStorage"
     );
     assert_eq!(
         set_property_debug_name(PID_TAG_EXTENDED_FOLDER_FLAGS),
@@ -1179,6 +1343,37 @@ fn set_property_debug_names_cover_folder_special_properties() {
     assert_eq!(
         set_property_debug_name(PID_TAG_SEARCH_FOLDER_DEFINITION),
         "PidTagSearchFolderDefinition"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_ARCHIVE_TAG),
+        "PidTagArchiveTag"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_POLICY_TAG),
+        "PidTagPolicyTag"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_RETENTION_PERIOD),
+        "PidTagRetentionPeriod"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_RETENTION_FLAGS),
+        "PidTagRetentionFlags"
+    );
+    assert_eq!(
+        set_property_debug_name(PID_TAG_ARCHIVE_PERIOD),
+        "PidTagArchivePeriod"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_RIGHTS), "PidTagRights");
+    assert_eq!(
+        set_property_debug_name(PID_TAG_FOLDER_VIEWLIST_FLAGS),
+        "PidTagFolderViewListFlags"
+    );
+    assert_eq!(set_property_debug_name(PID_TAG_ACCESS), "PidTagAccess");
+    assert_eq!(set_property_debug_name(0x6672_0102), "PidTagMemberName");
+    assert_eq!(
+        set_property_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
+        "OutlookUndocumentedFolderBinary120C"
     );
     assert_eq!(
         set_property_debug_name(PID_TAG_WLINK_ENTRY_ID),
