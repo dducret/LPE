@@ -339,6 +339,9 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
+        "default_view_id_owners": defaultdict(set),
+        "default_view_id_collision_contexts": set(),
+        "default_view_id_collisions": Counter(),
         "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
@@ -425,7 +428,10 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                     summary,
                     str(fields.get("umolk_getprops_materialization_context") or ""),
                 )
-            elif message == "rca debug outlook hierarchy table query rows response":
+            release_context = fields.get("release_without_query_rows_context")
+            if isinstance(release_context, str) and release_context:
+                record_visible_release_context(summary, release_context)
+            if message == "rca debug outlook hierarchy table query rows response":
                 record_hierarchy_query_window(summary, fields)
             for key in (
                 "view_handoff_table_contract",
@@ -579,18 +585,28 @@ def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
                     summary["stale_default_view_states"][f"{role}->{owner_role}"] += 1
         if segment.startswith("visible_inbox_release_without_query_rows:"):
             after_visible_release = True
-            if segment not in summary["visible_release_contexts"]:
-                summary["visible_release_contexts"].add(segment)
-                record_visible_release_classification(summary, segment)
-                record_visible_release_descriptor_window(summary, segment)
+            record_visible_release_context(summary, segment)
         if (
             after_visible_release
             or "after_visible_inbox_release_without_query_rows=true" in segment
         ):
             record_post_visible_release_terminal_event(summary, segment)
         record_default_view_query_position_without_rows(summary, segment)
+        record_default_view_id_collision(summary, segment)
         record_descriptor_gap(summary, segment)
         inspect_contract(summary, segment)
+
+
+def record_visible_release_context(summary: dict[str, Any], text: str) -> None:
+    if text.startswith("visible_inbox_release_without_query_rows:"):
+        segment = text
+    else:
+        segment = f"visible_inbox_release_without_query_rows:{text}"
+    if segment in summary["visible_release_contexts"]:
+        return
+    summary["visible_release_contexts"].add(segment)
+    record_visible_release_classification(summary, segment)
+    record_visible_release_descriptor_window(summary, segment)
 
 
 def record_post_visible_release_terminal_event(
@@ -640,6 +656,26 @@ def record_post_visible_release_terminal_event(
     detail = ";".join(detail_parts)
     summary["post_visible_release_terminal_events"][detail] += 1
     summary["post_visible_release_terminal_tail"].append(detail)
+
+
+def record_default_view_id_collision(summary: dict[str, Any], segment: str) -> None:
+    if not segment.startswith("default_view_advertised:"):
+        return
+    fields = segment.split(":", 1)[1]
+    view_id = first_field(fields, "view")
+    owner_folder = first_field(fields, "owner_folder")
+    if not view_id or not owner_folder:
+        return
+    owners = summary.setdefault("default_view_id_owners", defaultdict(set))[view_id]
+    owners.add(owner_folder)
+    if len(owners) < 2:
+        return
+    key = f"view={view_id};owners={','.join(sorted(owners))}"
+    contexts = summary.setdefault("default_view_id_collision_contexts", set())
+    if key in contexts:
+        return
+    contexts.add(key)
+    summary["default_view_id_collisions"][key] += 1
 
 
 def record_visible_release_classification(summary: dict[str, Any], text: str) -> None:
@@ -1131,6 +1167,11 @@ def print_single_summary(
             limit=12,
         )
         print_counter(
+            "Default-view ID collisions",
+            log["default_view_id_collisions"],
+            limit=8,
+        )
+        print_counter(
             "Calendar zero-duration timed rows at QueryPosition",
             log["calendar_zero_duration_timed_query_position_rows"],
             limit=12,
@@ -1231,6 +1272,7 @@ def print_batch_summary(
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
+    aggregate_default_view_id_collisions: Counter[str] = Counter()
     aggregate_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     aggregate_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     aggregate_descriptor_gap_windows: Counter[str] = Counter()
@@ -1253,6 +1295,7 @@ def print_batch_summary(
     current_umolk_dictionary_shapes: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
+    current_default_view_id_collisions: Counter[str] = Counter()
     current_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     current_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     current_nonzero_response_codes: Counter[str] = Counter()
@@ -1309,6 +1352,7 @@ def print_batch_summary(
         aggregate_default_view_query_position_without_rows.update(
             log["default_view_query_position_without_rows"]
         )
+        aggregate_default_view_id_collisions.update(log["default_view_id_collisions"])
         aggregate_calendar_zero_duration_timed_query_position_rows.update(
             log["calendar_zero_duration_timed_query_position_rows"]
         )
@@ -1363,6 +1407,7 @@ def print_batch_summary(
             current_default_view_query_position_without_rows.update(
                 log["default_view_query_position_without_rows"]
             )
+            current_default_view_id_collisions.update(log["default_view_id_collisions"])
             current_calendar_zero_duration_timed_query_position_rows.update(
                 log["calendar_zero_duration_timed_query_position_rows"]
             )
@@ -1484,6 +1529,11 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate default-view ID collisions",
+        aggregate_default_view_id_collisions,
+        limit=20,
+    )
+    print_counter(
         "Aggregate Calendar zero-duration timed rows at QueryPosition",
         aggregate_calendar_zero_duration_timed_query_position_rows,
         limit=20,
@@ -1586,6 +1636,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build default-view ID collisions",
+            current_default_view_id_collisions,
+            limit=20,
+        )
+        print_counter(
             "Current-build Calendar zero-duration timed rows at QueryPosition",
             current_calendar_zero_duration_timed_query_position_rows,
             limit=20,
@@ -1657,6 +1712,9 @@ def issue_buckets(
     if log.get("default_view_query_position_without_rows"):
         for name, _count in log["default_view_query_position_without_rows"].most_common(2):
             issues.append(f"default_view_query_position_without_rows:{name}")
+    if log.get("default_view_id_collisions"):
+        for name, _count in log["default_view_id_collisions"].most_common(2):
+            issues.append(f"default_view_id_collision:{name}")
     if log.get("calendar_zero_duration_timed_query_position_rows"):
         issues.append("calendar_zero_duration_timed_query_position_row")
     if log.get("post_calendar_query_position_named_property_probes"):

@@ -832,7 +832,7 @@ fn inbox_associated_named_view_debug_summaries_report_folder_local_default_view(
     );
     let expected_id = format!(
         "id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID)
+        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
     );
     assert!(values.contains(&expected_id), "{values}");
     assert!(wire.contains(&expected_id), "{wire}");

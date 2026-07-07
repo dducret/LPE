@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Track the Calendar default-view descriptor fix and the follow-up pattern to apply
-to Contacts, Tasks, Notes, and Journal only after the Calendar run proves the
-change helps Outlook progress.
+Track the Calendar default-view descriptor fix and the follow-up pattern that
+was later applied to Contacts, Tasks, Notes, and Journal as Outlook traces proved
+those folders also need type-specific default-view metadata during startup.
 
 ## Current Calendar Evidence
 
@@ -57,10 +57,17 @@ Validation run before the next Outlook test:
 - `cargo test -p lpe-exchange outlook_view_descriptor_visible_property_tags_reports_calendar_columns`
 - `cargo test -p lpe-exchange calendar_view_handoff_table_contract_reports_calendar_default_view`
 
-## Apply Pattern Later
+## Current Advertising Policy
 
-Do not blindly expand every descriptor. For each folder type, first confirm the
-same failure shape in a real Outlook run:
+Calendar, Contacts, Tasks, Notes, and Journal now advertise
+`PidTagDefaultViewEntryId` with folder-local, type-specific default view
+descriptors. The earlier investigation gate is closed because Calendar evidence
+and later Outlook traces proved the default-view path is required for these
+folder classes.
+
+Do not blindly expand any descriptor beyond the backed properties already
+advertised for that folder type. For each future descriptor change, first confirm
+the same failure shape in a real Outlook run:
 
 1. The folder's normal contents table reaches `QueryPosition`.
 2. LPE can project at least one row for the folder.
@@ -70,7 +77,9 @@ same failure shape in a real Outlook run:
    descriptor does not advertise.
 
 Only then align the descriptor with the Outlook-selected backed columns and add
-focused tests.
+focused tests. The decision point is no longer default-view publication for
+Tasks, Notes, or Journal; they should publish one. The remaining decision is
+whether their existing descriptor columns are complete for the latest trace.
 
 ## Folder Follow-Up Checklist
 

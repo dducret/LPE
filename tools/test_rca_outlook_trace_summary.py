@@ -3,7 +3,7 @@ import io
 import json
 import shutil
 import unittest
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -26,6 +26,7 @@ def empty_log_summary() -> dict:
         "resolved_named_getprops_tags": set(),
         "zero_default_tags": Counter(),
         "descriptor_gap_windows": Counter(),
+        "visible_release_without_query_rows": 0,
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "setcolumns_release_response_frames": Counter(),
@@ -39,6 +40,9 @@ def empty_log_summary() -> dict:
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
+        "default_view_id_owners": defaultdict(set),
+        "default_view_id_collision_contexts": set(),
+        "default_view_id_collisions": Counter(),
         "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "stale_default_view_contexts": set(),
@@ -372,6 +376,23 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
         )
 
+    def test_standalone_visible_release_context_is_classified(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_context(
+            summary,
+            "request_id={A}:141;handle=29;row_count=1;"
+            "column_support=backed=0x67480014,0x0037001f;defaulted=;"
+            "selected_missing_descriptor_columns=;"
+            "descriptor_sort_tag=0x0e060040;table_primary_sort_tag=0x0e060040",
+        )
+
+        self.assertEqual(summary["visible_release_without_query_rows"], 0)
+        self.assertEqual(
+            summary["visible_release_classifications"],
+            Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
     def test_view_trace_records_terminal_events_after_visible_release(self) -> None:
         summary = empty_log_summary()
 
@@ -404,6 +425,29 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "event=default_view_folder_open;role=journal;"
                 "view=Journal;request={A}:201",
             ],
+        )
+
+    def test_default_view_id_collision_records_reused_folder_local_view_id(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_view_trace(
+            summary,
+            "default_view_advertised:request_id={A}:1;"
+            "owner_folder=0x0000000000100001;view_folder=0x0000000000100001;"
+            "view=0x7fffffffffe90001;name=Calendar>"
+            "default_view_advertised:request_id={A}:2;"
+            "owner_folder=0x0000000000110001;view_folder=0x0000000000110001;"
+            "view=0x7fffffffffe90001;name=Journal",
+        )
+
+        self.assertEqual(
+            summary["default_view_id_collisions"],
+            Counter(
+                {
+                    "view=0x7fffffffffe90001;"
+                    "owners=0x0000000000100001,0x0000000000110001": 1
+                }
+            ),
         )
 
     def test_setcolumns_release_response_frame_is_counted_from_execute_fields(self) -> None:
@@ -714,6 +758,33 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertIn(
             "default_view_folder_open_without_rows:"
             "role=calendar;folder=0x0000000000100001",
+            rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_reports_default_view_id_collision(self) -> None:
+        log = {
+            "visible_release_without_query_rows": 0,
+            "post_visible_release_followups": Counter(),
+            "default_view_folder_open_without_rows": Counter(),
+            "default_view_query_position_without_rows": Counter(),
+            "default_view_id_collisions": Counter(
+                {
+                    "view=0x7fffffffffe90001;"
+                    "owners=0x0000000000100001,0x0000000000110001": 1
+                }
+            ),
+            "post_calendar_query_position_named_property_probes": Counter(),
+            "raw_umolk_placeholder": 0,
+            "stale_default_view_states": Counter(),
+            "descriptor_gap_windows": Counter(),
+            "stall_warnings": Counter(),
+            "startup_missing_gates": Counter(),
+        }
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn(
+            "default_view_id_collision:view=0x7fffffffffe90001;"
+            "owners=0x0000000000100001,0x0000000000110001",
             rca.issue_buckets(rr, log, None),
         )
 
