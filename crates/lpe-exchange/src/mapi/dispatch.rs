@@ -768,7 +768,6 @@ where
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
     let mut response_handle_indexes = Vec::new();
-    let mut response_handle_slots = handle_slots.clone();
     let mut post_hierarchy_release_events = Vec::new();
     let mut same_execute_released_handles = HashSet::new();
     let mut created_emails: Vec<JmapEmail> = Vec::new();
@@ -792,7 +791,6 @@ where
         if let Some(response) = unknown_property_wire_type_response(principal, &request) {
             responses.extend_from_slice(&response);
             response_handle_indexes.push(request.response_handle_index());
-            response_handle_slots = handle_slots.clone();
             break;
         }
         match RopId::from_u8(typed_request.rop_id()) {
@@ -1157,24 +1155,22 @@ where
             None => {
                 append_unsupported_unknown_dispatch_response(&request, &mut responses);
                 response_handle_indexes.push(request.response_handle_index());
-                response_handle_slots = handle_slots.clone();
                 break;
             }
         }
         if responses.len() != response_len_before {
             response_handle_indexes.push(request.response_handle_index());
-            response_handle_slots = handle_slots.clone();
             if matches!(
                 RopId::from_u8(typed_request.rop_id()),
                 Some(RopId::SaveChangesMessage)
             ) {
-                if let Some(handle) = input_handle(&response_handle_slots, &request) {
+                if let Some(handle) = input_handle(&handle_slots, &request) {
                     if let Some(folder_id) =
                         session.handles.get(&handle).and_then(MapiObject::folder_id)
                     {
                         restore_save_changes_containing_folder_response_handle(
                             session,
-                            &mut response_handle_slots,
+                            &mut handle_slots,
                             &request,
                             folder_id,
                         );
@@ -1204,14 +1200,9 @@ where
         &post_hierarchy_release_events,
         &responses,
     );
-    let final_handle_slots = if request_has_release && !responses.is_empty() {
-        &response_handle_slots
-    } else {
-        &handle_slots
-    };
     finalize_execute_rop_buffer(
         responses,
-        final_handle_slots,
+        &handle_slots,
         &output_handles,
         &response_handle_indexes,
         echo_input_handle_table,

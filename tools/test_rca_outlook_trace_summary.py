@@ -30,6 +30,8 @@ def empty_log_summary() -> dict:
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "setcolumns_release_response_frames": Counter(),
+        "setcolumns_release_response_handle_tables": Counter(),
+        "setcolumns_release_response_handle_classifications": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_terminal_events": Counter(),
@@ -458,12 +460,52 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             {
                 "request_rop_names": "SetColumns,Release,Release,Release",
                 "response_rop_frames": "0x12@0..7:len=7:out=33:rv=0x00000000",
+                "request_rop_raw_frames": "0x12@0..30:len=30:logon=0:in=0:out=-:payload=27|0x01@30..33:len=3:logon=0:in=0:out=-:payload=0",
+                "output_handle_table_summary": "count=1;handles=0x00000022",
             },
         )
 
         self.assertEqual(
             summary["setcolumns_release_response_frames"],
             Counter({"0x12@0..7:len=7:out=33:rv=0x00000000": 1}),
+        )
+        self.assertEqual(
+            summary["setcolumns_release_response_handle_classifications"],
+            Counter({"released_slot_reused_in_response_handle_table": 1}),
+        )
+
+    def test_setcolumns_release_response_classifies_invalidated_handle_slot(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_setcolumns_release_response(
+            summary,
+            {
+                "request_rop_names": "SetColumns,Release,Release,Release",
+                "request_rop_raw_frames": "0x12@0..30:len=30:logon=0:in=0:out=-:payload=27|0x01@30..33:len=3:logon=0:in=0:out=-:payload=0",
+                "output_handle_table_summary": "count=1;handles=0x00000000",
+            },
+        )
+
+        self.assertEqual(
+            summary["setcolumns_release_response_handle_classifications"],
+            Counter({"released_slot_invalidated_in_response_handle_table": 1}),
+        )
+
+    def test_setcolumns_release_response_checks_all_release_slots(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_setcolumns_release_response(
+            summary,
+            {
+                "request_rop_names": "SetColumns,Release,Release,Release",
+                "request_rop_raw_frames": "0x12@0..30:len=30:logon=0:in=0:out=-:payload=27|0x01@30..33:len=3:logon=3:in=1:out=-:payload=0|0x01@33..36:len=3:logon=3:in=2:out=-:payload=0|0x01@36..39:len=3:logon=0:in=0:out=-:payload=0",
+                "output_handle_table_summary": "count=1;handles=0x00000022",
+            },
+        )
+
+        self.assertEqual(
+            summary["setcolumns_release_response_handle_classifications"],
+            Counter({"released_slot_reused_in_response_handle_table": 1}),
         )
 
     def test_rr_summary_counts_setcolumns_release_response_frame(self) -> None:
@@ -475,7 +517,9 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             "response_status": 200,
             "metadata": {
                 "request_rop_names": "SetColumns,Release,Release,Release",
+                "request_handle_table": "count=3;handles=0x00000022,0x00000056,0x00000055",
                 "response_rop_frames": "0x12@0..7:len=7:out=33:rv=0x00000000",
+                "response_handle_table_bytes": "4",
                 "response_rop_buffer_preview": "000004000d000d0009001200000000000021",
             },
         }
@@ -498,6 +542,34 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["setcolumns_release_response_previews"],
             Counter({"000004000d000d0009001200000000000021": 1}),
+        )
+        self.assertEqual(
+            summary["setcolumns_release_response_handle_classifications"],
+            Counter({"released_slot_non_request_handle_in_response_handle_table": 1}),
+        )
+
+    def test_rr_summary_classifies_stale_released_handle(self) -> None:
+        metadata = {
+            "request_handle_table": "count=3;handles=0x00000022,0x00000056,0x00000055",
+            "response_handle_table_bytes": "4",
+            "response_rop_buffer_preview": "000004000d000d0009001200000000000022000000",
+        }
+
+        self.assertEqual(
+            rca.classify_rr_setcolumns_release_response(metadata),
+            "released_slot_reused_in_response_handle_table",
+        )
+
+    def test_rr_summary_classifies_invalidated_released_handle(self) -> None:
+        metadata = {
+            "request_handle_table": "count=3;handles=0x00000022,0x00000056,0x00000055",
+            "response_handle_table_bytes": "4",
+            "response_rop_buffer_preview": "000004000d000d0009001200000000000000000000",
+        }
+
+        self.assertEqual(
+            rca.classify_rr_setcolumns_release_response(metadata),
+            "released_slot_invalidated_in_response_handle_table",
         )
 
     def test_umolk_dictionary_shapes_are_counted_from_context(self) -> None:

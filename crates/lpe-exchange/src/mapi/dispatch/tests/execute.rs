@@ -148,10 +148,16 @@ fn mixed_create_save_batch_preserves_save_response_folder_handle_slot() {
 
 #[test]
 fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
-    let response_handles =
-        execute_response_handle_table(&[0x12, 0x01, 0, 0, 0, 0, 0], &[25], &[], &[0], true, true);
+    let response_handles = execute_response_handle_table(
+        &[0x12, 0x01, 0, 0, 0, 0, 0],
+        &[u32::MAX],
+        &[],
+        &[0],
+        true,
+        true,
+    );
 
-    assert_eq!(response_handles, vec![25]);
+    assert_eq!(response_handles, vec![0]);
 }
 
 #[test]
@@ -183,17 +189,17 @@ fn mixed_setcolumns_trailing_release_returns_invalid_released_handle() {
 }
 
 #[test]
-fn outlook_setcolumns_then_release_same_slot_uses_response_boundary_handle_snapshot() {
+fn outlook_setcolumns_then_release_same_slot_returns_post_release_handle_table() {
     let response_handles = execute_response_handle_table(
         &[0x12, 0x00, 0, 0, 0, 0, 0],
-        &[28, 80, 79],
+        &[u32::MAX, 80, 79],
         &[],
         &[0],
         true,
         true,
     );
 
-    assert_eq!(response_handles, vec![28]);
+    assert_eq!(response_handles, vec![0]);
 }
 
 #[test]

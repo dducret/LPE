@@ -230,6 +230,7 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
         "request_sequences": Counter(),
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_previews": Counter(),
+        "setcolumns_release_response_handle_classifications": Counter(),
     }
     for path in trace_jsonl_paths(trace_dir):
         summary["files"] += 1
@@ -272,7 +273,41 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
                         preview = str(metadata.get("response_rop_buffer_preview") or "missing")
                         summary["setcolumns_release_response_frames"][frames] += 1
                         summary["setcolumns_release_response_previews"][preview] += 1
+                        summary["setcolumns_release_response_handle_classifications"][
+                            classify_rr_setcolumns_release_response(metadata)
+                        ] += 1
     return summary
+
+
+def classify_rr_setcolumns_release_response(metadata: dict[str, Any]) -> str:
+    response_handles = parse_rr_response_handle_table(metadata)
+    if not response_handles:
+        return "response_handle_table_unknown"
+    if response_handles[0].lower() in {"0x00000000", "0xffffffff"}:
+        return "released_slot_invalidated_in_response_handle_table"
+    request_handles = parse_handle_table_summary(str(metadata.get("request_handle_table") or ""))
+    if request_handles and response_handles[0].lower() == request_handles[0].lower():
+        return "released_slot_reused_in_response_handle_table"
+    return "released_slot_non_request_handle_in_response_handle_table"
+
+
+def parse_rr_response_handle_table(metadata: dict[str, Any]) -> list[str]:
+    try:
+        handle_bytes = int(str(metadata.get("response_handle_table_bytes") or "0"))
+    except ValueError:
+        return []
+    preview = str(metadata.get("response_rop_buffer_preview") or "")
+    if handle_bytes <= 0 or len(preview) < handle_bytes * 2:
+        return []
+    handle_hex = preview[-handle_bytes * 2 :]
+    handles = []
+    for offset in range(0, len(handle_hex), 8):
+        chunk = handle_hex[offset : offset + 8]
+        if len(chunk) != 8:
+            return []
+        value = int.from_bytes(bytes.fromhex(chunk), "little")
+        handles.append(f"0x{value:08x}")
+    return handles
 
 
 def rr_event_tail_summary(event: dict[str, Any], metadata: dict[str, Any]) -> str:
@@ -329,6 +364,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "setcolumns_release_response_frames": Counter(),
+        "setcolumns_release_response_handle_tables": Counter(),
+        "setcolumns_release_response_handle_classifications": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_terminal_events": Counter(),
@@ -421,6 +458,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 inspect_contract(summary, contract, fields)
             elif message == "rca debug mapi get properties named property context":
                 record_resolved_named_property_context(summary, fields)
+            elif message == "rca debug mapi setcolumns release response framing":
+                record_setcolumns_release_response(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi umolk getprops materialization":
@@ -707,9 +746,52 @@ def record_setcolumns_release_response(
     if field_text(fields, "request_rop_names") != "SetColumns,Release,Release,Release":
         return
     frames = field_text(fields, "response_rop_frames")
-    if not frames:
-        return
-    summary["setcolumns_release_response_frames"][frames] += 1
+    if frames:
+        summary["setcolumns_release_response_frames"][frames] += 1
+    handle_table = field_text(fields, "output_handle_table_summary")
+    if handle_table:
+        summary["setcolumns_release_response_handle_tables"][handle_table] += 1
+        summary["setcolumns_release_response_handle_classifications"][
+            classify_setcolumns_release_response_handle_table(fields, handle_table)
+        ] += 1
+
+
+def classify_setcolumns_release_response_handle_table(
+    fields: dict[str, Any], handle_table: str
+) -> str:
+    request_frames = field_text(fields, "request_rop_raw_frames")
+    release_indexes = [
+        int(match.group(1))
+        for match in re.finditer(r"0x01@[^|]*:in=(\d+):", request_frames)
+    ]
+    if not release_indexes:
+        return "release_input_slot_unknown"
+    handles = parse_handle_table_summary(handle_table)
+    if not handles:
+        return "response_handle_table_unknown"
+    saw_trimmed = False
+    saw_invalidated = False
+    for release_index in release_indexes:
+        if release_index >= len(handles):
+            saw_trimmed = True
+            continue
+        handle = handles[release_index].lower()
+        if handle in {"0x00000000", "0xffffffff"}:
+            saw_invalidated = True
+            continue
+        return "released_slot_reused_in_response_handle_table"
+    if saw_invalidated:
+        return "released_slot_invalidated_in_response_handle_table"
+    if saw_trimmed:
+        return "released_slot_trimmed_from_response_handle_table"
+    return "release_input_slot_unknown"
+
+
+def parse_handle_table_summary(summary: str) -> list[str]:
+    match = re.search(r"(?:^|;)handles=([^;]+)", summary)
+    if not match:
+        return []
+    return [part.strip() for part in match.group(1).split(",") if part.strip()]
 
 
 def record_default_view_query_position_without_rows(
@@ -1078,6 +1160,11 @@ def print_single_summary(
         rr["setcolumns_release_response_previews"],
         limit=8,
     )
+    print_counter(
+        "RR SetColumns+Release response handle classifications",
+        rr["setcolumns_release_response_handle_classifications"],
+        limit=8,
+    )
 
     sessions = rr["sessions"]
     if sessions:
@@ -1190,6 +1277,16 @@ def print_single_summary(
         print_counter(
             "Journal SetColumns+Release response frames",
             log["setcolumns_release_response_frames"],
+            limit=8,
+        )
+        print_counter(
+            "Journal SetColumns+Release response handle tables",
+            log["setcolumns_release_response_handle_tables"],
+            limit=8,
+        )
+        print_counter(
+            "Journal SetColumns+Release response handle classifications",
+            log["setcolumns_release_response_handle_classifications"],
             limit=8,
         )
         print_counter(

@@ -7076,6 +7076,15 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     );
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG),
+        None
+    );
+    let compact_view = MapiAssociatedConfigMessage {
+        message_class: crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
+        subject: "Compact".to_string(),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value(&compact_view, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG),
         Some(MapiValue::U32(0))
     );
     assert_eq!(
