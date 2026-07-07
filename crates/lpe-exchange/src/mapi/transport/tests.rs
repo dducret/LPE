@@ -1,5 +1,7 @@
 use super::*;
-use crate::mapi::transport::diagnostics::post_hierarchy_close_kind;
+use crate::mapi::transport::diagnostics::{
+    advertised_default_view_pending_open_is_primary, post_hierarchy_close_kind,
+};
 use crate::mapi::wire::RopId;
 
 fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
@@ -1209,6 +1211,44 @@ fn post_hierarchy_close_kind_classifies_default_view_followup() {
         post_hierarchy_close_kind(&state, false),
         "outlook_default_view_followup_after_visible_inbox_handoff"
     );
+}
+
+#[test]
+fn advertised_default_view_pending_open_is_primary_without_visible_inbox_release() {
+    let mut session = test_session(HashMap::new());
+
+    session.record_default_view_advertised(
+        "request:175",
+        OUTBOX_FOLDER_ID,
+        OUTBOX_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        "Messages",
+    );
+
+    assert!(advertised_default_view_pending_open_is_primary(&session));
+}
+
+#[test]
+fn advertised_default_view_pending_open_is_not_primary_after_visible_inbox_release() {
+    let mut session = test_session(HashMap::new());
+
+    session.record_default_view_advertised(
+        "request:175",
+        OUTBOX_FOLDER_ID,
+        OUTBOX_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        "Messages",
+    );
+    session
+        .post_hierarchy_actions
+        .inbox_normal_contents_table_setcolumns_observed = true;
+    session
+        .post_hierarchy_actions
+        .last_inbox_related_release_context =
+        "visible_inbox_release_without_query_rows=true;handle=32".to_string();
+
+    assert!(session.advertised_default_view_pending_open());
+    assert!(!advertised_default_view_pending_open_is_primary(&session));
 }
 
 #[test]

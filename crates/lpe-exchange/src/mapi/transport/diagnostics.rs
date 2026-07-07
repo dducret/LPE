@@ -639,6 +639,13 @@ pub(in crate::mapi) fn post_hierarchy_close_kind(
     }
 }
 
+pub(in crate::mapi) fn advertised_default_view_pending_open_is_primary(
+    session: &MapiSession,
+) -> bool {
+    session.advertised_default_view_pending_open()
+        && !visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions)
+}
+
 pub(in crate::mapi) fn partial_scope_checkpoint_not_stored_count(
     actions: &PostHierarchyActionState,
 ) -> usize {
@@ -883,6 +890,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         session.abandoned_after_inbox_fai_query_rows();
     let outlook_startup_gates = outlook_startup_gate_summary(session);
     let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
+    let advertised_default_view_pending_open_is_primary =
+        advertised_default_view_pending_open_is_primary(session);
     let default_view_advertisement_state = session.default_view_advertisement_state();
     let default_view_advertisement_summary = session.default_view_advertisement_summary();
     let default_view_folder_open_without_query_rows = !session
@@ -896,7 +905,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         "client_abandoned_after_inbox_fai_query_rows"
     } else if visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions) {
         "visible_inbox_released_after_setcolumns_before_query_rows"
-    } else if advertised_default_view_pending_open {
+    } else if advertised_default_view_pending_open_is_primary {
         "advertised_default_view_not_opened"
     } else if default_view_folder_open_without_query_rows {
         "default_view_folder_open_without_query_rows"
@@ -1018,7 +1027,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
 
     if endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
-        && advertised_default_view_pending_open
+        && advertised_default_view_pending_open_is_primary
     {
         tracing::info!(
             rca_debug = true,

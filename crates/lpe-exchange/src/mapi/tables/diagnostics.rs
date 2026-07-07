@@ -146,15 +146,29 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         index,
                         "inbox_contents",
                         mapi_message_id(email),
-                        None,
                         Some(INBOX_FOLDER_ID),
                         None,
-                        |tag| email_property_value(email, tag),
+                        None,
+                        |tag| inbox_contents_row_invariant_property_value(email, tag),
                     )
                 })
                 .collect()
         }
         _ => Vec::new(),
+    }
+}
+
+fn inbox_contents_row_invariant_property_value(
+    email: &JmapEmail,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_INST_ID => Some(MapiValue::U64(mapi_message_id(email))),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(mapi_message_id(email)),
+        )),
+        tag => email_property_value(email, tag),
     }
 }
 
@@ -220,8 +234,10 @@ where
         .as_deref()
         .and_then(crate::mapi::identity::object_id_from_folder_entry_id);
 
-    let folder_id_consistent = expected_folder_id
-        .is_none_or(|expected| folder_id == Some(expected) && entry_id_decoded == Some(expected));
+    let folder_id_consistent = expected_folder_id.is_none_or(|expected| {
+        folder_id == Some(expected)
+            && (row_kind == "inbox_contents" || entry_id_decoded == Some(expected))
+    });
     let parent_id_consistent = expected_parent_id.is_none_or(|expected| {
         parent_source_key_decoded == Some(expected) && parent_entry_id_decoded == Some(expected)
     });
@@ -234,6 +250,7 @@ where
     let instance_key_stable_non_empty =
         instance_key.as_ref().is_some_and(|bytes| !bytes.is_empty());
     let folder_property_row = !row_kind.ends_with("_associated") && row_kind != "inbox_contents";
+    let record_key_required = row_kind != "inbox_contents";
     let folder_type_valid = !folder_property_row
         || folder_type
             .is_some_and(|value| matches!(value, FOLDER_ROOT | FOLDER_GENERIC | FOLDER_SEARCH));
@@ -251,7 +268,7 @@ where
         (!folder_id_consistent).then_some("folder_id"),
         (!parent_id_consistent).then_some("parent_id"),
         (!source_key_stable_non_empty).then_some("source_key"),
-        (!record_key_stable_non_empty).then_some("record_key"),
+        (record_key_required && !record_key_stable_non_empty).then_some("record_key"),
         (!instance_key_stable_non_empty).then_some("instance_key"),
         (!folder_type_valid).then_some("folder_type"),
         (!content_count_present_non_negative).then_some("content_count"),

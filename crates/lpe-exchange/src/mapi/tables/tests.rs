@@ -326,6 +326,75 @@ fn inbox_associated_invariant_uses_mailbox_guid_entry_id() {
 }
 
 #[test]
+fn inbox_contents_invariant_accepts_message_identity_columns() {
+    let mailbox_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+    let email_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+    let mailbox = JmapMailbox {
+        id: mailbox_id,
+        parent_id: None,
+        role: "inbox".to_string(),
+        name: "Inbox".to_string(),
+        sort_order: 0,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let email = test_table_email(email_id, mailbox_id, "Inbox row");
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(0x1a5),
+    );
+    let object = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: false,
+        columns: vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: std::collections::HashSet::new(),
+        restriction: None,
+        bookmarks: std::collections::HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+
+    let summaries = outlook_bootstrap_row_invariant_summaries(
+        Some(&object),
+        std::slice::from_ref(&mailbox),
+        std::slice::from_ref(&email),
+        &MapiMailStoreSnapshot::empty(),
+        Uuid::nil(),
+        true,
+        1,
+    );
+
+    assert_eq!(summaries.len(), 1, "{summaries:?}");
+    assert!(
+        summaries[0].contains("kind=inbox_contents"),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries[0].contains("folder_id=0x0000000000050001"),
+        "{summaries:?}"
+    );
+    assert!(
+        summaries[0].contains("folder_id_consistent=true"),
+        "{summaries:?}"
+    );
+    assert!(summaries[0].contains("issues=none"), "{summaries:?}");
+}
+
+#[test]
 fn common_views_invariant_reports_decoded_row_identity() {
     let mailbox_guid = Uuid::parse_str("bc737006-4413-49b9-aefc-3cb6e0088492").unwrap();
     let object = MapiObject::ContentsTable {
