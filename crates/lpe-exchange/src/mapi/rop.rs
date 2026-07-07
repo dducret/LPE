@@ -965,7 +965,7 @@ fn umolk_associated_config_empty_property_default(object: Option<&MapiObject>, t
     else {
         return false;
     };
-    saved_message.message_class == "IPM.Configuration.UMOLK.UserOptions"
+    crate::mapi_store::is_outlook_umolk_user_options_message_class(&saved_message.message_class)
         && MapiPropertyTag::new(tag).property_type().is_some()
 }
 

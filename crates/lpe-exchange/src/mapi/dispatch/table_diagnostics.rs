@@ -70,7 +70,7 @@ pub(super) fn format_ipm_configuration_contract_summary(
         .associated_config_messages_for_folder(folder_id)
         .into_iter()
         .filter(|message| {
-            message.message_class.starts_with("IPM.Configuration.")
+            crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
                 && associated_config_visible_in_table(folder_id, None, message)
         })
         .collect::<Vec<_>>();

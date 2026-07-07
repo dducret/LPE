@@ -219,11 +219,13 @@ pub(crate) use associated_config::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID;
 use associated_config::*;
 pub(crate) use associated_config::{
     is_outlook_common_views_default_named_view_id,
-    is_outlook_common_views_default_navigation_shortcut_id,
-    is_outlook_contact_default_associated_config_id, is_outlook_default_conversation_action_id,
-    is_outlook_default_folder_named_view_id, is_outlook_inbox_default_associated_config_id,
+    is_outlook_common_views_default_navigation_shortcut_id, is_outlook_configuration_message_class,
+    is_outlook_configuration_message_class_name, is_outlook_contact_default_associated_config_id,
+    is_outlook_default_conversation_action_id, is_outlook_default_folder_named_view_id,
+    is_outlook_inbox_default_associated_config_id,
     is_outlook_inbox_virtual_only_associated_config_id, is_outlook_local_freebusy_message_id,
     is_outlook_quick_step_default_associated_config_id,
+    is_outlook_umolk_user_options_message_class,
     modeled_virtual_associated_config_message_for_canonical_id,
     outlook_default_folder_named_view_name, outlook_inbox_broad_startup_associated_config_defaults,
     outlook_inbox_exact_virtual_associated_config_for_message_class,

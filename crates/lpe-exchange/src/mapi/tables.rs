@@ -923,8 +923,10 @@ pub(in crate::mapi) fn rop_find_row_response(
 fn exact_virtual_elc_find_row_probe(folder_id: u64, row: &AssociatedTableRow) -> bool {
     folder_id == INBOX_FOLDER_ID
         && associated_table_row_config(row).is_some_and(|message| {
-            message.message_class == "IPM.Configuration.ELC"
-                && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+            crate::mapi_store::is_outlook_configuration_message_class_name(
+                &message.message_class,
+                "IPM.Configuration.ELC",
+            ) && crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
         })
 }
 

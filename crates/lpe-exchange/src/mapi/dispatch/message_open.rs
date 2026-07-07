@@ -352,7 +352,7 @@ pub(super) fn append_open_message_response(
             },
         );
         if folder_id == INBOX_FOLDER_ID
-            && (message.message_class.starts_with("IPM.Configuration.")
+            && (crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
                 || message.message_class == "IPM.ExtendedRule.Message")
         {
             session.record_inbox_associated_config_open();

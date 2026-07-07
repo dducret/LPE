@@ -301,10 +301,13 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
     if folder_id == CALENDAR_FOLDER_ID
-        && message.message_class.starts_with("IPM.Configuration.")
+        && crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
         && is_broad_outlook_configuration_restriction(restriction)
     {
-        return message.message_class == "IPM.Configuration.Calendar";
+        return crate::mapi_store::is_outlook_configuration_message_class_name(
+            &message.message_class,
+            "IPM.Configuration.Calendar",
+        );
     }
     if folder_id != INBOX_FOLDER_ID {
         return true;
@@ -318,19 +321,28 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         return true;
     }
     if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
-        return matches!(
-            message.message_class.as_str(),
-            "IPM.Configuration.ELC"
-                | "IPM.Configuration.MRM"
-                | "IPM.Configuration.UMOLK.UserOptions"
-                | "IPM.Sharing.Configuration"
-                | "IPM.Sharing.Index"
-                | "IPM.Aggregation"
-        ) && restriction.is_some_and(|restriction| {
-            message_class_restriction_matches_exact(restriction, &message.message_class)
-        });
+        return (crate::mapi_store::is_outlook_configuration_message_class_name(
+            &message.message_class,
+            "IPM.Configuration.ELC",
+        ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+            &message.message_class,
+            "IPM.Configuration.MRM",
+        ) || crate::mapi_store::is_outlook_umolk_user_options_message_class(
+            &message.message_class,
+        ) || message
+            .message_class
+            .eq_ignore_ascii_case("IPM.Sharing.Configuration")
+            || message
+                .message_class
+                .eq_ignore_ascii_case("IPM.Sharing.Index")
+            || message
+                .message_class
+                .eq_ignore_ascii_case("IPM.Aggregation"))
+            && restriction.is_some_and(|restriction| {
+                message_class_restriction_matches_exact(restriction, &message.message_class)
+            });
     }
-    if message.message_class.starts_with("IPM.Configuration.") {
+    if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         if is_broad_outlook_configuration_restriction(restriction) {
             return is_inbox_broad_startup_config_class(message);
         }
@@ -348,7 +360,7 @@ fn is_inbox_broad_startup_config_visible(
     restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    if !message.message_class.starts_with("IPM.Configuration.") {
+    if !crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         return false;
     }
     let exact = restriction.is_some_and(|restriction| {
@@ -396,7 +408,9 @@ pub(super) fn message_class_restriction_matches_exact(
 }
 
 fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
-    if message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
+    if message
+        .message_class
+        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
         && message.subject == "Compact"
     {
         return message
@@ -404,7 +418,7 @@ fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessag
             .as_object()
             .is_some_and(|object| object.is_empty());
     }
-    if !message.message_class.starts_with("IPM.Configuration.") {
+    if !crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         return false;
     }
     let properties = mapi_properties_from_json(&message.properties_json);
@@ -548,7 +562,7 @@ fn sanitize_configuration_property_value(
     value: MapiValue,
 ) -> MapiValue {
     if property_tag == PID_TAG_ROAMING_DICTIONARY
-        && message_class.starts_with("IPM.Configuration.")
+        && crate::mapi_store::is_outlook_configuration_message_class(message_class)
         && matches!(&value, MapiValue::Binary(bytes) if bytes == b"<xml/>")
     {
         return MapiValue::Binary(minimal_roaming_dictionary_stream());
@@ -642,7 +656,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     }) as i64,
                 )),
                 PID_TAG_ROAMING_DATATYPES
-                    if message.message_class.starts_with("IPM.Configuration.") =>
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
                 {
                     Some(MapiValue::U32(configuration_roaming_datatypes(
                         &message.message_class,
@@ -650,27 +666,38 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     )))
                 }
                 PID_TAG_ROAMING_DICTIONARY
-                    if message.message_class.starts_with("IPM.Configuration.") =>
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
                 {
-                    (!matches!(
-                        message.message_class.as_str(),
-                        "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
-                    ) && !properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
+                    (!configuration_uses_xml_stream(&message.message_class)
+                        && !properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
                     .then(|| MapiValue::Binary(minimal_roaming_dictionary_stream()))
                 }
                 PID_TAG_ROAMING_XML_STREAM
-                    if message.message_class == "IPM.Configuration.WorkHours" =>
+                    if crate::mapi_store::is_outlook_configuration_message_class_name(
+                        &message.message_class,
+                        "IPM.Configuration.WorkHours",
+                    ) =>
                 {
                     (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
                         .then(|| MapiValue::Binary(minimal_working_hours_roaming_xml_stream()))
                 }
                 PID_TAG_ROAMING_XML_STREAM
-                    if message.message_class == "IPM.Configuration.CategoryList" =>
+                    if crate::mapi_store::is_outlook_configuration_message_class_name(
+                        &message.message_class,
+                        "IPM.Configuration.CategoryList",
+                    ) =>
                 {
                     (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
                         .then(|| MapiValue::Binary(minimal_category_list_roaming_xml_stream()))
                 }
-                PID_TAG_ROAMING_XML_STREAM if message.message_class == "IPM.Configuration.MRM" => {
+                PID_TAG_ROAMING_XML_STREAM
+                    if crate::mapi_store::is_outlook_configuration_message_class_name(
+                        &message.message_class,
+                        "IPM.Configuration.MRM",
+                    ) =>
+                {
                     (!properties.contains_key(&PID_TAG_ROAMING_DATATYPES))
                         .then(|| MapiValue::Binary(minimal_mrm_roaming_xml_stream()))
                 }
@@ -693,19 +720,25 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     Some(MapiValue::Binary(Vec::new()))
                 }
                 OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    if message.message_class.starts_with("IPM.Configuration.") =>
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
                 {
                     Some(MapiValue::Binary(configuration_fallback_binary_stream(
                         &message.message_class,
                     )))
                 }
                 PID_NAME_CONTENT_CLASS_W_TAG
-                    if message.message_class.starts_with("IPM.Configuration.") =>
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
                 {
                     Some(MapiValue::String("urn:content-classes:message".to_string()))
                 }
                 PID_NAME_CONTENT_TYPE_W_TAG
-                    if message.message_class.starts_with("IPM.Configuration.") =>
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
                 {
                     Some(MapiValue::String("text/xml".to_string()))
                 }
@@ -850,7 +883,11 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(MapiValue::U32(0))
                 }
-                0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
+                0x685D_0003
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
+                {
                     Some(MapiValue::U32(outlook_configuration_stamp(message)))
                 }
                 PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
@@ -916,11 +953,10 @@ fn configuration_roaming_datatypes(
         datatypes |= 0x0000_0004;
     }
     if datatypes == 0 {
-        match message_class {
-            "IPM.Configuration.CategoryList"
-            | "IPM.Configuration.MRM"
-            | "IPM.Configuration.WorkHours" => 0x0000_0002,
-            _ => 0x0000_0004,
+        if configuration_uses_xml_stream(message_class) {
+            0x0000_0002
+        } else {
+            0x0000_0004
         }
     } else {
         datatypes
@@ -928,12 +964,37 @@ fn configuration_roaming_datatypes(
 }
 
 fn configuration_fallback_binary_stream(message_class: &str) -> Vec<u8> {
-    match message_class {
-        "IPM.Configuration.WorkHours" => minimal_working_hours_roaming_xml_stream(),
-        "IPM.Configuration.CategoryList" => minimal_category_list_roaming_xml_stream(),
-        "IPM.Configuration.MRM" => minimal_mrm_roaming_xml_stream(),
-        _ => minimal_roaming_dictionary_stream(),
+    if crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.WorkHours",
+    ) {
+        minimal_working_hours_roaming_xml_stream()
+    } else if crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.CategoryList",
+    ) {
+        minimal_category_list_roaming_xml_stream()
+    } else if crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.MRM",
+    ) {
+        minimal_mrm_roaming_xml_stream()
+    } else {
+        minimal_roaming_dictionary_stream()
     }
+}
+
+fn configuration_uses_xml_stream(message_class: &str) -> bool {
+    crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.CategoryList",
+    ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.MRM",
+    ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+        message_class,
+        "IPM.Configuration.WorkHours",
+    )
 }
 
 pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {

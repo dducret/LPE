@@ -142,8 +142,10 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
     let dictionary_configuration_objects = configuration_objects
         .iter()
         .filter(|object| {
-            object.message_class == "IPM.Configuration.Calendar"
-                && special_binary_property_len(object, PID_TAG_ROAMING_DICTIONARY).is_some()
+            crate::mapi_store::is_outlook_configuration_message_class_name(
+                &object.message_class,
+                "IPM.Configuration.Calendar",
+            ) && special_binary_property_len(object, PID_TAG_ROAMING_DICTIONARY).is_some()
         })
         .count();
     let xml_configuration_objects = configuration_objects
@@ -183,17 +185,22 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
             .filter(|tag| {
                 !configuration_objects.iter().any(|object| match *tag {
                     PID_TAG_ROAMING_DICTIONARY => {
-                        object.message_class == "IPM.Configuration.Calendar"
-                            && object
-                                .named_properties
-                                .iter()
-                                .any(|(present, _)| present == tag)
+                        crate::mapi_store::is_outlook_configuration_message_class_name(
+                            &object.message_class,
+                            "IPM.Configuration.Calendar",
+                        ) && object
+                            .named_properties
+                            .iter()
+                            .any(|(present, _)| present == tag)
                     }
                     PID_TAG_ROAMING_XML_STREAM => {
-                        matches!(
-                            object.message_class.as_str(),
-                            "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
-                        ) && object
+                        (crate::mapi_store::is_outlook_configuration_message_class_name(
+                            &object.message_class,
+                            "IPM.Configuration.CategoryList",
+                        ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+                            &object.message_class,
+                            "IPM.Configuration.WorkHours",
+                        )) && object
                             .named_properties
                             .iter()
                             .any(|(present, _)| present == tag)
@@ -449,12 +456,16 @@ pub(in crate::mapi::dispatch) fn is_calendar_configuration_object(
     object: &mapi_mailstore::SpecialMessageSyncFact,
 ) -> bool {
     object.associated
-        && matches!(
-            object.message_class.as_str(),
-            "IPM.Configuration.Calendar"
-                | "IPM.Configuration.CategoryList"
-                | "IPM.Configuration.WorkHours"
-        )
+        && (crate::mapi_store::is_outlook_configuration_message_class_name(
+            &object.message_class,
+            "IPM.Configuration.Calendar",
+        ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+            &object.message_class,
+            "IPM.Configuration.CategoryList",
+        ) || crate::mapi_store::is_outlook_configuration_message_class_name(
+            &object.message_class,
+            "IPM.Configuration.WorkHours",
+        ))
 }
 
 fn special_i64_property(

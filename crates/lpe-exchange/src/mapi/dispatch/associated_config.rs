@@ -337,7 +337,10 @@ pub(super) fn is_empty_inbox_message_list_settings_placeholder(
     properties: &HashMap<u32, MapiValue>,
 ) -> bool {
     folder_id == INBOX_FOLDER_ID
-        && message_class == "IPM.Configuration.MessageListSettings"
+        && crate::mapi_store::is_outlook_configuration_message_class_name(
+            message_class,
+            "IPM.Configuration.MessageListSettings",
+        )
         && properties
             .get(&PID_TAG_ROAMING_DATATYPES)
             .cloned()

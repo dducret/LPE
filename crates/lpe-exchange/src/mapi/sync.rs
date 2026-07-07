@@ -839,7 +839,7 @@ fn associated_config_sync_object(
 fn associated_config_default_sync_tags(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
 ) -> &'static [u32] {
-    if message.message_class.starts_with("IPM.Configuration.") {
+    if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         &[
             PID_TAG_ROAMING_DATATYPES,
             PID_TAG_ROAMING_DICTIONARY,
@@ -847,7 +847,10 @@ fn associated_config_default_sync_tags(
             PID_NAME_CONTENT_CLASS_W_TAG,
             PID_NAME_CONTENT_TYPE_W_TAG,
         ]
-    } else if message.message_class == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS {
+    } else if message
+        .message_class
+        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+    {
         &[
             PID_TAG_VIEW_DESCRIPTOR_CLSID,
             PID_TAG_VIEW_DESCRIPTOR_FLAGS,

@@ -460,7 +460,10 @@ fn record_outlook_umolk_named_property_probe(
                 folder_id: INBOX_FOLDER_ID,
                 config_id,
                 saved_message: Some(saved_message),
-            } if saved_message.message_class == "IPM.Configuration.UMOLK.UserOptions" => {
+            } if crate::mapi_store::is_outlook_umolk_user_options_message_class(
+                &saved_message.message_class,
+            ) =>
+            {
                 Some((*config_id, saved_message.message_class.clone()))
             }
             _ => None,

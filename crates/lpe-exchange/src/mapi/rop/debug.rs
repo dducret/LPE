@@ -1401,7 +1401,7 @@ pub(in crate::mapi) fn format_ipm_configuration_getprops_contract(
     else {
         return format!("found=false;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x}");
     };
-    if !message.message_class.starts_with("IPM.Configuration.") {
+    if !crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         return String::new();
     }
     let datatypes = associated_config_property_value(&message, PID_TAG_ROAMING_DATATYPES)

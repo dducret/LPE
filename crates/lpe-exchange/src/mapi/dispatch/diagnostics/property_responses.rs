@@ -336,7 +336,7 @@ fn record_outlook_umolk_getprops_materialization(
     let Some((config_id, message_class, subject)) = associated_config_debug else {
         return;
     };
-    if message_class != "IPM.Configuration.UMOLK.UserOptions" {
+    if !crate::mapi_store::is_outlook_umolk_user_options_message_class(&message_class) {
         return;
     }
     if session

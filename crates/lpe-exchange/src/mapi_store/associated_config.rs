@@ -528,7 +528,7 @@ pub(super) fn is_stale_outlook_umolk_user_options_placeholder(
     config: &MapiAssociatedConfigRecord,
 ) -> bool {
     if config.folder_id != crate::mapi::identity::INBOX_FOLDER_ID
-        || config.message_class != OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+        || !is_outlook_umolk_user_options_message_class(&config.message_class)
     {
         return false;
     }
@@ -545,6 +545,23 @@ pub(super) fn is_stale_outlook_umolk_user_options_placeholder(
         .is_some_and(|value| {
             value.eq_ignore_ascii_case(OUTLOOK_STALE_USER_OPTIONS_XML_PLACEHOLDER_HEX)
         })
+}
+
+pub(crate) fn is_outlook_configuration_message_class(message_class: &str) -> bool {
+    message_class
+        .get(..18)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Configuration."))
+}
+
+pub(crate) fn is_outlook_configuration_message_class_name(
+    message_class: &str,
+    expected: &str,
+) -> bool {
+    message_class.eq_ignore_ascii_case(expected)
+}
+
+pub(crate) fn is_outlook_umolk_user_options_message_class(message_class: &str) -> bool {
+    message_class.eq_ignore_ascii_case(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS)
 }
 
 pub(super) fn outlook_quick_step_associated_config_defaults(
