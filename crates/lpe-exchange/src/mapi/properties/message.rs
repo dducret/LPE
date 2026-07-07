@@ -29,10 +29,9 @@ pub(in crate::mapi) fn email_property_value(
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
         )),
-        PID_TAG_CLIENT_SUBMIT_TIME => email
-            .sent_at
-            .as_deref()
-            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_CLIENT_SUBMIT_TIME => {
+            Some(MapiValue::U64(email_client_submit_time_filetime(email)))
+        }
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
         PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
@@ -215,6 +214,12 @@ pub(in crate::mapi) fn email_sender_name(email: &JmapEmail) -> &str {
         .or(email.sender_address.as_deref())
         .or(email.from_display.as_deref())
         .unwrap_or(&email.from_address)
+}
+
+pub(in crate::mapi) fn email_client_submit_time_filetime(email: &JmapEmail) -> u64 {
+    mapi_mailstore::filetime_from_rfc3339_utc(
+        email.sent_at.as_deref().unwrap_or(&email.received_at),
+    )
 }
 
 pub(in crate::mapi) fn email_sender_address(email: &JmapEmail) -> &str {

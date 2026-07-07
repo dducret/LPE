@@ -7782,6 +7782,25 @@ fn message_row_projects_containing_folder_ids() {
 }
 
 #[test]
+fn message_row_client_submit_time_falls_back_to_received_time() {
+    let email_id = Uuid::from_u128(0x7173);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x83),
+    );
+    let mut email = test_table_email(email_id, Uuid::from_u128(0x8183), "Imported row");
+    email.received_at = "2026-06-09T19:25:40Z".to_string();
+    email.sent_at = None;
+
+    let row = serialize_message_row(&email, &[PID_TAG_CLIENT_SUBMIT_TIME]);
+
+    assert_eq!(
+        u64::from_le_bytes(row.try_into().unwrap()),
+        mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at)
+    );
+}
+
+#[test]
 fn normal_message_row_projects_outlook_inbox_view_columns() {
     let email_id = Uuid::from_u128(0x7172);
     let mut email = test_table_email(email_id, Uuid::from_u128(0x8182), "Inbox row");

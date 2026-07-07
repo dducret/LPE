@@ -151,14 +151,9 @@ fn serialize_message_row_with_table_instance(
                 &mut row,
                 mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
             ),
-            PID_TAG_CLIENT_SUBMIT_TIME => write_u64(
-                &mut row,
-                email
-                    .sent_at
-                    .as_deref()
-                    .map(mapi_mailstore::filetime_from_rfc3339_utc)
-                    .unwrap_or_default(),
-            ),
+            PID_TAG_CLIENT_SUBMIT_TIME => {
+                write_u64(&mut row, email_client_submit_time_filetime(email))
+            }
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
             PID_TAG_ACCESS_LEVEL => write_u32(&mut row, 1),
             PID_TAG_IMPORTANCE => write_u32(&mut row, 1),

@@ -248,13 +248,9 @@ pub(in crate::mapi::dispatch) fn normal_message_debug_property_value(
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
         )),
-        PID_TAG_CLIENT_SUBMIT_TIME => Some(MapiValue::U64(
-            email
-                .sent_at
-                .as_deref()
-                .map(mapi_mailstore::filetime_from_rfc3339_utc)
-                .unwrap_or_default(),
-        )),
+        PID_TAG_CLIENT_SUBMIT_TIME => {
+            Some(MapiValue::U64(email_client_submit_time_filetime(email)))
+        }
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
         PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),

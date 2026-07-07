@@ -4938,6 +4938,90 @@ fn outlook_compact_view_definition_binary_matches_visible_trace_contract() {
 }
 
 #[test]
+fn client_submit_time_falls_back_to_received_time_for_imported_mail() {
+    let mailbox_id = Uuid::from_u128(0x3333);
+    crate::mapi::identity::remember_mapi_identity(
+        Uuid::from_u128(0x1111),
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 111,
+        ),
+    );
+    let email = JmapEmail {
+        id: Uuid::from_u128(0x1111),
+        thread_id: Uuid::from_u128(0x2222),
+        mailbox_id,
+        mailbox_role: "inbox".to_string(),
+        mailbox_name: "Inbox".to_string(),
+        modseq: 7,
+        mailbox_ids: vec![mailbox_id],
+        mailbox_states: vec![lpe_storage::JmapEmailMailboxState {
+            mailbox_id,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            modseq: 7,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            draft: false,
+        }],
+        received_at: "2026-06-09T19:25:40Z".to_string(),
+        sent_at: None,
+        from_address: "sender@example.test".to_string(),
+        from_display: None,
+        sender_address: None,
+        sender_display: None,
+        sender_authorization_kind: "self".to_string(),
+        submitted_by_account_id: Uuid::nil(),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Imported".to_string(),
+        preview: String::new(),
+        body_text: String::new(),
+        body_html_sanitized: None,
+        unread: false,
+        flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
+        categories: Vec::new(),
+        has_attachments: false,
+        size_octets: 128,
+        internet_message_id: None,
+        mime_blob_ref: None,
+        delivery_status: "stored".to_string(),
+    };
+
+    assert_eq!(
+        email_property_value(&email, PID_TAG_CLIENT_SUBMIT_TIME),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            &email.received_at
+        )))
+    );
+}
+
+#[test]
 fn common_view_sent_to_descriptor_uses_recipient_columns() {
     let compact = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
     let sent_to_definition = outlook_mail_view_definition("Sent To");

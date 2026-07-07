@@ -1,6 +1,6 @@
 import importlib.util
 import io
-import tempfile
+import shutil
 import unittest
 from collections import Counter, deque
 from contextlib import redirect_stdout
@@ -442,18 +442,24 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
 
     def test_trace_dir_for_log_uses_matching_child_run_directory(self) -> None:
-        with tempfile.TemporaryDirectory(dir=MODULE_PATH.parent) as tmp:
-            root = Path(tmp)
+        root = MODULE_PATH.parent / ".rca_trace_dir_for_log_test"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            root.mkdir()
             run = root / "202607070648"
             run.mkdir()
             (run / "outlook-mapi-session.rr.jsonl").write_text("{}", encoding="utf-8")
             log = root / "LPE_last_202607070648.log"
 
             self.assertEqual(rca.trace_dir_for_log(root, log), run)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_trace_dir_for_log_uses_nearest_child_run_directory(self) -> None:
-        with tempfile.TemporaryDirectory(dir=MODULE_PATH.parent) as tmp:
-            root = Path(tmp)
+        root = MODULE_PATH.parent / ".rca_trace_dir_for_log_test"
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            root.mkdir()
             older = root / "202607070646"
             older.mkdir()
             (older / "outlook-mapi-old.rr.jsonl").write_text("{}", encoding="utf-8")
@@ -463,6 +469,8 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             log = root / "LPE_last_202607070648.log"
 
             self.assertEqual(rca.trace_dir_for_log(root, log), nearest)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
     def test_issue_buckets_reports_post_visible_release_followup(self) -> None:
         log = {
