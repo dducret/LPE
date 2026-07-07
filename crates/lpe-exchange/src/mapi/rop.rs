@@ -873,7 +873,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                     | PID_TAG_SENT_MAIL_SVR_EID
                     | PID_TAG_ASSOCIATED
                     | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-            ) || umolk_associated_config_empty_property_default(object, tag)
+            )
         }
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
@@ -954,19 +954,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         }
         _ => false,
     }
-}
-
-fn umolk_associated_config_empty_property_default(object: Option<&MapiObject>, tag: u32) -> bool {
-    let Some(MapiObject::AssociatedConfig {
-        folder_id: INBOX_FOLDER_ID,
-        saved_message: Some(saved_message),
-        ..
-    }) = object
-    else {
-        return false;
-    };
-    crate::mapi_store::is_outlook_umolk_user_options_message_class(&saved_message.message_class)
-        && MapiPropertyTag::new(tag).property_type().is_some()
 }
 
 fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u32) -> bool {

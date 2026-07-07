@@ -2856,7 +2856,7 @@ fn saved_umolk_associated_config_getprops_projects_roaming_dictionary_stream() {
 }
 
 #[test]
-fn umolk_associated_config_property_burst_projects_empty_defaults() {
+fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_not_found() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -2878,40 +2878,11 @@ fn umolk_associated_config_property_burst_projects_empty_defaults() {
             properties_json: serde_json::json!({}),
         }),
     };
-    let expected_config_filetime = mapi_mailstore::filetime_from_change_number(
-        mapi_mailstore::change_number_for_store_id(config_id),
-    ) as i64;
-    let tags: [u32; 30] = [
-        0x9000_0002,
+    let tags = [
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_ROAMING_DICTIONARY,
         0x9001_0003,
-        0x9002_0004,
-        0x8102_0005,
-        0x9029_000A,
-        0x9005_000B,
-        0x9004_0040,
-        0x9012_001E,
-        0x9013_001F,
-        0x9014_0048,
-        0x9015_00FB,
-        0x901E_0102,
-        0x9020_1002,
-        0x8543_1003,
-        0x9021_1014,
-        0x9022_101E,
-        0x9030_101F,
-        0x9031_1048,
-        0x9032_1102,
-        0x9033_3003,
-        0x0E1F_000B,
-        0x1009_0102,
-        0x0071_0102,
-        0x0026_0003,
-        0x0039_0040,
         0x0F02_0040,
-        0x0C1A_001F,
-        0x002B_000B,
-        0x301A_0003,
-        0x9260_001F,
     ];
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -2935,156 +2906,23 @@ fn umolk_associated_config_property_burst_projects_empty_defaults() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
-    let mut cursor = Cursor::new(&response[7..]);
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9000_0002).unwrap(),
-        MapiValue::I16(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9001_0003).unwrap(),
-        MapiValue::I32(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9002_0004).unwrap(),
-        MapiValue::F64(0.0f64.to_bits())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x8102_0005).unwrap(),
-        MapiValue::F64(0.0f64.to_bits())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9029_000A).unwrap(),
-        MapiValue::Error(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9005_000B).unwrap(),
-        MapiValue::Bool(false)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9004_0040).unwrap(),
-        MapiValue::I64(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9012_001E).unwrap(),
-        MapiValue::String(String::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9013_001F).unwrap(),
-        MapiValue::String(String::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9014_0048).unwrap(),
-        MapiValue::Guid([0; 16])
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9015_00FB).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x901E_0102).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9020_1002).unwrap(),
-        MapiValue::MultiI16(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x8543_1003).unwrap(),
-        MapiValue::MultiI32(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9021_1014).unwrap(),
-        MapiValue::MultiI64(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9022_101E).unwrap(),
-        MapiValue::MultiString(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9030_101F).unwrap(),
-        MapiValue::MultiString(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9031_1048).unwrap(),
-        MapiValue::MultiGuid(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9032_1102).unwrap(),
-        MapiValue::MultiBinary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9033_3003).unwrap(),
-        MapiValue::MultiI32(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0E1F_000B).unwrap(),
-        MapiValue::Bool(false)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x1009_0102).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0071_0102).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0026_0003).unwrap(),
-        MapiValue::I32(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0039_0040).unwrap(),
-        MapiValue::I64(expected_config_filetime)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0F02_0040).unwrap(),
-        MapiValue::I64(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0C1A_001F).unwrap(),
-        MapiValue::String(String::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x002B_000B).unwrap(),
-        MapiValue::Bool(false)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x301A_0003).unwrap(),
-        MapiValue::I32(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9260_001F).unwrap(),
-        MapiValue::String(String::new())
-    );
-
-    let non_umolk = MapiObject::AssociatedConfig {
-        folder_id: INBOX_FOLDER_ID,
-        config_id,
-        saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
-            id: config_id,
-            folder_id: INBOX_FOLDER_ID,
-            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555557").unwrap(),
-            message_class: "IPM.Configuration.AccountPrefs".to_string(),
-            subject: "IPM.Configuration.AccountPrefs".to_string(),
-            properties_json: serde_json::json!({}),
-        }),
-    };
-    let response = rop_get_properties_specific_response(
-        &request,
-        Some(&non_umolk),
-        &principal,
-        &[],
-        &[],
-        &MapiMailStoreSnapshot::empty(),
-    );
-
+    assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
     assert_eq!(response[6], 1);
-    assert_eq!(response[7], 0x0A);
+    let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
-        u32::from_le_bytes(response[8..12].try_into().unwrap()),
-        ROP_ERROR_NOT_FOUND
+        parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
+        MapiValue::I32(4)
     );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert!(matches!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DICTIONARY).unwrap(),
+        MapiValue::Binary(value) if value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
+    ));
+    for _ in 0..2 {
+        assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+        assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
+    }
 }
 
 #[test]

@@ -321,7 +321,13 @@ non-canonical LPE state.
   payloads, and the Inbox `IPM.Configuration.UMOLK.UserOptions` exact lookup
   exposes a non-empty modeled roaming-dictionary row because Outlook 2016/2019
   startup traces abandon the Inbox normal contents table after a missing exact
-  UMOLK lookup.
+  UMOLK lookup. UMOLK remains a sparse configuration FAI message: LPE returns
+  real modeled or persisted properties such as `PidTagRoamingDatatypes` and
+  `PidTagRoamingDictionary`, but absent optional properties are reported as
+  `ecNotFound` in `RopGetPropertiesSpecific` instead of being fabricated as
+  typed zero values. This follows `[MS-OXOCFG]` configuration-data storage and
+  `[MS-OXCDATA]` property error semantics while leaving Outlook free to use or
+  persist its own defaults.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`

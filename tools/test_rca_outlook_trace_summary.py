@@ -764,6 +764,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
     def test_issue_buckets_reports_default_view_id_collision(self) -> None:
         log = {
             "visible_release_without_query_rows": 0,
+            "visible_release_classifications": Counter(),
             "post_visible_release_followups": Counter(),
             "default_view_folder_open_without_rows": Counter(),
             "default_view_query_position_without_rows": Counter(),
@@ -785,6 +786,32 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertIn(
             "default_view_id_collision:view=0x7fffffffffe90001;"
             "owners=0x0000000000100001,0x0000000000110001",
+            rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_reports_visible_release_classification(self) -> None:
+        log = {
+            "visible_release_without_query_rows": 1,
+            "visible_release_classifications": Counter(
+                {"valid_projection_complete_setcolumns_before_query_rows": 1}
+            ),
+            "post_visible_release_followups": Counter(),
+            "default_view_folder_open_without_rows": Counter(),
+            "default_view_query_position_without_rows": Counter(),
+            "default_view_id_collisions": Counter(),
+            "calendar_zero_duration_timed_query_position_rows": Counter(),
+            "post_calendar_query_position_named_property_probes": Counter(),
+            "raw_umolk_placeholder": 0,
+            "stale_default_view_states": Counter(),
+            "descriptor_gap_windows": Counter(),
+            "stall_warnings": Counter(),
+            "startup_missing_gates": Counter(),
+        }
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn(
+            "visible_inbox_release_classification:"
+            "valid_projection_complete_setcolumns_before_query_rows",
             rca.issue_buckets(rr, log, None),
         )
 

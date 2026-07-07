@@ -1703,6 +1703,9 @@ def issue_buckets(
         issues.append("rop_parse_error")
     if log["visible_release_without_query_rows"]:
         issues.append("visible_inbox_release_before_query_rows")
+    if log.get("visible_release_classifications"):
+        for name, _count in log["visible_release_classifications"].most_common(2):
+            issues.append(f"visible_inbox_release_classification:{name}")
     if log.get("post_visible_release_followups"):
         for name, _count in log["post_visible_release_followups"].most_common(2):
             issues.append(f"post_visible_release:{name}")
