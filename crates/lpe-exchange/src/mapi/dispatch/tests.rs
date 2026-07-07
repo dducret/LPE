@@ -404,6 +404,18 @@ fn default_view_advertisement_state_tracks_multiple_owner_folders() {
     assert!(contacts_state.contains("opened=false"));
     assert!(session.advertised_default_view_pending_open());
 
+    let tasks_match_state = session.default_view_folder_open_match_state(
+        TASKS_FOLDER_ID,
+        Some((
+            TASKS_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+        )),
+    );
+    assert!(tasks_match_state.contains("advertised=false"));
+    assert!(tasks_match_state.contains("advertised_for_folder=false"));
+    assert!(tasks_match_state.contains("last_advertised_owner=0x00000000000f0001"));
+    assert!(tasks_match_state.contains("entry_id_matches_last_advertised=false"));
+
     let tasks_state = session.default_view_advertisement_state_for_folder(TASKS_FOLDER_ID);
     assert!(tasks_state.contains("none_for_folder=0x0000000000130001"));
     assert!(tasks_state.contains("owner_role=tasks"));

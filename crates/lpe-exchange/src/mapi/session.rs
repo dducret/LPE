@@ -807,22 +807,31 @@ impl MapiSession {
                 !advertised.opened
             );
         }
-        let actions = &self.post_hierarchy_actions;
-        let Some(advertised_owner_folder_id) = actions.last_advertised_default_view_owner_folder_id
+        let Some(last_advertised_owner_folder_id) = self
+            .post_hierarchy_actions
+            .last_advertised_default_view_owner_folder_id
         else {
-            return "advertised=false;opened_folder_matches_owner=false;entry_id_decoded=false;entry_id_matches_advertised=false;pending_open=false".to_string();
+            return "advertised=false;advertised_for_folder=false;opened_folder_matches_owner=false;entry_id_decoded=false;entry_id_matches_advertised=false;pending_open=false".to_string();
         };
         let entry_id_decoded = default_view_target.is_some();
         let entry_id_matches_advertised = default_view_target
             .map(|(view_folder_id, view_message_id)| {
-                actions.last_advertised_default_view_folder_id == Some(view_folder_id)
-                    && actions.last_advertised_default_view_message_id == Some(view_message_id)
+                self.post_hierarchy_actions
+                    .last_advertised_default_view_folder_id
+                    == Some(view_folder_id)
+                    && self
+                        .post_hierarchy_actions
+                        .last_advertised_default_view_message_id
+                        == Some(view_message_id)
             })
             .unwrap_or(false);
         format!(
-            "advertised=true;opened_folder_matches_owner={};entry_id_decoded={entry_id_decoded};entry_id_matches_advertised={entry_id_matches_advertised};pending_open={}",
-            opened_folder_id == advertised_owner_folder_id,
-            !actions.last_advertised_default_view_opened
+            "advertised=false;advertised_for_folder=false;last_advertised_owner=0x{last_advertised_owner_folder_id:016x};last_advertised_owner_role={};opened_folder_matches_owner={};entry_id_decoded={entry_id_decoded};entry_id_matches_last_advertised={entry_id_matches_advertised};pending_last_advertised_open={}",
+            debug_role_for_folder_id(last_advertised_owner_folder_id),
+            opened_folder_id == last_advertised_owner_folder_id,
+            !self
+                .post_hierarchy_actions
+                .last_advertised_default_view_opened
         )
     }
 
