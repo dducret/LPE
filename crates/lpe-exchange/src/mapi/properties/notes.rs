@@ -12,7 +12,10 @@ pub(in crate::mapi) fn note_property_value(
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INST_ID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
             Some(MapiValue::String(note.title.clone()))
         }
@@ -20,6 +23,7 @@ pub(in crate::mapi) fn note_property_value(
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.StickyNote".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(note_size(note))),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(note_size(note))),
@@ -58,7 +62,10 @@ pub(in crate::mapi) fn journal_entry_property_value(
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INST_ID => Some(MapiValue::U64(item_id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
             Some(MapiValue::String(entry.subject.clone()))
         }
@@ -78,6 +85,7 @@ pub(in crate::mapi) fn journal_entry_property_value(
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(entry.message_class.clone())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(journal_entry_size(entry))),
         PID_TAG_MESSAGE_SIZE_EXTENDED => {

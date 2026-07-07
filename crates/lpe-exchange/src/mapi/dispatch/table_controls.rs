@@ -1026,6 +1026,8 @@ pub(super) fn append_query_rows_response(
         } else {
             columns.clone()
         };
+        let hierarchy_wire_row_summary =
+            format_hierarchy_query_rows_wire_summary(&response, &selected_columns, 8);
         let after_visible_inbox_release_without_query_rows = session
             .post_hierarchy_actions
             .last_inbox_related_release_context
@@ -1034,13 +1036,14 @@ pub(super) fn append_query_rows_response(
                 .post_hierarchy_actions
                 .inbox_normal_contents_table_query_rows_observed;
         session.record_outlook_view_failure_trace_event(format!(
-            "hierarchy_query_rows:request_id={request_id};folder=0x{folder_id:016x};role={};input_index={};handle={};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_origin=0x{response_origin:02x};response_row_count={row_count};columns={};after_view_handoff={};after_visible_inbox_release_without_query_rows={};last_visible_release={}",
+            "hierarchy_query_rows:request_id={request_id};folder=0x{folder_id:016x};role={};input_index={};handle={};queried_position={queried_position};current_position_after={position};requested_forward_read={};requested_row_count={};response_origin=0x{response_origin:02x};response_row_count={row_count};columns={};hierarchy_rows={};after_view_handoff={};after_visible_inbox_release_without_query_rows={};last_visible_release={}",
             debug_role_for_folder_id(*folder_id),
             request.input_handle_index().unwrap_or(0),
             format_optional_debug_handle(input_handle_value),
             request.query_forward_read(),
             request.query_row_count().unwrap_or(0),
             format_debug_property_tags(&selected_columns),
+            hierarchy_wire_row_summary,
             session
                 .post_hierarchy_actions
                 .outlook_view_failure_trace_events

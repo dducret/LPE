@@ -101,7 +101,7 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 != released_handle =>
         {
             Some(format!(
-                "request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={}",
+                "request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={}",
                 format_optional_debug_handle(released_handle),
                 position,
                 folder_message_count(*folder_id, mailboxes, emails, snapshot),
@@ -138,6 +138,19 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                     *folder_id,
                     *associated,
                     columns,
+                    snapshot,
+                ),
+                format_inbox_view_descriptor_behavior_contract(
+                    *folder_id,
+                    *associated,
+                    *position,
+                    true,
+                    40,
+                    sort_orders,
+                    restriction.as_ref(),
+                    columns,
+                    mailboxes,
+                    emails,
                     snapshot,
                 )
             ))

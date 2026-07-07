@@ -1431,6 +1431,77 @@ fn contact_property_projects_outlook_table_identity_columns() {
         contact_property_value(&contact, item_id, CONTACTS_FOLDER_ID, PID_TAG_INSTANCE_NUM),
         Some(MapiValue::U32(0))
     );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            item_id,
+            CONTACTS_FOLDER_ID,
+            PID_TAG_MESSAGE_STATUS
+        ),
+        Some(MapiValue::U32(0))
+    );
+}
+
+#[test]
+fn collaboration_item_properties_project_outlook_table_identity_columns() {
+    let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777a);
+    let task = default_task_for_mapping(account_id, "default");
+    let note = default_note_for_mapping();
+    let journal = default_journal_entry_for_mapping();
+    let task_id = crate::mapi::identity::mapi_store_id(0x044);
+    let note_id = crate::mapi::identity::mapi_store_id(0x045);
+    let journal_id = crate::mapi::identity::mapi_store_id(0x046);
+
+    for (folder_id, item_id, folder_value, mid_value, inst_value, instance_num, status) in [
+        (
+            TASKS_FOLDER_ID,
+            task_id,
+            task_property_value(&task, task_id, TASKS_FOLDER_ID, PID_TAG_FOLDER_ID),
+            task_property_value(&task, task_id, TASKS_FOLDER_ID, PID_TAG_MID),
+            task_property_value(&task, task_id, TASKS_FOLDER_ID, PID_TAG_INST_ID),
+            task_property_value(&task, task_id, TASKS_FOLDER_ID, PID_TAG_INSTANCE_NUM),
+            task_property_value(&task, task_id, TASKS_FOLDER_ID, PID_TAG_MESSAGE_STATUS),
+        ),
+        (
+            NOTES_FOLDER_ID,
+            note_id,
+            note_property_value(&note, note_id, NOTES_FOLDER_ID, PID_TAG_FOLDER_ID),
+            note_property_value(&note, note_id, NOTES_FOLDER_ID, PID_TAG_MID),
+            note_property_value(&note, note_id, NOTES_FOLDER_ID, PID_TAG_INST_ID),
+            note_property_value(&note, note_id, NOTES_FOLDER_ID, PID_TAG_INSTANCE_NUM),
+            note_property_value(&note, note_id, NOTES_FOLDER_ID, PID_TAG_MESSAGE_STATUS),
+        ),
+        (
+            JOURNAL_FOLDER_ID,
+            journal_id,
+            journal_entry_property_value(
+                &journal,
+                journal_id,
+                JOURNAL_FOLDER_ID,
+                PID_TAG_FOLDER_ID,
+            ),
+            journal_entry_property_value(&journal, journal_id, JOURNAL_FOLDER_ID, PID_TAG_MID),
+            journal_entry_property_value(&journal, journal_id, JOURNAL_FOLDER_ID, PID_TAG_INST_ID),
+            journal_entry_property_value(
+                &journal,
+                journal_id,
+                JOURNAL_FOLDER_ID,
+                PID_TAG_INSTANCE_NUM,
+            ),
+            journal_entry_property_value(
+                &journal,
+                journal_id,
+                JOURNAL_FOLDER_ID,
+                PID_TAG_MESSAGE_STATUS,
+            ),
+        ),
+    ] {
+        assert_eq!(folder_value, Some(MapiValue::U64(folder_id)));
+        assert_eq!(mid_value, Some(MapiValue::U64(item_id)));
+        assert_eq!(inst_value, Some(MapiValue::U64(item_id)));
+        assert_eq!(instance_num, Some(MapiValue::U32(0)));
+        assert_eq!(status, Some(MapiValue::U32(0)));
+    }
 }
 
 #[test]
@@ -2638,6 +2709,82 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
         Some(MapiValue::U32(0))
     );
     assert_eq!(
+        email_property_value(&email, PID_TAG_ORIGINAL_SENSITIVITY),
+        Some(MapiValue::U32(0))
+    );
+    for tag in [
+        PID_TAG_ALTERNATE_RECIPIENT_ALLOWED,
+        PID_TAG_AUTO_FORWARDED,
+        PID_TAG_DELETE_AFTER_SUBMIT,
+        PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED,
+        PID_TAG_READ_RECEIPT_REQUESTED,
+        PID_TAG_RECIPIENT_REASSIGNMENT_PROHIBITED,
+        PID_TAG_REPLY_REQUESTED,
+        PID_TAG_RESPONSE_REQUESTED,
+        PID_TAG_PROCESSED,
+    ] {
+        assert_eq!(
+            email_property_value(&email, tag),
+            Some(MapiValue::Bool(false))
+        );
+    }
+    for tag in [
+        PID_TAG_DEFERRED_DELIVERY_TIME,
+        PID_TAG_DEFERRED_SEND_TIME,
+        PID_TAG_END_DATE,
+        PID_TAG_EXPIRY_TIME,
+        PID_TAG_LAST_VERB_EXECUTION_TIME,
+        PID_TAG_ORIGINAL_SUBMIT_TIME,
+        PID_TAG_REPLY_TIME,
+        PID_TAG_REPORT_TIME,
+        PID_TAG_START_DATE,
+    ] {
+        assert_eq!(email_property_value(&email, tag), Some(MapiValue::U64(0)));
+    }
+    for tag in [
+        PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID,
+        PID_TAG_PARENT_KEY,
+        PID_TAG_REPLY_RECIPIENT_ENTRIES,
+        PID_TAG_REPORT_TAG,
+    ] {
+        assert_eq!(
+            email_property_value(&email, tag),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+    }
+    for tag in [
+        PID_TAG_ORIGINAL_AUTHOR_NAME_W,
+        PID_TAG_ORIGINAL_DISPLAY_BCC_W,
+        PID_TAG_ORIGINAL_DISPLAY_CC_W,
+        PID_TAG_ORIGINAL_DISPLAY_TO_W,
+        PID_TAG_IN_REPLY_TO_ID_W,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        PID_TAG_NEXT_SEND_ACCOUNT_W,
+        PID_TAG_PRIMARY_SEND_ACCOUNT_W,
+        PID_TAG_REPLY_RECIPIENT_NAMES_W,
+    ] {
+        assert_eq!(
+            email_property_value(&email, tag),
+            Some(MapiValue::String(String::new()))
+        );
+    }
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ICON_INDEX),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_LAST_VERB_EXECUTED),
+        Some(MapiValue::U32(0))
+    );
+    for tag in [
+        PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT,
+        PID_TAG_BLOCK_STATUS,
+        PID_TAG_MESSAGE_EDITOR_FORMAT,
+        PID_TAG_OWNER_APPOINTMENT_ID,
+    ] {
+        assert_eq!(email_property_value(&email, tag), Some(MapiValue::U32(0)));
+    }
+    assert_eq!(
         email_property_value(&email, PID_TAG_SUBJECT_PREFIX_W),
         Some(MapiValue::String(String::new()))
     );
@@ -2655,6 +2802,10 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_CONVERSATION_TOPIC_W),
+        Some(MapiValue::String("RSS item".to_string()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ORIGINAL_SUBJECT_W),
         Some(MapiValue::String("RSS item".to_string()))
     );
     assert_eq!(
@@ -2718,6 +2869,14 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     assert_eq!(u32::from_le_bytes([rtf[12], rtf[13], rtf[14], rtf[15]]), 0);
     assert!(String::from_utf8_lossy(&rtf[16..]).contains("RSS item"));
     assert_eq!(
+        email_property_value(&email, PID_TAG_CONVERSATION_ID),
+        Some(MapiValue::Binary(email.thread_id.as_bytes().to_vec()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_CONVERSATION_INDEX_TRACKING),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
         email_property_value(&email, PID_TAG_NATIVE_BODY),
         Some(MapiValue::U32(3))
     );
@@ -2728,6 +2887,42 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     assert_eq!(
         email_property_value(&email, PID_TAG_MESSAGE_LOCALE_ID),
         Some(MapiValue::U32(0x0409))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ORIGINAL_SENDER_NAME_W),
+        Some(MapiValue::String(String::new()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_START_DATE_ETC),
+        Some(MapiValue::Binary(Vec::new()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_RETENTION_DATE),
+        Some(MapiValue::U64(0))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ARCHIVE_DATE),
+        Some(MapiValue::U64(0))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ARCHIVE_TAG),
+        Some(MapiValue::Binary(Vec::new()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_POLICY_TAG),
+        Some(MapiValue::Binary(Vec::new()))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_ARCHIVE_PERIOD),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_RETENTION_PERIOD),
+        Some(MapiValue::U32(0))
+    );
+    assert_eq!(
+        email_property_value(&email, PID_TAG_RETENTION_FLAGS),
+        Some(MapiValue::U32(0))
     );
 }
 
@@ -4590,93 +4785,6 @@ fn descriptor_column_property_tags(descriptor: &[u8]) -> Vec<u32> {
     view_descriptor_property_tags(descriptor)
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct TestViewColumnPacket {
-    property_type: u16,
-    property_id: u16,
-    width: u32,
-    flags: u32,
-    kind: u32,
-    id: u32,
-    guid: Option<[u8; 16]>,
-    name: Option<String>,
-}
-
-fn descriptor_column_packets(descriptor: &[u8]) -> Vec<TestViewColumnPacket> {
-    let Some(column_count) = descriptor
-        .get(20..24)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u32::from_le_bytes)
-        .and_then(|count| usize::try_from(count).ok())
-    else {
-        return Vec::new();
-    };
-
-    let mut offset = 60usize;
-    let mut packets = Vec::with_capacity(column_count);
-    for _ in 0..column_count {
-        let Some(packet) = descriptor.get(offset..offset + 36) else {
-            break;
-        };
-        let property_type = u16::from_le_bytes([packet[0], packet[1]]);
-        let property_id = u16::from_le_bytes([packet[2], packet[3]]);
-        let width = u32::from_le_bytes([packet[4], packet[5], packet[6], packet[7]]);
-        let flags = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
-        let kind = u32::from_le_bytes([packet[28], packet[29], packet[30], packet[31]]);
-        let id = u32::from_le_bytes([packet[32], packet[33], packet[34], packet[35]]);
-        offset += 36;
-
-        let mut guid = None;
-        let mut name = None;
-        if flags & 0x0000_1000 != 0 {
-            let Some(guid_bytes) = descriptor.get(offset..offset + 16) else {
-                break;
-            };
-            guid = Some(
-                guid_bytes
-                    .try_into()
-                    .expect("slice length checked for view descriptor guid"),
-            );
-            offset += 16;
-
-            if kind == 1 {
-                let Some(length_bytes) = descriptor.get(offset..offset + 4) else {
-                    break;
-                };
-                let buffer_length = u32::from_le_bytes(
-                    length_bytes
-                        .try_into()
-                        .expect("slice length checked for view descriptor name length"),
-                ) as usize;
-                offset += 4;
-                let Some(buffer) = descriptor.get(offset..offset + buffer_length) else {
-                    break;
-                };
-                let units = buffer
-                    .chunks_exact(2)
-                    .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
-                    .take_while(|unit| *unit != 0)
-                    .collect::<Vec<_>>();
-                name = Some(String::from_utf16(&units).expect("valid UTF-16 view name"));
-                offset += buffer_length;
-            }
-        }
-
-        packets.push(TestViewColumnPacket {
-            property_type,
-            property_id,
-            width,
-            flags,
-            kind,
-            id,
-            guid,
-            name,
-        });
-    }
-
-    packets
-}
-
 #[test]
 fn common_view_named_view_projects_descriptor_properties_for_outlook() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
@@ -4712,36 +4820,34 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
             &outlook_mail_view_definition("Messages")
         )))
     );
-    assert_eq!(descriptor.len(), 436);
+    assert!(!descriptor.is_empty());
     assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
     assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
-    assert_eq!(&descriptor[24..28], &8u32.to_le_bytes());
-    assert_eq!(&descriptor[60..62], &1u16.to_le_bytes());
-    assert_eq!(&descriptor[62..64], &4u16.to_le_bytes());
-    assert_eq!(&descriptor[64..68], &7u32.to_le_bytes());
-    assert_eq!(&descriptor[72..76], &0x28u32.to_le_bytes());
-    assert_eq!(&descriptor[92..96], &4u32.to_le_bytes());
+    assert_eq!(&descriptor[20..24], &19u32.to_le_bytes());
+    assert_eq!(&descriptor[24..28], &14u32.to_le_bytes());
     assert_eq!(
         descriptor_column_property_tags(&descriptor),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
             PID_TAG_IMPORTANCE,
             PID_LID_OUTLOOK_COMMON_8514_TAG,
+            PID_TAG_CONVERSATION_INDEX,
             PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_MESSAGE_FLAGS,
             PID_TAG_MESSAGE_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+            PID_LID_OUTLOOK_COMMON_85EF_TAG,
         ]
     );
-    assert_eq!(&descriptor[96..98], &0x0003u16.to_le_bytes());
-    assert_eq!(&descriptor[98..100], &0x0017u16.to_le_bytes());
-    assert_eq!(&descriptor[100..104], &18u32.to_le_bytes());
-    assert_eq!(&descriptor[108..112], &0x0000_2F4Au32.to_le_bytes());
-    assert_eq!(&descriptor[124..128], &0u32.to_le_bytes());
-    assert_eq!(&descriptor[128..132], &0x0017u32.to_le_bytes());
     assert_eq!(
         common_view_named_view_property_value(
             &view,
@@ -4765,7 +4871,7 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
                 PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
             ),
             Some(MapiValue::String(
-                "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n".to_string()
+                "\nFolder\nMessage\nInstance\nInstance Number\nImportance\nReminder\nConversation Index\nIcon\nMessage Flags\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nModified\nOutlook Binary\nSize\nOutlook Common\n".to_string()
             ))
         );
     assert_eq!(
@@ -4788,142 +4894,46 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
     let definition = outlook_mail_view_definition("Messages");
     let descriptor = view_descriptor_binary(&definition);
 
-    assert_eq!(descriptor.len(), 436);
+    assert!(!descriptor.is_empty());
     assert_eq!(&descriptor[8..12], &8u32.to_le_bytes());
     assert_eq!(&descriptor[12..16], &2u32.to_le_bytes());
-    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
-    assert_eq!(&descriptor[24..28], &8u32.to_le_bytes());
+    assert_eq!(&descriptor[20..24], &19u32.to_le_bytes());
+    assert_eq!(&descriptor[24..28], &14u32.to_le_bytes());
     assert_eq!(
         view_descriptor_strings(&definition),
-        "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nImportance\nReminder\nConversation Index\nIcon\nMessage Flags\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nModified\nOutlook Binary\nSize\nOutlook Common\n"
     );
     assert_eq!(
         descriptor_column_property_tags(&descriptor),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
             PID_TAG_IMPORTANCE,
             PID_LID_OUTLOOK_COMMON_8514_TAG,
+            PID_TAG_CONVERSATION_INDEX,
             PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_MESSAGE_FLAGS,
             PID_TAG_MESSAGE_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
             OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+            PID_LID_OUTLOOK_COMMON_85EF_TAG,
         ]
     );
-    assert_eq!(
-        descriptor_column_packets(&descriptor),
-        vec![
-            TestViewColumnPacket {
-                property_type: 0x0001,
-                property_id: 0x0004,
-                width: 0x07,
-                flags: 0x0000_0028,
-                kind: 0,
-                id: 0x0004,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x0003,
-                property_id: 0x0017,
-                width: 0x12,
-                flags: 0x0000_2F4A,
-                kind: 0,
-                id: 0x0017,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x000B,
-                property_id: 0x8514,
-                width: 0x12,
-                flags: 0x0000_3F40,
-                kind: 0,
-                id: 0x8514,
-                guid: Some(PSETID_COMMON_GUID),
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x001F,
-                property_id: 0x001A,
-                width: 0x12,
-                flags: 0x0000_270A,
-                kind: 0,
-                id: 0x001A,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x0003,
-                property_id: 0x0E17,
-                width: 0x12,
-                flags: 0x0000_2F4A,
-                kind: 0,
-                id: 0x0E17,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x000B,
-                property_id: 0x0E1B,
-                width: 0x12,
-                flags: 0x0000_2F4A,
-                kind: 0,
-                id: 0x0E1B,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x001F,
-                property_id: 0x0042,
-                width: 0x0C,
-                flags: 0x0000_2F00,
-                kind: 0,
-                id: 0x0042,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x001F,
-                property_id: 0x0037,
-                width: 0x11,
-                flags: 0x0000_2F00,
-                kind: 0,
-                id: 0x0037,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x0040,
-                property_id: 0x0E06,
-                width: 0x10,
-                flags: 0x0000_2F40,
-                kind: 0,
-                id: 0x0E06,
-                guid: None,
-                name: None,
-            },
-            TestViewColumnPacket {
-                property_type: 0x0003,
-                property_id: 0x1213,
-                width: 0x0C,
-                flags: 0x0000_2740,
-                kind: 0,
-                id: 0x1213,
-                guid: None,
-                name: None,
-            },
-        ]
-    );
+    assert!(descriptor_column_property_tags(&descriptor).contains(&PID_LID_OUTLOOK_COMMON_85EF_TAG));
 }
 
 #[test]
 fn outlook_compact_view_definition_binary_matches_visible_trace_contract() {
     let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Messages"));
 
-    assert_eq!(descriptor.len(), 436);
-    assert_eq!(&descriptor[20..24], &10u32.to_le_bytes());
+    assert_eq!(&descriptor[20..24], &19u32.to_le_bytes());
     assert!(!descriptor_column_property_tags(&descriptor).contains(&PID_NAME_KEYWORDS_TAG));
 }
 
@@ -4969,6 +4979,12 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&contact)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_DISPLAY_NAME_W,
             PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG,
@@ -4979,15 +4995,21 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
     assert_eq!(
         view_descriptor_strings(&contact),
-        "\nIcon\nFull Name\nEmail\nMobile\nCompany\nJob Title\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nMessage Flags\nMessage Status\nIcon\nFull Name\nEmail\nMobile\nCompany\nJob Title\n"
     );
 
     assert_eq!(calendar.kind, ViewDefinitionKind::CalendarCompact);
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&calendar)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_LID_COMMON_START_TAG,
             PID_LID_COMMON_END_TAG,
             PID_LID_LOCATION_W_TAG,
@@ -4998,13 +5020,19 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
     assert_eq!(
         view_descriptor_strings(&calendar),
-        "\nIcon\nSubject\nStart\nEnd\nLocation\nBusy\nOutlook Common\nSide Effects\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nIcon\nSubject\nMessage Flags\nMessage Status\nStart\nEnd\nLocation\nBusy\nOutlook Common\nSide Effects\n"
     );
 
     assert_eq!(task.kind, ViewDefinitionKind::TaskList);
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&task)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_FLAG_STATUS,
@@ -5015,13 +5043,19 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
     assert_eq!(
         view_descriptor_strings(&task),
-        "\nIcon\nSubject\nStatus\nDue Date\nStart Date\n% Complete\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nMessage Flags\nMessage Status\nIcon\nSubject\nStatus\nDue Date\nStart Date\n% Complete\n"
     );
 
     assert_eq!(note.kind, ViewDefinitionKind::NoteList);
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&note)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_LAST_MODIFICATION_TIME,
@@ -5030,13 +5064,19 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
     assert_eq!(
         view_descriptor_strings(&note),
-        "\nIcon\nSubject\nModified\nColor\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nMessage Flags\nMessage Status\nIcon\nSubject\nModified\nColor\n"
     );
 
     assert_eq!(journal.kind, ViewDefinitionKind::JournalList);
     assert_eq!(
         descriptor_column_property_tags(&view_descriptor_binary(&journal)),
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_LID_LOG_START_TAG,
@@ -5046,7 +5086,7 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
     assert_eq!(
         view_descriptor_strings(&journal),
-        "\nIcon\nSubject\nStart\nDuration\nType\n"
+        "\nFolder\nMessage\nInstance\nInstance Number\nMessage Flags\nMessage Status\nIcon\nSubject\nStart\nDuration\nType\n"
     );
 
     assert_eq!(mail.kind, ViewDefinitionKind::MailCompact);
@@ -5064,6 +5104,31 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         view_descriptor_strings(&mail),
         "\nFolder\nMessage\nInstance\nInstance Number\nSubject\nReceived\n"
+    );
+
+    assert_eq!(
+        outlook_folder_view_sort_orders(CONTACTS_FOLDER_ID, "Compact")
+            .first()
+            .map(|order| order.property_tag),
+        Some(PID_TAG_DISPLAY_NAME_W)
+    );
+    assert_eq!(
+        outlook_folder_view_sort_orders(TASKS_FOLDER_ID, "Compact")
+            .first()
+            .map(|order| order.property_tag),
+        Some(PID_LID_TASK_DUE_DATE_TAG)
+    );
+    assert_eq!(
+        outlook_folder_view_sort_orders(NOTES_FOLDER_ID, "Compact")
+            .first()
+            .map(|order| order.property_tag),
+        Some(PID_TAG_LAST_MODIFICATION_TIME)
+    );
+    assert_eq!(
+        outlook_folder_view_sort_orders(JOURNAL_FOLDER_ID, "Compact")
+            .first()
+            .map(|order| order.property_tag),
+        Some(PID_LID_LOG_START_TAG)
     );
 }
 

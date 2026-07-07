@@ -351,13 +351,14 @@ fn record_outlook_umolk_getprops_materialization(
     }
     let materialization =
         summarize_flagged_getprops_materialization(property_tags, property_response);
+    let dictionary_shape = classify_umolk_dictionary_shape(response_shape);
     session
         .post_hierarchy_actions
         .outlook_umolk_getprops_not_found_count = materialization.not_found_count;
     session
         .post_hierarchy_actions
         .last_outlook_umolk_getprops_materialization_context = format!(
-        "request_id={request_id};handle={};config={config_id};class={message_class};subject={subject};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};response_shape={};response_bytes={}",
+        "request_id={request_id};handle={};config={config_id};class={message_class};subject={subject};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};dictionary_shape={dictionary_shape};response_shape={};response_bytes={}",
         request.input_handle_index().unwrap_or(0),
         property_tags.len(),
         materialization.returned_value_count,
@@ -397,6 +398,27 @@ fn record_outlook_umolk_getprops_materialization(
             .post_hierarchy_actions
             .last_outlook_umolk_getprops_materialization_context
     ));
+}
+
+fn classify_umolk_dictionary_shape(response_shape: &str) -> &'static str {
+    if !response_shape.contains("0x7c070102:binary") {
+        return "dictionary_not_returned";
+    }
+    if response_shape.contains("0x7c070102:binary:bytes=0") {
+        return "empty_dictionary";
+    }
+    if response_shape.contains("preview=3c786d6c2f3e") {
+        return "stale_xml_placeholder";
+    }
+    if response_shape.contains("preview=3c3f786d6c")
+        && response_shape.contains("55736572436f6e66696775726174696f6e")
+    {
+        return "xml_user_configuration_dictionary";
+    }
+    if response_shape.contains("preview=3c3f786d6c") {
+        return "xml_dictionary";
+    }
+    "unknown_binary_dictionary"
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -618,4 +640,33 @@ pub(in crate::mapi::dispatch) fn get_properties_view_response_values_for_debug(
         }
     }
     values.join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn umolk_dictionary_shape_classifies_current_modeled_xml_dictionary() {
+        let shape = concat!(
+            "values=0x7c070102:binary:bytes=170:",
+            "preview=3c3f786d6c2076657273696f6e3d22312e3022;",
+            "tail=55736572436f6e66696775726174696f6e"
+        );
+
+        assert_eq!(
+            classify_umolk_dictionary_shape(shape),
+            "xml_user_configuration_dictionary"
+        );
+    }
+
+    #[test]
+    fn umolk_dictionary_shape_classifies_stale_placeholder() {
+        let shape = "values=0x7c070102:binary:bytes=6:preview=3c786d6c2f3e";
+
+        assert_eq!(
+            classify_umolk_dictionary_shape(shape),
+            "stale_xml_placeholder"
+        );
+    }
 }

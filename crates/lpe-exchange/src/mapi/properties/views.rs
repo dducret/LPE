@@ -189,6 +189,10 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
         return ViewDefinition {
             kind: ViewDefinitionKind::MailCompact,
             columns: vec![
+                view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+                view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+                view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+                view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
                 view_column(PID_TAG_IMPORTANCE, 0x12, 0x0000_2F4A, "Importance"),
                 view_named_id_column(
                     PID_LID_OUTLOOK_COMMON_8514_TAG,
@@ -198,20 +202,47 @@ pub(in crate::mapi) fn outlook_mail_view_definition(view_name: &str) -> ViewDefi
                     PID_LID_OUTLOOK_COMMON_8514,
                     "Reminder",
                 ),
+                view_column(
+                    PID_TAG_CONVERSATION_INDEX,
+                    0x0C,
+                    0x0000_2740,
+                    "Conversation Index",
+                ),
                 view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
+                view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
                 view_column(PID_TAG_MESSAGE_STATUS, 0x12, 0x0000_2F4A, "Flag Status"),
                 view_column(PID_TAG_HAS_ATTACHMENTS, 0x12, 0x0000_2F4A, "Attachment"),
                 view_column(PID_TAG_SENT_REPRESENTING_NAME_W, 0x0C, 0x0000_2F00, "From"),
                 view_column(PID_TAG_SUBJECT_W, 0x11, 0x0000_2F00, "Subject"),
                 view_column(PID_TAG_MESSAGE_DELIVERY_TIME, 0x10, 0x0000_2F40, "Received"),
                 view_column(
+                    PID_TAG_LAST_MODIFICATION_TIME,
+                    0x10,
+                    0x0000_2F40,
+                    "Modified",
+                ),
+                view_column(
+                    OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
+                    0x0C,
+                    0x0000_2740,
+                    "Outlook Binary",
+                ),
+                view_column(
                     OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
                     0x0C,
                     0x0000_2740,
                     "Size",
                 ),
+                view_named_id_column(
+                    PID_LID_OUTLOOK_COMMON_85EF_TAG,
+                    0x0C,
+                    0x0000_2740,
+                    PSETID_COMMON_GUID,
+                    PID_LID_OUTLOOK_COMMON_85EF,
+                    "Outlook Common",
+                ),
             ],
-            sort_column: 7,
+            sort_column: 13,
             sort_descending: true,
         };
     }
@@ -307,8 +338,14 @@ fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::CalendarCompact,
         columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
             view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
             view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x0C, 0x0000_2740, "Message Status"),
             view_named_id_column(
                 PID_LID_COMMON_START_TAG,
                 0x10,
@@ -358,7 +395,7 @@ fn outlook_calendar_view_definition(_view_name: &str) -> ViewDefinition {
                 "Side Effects",
             ),
         ],
-        sort_column: 2,
+        sort_column: 8,
         sort_descending: false,
     }
 }
@@ -367,6 +404,12 @@ fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::ContactList,
         columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x0C, 0x0000_2740, "Message Status"),
             view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
             view_column(PID_TAG_DISPLAY_NAME_W, 0x18, 0x0000_2F00, "Full Name"),
             view_named_id_column(
@@ -386,7 +429,7 @@ fn outlook_contact_view_definition(_view_name: &str) -> ViewDefinition {
             view_column(PID_TAG_COMPANY_NAME_W, 0x14, 0x0000_2F00, "Company"),
             view_column(PID_TAG_TITLE_W, 0x14, 0x0000_2F00, "Job Title"),
         ],
-        sort_column: 1,
+        sort_column: 7,
         sort_descending: false,
     }
 }
@@ -395,6 +438,12 @@ fn outlook_task_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::TaskList,
         columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x0C, 0x0000_2740, "Message Status"),
             view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
             view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_column(PID_TAG_FLAG_STATUS, 0x0C, 0x0000_2F4A, "Status"),
@@ -423,7 +472,7 @@ fn outlook_task_view_definition(_view_name: &str) -> ViewDefinition {
                 "% Complete",
             ),
         ],
-        sort_column: 3,
+        sort_column: 9,
         sort_descending: false,
     }
 }
@@ -432,6 +481,12 @@ fn outlook_note_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::NoteList,
         columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x0C, 0x0000_2740, "Message Status"),
             view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
             view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_column(
@@ -449,7 +504,7 @@ fn outlook_note_view_definition(_view_name: &str) -> ViewDefinition {
                 "Color",
             ),
         ],
-        sort_column: 2,
+        sort_column: 8,
         sort_descending: true,
     }
 }
@@ -458,6 +513,12 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
     ViewDefinition {
         kind: ViewDefinitionKind::JournalList,
         columns: vec![
+            view_column(PID_TAG_FOLDER_ID, 0x0C, 0x0000_2740, "Folder"),
+            view_column(PID_TAG_MID, 0x0C, 0x0000_2740, "Message"),
+            view_column(PID_TAG_INST_ID, 0x0C, 0x0000_2740, "Instance"),
+            view_column(PID_TAG_INSTANCE_NUM, 0x0C, 0x0000_2740, "Instance Number"),
+            view_column(PID_TAG_MESSAGE_FLAGS, 0x0C, 0x0000_2740, "Message Flags"),
+            view_column(PID_TAG_MESSAGE_STATUS, 0x0C, 0x0000_2740, "Message Status"),
             view_column(PID_TAG_MESSAGE_CLASS_W, 0x12, 0x0000_270A, "Icon"),
             view_column(PID_TAG_SUBJECT_W, 0x18, 0x0000_2F00, "Subject"),
             view_named_id_column(
@@ -485,7 +546,7 @@ fn outlook_journal_view_definition(_view_name: &str) -> ViewDefinition {
                 "Type",
             ),
         ],
-        sort_column: 2,
+        sort_column: 8,
         sort_descending: true,
     }
 }

@@ -19,6 +19,7 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
             Some(MapiValue::String(email.subject.clone()))
         }
+        PID_TAG_ORIGINAL_SUBJECT_W => Some(MapiValue::String(email.subject.clone())),
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
             message_class_for_email(email).to_string(),
         )),
@@ -35,14 +36,65 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
         PID_TAG_IMPORTANCE => Some(MapiValue::U32(1)),
-        PID_TAG_PRIORITY | PID_TAG_SENSITIVITY => Some(MapiValue::U32(0)),
+        PID_TAG_PRIORITY | PID_TAG_SENSITIVITY | PID_TAG_ORIGINAL_SENSITIVITY => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_ARCHIVE_PERIOD | PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => {
+            Some(MapiValue::U32(0))
+        }
+        PID_TAG_ALTERNATE_RECIPIENT_ALLOWED
+        | PID_TAG_AUTO_FORWARDED
+        | PID_TAG_DELETE_AFTER_SUBMIT
+        | PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED
+        | PID_TAG_READ_RECEIPT_REQUESTED
+        | PID_TAG_RECIPIENT_REASSIGNMENT_PROHIBITED => Some(MapiValue::Bool(false)),
+        PID_TAG_REPLY_REQUESTED | PID_TAG_RESPONSE_REQUESTED => Some(MapiValue::Bool(false)),
+        PID_TAG_PROCESSED => Some(MapiValue::Bool(false)),
+        PID_TAG_DEFERRED_DELIVERY_TIME
+        | PID_TAG_DEFERRED_SEND_TIME
+        | PID_TAG_END_DATE
+        | PID_TAG_EXPIRY_TIME
+        | PID_TAG_ARCHIVE_DATE
+        | PID_TAG_LAST_VERB_EXECUTION_TIME
+        | PID_TAG_ORIGINAL_SUBMIT_TIME
+        | PID_TAG_RETENTION_DATE
+        | PID_TAG_REPLY_TIME
+        | PID_TAG_REPORT_TIME => Some(MapiValue::U64(0)),
+        PID_TAG_START_DATE => Some(MapiValue::U64(0)),
+        PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID
+        | PID_TAG_ARCHIVE_TAG
+        | PID_TAG_PARENT_KEY
+        | PID_TAG_POLICY_TAG
+        | PID_TAG_REPLY_RECIPIENT_ENTRIES
+        | PID_TAG_REPORT_TAG
+        | PID_TAG_START_DATE_ETC => Some(MapiValue::Binary(Vec::new())),
+        PID_TAG_ORIGINAL_AUTHOR_NAME_W
+        | PID_TAG_ORIGINAL_DISPLAY_BCC_W
+        | PID_TAG_ORIGINAL_DISPLAY_CC_W
+        | PID_TAG_ORIGINAL_DISPLAY_TO_W
+        | PID_TAG_ORIGINAL_SENDER_NAME_W
+        | PID_TAG_LAST_MODIFIER_NAME_W
+        | PID_TAG_IN_REPLY_TO_ID_W
+        | PID_TAG_INTERNET_REFERENCES_W
+        | PID_TAG_NEXT_SEND_ACCOUNT_W
+        | PID_TAG_PRIMARY_SEND_ACCOUNT_W
+        | PID_TAG_REPORT_DISPOSITION_W
+        | PID_TAG_REPLY_RECIPIENT_NAMES_W => Some(MapiValue::String(String::new())),
+        PID_TAG_ICON_INDEX
+        | PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
+        | PID_TAG_BLOCK_STATUS
+        | PID_TAG_LAST_VERB_EXECUTED
+        | PID_TAG_MESSAGE_EDITOR_FORMAT
+        | PID_TAG_OWNER_APPOINTMENT_ID => Some(MapiValue::U32(0)),
         PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(String::new())),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
         PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG | 0x8017_000B => Some(MapiValue::Bool(false)),
-        PID_LID_OUTLOOK_COMMON_8514_TAG => Some(MapiValue::Bool(false)),
+        PID_LID_OUTLOOK_COMMON_8514_TAG | PID_LID_OUTLOOK_COMMON_85EF_TAG => {
+            Some(MapiValue::Bool(false))
+        }
         PID_LID_PERCENT_COMPLETE_TAG => {
             Some(MapiValue::F64(email_percent_complete(email).to_bits()))
         }
@@ -76,6 +128,7 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(email.size_octets)),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(email.size_octets)),
         OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG => Some(MapiValue::U32(0)),
+        OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(email_sender_name(email).to_string())),
         PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W | PID_TAG_SENDER_SMTP_ADDRESS_W => {
@@ -116,6 +169,8 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_CONVERSATION_INDEX => Some(MapiValue::Binary(conversation_index_for_uuid(
             email.thread_id,
         ))),
+        PID_TAG_CONVERSATION_ID => Some(MapiValue::Binary(email.thread_id.as_bytes().to_vec())),
+        PID_TAG_CONVERSATION_INDEX_TRACKING => Some(MapiValue::Bool(false)),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
             let object_id = mapi_message_id(email);
             Some(MapiValue::Binary(

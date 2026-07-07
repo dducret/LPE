@@ -78,6 +78,27 @@ pub(super) fn format_calendar_query_position_wire_summary(
     )
 }
 
+pub(super) fn format_default_view_query_position_wire_summary(
+    request_id: &str,
+    request_rop_names: &str,
+    context: &str,
+    response: &[u8],
+    query_rows_observed_on_handle: bool,
+    role: &str,
+) -> String {
+    let observed_next_step = format!("{role}_query_rows_already_observed_on_handle");
+    let missing_next_step = format!("query_rows_on_{role}_contents_table");
+    format_query_position_wire_summary(
+        request_id,
+        request_rop_names,
+        context,
+        response,
+        query_rows_observed_on_handle,
+        &observed_next_step,
+        &missing_next_step,
+    )
+}
+
 fn format_query_position_wire_summary(
     request_id: &str,
     request_rop_names: &str,
@@ -983,6 +1004,29 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_MESSAGE_CLASS_W
             | PID_TAG_ORIGINAL_MESSAGE_CLASS_W
             | PID_TAG_CREATION_TIME
+            | PID_TAG_ALTERNATE_RECIPIENT_ALLOWED
+            | PID_TAG_AUTO_FORWARDED
+            | PID_TAG_DEFERRED_DELIVERY_TIME
+            | PID_TAG_DELETE_AFTER_SUBMIT
+            | PID_TAG_EXPIRY_TIME
+            | PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID
+            | PID_TAG_ORIGINAL_AUTHOR_NAME_W
+            | PID_TAG_ORIGINAL_DISPLAY_BCC_W
+            | PID_TAG_ORIGINAL_DISPLAY_CC_W
+            | PID_TAG_ORIGINAL_DISPLAY_TO_W
+            | PID_TAG_ORIGINAL_SUBMIT_TIME
+            | PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED
+            | PID_TAG_PARENT_KEY
+            | PID_TAG_READ_RECEIPT_REQUESTED
+            | PID_TAG_RECIPIENT_REASSIGNMENT_PROHIBITED
+            | PID_TAG_REPLY_REQUESTED
+            | PID_TAG_REPLY_RECIPIENT_ENTRIES
+            | PID_TAG_REPLY_RECIPIENT_NAMES_W
+            | PID_TAG_REPLY_TIME
+            | PID_TAG_REPORT_TAG
+            | PID_TAG_REPORT_TIME
+            | PID_TAG_RESPONSE_REQUESTED
+            | PID_TAG_DEFERRED_SEND_TIME
             | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
@@ -996,6 +1040,7 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_FLAG_STATUS
             | PID_LID_OUTLOOK_APPOINTMENT_8F07_TAG
             | PID_LID_OUTLOOK_COMMON_8514_TAG
+            | PID_LID_OUTLOOK_COMMON_85EF_TAG
             | 0x8017_000B
             | PID_TAG_FLAG_COMPLETE_TIME
             | PID_TAG_FOLLOWUP_ICON
@@ -1004,6 +1049,7 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_SWAPPED_TODO_DATA
             | PID_TAG_MESSAGE_SIZE
             | OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG
+            | OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG
             | PID_TAG_SENDER_NAME_W
             | PID_TAG_SENDER_ADDRESS_TYPE_W
             | PID_TAG_SENDER_EMAIL_ADDRESS_W
@@ -1017,6 +1063,13 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_DISPLAY_CC_W
             | PID_TAG_DISPLAY_BCC_W
             | PID_TAG_HAS_ATTACHMENTS
+            | PID_TAG_ICON_INDEX
+            | PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT
+            | PID_TAG_INTERNET_REFERENCES_W
+            | PID_TAG_IN_REPLY_TO_ID_W
+            | PID_TAG_LAST_MODIFIER_NAME_W
+            | PID_TAG_LAST_VERB_EXECUTED
+            | PID_TAG_LAST_VERB_EXECUTION_TIME
             | PID_TAG_RTF_IN_SYNC
             | PID_TAG_BODY_W
             | PID_TAG_RTF_COMPRESSED
@@ -1025,17 +1078,38 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_NATIVE_BODY
             | PID_TAG_INTERNET_CODEPAGE
             | PID_TAG_MESSAGE_LOCALE_ID
+            | PID_TAG_CONVERSATION_ID
             | PID_TAG_CONVERSATION_INDEX
+            | PID_TAG_CONVERSATION_INDEX_TRACKING
             | PID_TAG_ENTRY_ID
             | PID_TAG_INSTANCE_KEY
             | PID_TAG_SOURCE_KEY
             | PID_TAG_SEARCH_KEY
+            | PID_TAG_START_DATE_ETC
             | PID_TAG_PARENT_SOURCE_KEY
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
             | PID_TAG_INTERNET_MESSAGE_ID_W
             | PID_TAG_TRANSPORT_MESSAGE_HEADERS_W
+            | PID_TAG_ORIGINAL_SUBJECT_W
+            | PID_TAG_ORIGINAL_SENDER_NAME_W
+            | PID_TAG_ARCHIVE_DATE
+            | PID_TAG_ARCHIVE_PERIOD
+            | PID_TAG_ARCHIVE_TAG
+            | PID_TAG_POLICY_TAG
+            | PID_TAG_RETENTION_DATE
+            | PID_TAG_RETENTION_FLAGS
+            | PID_TAG_RETENTION_PERIOD
+            | PID_TAG_START_DATE
+            | PID_TAG_END_DATE
+            | PID_TAG_OWNER_APPOINTMENT_ID
+            | PID_TAG_MESSAGE_EDITOR_FORMAT
+            | PID_TAG_PROCESSED
+            | PID_TAG_PRIMARY_SEND_ACCOUNT_W
+            | PID_TAG_NEXT_SEND_ACCOUNT_W
+            | PID_TAG_REPORT_DISPOSITION_W
+            | PID_TAG_BLOCK_STATUS
             | PID_LID_REMINDER_SET_TAG
             | PID_NAME_KEYWORDS_TAG
             | PID_NAME_CONTENT_CLASS_W_TAG
@@ -1286,6 +1360,41 @@ pub(super) fn append_table_control_response(
                 }
                 _ => None,
             };
+            let default_view_normal_query_position_context = match input_object(
+                session,
+                handle_slots,
+                request,
+            ) {
+                Some(MapiObject::ContentsTable {
+                    folder_id,
+                    associated,
+                    columns,
+                    position,
+                    restriction,
+                    sort_orders,
+                    ..
+                }) if !*associated
+                    && !matches!(*folder_id, INBOX_FOLDER_ID | CALENDAR_FOLDER_ID) =>
+                {
+                    let (_, _, container_class) = debug_open_folder_metadata(*folder_id, mailboxes);
+                    default_view_supported_folder(*folder_id, &container_class).then(|| {
+                        (
+                            debug_role_for_folder_id(*folder_id),
+                            format!(
+                                "handle={};input_index={};folder=0x{folder_id:016x};role={};container_class={container_class};position_before={};columns={};sort={};restriction={}",
+                                format_optional_debug_handle(input_handle(handle_slots, request)),
+                                request.input_handle_index().unwrap_or(0),
+                                debug_role_for_folder_id(*folder_id),
+                                position,
+                                format_debug_property_tags(columns),
+                                format_debug_sort_orders(sort_orders),
+                                format_debug_restriction_option(restriction.as_ref())
+                            ),
+                        )
+                    })
+                }
+                _ => None,
+            };
             let hierarchy_query_position_context =
                 match input_object(session, handle_slots, request) {
                     Some(MapiObject::HierarchyTable {
@@ -1347,14 +1456,17 @@ pub(super) fn append_table_control_response(
                 session.record_outlook_view_failure_trace_event(format!(
                     "calendar_normal_query_position:{context}"
                 ));
+                let input_handle_value = input_handle(handle_slots, request);
+                let query_rows_observed_on_handle = session
+                    .post_hierarchy_actions
+                    .last_calendar_normal_contents_table_query_rows_handle
+                    == input_handle_value;
                 let wire_summary = format_calendar_query_position_wire_summary(
                     request_id,
                     request_rop_names,
                     &context,
                     &response,
-                    session
-                        .post_hierarchy_actions
-                        .calendar_normal_contents_table_query_rows_observed,
+                    query_rows_observed_on_handle,
                 );
                 session.record_outlook_view_failure_trace_event(format!(
                     "calendar_query_position_wire:{wire_summary}"
@@ -1368,11 +1480,9 @@ pub(super) fn append_table_control_response(
                     mapi_request_id = %request_id,
                     request_rop_id = "0x17",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                    input_handle_value = %format_optional_debug_handle(input_handle_value),
                     query_position_context = %context,
-                    calendar_query_rows_observed = session
-                        .post_hierarchy_actions
-                        .calendar_normal_contents_table_query_rows_observed,
+                    calendar_query_rows_observed = query_rows_observed_on_handle,
                     next_expected_client_step = "query_rows_on_calendar_contents_table",
                     "rca debug mapi calendar query position tracked"
                 );
@@ -1385,10 +1495,59 @@ pub(super) fn append_table_control_response(
                     mapi_request_id = %request_id,
                     request_rop_id = "0x17",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
-                    input_handle_value = %format_optional_debug_handle(input_handle(handle_slots, request)),
+                    input_handle_value = %format_optional_debug_handle(input_handle_value),
                     calendar_query_position_wire = %wire_summary,
                     next_debug_focus = "calendar_query_rows_missing_after_query_position",
                     "rca debug mapi calendar query position wire"
+                );
+            }
+            if let Some((role, context)) = default_view_normal_query_position_context {
+                let position = response
+                    .get(6..10)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let row_count = response
+                    .get(10..14)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u32::from_le_bytes)
+                    .unwrap_or(0);
+                let context = format!(
+                    "{context};response_position={position};response_row_count={row_count}"
+                );
+                session.record_outlook_view_failure_trace_event(format!(
+                    "default_view_normal_query_position:{context}"
+                ));
+                let input_handle_value = input_handle(handle_slots, request);
+                let query_rows_observed_on_handle = session
+                    .post_hierarchy_actions
+                    .last_default_view_normal_contents_table_query_rows_handle
+                    == input_handle_value;
+                let wire_summary = format_default_view_query_position_wire_summary(
+                    request_id,
+                    request_rop_names,
+                    &context,
+                    &response,
+                    query_rows_observed_on_handle,
+                    role,
+                );
+                session.record_outlook_view_failure_trace_event(format!(
+                    "default_view_query_position_wire:{wire_summary}"
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = %request_id,
+                    request_rop_id = "0x17",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle_value),
+                    folder_role = role,
+                    default_view_query_position_wire = %wire_summary,
+                    next_debug_focus = "default_view_query_rows_missing_after_query_position",
+                    "rca debug mapi default view query position wire"
                 );
             }
             if let Some(context) = hierarchy_query_position_context {

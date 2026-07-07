@@ -273,14 +273,16 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             format_view_descriptor_binary_summary(&descriptor)
         })
         .unwrap_or_default();
-    let selected_missing_descriptor_columns = view
-        .as_ref()
-        .map(|message| {
-            let definition = outlook_folder_view_definition(message.folder_id, &message.name);
-            let descriptor = view_descriptor_binary(&definition);
-            let descriptor_columns = view_descriptor_property_tags(&descriptor);
-            missing_debug_property_tags(columns, &descriptor_columns)
+    let selected_missing_descriptor_columns = (!associated)
+        .then(|| {
+            view.as_ref().map(|message| {
+                let definition = outlook_folder_view_definition(message.folder_id, &message.name);
+                let descriptor = view_descriptor_binary(&definition);
+                let descriptor_columns = view_descriptor_property_tags(&descriptor);
+                missing_debug_property_tags(columns, &descriptor_columns)
+            })
         })
+        .flatten()
         .unwrap_or_default();
     let selected_view_name = view
         .as_ref()
@@ -608,6 +610,9 @@ pub(in crate::mapi::dispatch) fn is_outlook_folder_table_debug_target(folder_id:
             | CONTACTS_SEARCH_FOLDER_ID
             | QUICK_CONTACTS_FOLDER_ID
             | IM_CONTACT_LIST_FOLDER_ID
+            | TASKS_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | JOURNAL_FOLDER_ID
             | JUNK_FOLDER_ID
             | COMMON_VIEWS_FOLDER_ID
             | QUICK_STEP_SETTINGS_FOLDER_ID

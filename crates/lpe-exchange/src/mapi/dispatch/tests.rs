@@ -210,8 +210,14 @@ fn outlook_view_descriptor_visible_property_tags_reports_calendar_columns() {
     assert_eq!(
         tags,
         vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
             PID_LID_COMMON_START_TAG,
             PID_LID_COMMON_END_TAG,
             PID_LID_LOCATION_W_TAG,
@@ -495,7 +501,7 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
+        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
     ));
     assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
 }
@@ -513,9 +519,131 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x0037001f,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
     ));
     assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+}
+
+#[test]
+fn task_note_journal_handoff_contracts_report_standard_identity_columns() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+
+    for (folder_id, expected_columns) in [
+        (
+            TASKS_FOLDER_ID,
+            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x10900003,0x81050040,0x81040040,0x81020005",
+        ),
+        (
+            NOTES_FOLDER_ID,
+            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x30080040,0x8b000003",
+        ),
+        (
+            JOURNAL_FOLDER_ID,
+            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x87060040,0x87070003,0x8700001f",
+        ),
+    ] {
+        let contract = format_outlook_view_handoff_table_contract(
+            folder_id,
+            true,
+            &default_associated_config_columns(),
+            &snapshot,
+        );
+
+        assert!(contract.contains("folder_local_default_supported=true"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
+        assert!(contract.contains(expected_columns), "{contract}");
+        assert!(contract.contains("expected_view_message_id=0x7fffffffffe90001"));
+    }
+}
+
+#[test]
+fn associated_view_handoff_contract_ignores_visible_view_descriptor_gaps() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = [
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        0x7c06_0003,
+        PID_TAG_MESSAGE_CLASS_W,
+        0x685d_0003,
+        PID_TAG_LAST_MODIFICATION_TIME,
+    ];
+    let contract =
+        format_outlook_view_handoff_table_contract(CALENDAR_FOLDER_ID, true, &columns, &snapshot);
+
+    assert!(contract.contains("selected_view_name=Calendar"));
+    assert!(
+        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
+        "{contract}"
+    );
+}
+
+#[test]
+fn calendar_view_handoff_descriptor_matches_observed_calendar_projection() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = [
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_STATUS,
+        PID_LID_OUTLOOK_COMMON_8578_TAG,
+        PID_LID_SIDE_EFFECTS_TAG,
+    ];
+    let contract =
+        format_outlook_view_handoff_table_contract(CALENDAR_FOLDER_ID, false, &columns, &snapshot);
+
+    assert!(contract.contains("selected_view_name=Calendar"));
+    assert!(contract.contains(
+        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+    ));
+    assert!(
+        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
+        "{contract}"
+    );
+}
+
+#[test]
+fn messages_view_handoff_descriptor_matches_observed_drafts_projection() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = [
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_CONVERSATION_INDEX,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
+        PID_LID_OUTLOOK_COMMON_85EF_TAG,
+    ];
+    let contract =
+        format_outlook_view_handoff_table_contract(DRAFTS_FOLDER_ID, false, &columns, &snapshot);
+
+    assert!(contract.contains("selected_view_name=Messages"));
+    for tag in [
+        "0x67480014",
+        "0x674a0014",
+        "0x674d0014",
+        "0x674e0003",
+        "0x00710102",
+        "0x0e070003",
+        "0x001a001f",
+        "0x30080040",
+        "0x0f030102",
+        "0x85ef000b",
+    ] {
+        assert!(contract.contains(tag), "{contract}");
+    }
+    assert!(
+        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
+        "{contract}"
+    );
 }
 
 #[test]
@@ -574,6 +702,109 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
         contract.ends_with("selected_missing_descriptor_columns="),
         "{contract}"
     );
+}
+
+#[test]
+fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release() {
+    let inbox_id = Uuid::from_u128(0x5555);
+    crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+    let mailbox = JmapMailbox {
+        id: inbox_id,
+        parent_id: None,
+        role: "inbox".to_string(),
+        name: "Inbox".to_string(),
+        sort_order: 0,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let email = JmapEmail {
+        id: Uuid::from_u128(0x6666),
+        thread_id: Uuid::from_u128(0x7777),
+        mailbox_ids: vec![inbox_id],
+        mailbox_states: vec![test_mailbox_state(inbox_id, "inbox")],
+        mailbox_id: inbox_id,
+        mailbox_role: "inbox".to_string(),
+        mailbox_name: "Inbox".to_string(),
+        modseq: 1,
+        received_at: "2026-06-07T19:00:00Z".to_string(),
+        sent_at: None,
+        from_address: "sender@example.test".to_string(),
+        from_display: Some("Sender".to_string()),
+        sender_address: None,
+        sender_display: None,
+        sender_authorization_kind: "self".to_string(),
+        submitted_by_account_id: Uuid::nil(),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: "Preview target".to_string(),
+        preview: "Body text".to_string(),
+        body_text: "Body text".to_string(),
+        body_html_sanitized: None,
+        unread: false,
+        flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
+        categories: Vec::new(),
+        has_attachments: false,
+        size_octets: 128,
+        internet_message_id: Some("<message@example.test>".to_string()),
+        mime_blob_ref: None,
+        delivery_status: "stored".to_string(),
+    };
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(0x6666),
+    );
+
+    let contract = format_inbox_view_descriptor_behavior_contract(
+        INBOX_FOLDER_ID,
+        false,
+        0,
+        true,
+        40,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 1,
+        }],
+        None,
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
+        std::slice::from_ref(&mailbox),
+        std::slice::from_ref(&email),
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert!(contract.contains("total_rows=1"), "{contract}");
+    assert!(contract.contains("position=0"), "{contract}");
+    assert!(contract.contains("requested=40"), "{contract}");
+    assert!(contract.contains("sampled=1"), "{contract}");
+    assert!(
+        contract.contains("selected_missing_descriptor_columns=;"),
+        "{contract}"
+    );
+    assert!(contract.contains("0x0037001f:projected=true"), "{contract}");
+    assert!(contract.contains("0x0037001f=Preview target"), "{contract}");
+    assert!(contract.contains("0x0e060040="), "{contract}");
 }
 
 #[test]
@@ -1540,6 +1771,76 @@ fn calendar_query_position_wire_summary_reports_compact_response_shape() {
 }
 
 #[test]
+fn calendar_query_position_wire_summary_reports_same_handle_query_rows_observed() {
+    let response = vec![
+        RopId::QueryPosition.as_u8(),
+        31,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+    ];
+    let summary = format_calendar_query_position_wire_summary(
+        "request:219",
+        "QueryPosition",
+        "handle=134;input_index=31;response_row_count=1",
+        &response,
+        true,
+    );
+
+    assert!(summary.contains("query_rows_observed=true"));
+    assert!(summary.contains("next_expected_client_step=calendar_query_rows_already_observed"));
+    assert!(summary.contains("response_position=1"));
+}
+
+#[test]
+fn default_view_query_position_wire_summary_reports_role_specific_next_step() {
+    let response = vec![
+        RopId::QueryPosition.as_u8(),
+        12,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+    ];
+    let summary = format_default_view_query_position_wire_summary(
+        "request:301",
+        "SetColumns,QueryPosition",
+        "handle=151;input_index=12;folder=0x0000000000130001;role=tasks",
+        &response,
+        false,
+        "tasks",
+    );
+
+    assert!(summary.contains("request_id=request:301"));
+    assert!(summary.contains("request_rops=SetColumns,QueryPosition"));
+    assert!(summary.contains("response_bytes=14"));
+    assert!(summary.contains("response_preview=170c000000000000000002000000"));
+    assert!(summary.contains("response_return=0x00000000"));
+    assert!(summary.contains("response_position=0"));
+    assert!(summary.contains("response_row_count=2"));
+    assert!(summary.contains("query_rows_observed=false"));
+    assert!(summary.contains("next_expected_client_step=query_rows_on_tasks_contents_table"));
+    assert!(summary.contains("role=tasks"));
+}
+
+#[test]
 fn calendar_associated_sort_trace_reports_missing_query_rows_handoff() {
     let snapshot = empty_snapshot();
     let trace = format_calendar_associated_sort_trace(
@@ -1672,21 +1973,123 @@ fn normal_message_column_support_covers_observed_inbox_compact_projection() {
         PID_TAG_SENT_REPRESENTING_NAME_W,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_CONVERSATION_ID,
+        PID_TAG_CONVERSATION_INDEX_TRACKING,
         PID_TAG_INTERNET_MESSAGE_ID_W,
         PID_TAG_IMPORTANCE,
+        PID_TAG_ORIGINAL_SENSITIVITY,
         PID_TAG_HAS_ATTACHMENTS,
         PID_TAG_MESSAGE_STATUS,
+        PID_TAG_ALTERNATE_RECIPIENT_ALLOWED,
+        PID_TAG_AUTO_FORWARDED,
+        PID_TAG_DEFERRED_DELIVERY_TIME,
+        PID_TAG_DELETE_AFTER_SUBMIT,
+        PID_TAG_EXPIRY_TIME,
+        PID_TAG_ICON_INDEX,
+        PID_TAG_INTERNET_MAIL_OVERRIDE_FORMAT,
+        PID_TAG_IN_REPLY_TO_ID_W,
+        PID_TAG_BLOCK_STATUS,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        PID_TAG_LAST_VERB_EXECUTED,
+        PID_TAG_LAST_VERB_EXECUTION_TIME,
+        PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID,
+        PID_TAG_ORIGINAL_AUTHOR_NAME_W,
+        PID_TAG_ORIGINAL_DISPLAY_BCC_W,
+        PID_TAG_ORIGINAL_DISPLAY_CC_W,
+        PID_TAG_ORIGINAL_DISPLAY_TO_W,
+        PID_TAG_ORIGINAL_SENDER_NAME_W,
+        PID_TAG_ORIGINAL_SUBJECT_W,
+        PID_TAG_ORIGINAL_SUBMIT_TIME,
+        PID_TAG_OWNER_APPOINTMENT_ID,
+        PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED,
+        PID_TAG_PARENT_KEY,
+        PID_TAG_PROCESSED,
+        PID_TAG_NEXT_SEND_ACCOUNT_W,
+        PID_TAG_PRIMARY_SEND_ACCOUNT_W,
+        PID_TAG_READ_RECEIPT_REQUESTED,
+        PID_TAG_RECIPIENT_REASSIGNMENT_PROHIBITED,
+        PID_TAG_REPLY_REQUESTED,
+        PID_TAG_REPLY_RECIPIENT_ENTRIES,
+        PID_TAG_REPLY_RECIPIENT_NAMES_W,
+        PID_TAG_REPLY_TIME,
+        PID_TAG_REPORT_TAG,
+        PID_TAG_REPORT_TIME,
+        PID_TAG_RESPONSE_REQUESTED,
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_MESSAGE_EDITOR_FORMAT,
+        PID_TAG_DEFERRED_SEND_TIME,
         0x8514_000B,
         0x8017_000B,
         0x801F_001F,
         PID_TAG_SENT_REPRESENTING_ENTRY_ID,
+        PID_TAG_START_DATE_ETC,
+        PID_TAG_ARCHIVE_DATE,
+        PID_TAG_ARCHIVE_PERIOD,
+        PID_TAG_ARCHIVE_TAG,
+        PID_TAG_POLICY_TAG,
+        PID_TAG_RETENTION_DATE,
+        PID_TAG_RETENTION_FLAGS,
+        PID_TAG_RETENTION_PERIOD,
         0x1213_0003,
         PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_MESSAGE_LOCALE_ID,
     ]);
 
     assert!(summary.contains("0x00410102"));
     assert!(!summary.contains("defaulted=0x00410102"));
+    assert!(!summary.contains("defaulted=0x30130102"));
+    assert!(!summary.contains("defaulted=0x3016000b"));
+    assert!(!summary.contains("defaulted=0x0002000b"));
+    assert!(!summary.contains("defaulted=0x0005000b"));
+    assert!(!summary.contains("defaulted=0x000f0040"));
+    assert!(!summary.contains("defaulted=0x0e01000b"));
+    assert!(!summary.contains("defaulted=0x00150040"));
+    assert!(!summary.contains("defaulted=0x10800003"));
+    assert!(!summary.contains("defaulted=0x59020003"));
+    assert!(!summary.contains("defaulted=0x1042001f"));
+    assert!(!summary.contains("defaulted=0x10960003"));
+    assert!(!summary.contains("defaulted=0x3ffa001f"));
+    assert!(!summary.contains("defaulted=0x10810003"));
+    assert!(!summary.contains("defaulted=0x10820040"));
+    assert!(!summary.contains("defaulted=0x004c0102"));
+    assert!(!summary.contains("defaulted=0x004d001f"));
+    assert!(!summary.contains("defaulted=0x0072001f"));
+    assert!(!summary.contains("defaulted=0x0073001f"));
+    assert!(!summary.contains("defaulted=0x0074001f"));
+    assert!(!summary.contains("defaulted=0x005a001f"));
+    assert!(!summary.contains("defaulted=0x0049001f"));
+    assert!(!summary.contains("defaulted=0x004e0040"));
+    assert!(!summary.contains("defaulted=0x00620003"));
+    assert!(!summary.contains("defaulted=0x0023000b"));
+    assert!(!summary.contains("defaulted=0x00250102"));
+    assert!(!summary.contains("defaulted=0x7d01000b"));
+    assert!(!summary.contains("defaulted=0x0e29001f"));
+    assert!(!summary.contains("defaulted=0x0e28001f"));
+    assert!(!summary.contains("defaulted=0x0029000b"));
+    assert!(!summary.contains("defaulted=0x002b000b"));
+    assert!(!summary.contains("defaulted=0x0c17000b"));
+    assert!(!summary.contains("defaulted=0x004f0102"));
+    assert!(!summary.contains("defaulted=0x0050001f"));
+    assert!(!summary.contains("defaulted=0x00300040"));
+    assert!(!summary.contains("defaulted=0x00310102"));
+    assert!(!summary.contains("defaulted=0x00320040"));
+    assert!(!summary.contains("defaulted=0x0063000b"));
+    assert!(!summary.contains("defaulted=0x00600040"));
+    assert!(!summary.contains("defaulted=0x00610040"));
+    assert!(!summary.contains("defaulted=0x59090003"));
+    assert!(!summary.contains("defaulted=0x3fef0040"));
+    assert!(!summary.contains("defaulted=0x301b0102"));
+    assert!(!summary.contains("defaulted=0x30180003"));
+    assert!(!summary.contains("defaulted=0x30180102"));
+    assert!(!summary.contains("defaulted=0x30190102"));
+    assert!(!summary.contains("defaulted=0x301a0003"));
+    assert!(!summary.contains("defaulted=0x301c0040"));
+    assert!(!summary.contains("defaulted=0x301d0003"));
+    assert!(!summary.contains("defaulted=0x301e0003"));
+    assert!(!summary.contains("defaulted=0x301f0040"));
     assert!(!summary.contains("defaulted=0x12130003"));
+    assert!(!summary.contains("defaulted=0x3ff10003"));
     assert!(summary.contains("0x8514000b"));
     assert!(summary.contains("0x8017000b"));
     assert!(summary.contains("0x801f001f"));
