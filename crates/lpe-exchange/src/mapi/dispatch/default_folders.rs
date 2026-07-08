@@ -145,6 +145,10 @@ fn default_folder_identification_safe_property_value(
         return Some((tag, value));
     }
     match canonical_property_storage_tag(tag) {
+        storage_tag if is_scalar_default_folder_entry_id_property_tag(storage_tag) => {
+            special_folder_identification_property_value(principal.account_id, storage_tag)
+                .map(|value| (storage_tag, value))
+        }
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
             if !matches!(
                 object,
