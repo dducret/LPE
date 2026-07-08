@@ -19,6 +19,11 @@ from typing import Any
 
 HEX_TAG_RE = re.compile(r"0x[0-9a-fA-F]{8}")
 RUN_STAMP_RE = re.compile(r"(\d{12})")
+UMOLK_USER_OPTIONS_CLASS = "IPM.Configuration.UMOLK.UserOptions"
+UMOLK_MANDATORY_DICTIONARY_TAGS = {
+    "0x7c060003": "PidTagRoamingDatatypes",
+    "0x7c070102": "PidTagRoamingDictionary",
+}
 KNOWN_STATIC_GETPROPS_TAGS = {
     # Microsoft-defined message/store properties that older LPE builds logged as
     # unknown before the debug-name table caught up with Outlook traces.
@@ -174,9 +179,7 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     "0x85780003",  # Outlook calendar auxiliary status
     "0x85ef000b",  # PidLidOutlookCommon85EF
 }
-ACTIONABLE_ZERO_DEFAULT_TAGS = {
-    "0x120c0102": "undocumented_folder_binary_120c",
-}
+ACTIONABLE_ZERO_DEFAULT_TAGS = {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -373,12 +376,17 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "setcolumns_release_response_handle_tables": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
         "visible_release_descriptor_windows": Counter(),
+        "visible_release_descriptor_contract_issues": Counter(),
+        "common_view_descriptor_getprops": Counter(),
+        "common_view_descriptor_getprops_issues": Counter(),
+        "common_view_descriptor_getprops_contexts": set(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_terminal_events": Counter(),
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
+        "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
@@ -388,6 +396,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
+        "default_view_descriptor_identity_columns": Counter(),
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "stale_default_view_contexts": set(),
@@ -395,6 +404,11 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "unknown_getprops_contexts": Counter(),
         "unknown_defaulted_getprops_tags": Counter(),
         "unknown_defaulted_getprops_contexts": Counter(),
+        "problem_getprops_tags": Counter(),
+        "problem_getprops_contexts": Counter(),
+        "umolk_problem_getprops_tags": Counter(),
+        "umolk_problem_getprops_contexts": Counter(),
+        "umolk_getprops_request_ids": set(),
         "associated_config_optional_defaulted_getprops_tags": Counter(),
         "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
@@ -464,13 +478,29 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
             elif message == "rca debug mapi outlook surface getprops contract":
                 contract = str(fields.get("getprops_contract") or "")
                 inspect_contract(summary, contract, fields)
+                record_common_view_descriptor_getprops(
+                    summary,
+                    str(fields.get("common_view_descriptor_getprops_contract") or ""),
+                    fields,
+                )
+            elif message == "rca debug mapi get properties specific":
+                record_common_view_descriptor_getprops(
+                    summary,
+                    str(fields.get("common_view_descriptor_getprops_contract") or ""),
+                    fields,
+                )
             elif message == "rca debug mapi get properties named property context":
                 record_resolved_named_property_context(summary, fields)
+            elif message == "rca debug outlook view descriptor getprops":
+                record_common_view_descriptor_getprops(summary, "", fields)
             elif message == "rca debug mapi setcolumns release response framing":
                 record_setcolumns_release_response(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi umolk getprops materialization":
+                request_id = fields.get("mapi_request_id")
+                if request_id:
+                    summary["umolk_getprops_request_ids"].add(str(request_id))
                 record_umolk_dictionary_shapes(
                     summary,
                     str(fields.get("umolk_getprops_materialization_context") or ""),
@@ -534,6 +564,127 @@ def record_umolk_dictionary_shapes(summary: dict[str, Any], text: str) -> None:
     shape = first_field(text, "dictionary_shape")
     if shape:
         summary["umolk_dictionary_shapes"][shape] += 1
+    record_umolk_dictionary_contract(summary, text)
+
+
+def record_umolk_dictionary_contract(summary: dict[str, Any], text: str) -> None:
+    if not text:
+        return
+    requested = {tag.lower() for tag in tags_after(text, "tags=")}
+    if not requested:
+        return
+    returned = {tag.lower() for tag in tags_after(text, "values=")}
+    problem = {tag.lower() for tag in problem_tags_after(text, "first_problem_tags=")}
+    missing = []
+    for tag, name in UMOLK_MANDATORY_DICTIONARY_TAGS.items():
+        if tag not in requested:
+            continue
+        if tag not in returned or tag in problem:
+            missing.append(f"{tag}:{name}")
+    if not missing:
+        return
+    request_id = first_field(text, "request_id") or "unknown"
+    config_id = first_field(text, "config") or "unknown"
+    config_class = first_field(text, "class") or "unknown"
+    summary["umolk_dictionary_issues"][
+        f"missing={','.join(missing)};request={request_id};"
+        f"config={config_id};class={config_class}"
+    ] += 1
+
+
+def record_common_view_descriptor_getprops(
+    summary: dict[str, Any], contract: str, fields: dict[str, Any]
+) -> None:
+    if not contract and not field_text(fields, "requested_view_descriptor_contract"):
+        return
+
+    found = first_field(contract, "found")
+    view_name = first_field(contract, "view_name") or field_text(fields, "view_name")
+    folder_id = first_field(contract, "folder_id") or field_text(fields, "folder_id")
+    view_id = first_field(contract, "view_id") or field_text(fields, "view_message_id")
+    requested_tags = first_field(contract, "requested_descriptor_tags") or field_text(
+        fields, "requested_property_tags"
+    )
+    requested_contract = field_text(fields, "requested_view_descriptor_contract")
+    response_values = first_field(contract, "response_values") or field_text(
+        fields, "requested_view_descriptor_response_values"
+    )
+
+    key = (
+        f"found={found or 'unknown'};view={view_name or 'unknown'};"
+        f"folder={folder_id or 'unknown'};view_id={view_id or 'unknown'};"
+        f"requested={requested_tags or requested_contract or 'unknown'}"
+    )
+    if key in summary["common_view_descriptor_getprops_contexts"]:
+        return
+    summary["common_view_descriptor_getprops_contexts"].add(key)
+    summary["common_view_descriptor_getprops"][key] += 1
+
+    if found == "false":
+        summary["common_view_descriptor_getprops_issues"][
+            f"missing_view_message;{key}"
+        ] += 1
+        return
+
+    missing_response_parts: list[str] = []
+    if requested_contract:
+        for name in ("version", "name", "binary", "strings"):
+            if first_field(requested_contract, name) == "true" and (
+                not response_values or name not in response_values.lower()
+            ):
+                missing_response_parts.append(name)
+    if missing_response_parts:
+        summary["common_view_descriptor_getprops_issues"][
+            f"missing_response_values={','.join(missing_response_parts)};{key}"
+        ] += 1
+
+    descriptor_contract_issues = inbox_compact_descriptor_getprops_contract_issues(
+        contract, fields, view_name, folder_id
+    )
+    if descriptor_contract_issues:
+        summary["common_view_descriptor_getprops_issues"][
+            f"descriptor_contract={','.join(descriptor_contract_issues)};{key}"
+        ] += 1
+
+
+def inbox_compact_descriptor_getprops_contract_issues(
+    contract: str,
+    fields: dict[str, Any],
+    view_name: str | None,
+    folder_id: str | None,
+) -> list[str]:
+    if (view_name or "").lower() != "compact":
+        return []
+    if (folder_id or "").lower() != "0x0000000000050001":
+        return []
+
+    issues = []
+    column_count = first_field(contract, "descriptor_column_count") or field_text(
+        fields, "descriptor_column_count"
+    )
+    if column_count and column_count != "11":
+        issues.append(f"columns={column_count}")
+    terminators = first_field(contract, "descriptor_strings_terminators") or field_text(
+        fields, "descriptor_strings_terminators"
+    )
+    if terminators and terminators != "11":
+        issues.append(f"string_terminators={terminators}")
+    starts = first_field(contract, "descriptor_strings_starts_with_terminator") or field_text(
+        fields, "descriptor_strings_starts_with_terminator"
+    )
+    if starts and starts.lower() != "true":
+        issues.append(f"strings_start={starts}")
+    ends = first_field(contract, "descriptor_strings_ends_with_terminator") or field_text(
+        fields, "descriptor_strings_ends_with_terminator"
+    )
+    if ends and ends.lower() != "true":
+        issues.append(f"strings_end={ends}")
+    trailing_nul = first_field(contract, "descriptor_strings_trailing_nul") or field_text(
+        fields, "descriptor_strings_trailing_nul"
+    )
+    if trailing_nul and trailing_nul.lower() != "false":
+        issues.append(f"strings_trailing_nul={trailing_nul}")
+    return issues
 
 
 def record_post_visible_release_followup(
@@ -658,6 +809,7 @@ def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
             record_post_visible_release_terminal_event(summary, segment)
         record_default_view_query_position_without_rows(summary, segment)
         record_default_view_id_collision(summary, segment)
+        record_default_view_descriptor_identity_columns(summary, segment)
         record_descriptor_gap(summary, segment)
         inspect_contract(summary, segment)
 
@@ -673,6 +825,7 @@ def record_visible_release_context(summary: dict[str, Any], text: str) -> None:
     record_visible_release_classification(summary, segment)
     record_visible_release_request_metrics(summary, segment)
     record_visible_release_descriptor_window(summary, segment)
+    record_visible_release_descriptor_contract(summary, segment)
 
 
 def record_visible_release_request_metrics(summary: dict[str, Any], text: str) -> None:
@@ -992,6 +1145,41 @@ def record_descriptor_gap(
     summary["descriptor_gap_windows"][key] += 1
 
 
+DEFAULT_VIEW_IDENTITY_DESCRIPTOR_TAGS = {
+    "0x67480014": "PidTagFolderId",
+    "0x674a0014": "PidTagMid",
+    "0x674d0014": "PidTagInstId",
+    "0x674e0003": "PidTagInstanceNum",
+}
+
+
+def record_default_view_descriptor_identity_columns(
+    summary: dict[str, Any], text: str
+) -> None:
+    if "descriptor_summary=" not in text:
+        return
+    role = first_field(text, "role") or first_field(text, "owner_role") or "unknown"
+    view_name = first_field(text, "selected_view_name") or first_field(text, "view_name")
+    if not view_name:
+        return
+    descriptor_summary = suffix_field(text, "descriptor_summary")
+    if not descriptor_summary:
+        return
+    visible_tags = csv_field_values(
+        first_field(descriptor_summary, "visible_column_tags") or ""
+    )
+    identity_tags = [
+        f"{tag}:{DEFAULT_VIEW_IDENTITY_DESCRIPTOR_TAGS[tag]}"
+        for tag in visible_tags
+        if tag in DEFAULT_VIEW_IDENTITY_DESCRIPTOR_TAGS
+    ]
+    if not identity_tags:
+        return
+    summary["default_view_descriptor_identity_columns"][
+        f"role={role};view={view_name};identity={','.join(identity_tags)}"
+    ] += 1
+
+
 def record_visible_release_descriptor_window(
     summary: dict[str, Any], segment: str
 ) -> None:
@@ -1012,6 +1200,81 @@ def record_visible_release_descriptor_window(
     if sample:
         key = f"{key};sample={sample[:240]}"
     summary["visible_release_descriptor_windows"][key] += 1
+
+
+EXPECTED_INBOX_COMPACT_DESCRIPTOR_VISIBLE_TAGS = [
+    "0x00170003",
+    "0x8503000b",
+    "0x001a001e",
+    "0x10900003",
+    "0x0e1b000b",
+    "0x0042001e",
+    "0x0037001e",
+    "0x0e060040",
+    "0x0e080003",
+    "0x9000101e",
+]
+
+FORBIDDEN_INBOX_COMPACT_DESCRIPTOR_TAGS = {
+    "0x67480014": "identity_folder_id",
+    "0x674a0014": "identity_mid",
+    "0x674d0014": "identity_inst_id",
+    "0x674e0003": "identity_instance_num",
+    "0x8514000b": "old_outlook_common_8514_reminder",
+    "0x001a001f": "unicode_message_class",
+    "0x0e170003": "message_status_for_flag_status",
+    "0x0042001f": "unicode_from",
+    "0x0037001f": "unicode_subject",
+    "0x12130003": "old_auxiliary_flags_for_size",
+}
+
+
+def record_visible_release_descriptor_contract(
+    summary: dict[str, Any], segment: str
+) -> None:
+    if segment.startswith("visible_inbox_release_without_query_rows:"):
+        text = segment.split(":", 1)[1]
+    else:
+        text = segment
+    view_name = first_field(text, "selected_view_name") or first_field(text, "view_name")
+    role = first_field(text, "role") or first_field(text, "owner_role")
+    if view_name != "Compact" or role not in ("", None, "inbox"):
+        return
+    descriptor_summary = suffix_field(text, "descriptor_summary")
+    if not descriptor_summary:
+        return
+    visible_tags = csv_field_values(
+        first_field(descriptor_summary, "visible_column_tags") or ""
+    )
+    if not visible_tags:
+        return
+    missing_expected = [
+        tag for tag in EXPECTED_INBOX_COMPACT_DESCRIPTOR_VISIBLE_TAGS if tag not in visible_tags
+    ]
+    forbidden = [
+        f"{tag}:{FORBIDDEN_INBOX_COMPACT_DESCRIPTOR_TAGS[tag]}"
+        for tag in visible_tags
+        if tag in FORBIDDEN_INBOX_COMPACT_DESCRIPTOR_TAGS
+    ]
+    issue_parts = []
+    if missing_expected:
+        issue_parts.append(f"missing_expected={','.join(missing_expected)}")
+    if forbidden:
+        issue_parts.append(f"forbidden={','.join(forbidden)}")
+    if not issue_parts:
+        summary["visible_release_descriptor_contract_issues"][
+            "role=inbox;view=Compact;contract=ms_oxocfg_ok"
+        ] += 1
+        return
+    summary["visible_release_descriptor_contract_issues"][
+        f"role=inbox;view=Compact;{';'.join(issue_parts)}"
+    ] += 1
+
+
+def csv_field_values(value: str) -> list[str]:
+    if not value:
+        return []
+    return [part.strip().lower() for part in value.split(",") if part.strip()]
 
 
 def suffix_field(text: str, key: str) -> str | None:
@@ -1044,8 +1307,11 @@ def inspect_contract(
     zero_default_tags = {
         tag for key in ("zero_default_tags=", "zero_defaults=") for tag in tags_after(contract, key)
     }
+    problem_tags = set(problem_tags_after(contract, "problem_tags="))
     for tag in unknown_named_tags(contract):
         if tag in resolved_named_tags:
+            continue
+        if tag in problem_tags:
             continue
         if tag in zero_default_tags:
             record_unknown_getprops_tag(
@@ -1053,11 +1319,52 @@ def inspect_contract(
             )
         else:
             record_unknown_getprops_tag(summary, tag, contract, fields, "unknown-name")
-    for tag in problem_tags_after(contract, "problem_tags="):
+    for tag in problem_tags:
         if tag:
-            record_unknown_getprops_tag(summary, tag, contract, fields, "problem-tag")
+            record_getprops_problem_tag(summary, tag, contract, fields)
     for tag in zero_default_tags:
         summary["zero_default_tags"][tag] += 1
+
+
+def record_getprops_problem_tag(
+    summary: dict[str, Any],
+    tag: str,
+    contract: str,
+    fields: dict[str, Any] | None,
+) -> None:
+    request_id = field_text(fields or {}, "mapi_request_id") or first_field(
+        contract, "request_id"
+    )
+    object_kind = field_text(fields or {}, "object_kind") or first_field(
+        contract, "kind"
+    )
+    associated_config_class = field_text(fields or {}, "associated_config_class")
+    umolk_problem = (
+        object_kind == "associated_config"
+        and (
+            associated_config_class == UMOLK_USER_OPTIONS_CLASS
+            or (request_id and request_id in summary["umolk_getprops_request_ids"])
+        )
+    )
+    if umolk_problem:
+        tag_counter = "umolk_problem_getprops_tags"
+        context_counter = "umolk_problem_getprops_contexts"
+    else:
+        tag_counter = "problem_getprops_tags"
+        context_counter = "problem_getprops_contexts"
+    summary[tag_counter][tag] += 1
+    role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
+    folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
+    problem = problem_detail_for_tag(contract, tag)
+    context = (
+        f"{tag};object={object_kind or 'unknown'};role={role or 'unknown'};"
+        f"folder={folder or 'unknown'};request={request_id or 'unknown'}"
+    )
+    if associated_config_class and associated_config_class != "none":
+        context = f"{context};class={associated_config_class}"
+    if problem:
+        context = f"{context};problem={problem}"
+    summary[context_counter][context] += 1
 
 
 def record_unknown_getprops_tag(
@@ -1169,6 +1476,19 @@ def problem_tags_after(text: str, key: str) -> list[str]:
         if match:
             tags.append(match.group(0))
     return tags
+
+
+def problem_detail_for_tag(text: str, tag: str) -> str | None:
+    index = text.find("problem_tags=")
+    if index < 0:
+        return None
+    value = text[index + len("problem_tags=") :].split(";", 1)[0].split(")", 1)[0]
+    tag_lower = tag.lower()
+    for item in value.split(","):
+        item = item.strip()
+        if item.lower().startswith(tag_lower):
+            return item
+    return None
 
 
 def print_counter(title: str, counter: Counter[str], limit: int = 12) -> None:
@@ -1287,6 +1607,22 @@ def print_single_summary(
             log["unknown_getprops_contexts"],
             limit=20,
         )
+        print_counter("Problem GetProps tags", log["problem_getprops_tags"], limit=20)
+        print_counter(
+            "Problem GetProps contexts",
+            log["problem_getprops_contexts"],
+            limit=20,
+        )
+        print_counter(
+            "UMOLK problem GetProps tags",
+            log["umolk_problem_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "UMOLK problem GetProps contexts",
+            log["umolk_problem_getprops_contexts"],
+            limit=20,
+        )
         print_counter(
             "Unknown defaulted GetProps tags",
             log["unknown_defaulted_getprops_tags"],
@@ -1315,6 +1651,11 @@ def print_single_summary(
         )
         print_counter("Stale default-view owner states", log["stale_default_view_states"])
         print_counter("Descriptor gap windows", log["descriptor_gap_windows"], limit=12)
+        print_counter(
+            "Default-view descriptor identity columns",
+            log["default_view_descriptor_identity_columns"],
+            limit=12,
+        )
         print_counter(
             "Actionable descriptor gap windows",
             actionable_descriptor_gap_counts(log["descriptor_gap_windows"]),
@@ -1402,6 +1743,7 @@ def print_single_summary(
             for event in log["post_visible_release_terminal_tail"]:
                 print(f"  {event}")
         print_counter("UMOLK dictionary shapes", log["umolk_dictionary_shapes"], limit=8)
+        print_counter("UMOLK dictionary issues", log["umolk_dictionary_issues"], limit=8)
         print(
             "Post-visible-release hierarchy QueryPosition max: "
             f"{log['post_visible_release_hierarchy_query_position_max']}"
@@ -1410,6 +1752,21 @@ def print_single_summary(
             "Visible Inbox release descriptor windows",
             log["visible_release_descriptor_windows"],
             limit=8,
+        )
+        print_counter(
+            "Visible Inbox release descriptor contract issues",
+            log["visible_release_descriptor_contract_issues"],
+            limit=8,
+        )
+        print_counter(
+            "Common-view descriptor GetProps",
+            log["common_view_descriptor_getprops"],
+            limit=12,
+        )
+        print_counter(
+            "Common-view descriptor GetProps issues",
+            log["common_view_descriptor_getprops_issues"],
+            limit=12,
         )
         print(f"Raw UMOLK <xml/> placeholder hits: {log['raw_umolk_placeholder']}")
         if log["last_execute"]:
@@ -1448,10 +1805,17 @@ def print_batch_summary(
     aggregate_unknown_contexts: Counter[str] = Counter()
     aggregate_unknown_defaulted_tags: Counter[str] = Counter()
     aggregate_unknown_defaulted_contexts: Counter[str] = Counter()
+    aggregate_problem_getprops_tags: Counter[str] = Counter()
+    aggregate_problem_getprops_contexts: Counter[str] = Counter()
+    aggregate_umolk_problem_getprops_tags: Counter[str] = Counter()
+    aggregate_umolk_problem_getprops_contexts: Counter[str] = Counter()
     aggregate_associated_config_optional_defaulted_tags: Counter[str] = Counter()
     aggregate_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_hierarchy_windows: Counter[str] = Counter()
     aggregate_visible_release_descriptor_windows: Counter[str] = Counter()
+    aggregate_visible_release_descriptor_contract_issues: Counter[str] = Counter()
+    aggregate_common_view_descriptor_getprops: Counter[str] = Counter()
+    aggregate_common_view_descriptor_getprops_issues: Counter[str] = Counter()
     aggregate_visible_release_classifications: Counter[str] = Counter()
     aggregate_visible_release_request_shapes: Counter[str] = Counter()
     aggregate_visible_release_pre_release_states: Counter[str] = Counter()
@@ -1463,12 +1827,14 @@ def print_batch_summary(
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
+    aggregate_umolk_dictionary_issues: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
     aggregate_default_view_id_collisions: Counter[str] = Counter()
     aggregate_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     aggregate_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     aggregate_descriptor_gap_windows: Counter[str] = Counter()
+    aggregate_default_view_descriptor_identity_columns: Counter[str] = Counter()
     aggregate_nonzero_response_codes: Counter[str] = Counter()
     current_missing_gates: Counter[str] = Counter()
     current_stalls: Counter[str] = Counter()
@@ -1476,10 +1842,17 @@ def print_batch_summary(
     current_unknown_contexts: Counter[str] = Counter()
     current_unknown_defaulted_tags: Counter[str] = Counter()
     current_unknown_defaulted_contexts: Counter[str] = Counter()
+    current_problem_getprops_tags: Counter[str] = Counter()
+    current_problem_getprops_contexts: Counter[str] = Counter()
+    current_umolk_problem_getprops_tags: Counter[str] = Counter()
+    current_umolk_problem_getprops_contexts: Counter[str] = Counter()
     current_associated_config_optional_defaulted_tags: Counter[str] = Counter()
     current_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     current_descriptor_gap_windows: Counter[str] = Counter()
     current_visible_release_descriptor_windows: Counter[str] = Counter()
+    current_visible_release_descriptor_contract_issues: Counter[str] = Counter()
+    current_common_view_descriptor_getprops: Counter[str] = Counter()
+    current_common_view_descriptor_getprops_issues: Counter[str] = Counter()
     current_visible_release_classifications: Counter[str] = Counter()
     current_visible_release_request_shapes: Counter[str] = Counter()
     current_visible_release_pre_release_states: Counter[str] = Counter()
@@ -1491,12 +1864,14 @@ def print_batch_summary(
     current_post_visible_release_followups: Counter[str] = Counter()
     current_post_visible_release_terminal_events: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
+    current_umolk_dictionary_issues: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
     current_default_view_id_collisions: Counter[str] = Counter()
     current_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     current_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     current_nonzero_response_codes: Counter[str] = Counter()
+    current_default_view_descriptor_identity_columns: Counter[str] = Counter()
     build_issue_counts: Counter[tuple[str, str]] = Counter()
     current_issue_counts: Counter[tuple[str, str]] = Counter()
     actionable_runs = 0
@@ -1530,6 +1905,12 @@ def print_batch_summary(
         aggregate_unknown_defaulted_contexts.update(
             log["unknown_defaulted_getprops_contexts"]
         )
+        aggregate_problem_getprops_tags.update(log["problem_getprops_tags"])
+        aggregate_problem_getprops_contexts.update(log["problem_getprops_contexts"])
+        aggregate_umolk_problem_getprops_tags.update(log["umolk_problem_getprops_tags"])
+        aggregate_umolk_problem_getprops_contexts.update(
+            log["umolk_problem_getprops_contexts"]
+        )
         aggregate_associated_config_optional_defaulted_tags.update(
             log["associated_config_optional_defaulted_getprops_tags"]
         )
@@ -1538,6 +1919,9 @@ def print_batch_summary(
         )
         aggregate_hierarchy_windows.update(log["hierarchy_query_windows"])
         aggregate_descriptor_gap_windows.update(log["descriptor_gap_windows"])
+        aggregate_default_view_descriptor_identity_columns.update(
+            log["default_view_descriptor_identity_columns"]
+        )
         aggregate_post_visible_release_followups.update(
             log["post_visible_release_followups"]
         )
@@ -1545,6 +1929,7 @@ def print_batch_summary(
             log["post_visible_release_terminal_events"]
         )
         aggregate_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
+        aggregate_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
         aggregate_default_view_folder_open_without_rows.update(
             log["default_view_folder_open_without_rows"]
         )
@@ -1560,6 +1945,15 @@ def print_batch_summary(
         )
         aggregate_visible_release_descriptor_windows.update(
             log["visible_release_descriptor_windows"]
+        )
+        aggregate_visible_release_descriptor_contract_issues.update(
+            log["visible_release_descriptor_contract_issues"]
+        )
+        aggregate_common_view_descriptor_getprops.update(
+            log["common_view_descriptor_getprops"]
+        )
+        aggregate_common_view_descriptor_getprops_issues.update(
+            log["common_view_descriptor_getprops_issues"]
         )
         aggregate_visible_release_classifications.update(
             log["visible_release_classifications"]
@@ -1602,6 +1996,12 @@ def print_batch_summary(
             current_unknown_defaulted_contexts.update(
                 log["unknown_defaulted_getprops_contexts"]
             )
+            current_problem_getprops_tags.update(log["problem_getprops_tags"])
+            current_problem_getprops_contexts.update(log["problem_getprops_contexts"])
+            current_umolk_problem_getprops_tags.update(log["umolk_problem_getprops_tags"])
+            current_umolk_problem_getprops_contexts.update(
+                log["umolk_problem_getprops_contexts"]
+            )
             current_associated_config_optional_defaulted_tags.update(
                 log["associated_config_optional_defaulted_getprops_tags"]
             )
@@ -1609,6 +2009,9 @@ def print_batch_summary(
                 log["associated_config_optional_defaulted_getprops_contexts"]
             )
             current_descriptor_gap_windows.update(log["descriptor_gap_windows"])
+            current_default_view_descriptor_identity_columns.update(
+                log["default_view_descriptor_identity_columns"]
+            )
             current_post_visible_release_followups.update(
                 log["post_visible_release_followups"]
             )
@@ -1616,6 +2019,7 @@ def print_batch_summary(
                 log["post_visible_release_terminal_events"]
             )
             current_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
+            current_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
             current_default_view_folder_open_without_rows.update(
                 log["default_view_folder_open_without_rows"]
             )
@@ -1631,6 +2035,15 @@ def print_batch_summary(
             )
             current_visible_release_descriptor_windows.update(
                 log["visible_release_descriptor_windows"]
+            )
+            current_visible_release_descriptor_contract_issues.update(
+                log["visible_release_descriptor_contract_issues"]
+            )
+            current_common_view_descriptor_getprops.update(
+                log["common_view_descriptor_getprops"]
+            )
+            current_common_view_descriptor_getprops_issues.update(
+                log["common_view_descriptor_getprops_issues"]
             )
             current_visible_release_classifications.update(
                 log["visible_release_classifications"]
@@ -1703,6 +2116,26 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate problem GetProps tags",
+        aggregate_problem_getprops_tags,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate problem GetProps contexts",
+        aggregate_problem_getprops_contexts,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK problem GetProps tags",
+        aggregate_umolk_problem_getprops_tags,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK problem GetProps contexts",
+        aggregate_umolk_problem_getprops_contexts,
+        limit=20,
+    )
+    print_counter(
         "Aggregate unknown defaulted GetProps tags",
         aggregate_unknown_defaulted_tags,
         limit=20,
@@ -1732,6 +2165,11 @@ def print_batch_summary(
         actionable_descriptor_gap_counts(aggregate_descriptor_gap_windows),
         limit=20,
     )
+    print_counter(
+        "Aggregate default-view descriptor identity columns",
+        aggregate_default_view_descriptor_identity_columns,
+        limit=20,
+    )
     print_counter("Aggregate hierarchy QueryRows windows", aggregate_hierarchy_windows, limit=20)
     print_counter(
         "Aggregate post-visible-release followups",
@@ -1746,6 +2184,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate UMOLK dictionary shapes",
         aggregate_umolk_dictionary_shapes,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK dictionary issues",
+        aggregate_umolk_dictionary_issues,
         limit=20,
     )
     print_counter(
@@ -1776,6 +2219,21 @@ def print_batch_summary(
     print_counter(
         "Aggregate visible Inbox release descriptor windows",
         aggregate_visible_release_descriptor_windows,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate visible Inbox release descriptor contract issues",
+        aggregate_visible_release_descriptor_contract_issues,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate common-view descriptor GetProps",
+        aggregate_common_view_descriptor_getprops,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate common-view descriptor GetProps issues",
+        aggregate_common_view_descriptor_getprops_issues,
         limit=20,
     )
     print_counter(
@@ -1842,6 +2300,26 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build problem GetProps tags",
+            current_problem_getprops_tags,
+            limit=20,
+        )
+        print_counter(
+            "Current-build problem GetProps contexts",
+            current_problem_getprops_contexts,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK problem GetProps tags",
+            current_umolk_problem_getprops_tags,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK problem GetProps contexts",
+            current_umolk_problem_getprops_contexts,
+            limit=20,
+        )
+        print_counter(
             "Current-build unknown defaulted GetProps tags",
             current_unknown_defaulted_tags,
             limit=20,
@@ -1872,6 +2350,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build default-view descriptor identity columns",
+            current_default_view_descriptor_identity_columns,
+            limit=20,
+        )
+        print_counter(
             "Current-build post-visible-release followups",
             current_post_visible_release_followups,
             limit=20,
@@ -1884,6 +2367,11 @@ def print_batch_summary(
         print_counter(
             "Current-build UMOLK dictionary shapes",
             current_umolk_dictionary_shapes,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK dictionary issues",
+            current_umolk_dictionary_issues,
             limit=20,
         )
         print_counter(
@@ -1914,6 +2402,21 @@ def print_batch_summary(
         print_counter(
             "Current-build visible Inbox release descriptor windows",
             current_visible_release_descriptor_windows,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release descriptor contract issues",
+            current_visible_release_descriptor_contract_issues,
+            limit=20,
+        )
+        print_counter(
+            "Current-build common-view descriptor GetProps",
+            current_common_view_descriptor_getprops,
+            limit=20,
+        )
+        print_counter(
+            "Current-build common-view descriptor GetProps issues",
+            current_common_view_descriptor_getprops_issues,
             limit=20,
         )
         print_counter(
@@ -1989,6 +2492,15 @@ def issue_buckets(
         issues.append("rop_parse_error")
     if visible_release_needs_action(log):
         issues.append("visible_inbox_release_before_query_rows")
+    if log.get("visible_release_descriptor_contract_issues"):
+        for name, _count in log[
+            "visible_release_descriptor_contract_issues"
+        ].most_common(2):
+            if visible_release_descriptor_contract_issue_is_actionable(name):
+                issues.append(f"visible_inbox_descriptor_contract:{name}")
+    if log.get("common_view_descriptor_getprops_issues"):
+        for name, _count in log["common_view_descriptor_getprops_issues"].most_common(2):
+            issues.append(f"common_view_descriptor_getprops:{name}")
     if log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
             if visible_release_classification_is_actionable(name):
@@ -2009,6 +2521,9 @@ def issue_buckets(
         for name, _count in log["post_visible_release_followups"].most_common(2):
             if post_visible_release_followup_is_actionable(name):
                 issues.append(f"post_visible_release:{name}")
+    if log.get("umolk_dictionary_issues"):
+        for name, _count in log["umolk_dictionary_issues"].most_common(2):
+            issues.append(f"umolk_dictionary:{name}")
     if log.get("default_view_folder_open_without_rows"):
         for name, _count in log["default_view_folder_open_without_rows"].most_common(2):
             issues.append(f"default_view_folder_open_without_rows:{name}")
@@ -2085,6 +2600,11 @@ def setcolumns_release_response_handle_classification_is_actionable(name: str) -
 def visible_release_needs_action(log: dict[str, Any]) -> bool:
     if not log.get("visible_release_without_query_rows"):
         return False
+    if any(
+        visible_release_descriptor_contract_issue_is_actionable(name)
+        for name in log.get("visible_release_descriptor_contract_issues", {})
+    ):
+        return True
     classifications = log.get("visible_release_classifications")
     if not classifications:
         return True
@@ -2097,6 +2617,10 @@ def post_visible_release_followup_is_actionable(name: str) -> bool:
 
 def visible_release_classification_is_actionable(name: str) -> bool:
     return name != "empty_or_unknown_projection_before_query_rows"
+
+
+def visible_release_descriptor_contract_issue_is_actionable(name: str) -> bool:
+    return "contract=ms_oxocfg_ok" not in name
 
 
 def actionable_zero_default_tag_counts(counter: Counter[str]) -> Counter[str]:

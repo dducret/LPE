@@ -946,6 +946,8 @@ fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
             PID_TAG_VIEW_DESCRIPTOR_NAME_W,
             PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
             PID_TAG_VIEW_DESCRIPTOR_BINARY,
+            OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
         ],
     );
     let umolk = summary
@@ -1167,19 +1169,28 @@ fn common_view_named_view_sync_projects_canonical_descriptor_properties() {
         property(PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
         &mapi_mailstore::SpecialMessagePropertyValue::U32(8)
     );
-    assert!(matches!(
+    let expected_descriptor = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
+    assert_eq!(
         property(PID_TAG_VIEW_DESCRIPTOR_BINARY),
-        mapi_mailstore::SpecialMessagePropertyValue::Binary(value) if !value.is_empty()
-    ));
-    assert!(matches!(
+        &mapi_mailstore::SpecialMessagePropertyValue::Binary(expected_descriptor.clone())
+    );
+    assert_eq!(
+        property(OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
+        &mapi_mailstore::SpecialMessagePropertyValue::Binary(expected_descriptor)
+    );
+    assert_eq!(
         property(PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
-        mapi_mailstore::SpecialMessagePropertyValue::String(value)
-            if value.contains("From") && value.contains("Received")
-    ));
+        &mapi_mailstore::SpecialMessagePropertyValue::String(
+            "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n"
+                .to_string()
+        )
+    );
     assert!(matches!(
         property(OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
         mapi_mailstore::SpecialMessagePropertyValue::Binary(value)
-            if !value.is_empty() && value.starts_with(&[0x0a, 0x00])
+            if value.starts_with(&[0x0a, 0x00])
+                && value.ends_with(&[0x0a, 0x00])
+                && value.chunks_exact(2).filter(|unit| *unit == [0x0a, 0x00]).count() == 11
     ));
 }
 

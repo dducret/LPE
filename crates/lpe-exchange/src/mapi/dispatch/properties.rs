@@ -314,6 +314,31 @@ pub(super) async fn append_get_properties_specific_response<S>(
         &property_response,
     );
     if should_log_outlook_surface_getprops_info(object) {
+        let (associated_config_id, associated_config_class, associated_config_subject) =
+            match object {
+                Some(MapiObject::AssociatedConfig {
+                    config_id,
+                    saved_message,
+                    ..
+                }) => saved_message
+                    .as_ref()
+                    .map(|message| {
+                        (
+                            format!("0x{:016x}", message.id),
+                            message.message_class.as_str(),
+                            message.subject.as_str(),
+                        )
+                    })
+                    .unwrap_or_else(|| (format!("0x{config_id:016x}"), "missing", "missing")),
+                _ => ("none".to_string(), "none", "none"),
+            };
+        let common_view_descriptor_getprops_contract =
+            format_common_view_descriptor_getprops_contract(
+                object,
+                principal,
+                &request.property_tags(),
+                snapshot,
+            );
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -326,7 +351,11 @@ pub(super) async fn append_get_properties_specific_response<S>(
             response_handle_index = request.response_handle_index(),
             object_kind = mapi_object_debug_kind(object),
             folder_id = %mapi_object_debug_folder_id(object),
+            associated_config_id = %associated_config_id,
+            associated_config_class,
+            associated_config_subject,
             getprops_contract = %post_hierarchy_contract,
+            common_view_descriptor_getprops_contract = %common_view_descriptor_getprops_contract,
             "rca debug mapi outlook surface getprops contract"
         );
     }

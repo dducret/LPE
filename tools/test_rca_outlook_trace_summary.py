@@ -24,6 +24,11 @@ def empty_log_summary() -> dict:
         "unknown_getprops_contexts": Counter(),
         "unknown_defaulted_getprops_tags": Counter(),
         "unknown_defaulted_getprops_contexts": Counter(),
+        "problem_getprops_tags": Counter(),
+        "problem_getprops_contexts": Counter(),
+        "umolk_problem_getprops_tags": Counter(),
+        "umolk_problem_getprops_contexts": Counter(),
+        "umolk_getprops_request_ids": set(),
         "associated_config_optional_defaulted_getprops_tags": Counter(),
         "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
@@ -41,12 +46,17 @@ def empty_log_summary() -> dict:
         "setcolumns_release_response_handle_tables": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
         "visible_release_descriptor_windows": Counter(),
+        "visible_release_descriptor_contract_issues": Counter(),
+        "common_view_descriptor_getprops": Counter(),
+        "common_view_descriptor_getprops_issues": Counter(),
+        "common_view_descriptor_getprops_contexts": set(),
         "post_visible_release_followups": Counter(),
         "post_visible_release_terminal_events": Counter(),
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
+        "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
@@ -57,6 +67,7 @@ def empty_log_summary() -> dict:
         "post_calendar_query_position_named_property_probes": Counter(),
         "stale_default_view_contexts": set(),
         "stale_default_view_states": Counter(),
+        "default_view_descriptor_identity_columns": Counter(),
         "hierarchy_query_windows": Counter(),
         "hierarchy_query_samples": deque(maxlen=8),
     }
@@ -76,7 +87,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             summary["unknown_getprops_tags"],
-            Counter({"0x22220003": 1, "0x44440003": 1}),
+            Counter({"0x22220003": 1}),
         )
         self.assertEqual(
             summary["unknown_getprops_contexts"],
@@ -84,12 +95,102 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 {
                     "0x22220003;object=unknown;role=unknown;folder=unknown;"
                     "request=unknown;source=unknown-name": 1,
+                }
+            ),
+        )
+        self.assertEqual(summary["problem_getprops_tags"], Counter({"0x44440003": 1}))
+        self.assertEqual(
+            summary["problem_getprops_contexts"],
+            Counter(
+                {
                     "0x44440003;object=unknown;role=unknown;folder=unknown;"
-                    "request=unknown;source=problem-tag": 1,
+                    "request=unknown;problem=0x44440003:0x8004010f": 1,
                 }
             ),
         )
         self.assertEqual(summary["zero_default_tags"], Counter({"0x55550003": 1}))
+
+    def test_unknown_getprops_problem_tag_is_not_counted_as_unknown_success(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=message;folder=0x0000000000050001;role=inbox;"
+            "tags=0x22220003;names=unknown;problem_tags=0x22220003:0x8004010f;"
+            "zero_default_tags=;response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:9",
+                "object_kind": "message",
+                "folder_id": "0x0000000000050001",
+            },
+        )
+
+        self.assertEqual(summary["unknown_getprops_tags"], Counter())
+        self.assertEqual(summary["unknown_getprops_contexts"], Counter())
+        self.assertEqual(summary["problem_getprops_tags"], Counter({"0x22220003": 1}))
+        self.assertEqual(
+            summary["problem_getprops_contexts"],
+            Counter(
+                {
+                    "0x22220003;object=message;role=inbox;"
+                    "folder=0x0000000000050001;request={REQ}:9;"
+                    "problem=0x22220003:0x8004010f": 1,
+                }
+            ),
+        )
+
+    def test_umolk_problem_getprops_uses_associated_config_class(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x90010003;names=unknown;"
+            "problem_tags=0x90010003:0x8004010f;zero_default_tags=;"
+            "response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:128",
+                "object_kind": "associated_config",
+                "associated_config_class": "IPM.Configuration.UMOLK.UserOptions",
+            },
+        )
+
+        self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(
+            summary["umolk_problem_getprops_tags"], Counter({"0x90010003": 1})
+        )
+        self.assertEqual(
+            summary["umolk_problem_getprops_contexts"],
+            Counter(
+                {
+                    "0x90010003;object=associated_config;role=inbox;"
+                    "folder=0x0000000000050001;request={REQ}:128;"
+                    "class=IPM.Configuration.UMOLK.UserOptions;"
+                    "problem=0x90010003:0x8004010f": 1,
+                }
+            ),
+        )
+
+    def test_umolk_problem_getprops_uses_materialization_request_id(self) -> None:
+        summary = empty_log_summary()
+        summary["umolk_getprops_request_ids"].add("{REQ}:128")
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x90010003;names=unknown;"
+            "problem_tags=0x90010003:0x8004010f;zero_default_tags=;"
+            "response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:128",
+                "object_kind": "associated_config",
+            },
+        )
+
+        self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(
+            summary["umolk_problem_getprops_tags"], Counter({"0x90010003": 1})
+        )
 
     def test_unknown_getprops_context_uses_structured_fields(self) -> None:
         summary = empty_log_summary()
@@ -211,6 +312,226 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
 
+    def test_visible_inbox_descriptor_contract_flags_old_compact_shape(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_context(
+            summary,
+            "visible_inbox_release_without_query_rows:"
+            "role=inbox;selected_view_name=Compact;"
+            "descriptor_summary=version=8;column_count=13;"
+            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,"
+            "0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,"
+            "0x0042001f,0x0037001f,0x0e060040,0x12130003;"
+            "descriptor_query_window=total_rows=1;position=0;requested=40;"
+            "selected_missing_descriptor_columns=",
+        )
+
+        issues = summary["visible_release_descriptor_contract_issues"]
+        self.assertEqual(len(issues), 1)
+        issue = next(iter(issues))
+        self.assertIn("missing_expected=0x8503000b", issue)
+        self.assertIn("0x67480014:identity_folder_id", issue)
+        self.assertIn("0x001a001f:unicode_message_class", issue)
+        self.assertIn(
+            "visible_inbox_descriptor_contract:",
+            ",".join(
+                rca.issue_buckets(
+                    {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                    summary,
+                    Path("LPE_last_test.log"),
+                )
+            ),
+        )
+
+    def test_visible_inbox_descriptor_contract_accepts_ms_oxocfg_compact_shape(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_context(
+            summary,
+            "visible_inbox_release_without_query_rows:"
+            "role=inbox;selected_view_name=Compact;"
+            "descriptor_summary=version=8;column_count=11;"
+            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,"
+            "0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,"
+            "0x9000101e;"
+            "descriptor_query_window=total_rows=1;position=0;requested=40;"
+            "selected_missing_descriptor_columns=",
+        )
+
+        self.assertEqual(
+            summary["visible_release_descriptor_contract_issues"],
+            Counter({"role=inbox;view=Compact;contract=ms_oxocfg_ok": 1}),
+        )
+        self.assertNotIn(
+            "visible_inbox_descriptor_contract",
+            ",".join(
+                rca.issue_buckets(
+                    {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                    summary,
+                    Path("LPE_last_test.log"),
+                )
+            ),
+        )
+
+    def test_default_view_descriptor_identity_columns_are_reported_by_role(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_descriptor_identity_columns(
+            summary,
+            "default_view_folder_open:request_id={REQ}:1;role=contacts;"
+            "selected_view_name=Contacts;"
+            "descriptor_summary=version=8;column_count=6;"
+            "visible_column_tags=0x67480014,0x674a0014,0x3001001f",
+        )
+
+        self.assertEqual(
+            summary["default_view_descriptor_identity_columns"],
+            Counter(
+                {
+                    "role=contacts;view=Contacts;"
+                    "identity=0x67480014:PidTagFolderId,0x674a0014:PidTagMid": 1
+                }
+            ),
+        )
+
+    def test_common_view_descriptor_getprops_contract_is_reported(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_common_view_descriptor_getprops(
+            summary,
+            "found=true;folder_id=0x0000000000050001;"
+            "view_id=0x7fffffffffe90001;view_name=Compact;"
+            "requested_descriptor_tags=0x70010102,0x7002001f;"
+            "response_values=0x70010102:PidTagViewDescriptorBinary:bin(512)|"
+            "0x7002001f:PidTagViewDescriptorStrings:string(80)",
+            {},
+        )
+
+        self.assertEqual(
+            summary["common_view_descriptor_getprops"],
+            Counter(
+                {
+                    "found=true;view=Compact;folder=0x0000000000050001;"
+                    "view_id=0x7fffffffffe90001;requested=0x70010102,0x7002001f": 1
+                }
+            ),
+        )
+        self.assertEqual(summary["common_view_descriptor_getprops_issues"], Counter())
+
+    def test_common_view_descriptor_getprops_dedupes_surface_and_debug_events(self) -> None:
+        summary = empty_log_summary()
+        contract = (
+            "found=true;folder_id=0x0000000000050001;"
+            "view_id=0x7fffffffffe90001;view_name=Compact;"
+            "requested_descriptor_tags=0x68350102,0x683c0102;"
+            "descriptor_column_count=11;descriptor_strings_terminators=11;"
+            "descriptor_strings_starts_with_terminator=true;"
+            "descriptor_strings_ends_with_terminator=true;"
+            "descriptor_strings_trailing_nul=false;"
+            "response_values=0x68350102:OutlookCommonViewDescriptorBinary6835:bin(512)|"
+            "0x683c0102:OutlookCommonViewDescriptorStrings683C:bin(80)"
+        )
+
+        rca.record_common_view_descriptor_getprops(summary, contract, {})
+        rca.record_common_view_descriptor_getprops(summary, contract, {})
+
+        self.assertEqual(
+            summary["common_view_descriptor_getprops"],
+            Counter(
+                {
+                    "found=true;view=Compact;folder=0x0000000000050001;"
+                    "view_id=0x7fffffffffe90001;requested=0x68350102,0x683c0102": 1
+                }
+            ),
+        )
+        self.assertEqual(summary["common_view_descriptor_getprops_issues"], Counter())
+
+    def test_common_view_descriptor_getprops_flags_malformed_inbox_compact_contract(
+        self,
+    ) -> None:
+        summary = empty_log_summary()
+
+        rca.record_common_view_descriptor_getprops(
+            summary,
+            "found=true;folder_id=0x0000000000050001;"
+            "view_id=0x7fffffffffe90001;view_name=Compact;"
+            "requested_descriptor_tags=0x68350102,0x683c0102;"
+            "descriptor_column_count=14;descriptor_strings_terminators=10;"
+            "descriptor_strings_starts_with_terminator=false;"
+            "descriptor_strings_ends_with_terminator=true;"
+            "descriptor_strings_trailing_nul=true;"
+            "response_values=0x68350102:OutlookCommonViewDescriptorBinary6835:bin(512)|"
+            "0x683c0102:OutlookCommonViewDescriptorStrings683C:bin(80)",
+            {},
+        )
+
+        self.assertEqual(
+            summary["common_view_descriptor_getprops_issues"],
+            Counter(
+                {
+                    "descriptor_contract=columns=14,string_terminators=10,"
+                    "strings_start=false,strings_trailing_nul=true;"
+                    "found=true;view=Compact;folder=0x0000000000050001;"
+                    "view_id=0x7fffffffffe90001;requested=0x68350102,0x683c0102": 1
+                }
+            ),
+        )
+
+    def test_missing_common_view_descriptor_getprops_is_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_common_view_descriptor_getprops(
+            summary,
+            "found=false;folder_id=0x0000000000050001;"
+            "view_id=0x7fffffffffe90001;"
+            "requested_descriptor_tags=0x70010102,0x7002001f",
+            {},
+        )
+
+        self.assertEqual(len(summary["common_view_descriptor_getprops_issues"]), 1)
+        self.assertIn(
+            "common_view_descriptor_getprops:",
+            ",".join(
+                rca.issue_buckets(
+                    {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                    summary,
+                    Path("LPE_last_test.log"),
+                )
+            ),
+        )
+
+    def test_structured_common_view_descriptor_getprops_requires_requested_values(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_common_view_descriptor_getprops(
+            summary,
+            "",
+            {
+                "folder_id": "0x0000000000050001",
+                "view_message_id": "0x7fffffffffe90001",
+                "view_name": "Compact",
+                "requested_property_tags": "0x70010102,0x7002001f",
+                "requested_view_descriptor_contract": (
+                    "version=false;name=false;binary=true;strings=true"
+                ),
+                "requested_view_descriptor_response_values": (
+                    "0x70010102:PidTagViewDescriptorBinary:bin(512)"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["common_view_descriptor_getprops_issues"],
+            Counter(
+                {
+                    "missing_response_values=strings;found=unknown;view=Compact;"
+                    "folder=0x0000000000050001;view_id=0x7fffffffffe90001;"
+                    "requested=0x70010102,0x7002001f": 1
+                }
+            ),
+        )
+
     def test_calendar_query_position_without_rows_flags_zero_duration_timed_row(self) -> None:
         summary = empty_log_summary()
 
@@ -269,17 +590,14 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertNotIn("visible_descriptor_gap", rca.issue_buckets(rr, log, None))
 
-    def test_issue_buckets_reports_actionable_zero_default_tag(self) -> None:
+    def test_issue_buckets_ignores_nonactionable_zero_default_tag(self) -> None:
         log = empty_log_summary()
         log["zero_default_tags"] = Counter({"0x120c0102": 3, "0x36df0102": 4})
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
-        self.assertIn(
-            "zero_default:undocumented_folder_binary_120c",
-            rca.issue_buckets(rr, log, None),
-        )
+        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
 
-    def test_issue_buckets_suppresses_stall_symptoms_when_concrete_issue_exists(self) -> None:
+    def test_issue_buckets_keeps_stall_symptoms_for_zero_default_noise(self) -> None:
         log = empty_log_summary()
         log["zero_default_tags"] = Counter({"0x120c0102": 3})
         log["stall_warnings"] = Counter(
@@ -290,7 +608,10 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
-            ["zero_default:undocumented_folder_binary_120c"],
+            [
+                "stall:after_common_views_inbox_notification_without_contents",
+                "missing_gate:normal_inbox_visible_row_observed",
+            ],
         )
 
     def test_issue_buckets_keeps_stall_symptoms_without_concrete_issue(self) -> None:
@@ -754,6 +1075,39 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             Counter({"xml_user_configuration_dictionary": 1}),
         )
 
+    def test_umolk_dictionary_contract_flags_requested_missing_dictionary(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_umolk_dictionary_shapes(
+            summary,
+            "request_id=x;config=0x1;class=IPM.Configuration.UMOLK.UserOptions;"
+            "dictionary_shape=dictionary_not_returned;"
+            "tags=0x001a001f,0x7c060003,0x7c070102;"
+            "values=0x001a001f:string:chars=35,0x7c060003:i32",
+        )
+
+        self.assertEqual(
+            summary["umolk_dictionary_issues"],
+            Counter(
+                {
+                    "missing=0x7c070102:PidTagRoamingDictionary;"
+                    "request=x;config=0x1;class=IPM.Configuration.UMOLK.UserOptions": 1
+                }
+            ),
+        )
+
+    def test_umolk_dictionary_contract_ignores_dictionary_not_requested(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_umolk_dictionary_shapes(
+            summary,
+            "request_id=x;dictionary_shape=dictionary_not_returned;"
+            "tags=0x001a001f,0x0e0b0102;"
+            "values=0x001a001f:string:chars=35,0x0e0b0102:binary:bytes=170",
+        )
+
+        self.assertEqual(summary["umolk_dictionary_issues"], Counter())
+
     def test_default_view_query_position_without_rows_classifies_calendar(self) -> None:
         summary = empty_log_summary()
 
@@ -1083,7 +1437,10 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
     def test_verdict_prioritizes_concrete_issue_over_stall_symptoms(self) -> None:
         log = empty_log_summary()
-        log["zero_default_tags"] = Counter({"0x120c0102": 1})
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"incomplete_projection_before_query_rows": 1}
+        )
         log["stall_warnings"] = Counter(
             {"after_common_views_inbox_notification_without_contents": 1}
         )

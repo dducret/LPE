@@ -1051,6 +1051,12 @@ Resolved coverage-gap notes:
   common_view_named_view_projects_descriptor_properties_for_outlook`; `cargo
   test -p lpe-exchange
   microsoft_oxocfg_view_definition_binary_matches_protocol_example`.
+- 2026-07-08: Superseded the earlier Common Views/OXOCFG mail descriptor
+  cleanup by aligning folder-local mail `Compact` and `Messages` descriptors
+  with the `[MS-OXOCFG]` section 4.2.1 visible-column shape: Reminder,
+  String8 Icon/From/Subject, Flag Status, Attachment, Received, Size, and
+  Categories. Row identity columns and old auxiliary Outlook tags remain live
+  table projection concerns, not saved descriptor columns.
 - 2026-06-28: Resolved
   `folder_getprops_projects_saved_search_definition_metadata` by aligning the
   saved-search folder extended-flags expectation with the existing

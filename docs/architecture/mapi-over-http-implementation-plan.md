@@ -262,9 +262,15 @@ non-canonical LPE state.
   deterministic folder-specific virtual message IDs, SourceKeys, RecordKeys,
   SearchKeys, change keys, and descriptor CLSIDs so Outlook cached-mode state
   does not collapse default views across folders.
-  Mail named-view descriptor binaries list only real message-table property
-  tags used by the visible columns; they must not include synthetic placeholder
-  tags or named-property IDs that are not resolvable in the active session.
+  Folder-local named-view descriptor binaries list only real properties used by
+  the visible UI columns; they must not include synthetic placeholder tags,
+  table identity columns such as FolderId/MID/InstanceId/InstanceNum, or
+  named-property IDs that are not resolvable in the active session. The mail
+  Compact descriptor follows `[MS-OXOCFG]` section 4.2.1: Importance,
+  Reminder, Icon, Flag Status, Attachment, From, Subject, Received, Size, and
+  Categories are descriptor columns, while Outlook's row identity columns for
+  all folder types are served only through live table `SetColumns` /
+  `QueryRows`.
   The descriptor column packets follow `[MS-OXOCFG]` section 4.2 by using
   `PtypString8` / `PtypMultipleString8` for text view columns, while the
   message table projection accepts and serializes both those ANSI tags and the

@@ -601,7 +601,7 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
+        "visible_column_tags=0x0e070003,0x0e170003,0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
     ));
     assert!(contract.contains(&format!(
         "expected_view_message_id=0x{:016x}",
@@ -622,7 +622,7 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
     ));
     assert!(contract.contains(&format!(
         "expected_view_message_id=0x{:016x}",
@@ -631,21 +631,21 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
 }
 
 #[test]
-fn task_note_journal_handoff_contracts_report_standard_identity_columns() {
+fn task_note_journal_handoff_contracts_report_standard_visible_columns() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     for (folder_id, expected_columns) in [
         (
             TASKS_FOLDER_ID,
-            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x10900003,0x81050040,0x81040040,0x81020005",
+            "visible_column_tags=0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x10900003,0x81050040,0x81040040,0x81020005",
         ),
         (
             NOTES_FOLDER_ID,
-            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x30080040,0x8b000003",
+            "visible_column_tags=0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x30080040,0x8b000003",
         ),
         (
             JOURNAL_FOLDER_ID,
-            "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x87060040,0x87070003,0x8700001f",
+            "visible_column_tags=0x0e070003,0x0e170003,0x001a001f,0x0037001f,0x87060040,0x87070003,0x8700001f",
         ),
     ] {
         let contract = format_outlook_view_handoff_table_contract(
@@ -708,7 +708,7 @@ fn calendar_view_handoff_descriptor_matches_observed_calendar_projection() {
 
     assert!(contract.contains("selected_view_name=Calendar"));
     assert!(contract.contains(
-        "visible_column_tags=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
     ));
     assert!(
         contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
@@ -724,28 +724,32 @@ fn messages_view_handoff_descriptor_matches_observed_drafts_projection() {
         PID_TAG_MID,
         PID_TAG_INST_ID,
         PID_TAG_INSTANCE_NUM,
-        PID_TAG_CONVERSATION_INDEX,
-        PID_TAG_MESSAGE_FLAGS,
-        PID_TAG_MESSAGE_CLASS_W,
-        PID_TAG_LAST_MODIFICATION_TIME,
-        OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
-        PID_LID_OUTLOOK_COMMON_85EF_TAG,
+        PID_TAG_IMPORTANCE,
+        PID_LID_REMINDER_SET_TAG,
+        PID_TAG_MESSAGE_CLASS_STRING8,
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_HAS_ATTACHMENTS,
+        (PID_TAG_SENT_REPRESENTING_NAME_W & 0xFFFF_0000) | 0x001E,
+        (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_MESSAGE_SIZE,
+        (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E,
     ];
     let contract =
         format_outlook_view_handoff_table_contract(DRAFTS_FOLDER_ID, false, &columns, &snapshot);
 
     assert!(contract.contains("selected_view_name=Messages"));
     for tag in [
-        "0x67480014",
-        "0x674a0014",
-        "0x674d0014",
-        "0x674e0003",
-        "0x00710102",
-        "0x0e070003",
-        "0x001a001f",
-        "0x30080040",
-        "0x0f030102",
-        "0x85ef000b",
+        "0x00170003",
+        "0x8503000b",
+        "0x001a001e",
+        "0x10900003",
+        "0x0e1b000b",
+        "0x0042001e",
+        "0x0037001e",
+        "0x0e060040",
+        "0x0e080003",
+        "0x9000101e",
     ] {
         assert!(contract.contains(tag), "{contract}");
     }
@@ -775,7 +779,7 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
     assert!(contract.contains("phase=setcolumns"));
     assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
     assert!(contract.contains(
-        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
+        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
     ));
     assert!(!contract.contains("descriptor_columns=0x00040001"));
     assert!(contract.contains(
@@ -805,7 +809,7 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
     );
 
     assert!(contract.contains(
-        "descriptor_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
+        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
     ));
     assert!(
         contract.ends_with("selected_missing_descriptor_columns="),
@@ -840,7 +844,7 @@ fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_s
         "{contract}"
     );
     assert!(contract.contains(
-        "descriptor_columns_not_selected=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x12130003"
+        "descriptor_columns_not_selected=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0e080003,0x9000101e"
     ));
     assert!(contract.contains("table_sort_matches_descriptor=true"));
 }
@@ -943,8 +947,8 @@ fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release()
         contract.contains("selected_missing_descriptor_columns=;"),
         "{contract}"
     );
-    assert!(contract.contains("0x0037001f:projected=true"), "{contract}");
-    assert!(contract.contains("0x0037001f=Preview target"), "{contract}");
+    assert!(contract.contains("0x0037001e:projected=true"), "{contract}");
+    assert!(contract.contains("0x0037001e=Preview target"), "{contract}");
     assert!(contract.contains("0x0e060040="), "{contract}");
 }
 

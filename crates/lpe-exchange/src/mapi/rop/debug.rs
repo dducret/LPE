@@ -997,7 +997,7 @@ pub(in crate::mapi) fn log_common_view_descriptor_getprops_summary(
             folder_id = %format!("0x{folder_id:016x}"),
             view_message_id = %format!("0x{view_id:016x}"),
             requested_property_tags = %format_property_tags_for_debug(columns),
-            ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.3",
+            ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.2",
             message = "rca debug outlook view descriptor getprops missing view message",
         );
         return;
@@ -1032,7 +1032,7 @@ pub(in crate::mapi) fn log_common_view_descriptor_getprops_summary(
         requested_property_tags = %format_property_tags_for_debug(columns),
         requested_view_descriptor_contract = %requested_required,
         requested_view_descriptor_response_values = %response_values,
-        ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.3",
+        ms_oxcfg_reference = "MS-OXOCFG 2.2.6, 2.2.6.1, 2.2.6.2",
         descriptor_version = 8u32,
         descriptor_name_present = !message.name.is_empty(),
         descriptor_binary_bytes = descriptor.len(),
@@ -1085,6 +1085,11 @@ pub(in crate::mapi) fn format_common_view_descriptor_getprops_contract(
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_debug_property_tags(&descriptor);
     let descriptor_strings = view_descriptor_strings(&definition);
+    let descriptor_string_bytes = utf16le_bytes(&descriptor_strings);
+    let descriptor_strings_terminators = descriptor_strings
+        .chars()
+        .filter(|value| *value == '\n')
+        .count();
     let response_values =
         format_common_view_descriptor_response_values(principal.account_id, &message, columns);
     let target = default_view_message_entry_id_target(
@@ -1103,14 +1108,20 @@ pub(in crate::mapi) fn format_common_view_descriptor_getprops_contract(
     format!(
         "found=true;folder_id=0x{folder_id:016x};view_id=0x{view_id:016x};view_name={};\
          requested_descriptor_tags={};descriptor_bytes={};descriptor_strings_utf16_bytes={};\
-         descriptor_column_count={};descriptor_column_tags={};response_values={};\
+         descriptor_column_count={};descriptor_column_tags={};descriptor_strings_terminators={};\
+         descriptor_strings_starts_with_terminator={};descriptor_strings_ends_with_terminator={};\
+         descriptor_strings_trailing_nul={};response_values={};\
          descriptor_entry_id_target={target}",
         message.name,
         format_property_tags_for_debug(columns),
         descriptor.len(),
-        descriptor_strings.encode_utf16().count() * 2,
+        descriptor_string_bytes.len(),
         descriptor_columns.len(),
         format_property_tags_for_debug(&descriptor_columns),
+        descriptor_strings_terminators,
+        descriptor_strings.starts_with('\n'),
+        descriptor_strings.ends_with('\n'),
+        descriptor_string_bytes.ends_with(&[0x00, 0x00]),
         response_values
     )
 }

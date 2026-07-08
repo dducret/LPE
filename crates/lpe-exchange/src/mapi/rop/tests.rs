@@ -1053,6 +1053,50 @@ fn get_properties_specific_resolves_unspecified_modeled_message_properties() {
 }
 
 #[test]
+fn common_view_descriptor_getprops_contract_reports_current_inbox_compact_shape() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::from_u128(0x9191),
+        email: "test@example.test".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let view_id = crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID);
+    let object = MapiObject::CommonViewNamedView {
+        folder_id: INBOX_FOLDER_ID,
+        view_id,
+    };
+    let columns = [
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
+    ];
+
+    let contract = format_common_view_descriptor_getprops_contract(
+        Some(&object),
+        &principal,
+        &columns,
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert!(contract.contains("found=true"));
+    assert!(contract.contains("view_name=Compact"));
+    assert!(contract.contains("descriptor_column_count=11"));
+    assert!(contract.contains("descriptor_strings_terminators=11"));
+    assert!(contract.contains("descriptor_strings_starts_with_terminator=true"));
+    assert!(contract.contains("descriptor_strings_ends_with_terminator=true"));
+    assert!(contract.contains("descriptor_strings_trailing_nul=false"));
+    assert!(
+        contract.contains("0x68350102:OutlookCommonViewDescriptorBinary6835:binary_bytes=510"),
+        "{contract}"
+    );
+    assert!(
+        contract.contains("0x683c0102:OutlookCommonViewDescriptorStrings683C:binary_bytes=174"),
+        "{contract}"
+    );
+}
+
+#[test]
 fn get_properties_specific_returns_not_enough_memory_for_size_limited_value() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
@@ -3156,7 +3200,7 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
 }
 
 #[test]
-fn undocumented_folder_binary_120c_returns_not_found() {
+fn undocumented_folder_binary_120c_returns_empty_binary() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -3184,7 +3228,7 @@ fn undocumented_folder_binary_120c_returns_not_found() {
         property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
         "OutlookUndocumentedFolderBinary120C"
     );
-    assert!(fallback_default_specific_property(
+    assert!(!fallback_default_specific_property(
         Some(&folder),
         &principal,
         &[],
@@ -3202,12 +3246,8 @@ fn undocumented_folder_binary_120c_returns_not_found() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
-    assert_eq!(response[7], 0x0A);
-    assert_eq!(
-        u32::from_le_bytes(response[8..12].try_into().unwrap()),
-        ROP_ERROR_NOT_FOUND
-    );
+    assert_eq!(&response[..6], &[0x07, 0x01, 0, 0, 0, 0]);
+    assert_eq!(&response[6..], &[0, 0, 0]);
 
     for folder_id in [
         CALENDAR_FOLDER_ID,
@@ -3353,13 +3393,7 @@ fn fallback_property_errors_for_debug_match_wire_error_codes() {
         &MapiMailStoreSnapshot::empty(),
         &folder_error_tags,
     );
-    assert_eq!(
-        folder_errors,
-        format!(
-            "0x120c0102:{}:0x8004010f",
-            property_tag_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C)
-        )
-    );
+    assert_eq!(folder_errors, "");
 
     let config = MapiObject::AssociatedConfig {
         folder_id: INBOX_FOLDER_ID,

@@ -875,7 +875,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                     | PID_TAG_SENT_MAIL_SVR_EID
                     | PID_TAG_ASSOCIATED
                     | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-            )
+            ) || associated_config_contacts_helper_default_property(object, tag)
         }
         Some(MapiObject::CommonViewNamedView { .. }) => matches!(
             storage_tag,
@@ -925,6 +925,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE
                         | PID_TAG_FOLDER_VIEWLIST_FLAGS
+                        | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                 )
         }
         None => {
@@ -954,6 +955,35 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         }
         _ => false,
     }
+}
+
+fn associated_config_contacts_helper_default_property(
+    object: Option<&MapiObject>,
+    tag: u32,
+) -> bool {
+    let Some(MapiObject::AssociatedConfig {
+        saved_message: Some(message),
+        ..
+    }) = object
+    else {
+        return false;
+    };
+    if !matches!(
+        message.message_class.as_str(),
+        "IPM.Microsoft.ContactLink.TimeStamp" | "IPM.Microsoft.OSC.ContactSync"
+    ) {
+        return false;
+    }
+    let property_id = MapiPropertyTag::new(tag).property_id();
+    let property_id = u32::from(property_id);
+    property_id == u32::from(MapiPropertyTag::new(PID_NAME_OSC_CONTACT_SOURCES_TAG).property_id())
+        || matches!(
+            property_id,
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED
+        )
 }
 
 fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u32) -> bool {

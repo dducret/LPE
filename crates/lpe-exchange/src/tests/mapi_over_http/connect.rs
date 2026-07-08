@@ -2406,7 +2406,7 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
     ));
     assert!(contains_bytes(
         &response_rops,
-        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n")
+        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n")
     ));
     assert!(contains_bytes(
         &response_rops,

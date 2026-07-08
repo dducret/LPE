@@ -280,7 +280,8 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
                 let definition = outlook_folder_view_definition(message.folder_id, &message.name);
                 let descriptor = view_descriptor_binary(&definition);
                 let descriptor_columns = view_descriptor_property_tags(&descriptor);
-                missing_debug_property_tags(columns, &descriptor_columns)
+                let comparable_columns = view_descriptor_comparable_selected_columns(columns);
+                missing_debug_property_tags(&comparable_columns, &descriptor_columns)
             })
         })
         .flatten()
@@ -354,8 +355,9 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
     rows.retain(|email| restriction_matches_email(restriction, email));
     sort_emails(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let comparable_columns = view_descriptor_comparable_selected_columns(columns);
     let selected_missing_descriptor_columns =
-        missing_debug_property_tags(columns, &descriptor_columns);
+        missing_debug_property_tags(&comparable_columns, &descriptor_columns);
     let sample_values = selected
         .iter()
         .take(3)
@@ -425,8 +427,9 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
     let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let comparable_columns = view_descriptor_comparable_selected_columns(columns);
     let selected_missing_descriptor_columns =
-        missing_debug_property_tags(columns, &descriptor_columns);
+        missing_debug_property_tags(&comparable_columns, &descriptor_columns);
 
     format!(
         "phase=setcolumns;default_view_id=0x{:016x};view_name={};\
@@ -507,6 +510,19 @@ fn normal_message_table_unsupported_columns_from_summary(columns: &[u32]) -> Str
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn view_descriptor_comparable_selected_columns(columns: &[u32]) -> Vec<u32> {
+    columns
+        .iter()
+        .copied()
+        .filter(|tag| {
+            !matches!(
+                *tag,
+                PID_TAG_FOLDER_ID | PID_TAG_MID | PID_TAG_INST_ID | PID_TAG_INSTANCE_NUM
+            )
+        })
+        .collect()
 }
 
 fn support_field(summary: &str, name: &str) -> String {
@@ -683,12 +699,12 @@ mod tests {
         let summary = format_view_descriptor_binary_summary(&descriptor);
 
         assert!(summary.contains("version=8"));
-        assert!(summary.contains("column_count=10"));
+        assert!(summary.contains("column_count=11"));
         assert!(summary.contains("sort_column=8"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x0037001f,0x0e060040,0x12130003"
+            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
         ));
         assert!(summary.contains("0x0e060040"));
     }
@@ -719,14 +735,15 @@ mod tests {
         let snapshot = MapiMailStoreSnapshot::empty();
         let columns = [
             PID_TAG_IMPORTANCE,
-            PID_LID_OUTLOOK_COMMON_8514_TAG,
+            PID_LID_REMINDER_SET_TAG,
             PID_TAG_MESSAGE_CLASS_W,
-            PID_TAG_MESSAGE_STATUS,
+            PID_TAG_FLAG_STATUS,
             PID_TAG_HAS_ATTACHMENTS,
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_DELIVERY_TIME,
-            OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+            PID_TAG_MESSAGE_SIZE,
+            PID_NAME_KEYWORDS_TAG,
         ];
         let sort_orders = [MapiSortOrder {
             property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,

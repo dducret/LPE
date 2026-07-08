@@ -5,7 +5,7 @@ use crate::mapi_store::MapiJournalEntry;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ClientTask, CollaborationCollection, CollaborationRights,
-    JournalEntry, MailboxRule, SearchFolderDefinition,
+    JmapEmailAddress, JournalEntry, MailboxRule, SearchFolderDefinition,
 };
 
 fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
@@ -7539,7 +7539,7 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
         Some(MapiValue::String(
-            "\nFolder\nMessage\nInstance\nInstance Number\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\n"
+            "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n"
                 .to_string()
         ))
     );
@@ -7555,8 +7555,25 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY),
         Some(MapiValue::Binary(value)) if !value.is_empty()
     ));
+    let Some(MapiValue::Binary(descriptor_binary)) =
+        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
+    else {
+        panic!("expected descriptor binary");
+    };
+    assert_eq!(
+        view_descriptor_all_property_tags(&descriptor_binary).len(),
+        11
+    );
+    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_FOLDER_ID));
+    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_MID));
+    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_INST_ID));
+    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_INSTANCE_NUM));
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
+    );
+    assert_eq!(
+        associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
     );
     assert_eq!(
@@ -7564,6 +7581,20 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         Some(MapiValue::Binary(view_descriptor_strings_binary(
             &outlook_folder_view_definition(INBOX_FOLDER_ID, "Compact")
         )))
+    );
+    let Some(MapiValue::Binary(descriptor_strings)) =
+        associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C)
+    else {
+        panic!("expected descriptor strings");
+    };
+    assert_eq!(&descriptor_strings[..4], &[0x0A, 0x00, b'I', 0x00]);
+    assert!(descriptor_strings.ends_with(&[0x0A, 0x00]));
+    assert_eq!(
+        descriptor_strings
+            .windows(2)
+            .filter(|bytes| *bytes == [0x0A, 0x00])
+            .count(),
+        11
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_CLSID),
@@ -8189,9 +8220,14 @@ fn normal_message_row_projects_microsoft_view_descriptor_string8_columns() {
     let email_id = Uuid::from_u128(0x7173);
     let mut email = test_table_email(email_id, Uuid::from_u128(0x8183), "ANSI subject");
     email.from_display = Some("Denis Ducret".to_string());
+    email.to = vec![JmapEmailAddress {
+        display_name: Some("Support Desk".to_string()),
+        address: "support@example.test".to_string(),
+    }];
     email.categories = vec!["Blue".to_string(), "Customer".to_string()];
     let message_class_a = (PID_TAG_MESSAGE_CLASS_W & 0xFFFF_0000) | 0x001E;
     let sent_representing_name_a = (PID_TAG_SENT_REPRESENTING_NAME_W & 0xFFFF_0000) | 0x001E;
+    let display_to_a = (PID_TAG_DISPLAY_TO_W & 0xFFFF_0000) | 0x001E;
     let subject_a = (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E;
     let keywords_a = (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E;
 
@@ -8200,6 +8236,7 @@ fn normal_message_row_projects_microsoft_view_descriptor_string8_columns() {
         &[
             message_class_a,
             sent_representing_name_a,
+            display_to_a,
             subject_a,
             keywords_a,
         ],
@@ -8213,6 +8250,10 @@ fn normal_message_row_projects_microsoft_view_descriptor_string8_columns() {
     assert_eq!(
         parse_mapi_property_value(&mut cursor, sent_representing_name_a).unwrap(),
         MapiValue::String("Denis Ducret".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, display_to_a).unwrap(),
+        MapiValue::String("Support Desk".to_string())
     );
     assert_eq!(
         parse_mapi_property_value(&mut cursor, subject_a).unwrap(),
