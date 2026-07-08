@@ -259,7 +259,12 @@ pub(super) fn normalized_associated_config_persisted_properties(
     }
     if matches!(
         normalized.get(&PID_TAG_ROAMING_DICTIONARY),
-        Some(MapiValue::Binary(value)) if value.as_slice() == b"<xml/>"
+        Some(MapiValue::Binary(value))
+            if value.as_slice() == b"<xml/>"
+                || crate::mapi::tables::is_stale_minimal_umolk_dictionary(
+                    message_class,
+                    value,
+                )
     ) {
         normalized.insert(
             PID_TAG_ROAMING_DICTIONARY,

@@ -416,6 +416,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "problem_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
+        "umolk_not_found_getprops_tags": Counter(),
+        "umolk_not_found_getprops_contexts": Counter(),
         "umolk_getprops_request_ids": set(),
         "umolk_optional_defaulted_getprops_tags": Counter(),
         "umolk_optional_defaulted_getprops_contexts": Counter(),
@@ -692,10 +694,27 @@ def record_umolk_dictionary_shapes(summary: dict[str, Any], text: str) -> None:
         summary["umolk_dictionary_olprefs_versions"][
             f"{olprefs_version};value={value}"
         ] += 1
+        if olprefs_version in {"missing", "invalid", "zero_or_negative"}:
+            summary["umolk_dictionary_issues"][
+                umolk_dictionary_issue_context(
+                    text, f"olprefs_version={olprefs_version};value={value}"
+                )
+            ] += 1
     info_version = first_field(text, "dictionary_info_version")
     if info_version:
         summary["umolk_dictionary_info_versions"][info_version] += 1
+        if info_version != "none" and not info_version.startswith("Outlook."):
+            summary["umolk_dictionary_issues"][
+                umolk_dictionary_issue_context(text, f"info_version={info_version}")
+            ] += 1
     record_umolk_dictionary_contract(summary, text)
+
+
+def umolk_dictionary_issue_context(text: str, issue: str) -> str:
+    request_id = first_field(text, "request_id") or "unknown"
+    config_id = first_field(text, "config") or "unknown"
+    config_class = first_field(text, "class") or "unknown"
+    return f"{issue};request={request_id};config={config_id};class={config_class}"
 
 
 def record_umolk_dictionary_contract(summary: dict[str, Any], text: str) -> None:
@@ -714,12 +733,8 @@ def record_umolk_dictionary_contract(summary: dict[str, Any], text: str) -> None
             missing.append(f"{tag}:{name}")
     if not missing:
         return
-    request_id = first_field(text, "request_id") or "unknown"
-    config_id = first_field(text, "config") or "unknown"
-    config_class = first_field(text, "class") or "unknown"
     summary["umolk_dictionary_issues"][
-        f"missing={','.join(missing)};request={request_id};"
-        f"config={config_id};class={config_class}"
+        umolk_dictionary_issue_context(text, f"missing={','.join(missing)}")
     ] += 1
 
 
@@ -1503,7 +1518,11 @@ def record_getprops_problem_tag(
             or (request_id and request_id in summary["umolk_getprops_request_ids"])
         )
     )
-    if umolk_problem:
+    problem = problem_detail_for_tag(contract, tag)
+    if umolk_problem and problem_is_not_found(problem):
+        tag_counter = "umolk_not_found_getprops_tags"
+        context_counter = "umolk_not_found_getprops_contexts"
+    elif umolk_problem:
         tag_counter = "umolk_problem_getprops_tags"
         context_counter = "umolk_problem_getprops_contexts"
     else:
@@ -1512,7 +1531,6 @@ def record_getprops_problem_tag(
     summary[tag_counter][tag] += 1
     role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
     folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
-    problem = problem_detail_for_tag(contract, tag)
     context = (
         f"{tag};object={object_kind or 'unknown'};role={role or 'unknown'};"
         f"folder={folder or 'unknown'};request={request_id or 'unknown'}"
@@ -1522,6 +1540,10 @@ def record_getprops_problem_tag(
     if problem:
         context = f"{context};problem={problem}"
     summary[context_counter][context] += 1
+
+
+def problem_is_not_found(problem: str | None) -> bool:
+    return bool(problem and problem.lower().endswith(":0x8004010f"))
 
 
 def record_unknown_getprops_tag(
@@ -1800,6 +1822,16 @@ def print_single_summary(
             limit=20,
         )
         print_counter(
+            "UMOLK expected not-found GetProps tags",
+            log["umolk_not_found_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "UMOLK expected not-found GetProps contexts",
+            log["umolk_not_found_getprops_contexts"],
+            limit=20,
+        )
+        print_counter(
             "UMOLK optional defaulted GetProps tags",
             log["umolk_optional_defaulted_getprops_tags"],
             limit=20,
@@ -2015,6 +2047,8 @@ def print_batch_summary(
     aggregate_problem_getprops_contexts: Counter[str] = Counter()
     aggregate_umolk_problem_getprops_tags: Counter[str] = Counter()
     aggregate_umolk_problem_getprops_contexts: Counter[str] = Counter()
+    aggregate_umolk_not_found_getprops_tags: Counter[str] = Counter()
+    aggregate_umolk_not_found_getprops_contexts: Counter[str] = Counter()
     aggregate_umolk_optional_defaulted_tags: Counter[str] = Counter()
     aggregate_umolk_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_associated_config_optional_defaulted_tags: Counter[str] = Counter()
@@ -2058,6 +2092,8 @@ def print_batch_summary(
     current_problem_getprops_contexts: Counter[str] = Counter()
     current_umolk_problem_getprops_tags: Counter[str] = Counter()
     current_umolk_problem_getprops_contexts: Counter[str] = Counter()
+    current_umolk_not_found_getprops_tags: Counter[str] = Counter()
+    current_umolk_not_found_getprops_contexts: Counter[str] = Counter()
     current_umolk_optional_defaulted_tags: Counter[str] = Counter()
     current_umolk_optional_defaulted_contexts: Counter[str] = Counter()
     current_associated_config_optional_defaulted_tags: Counter[str] = Counter()
@@ -2128,6 +2164,12 @@ def print_batch_summary(
         aggregate_umolk_problem_getprops_tags.update(log["umolk_problem_getprops_tags"])
         aggregate_umolk_problem_getprops_contexts.update(
             log["umolk_problem_getprops_contexts"]
+        )
+        aggregate_umolk_not_found_getprops_tags.update(
+            log["umolk_not_found_getprops_tags"]
+        )
+        aggregate_umolk_not_found_getprops_contexts.update(
+            log["umolk_not_found_getprops_contexts"]
         )
         aggregate_umolk_optional_defaulted_tags.update(
             log["umolk_optional_defaulted_getprops_tags"]
@@ -2237,6 +2279,12 @@ def print_batch_summary(
             current_umolk_problem_getprops_tags.update(log["umolk_problem_getprops_tags"])
             current_umolk_problem_getprops_contexts.update(
                 log["umolk_problem_getprops_contexts"]
+            )
+            current_umolk_not_found_getprops_tags.update(
+                log["umolk_not_found_getprops_tags"]
+            )
+            current_umolk_not_found_getprops_contexts.update(
+                log["umolk_not_found_getprops_contexts"]
             )
             current_umolk_optional_defaulted_tags.update(
                 log["umolk_optional_defaulted_getprops_tags"]
@@ -2387,6 +2435,16 @@ def print_batch_summary(
     print_counter(
         "Aggregate UMOLK problem GetProps contexts",
         aggregate_umolk_problem_getprops_contexts,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK expected not-found GetProps tags",
+        aggregate_umolk_not_found_getprops_tags,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK expected not-found GetProps contexts",
+        aggregate_umolk_not_found_getprops_contexts,
         limit=20,
     )
     print_counter(
@@ -2601,6 +2659,16 @@ def print_batch_summary(
         print_counter(
             "Current-build UMOLK problem GetProps contexts",
             current_umolk_problem_getprops_contexts,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK expected not-found GetProps tags",
+            current_umolk_not_found_getprops_tags,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK expected not-found GetProps contexts",
+            current_umolk_not_found_getprops_contexts,
             limit=20,
         )
         print_counter(

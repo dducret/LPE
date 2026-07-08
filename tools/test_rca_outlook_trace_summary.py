@@ -29,6 +29,8 @@ def empty_log_summary() -> dict:
         "problem_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
+        "umolk_not_found_getprops_tags": Counter(),
+        "umolk_not_found_getprops_contexts": Counter(),
         "umolk_getprops_request_ids": set(),
         "umolk_optional_defaulted_getprops_tags": Counter(),
         "umolk_optional_defaulted_getprops_contexts": Counter(),
@@ -148,7 +150,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
 
-    def test_umolk_problem_getprops_uses_associated_config_class(self) -> None:
+    def test_umolk_not_found_getprops_uses_associated_config_class(self) -> None:
         summary = empty_log_summary()
 
         rca.inspect_contract(
@@ -165,11 +167,12 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(summary["umolk_problem_getprops_tags"], Counter())
         self.assertEqual(
-            summary["umolk_problem_getprops_tags"], Counter({"0x90010003": 1})
+            summary["umolk_not_found_getprops_tags"], Counter({"0x90010003": 1})
         )
         self.assertEqual(
-            summary["umolk_problem_getprops_contexts"],
+            summary["umolk_not_found_getprops_contexts"],
             Counter(
                 {
                     "0x90010003;object=associated_config;role=inbox;"
@@ -180,7 +183,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
 
-    def test_umolk_problem_getprops_uses_materialization_request_id(self) -> None:
+    def test_umolk_not_found_getprops_uses_materialization_request_id(self) -> None:
         summary = empty_log_summary()
         summary["umolk_getprops_request_ids"].add("{REQ}:128")
 
@@ -197,8 +200,38 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(summary["umolk_problem_getprops_tags"], Counter())
+        self.assertEqual(
+            summary["umolk_not_found_getprops_tags"], Counter({"0x90010003": 1})
+        )
+
+    def test_umolk_non_not_found_getprops_remains_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x90010003;names=unknown;"
+            "problem_tags=0x90010003:0x80070057;zero_default_tags=;"
+            "response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:128",
+                "object_kind": "associated_config",
+                "associated_config_class": "IPM.Configuration.UMOLK.UserOptions",
+            },
+        )
+
         self.assertEqual(
             summary["umolk_problem_getprops_tags"], Counter({"0x90010003": 1})
+        )
+        self.assertEqual(summary["umolk_not_found_getprops_tags"], Counter())
+        self.assertIn(
+            "umolk_problem_getprops_type:0x0003",
+            rca.issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
         )
 
     def test_unknown_getprops_context_uses_structured_fields(self) -> None:
@@ -698,6 +731,13 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "umolk_problem_getprops_type:0x0048",
             ],
         )
+
+    def test_issue_buckets_ignores_umolk_expected_not_found_getprops(self) -> None:
+        log = empty_log_summary()
+        log["umolk_not_found_getprops_tags"] = Counter({"0x90010003": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
 
     def test_problem_getprops_bucket_order_is_stable_for_ties(self) -> None:
         log = empty_log_summary()
@@ -1313,6 +1353,30 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["umolk_dictionary_info_versions"],
             Counter({"Outlook.16": 1}),
+        )
+        self.assertEqual(summary["umolk_dictionary_issues"], Counter())
+
+    def test_umolk_dictionary_flags_zero_olprefs_version(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_umolk_dictionary_shapes(
+            summary,
+            "request_id=x;config=0x1;class=IPM.Configuration.UMOLK.UserOptions;"
+            "dictionary_shape=xml_dictionary;dictionary_olprefs_version=zero_or_negative;"
+            "dictionary_olprefs_value=9-0;dictionary_info_version=LPE.1;"
+            "response_shape=values",
+        )
+
+        self.assertEqual(
+            summary["umolk_dictionary_issues"],
+            Counter(
+                {
+                    "olprefs_version=zero_or_negative;value=9-0;"
+                    "request=x;config=0x1;class=IPM.Configuration.UMOLK.UserOptions": 1,
+                    "info_version=LPE.1;"
+                    "request=x;config=0x1;class=IPM.Configuration.UMOLK.UserOptions": 1,
+                }
+            ),
         )
 
     def test_umolk_dictionary_contract_flags_requested_missing_dictionary(self) -> None:

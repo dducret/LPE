@@ -663,7 +663,10 @@ fn empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row() {
         modeled.properties_json["0x7c070102"]["value"],
         serde_json::json!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX)
     );
-    assert!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("392d30"));
+    assert!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("4f75746c6f6f6b2e3136"));
+    assert!(OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("392d31"));
+    assert!(!OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("4c50452e31"));
+    assert!(!OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX.contains("392d30"));
     assert!(snapshot.associated_config_identity_matches_folder(
         crate::mapi::identity::INBOX_FOLDER_ID,
         crate::mapi::identity::mapi_store_id(0x7fff_ffff_fffa)

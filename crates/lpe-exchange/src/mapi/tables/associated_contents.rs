@@ -563,11 +563,28 @@ fn sanitize_configuration_property_value(
 ) -> MapiValue {
     if property_tag == PID_TAG_ROAMING_DICTIONARY
         && crate::mapi_store::is_outlook_configuration_message_class(message_class)
-        && matches!(&value, MapiValue::Binary(bytes) if bytes == b"<xml/>")
+        && matches!(
+            &value,
+            MapiValue::Binary(bytes)
+                if bytes == b"<xml/>" || is_stale_minimal_umolk_dictionary(message_class, bytes)
+        )
     {
         return MapiValue::Binary(minimal_roaming_dictionary_stream());
     }
     value
+}
+
+pub(in crate::mapi) fn is_stale_minimal_umolk_dictionary(
+    message_class: &str,
+    bytes: &[u8],
+) -> bool {
+    crate::mapi_store::is_outlook_umolk_user_options_message_class(message_class)
+        && bytes
+            .windows(br#"Info version="LPE.1""#.len())
+            .any(|window| window == br#"Info version="LPE.1""#)
+        && bytes
+            .windows(br#"18-OLPrefsVersion" v="9-0""#.len())
+            .any(|window| window == br#"18-OLPrefsVersion" v="9-0""#)
 }
 
 pub(in crate::mapi) fn associated_config_property_value(

@@ -1169,7 +1169,9 @@ fn replace_persisted_default_mail_favorite_shortcuts(
             shortcut.shortcut_type == default_shortcut.shortcut_type
                 && shortcut.target_folder_id == default_shortcut.target_folder_id
                 && shortcut.section == default_shortcut.section
-                && shortcut.subject.eq_ignore_ascii_case(&default_shortcut.subject)
+                && shortcut
+                    .subject
+                    .eq_ignore_ascii_case(&default_shortcut.subject)
         }) {
             *existing = default_shortcut;
         }

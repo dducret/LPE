@@ -7666,7 +7666,8 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
         .as_str()
         .expect("dictionary hex");
     assert_ne!(dictionary, "3c786d6c2f3e");
-    assert!(dictionary.contains("392d30"), "{dictionary}");
+    assert!(dictionary.contains("392d31"), "{dictionary}");
+    assert!(!dictionary.contains("392d30"), "{dictionary}");
 }
 
 #[tokio::test]

@@ -7269,6 +7269,23 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
                 && value.windows(b"9-1".len()).any(|window| window == b"9-1")
                 && !value.windows(b"<xml/>".len()).any(|window| window == b"<xml/>")
     ));
+    let stale_minimal_dictionary = MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x7c070102": {
+                "type": "binary",
+                "value": "3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d227574662d38223f3e3c55736572436f6e66696775726174696f6e20786d6c6e733d2264696374696f6e6172792e787364223e3c496e666f2076657273696f6e3d224c50452e31222f3e3c446174613e3c65206b3d2231382d4f4c507265667356657273696f6e2220763d22392d30222f3e3c2f446174613e3c2f55736572436f6e66696775726174696f6e3e"
+            }
+        }),
+        ..message.clone()
+    };
+    assert!(matches!(
+        associated_config_property_value(&stale_minimal_dictionary, PID_TAG_ROAMING_DICTIONARY),
+        Some(MapiValue::Binary(value))
+            if value.windows(br#"Info version="Outlook.16""#.len()).any(|window| window == br#"Info version="Outlook.16""#)
+                && value.windows(b"9-1".len()).any(|window| window == b"9-1")
+                && !value.windows(br#"Info version="LPE.1""#.len()).any(|window| window == br#"Info version="LPE.1""#)
+                && !value.windows(b"9-0".len()).any(|window| window == b"9-0")
+    ));
     assert!(matches!(
         associated_config_property_value(&message, 0x685D_0003),
         Some(MapiValue::U32(value)) if value != 0

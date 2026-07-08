@@ -438,6 +438,31 @@ fn associated_config_persist_normalizes_stale_configuration_roaming_dictionary()
 }
 
 #[test]
+fn associated_config_persist_normalizes_stale_umolk_minimal_dictionary() {
+    let stale = br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#;
+    let properties = HashMap::from([(
+        PID_TAG_ROAMING_DICTIONARY,
+        MapiValue::Binary(stale.to_vec()),
+    )]);
+
+    let normalized = normalized_associated_config_persisted_properties(
+        "IPM.Configuration.UMOLK.UserOptions",
+        &properties,
+    );
+
+    match normalized.get(&PID_TAG_ROAMING_DICTIONARY) {
+        Some(MapiValue::Binary(value)) => {
+            let text = std::str::from_utf8(value).expect("dictionary xml");
+            assert!(text.contains(r#"Info version="Outlook.16""#), "{text}");
+            assert!(text.contains(r#"v="9-1""#), "{text}");
+            assert!(!text.contains(r#"Info version="LPE.1""#), "{text}");
+            assert!(!text.contains(r#"v="9-0""#), "{text}");
+        }
+        other => panic!("unexpected dictionary value: {other:?}"),
+    }
+}
+
+#[test]
 fn associated_config_persist_leaves_non_configuration_roaming_dictionary_unchanged() {
     let properties = HashMap::from([(
         PID_TAG_ROAMING_DICTIONARY,
