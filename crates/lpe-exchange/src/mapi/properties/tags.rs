@@ -28,6 +28,7 @@ impl MapiPropertyTag {
                     | MapiPropertyType::MultipleInteger64
                     | MapiPropertyType::MultipleString8
                     | MapiPropertyType::MultipleString
+                    | MapiPropertyType::MultipleTime
                     | MapiPropertyType::MultipleGuid
                     | MapiPropertyType::MultipleBinary),
                 ) => Some(property_type),

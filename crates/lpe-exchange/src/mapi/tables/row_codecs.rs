@@ -70,7 +70,7 @@ fn write_query_rows_property_value(
         MapiPropertyType::MultipleInteger32 => {
             write_counted_fixed_query_rows_property_values(response, values, offset, 4)
         }
-        MapiPropertyType::MultipleInteger64 => {
+        MapiPropertyType::MultipleInteger64 | MapiPropertyType::MultipleTime => {
             write_counted_fixed_query_rows_property_values(response, values, offset, 8)
         }
         MapiPropertyType::MultipleGuid => {
@@ -225,6 +225,7 @@ pub(in crate::mapi) fn write_property_default(row: &mut Vec<u8>, property_tag: u
             MapiPropertyType::MultipleInteger16
             | MapiPropertyType::MultipleInteger32
             | MapiPropertyType::MultipleInteger64
+            | MapiPropertyType::MultipleTime
             | MapiPropertyType::MultipleString8
             | MapiPropertyType::MultipleString
             | MapiPropertyType::MultipleGuid

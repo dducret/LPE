@@ -583,6 +583,7 @@ pub(in crate::mapi) enum MapiPropertyType {
     MultipleInteger64 = 0x1014,
     MultipleString8 = 0x101E,
     MultipleString = 0x101F,
+    MultipleTime = 0x1040,
     MultipleGuid = 0x1048,
     MultipleBinary = 0x1102,
 }
@@ -613,6 +614,7 @@ impl MapiPropertyType {
             0x1014 => Some(Self::MultipleInteger64),
             0x101E => Some(Self::MultipleString8),
             0x101F => Some(Self::MultipleString),
+            0x1040 => Some(Self::MultipleTime),
             0x1048 => Some(Self::MultipleGuid),
             0x1102 => Some(Self::MultipleBinary),
             _ => {
@@ -959,6 +961,7 @@ mod tests {
             MapiPropertyType::MultipleInteger64,
             MapiPropertyType::MultipleString8,
             MapiPropertyType::MultipleString,
+            MapiPropertyType::MultipleTime,
             MapiPropertyType::MultipleGuid,
             MapiPropertyType::MultipleBinary,
         ];
@@ -970,6 +973,18 @@ mod tests {
             assert_eq!(
                 gap_status_u16(PROPERTY_TYPE_GAP_MANIFEST, property_type.as_u16()),
                 Some(GapStatus::Implemented)
+            );
+        }
+        let documented_ms_oxcdata_property_types = [
+            0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x000A, 0x000B, 0x000D,
+            0x0014, 0x001E, 0x001F, 0x0040, 0x0048, 0x00FB, 0x00FD, 0x00FE, 0x0102, 0x1002, 0x1003,
+            0x1004, 0x1005, 0x1006, 0x1007, 0x1014, 0x101E, 0x101F, 0x1040, 0x1048, 0x10FB, 0x10FD,
+            0x10FE, 0x1102,
+        ];
+        for property_type in documented_ms_oxcdata_property_types {
+            assert!(
+                gap_status_u16(PROPERTY_TYPE_GAP_MANIFEST, property_type).is_some(),
+                "MS-OXCDATA property type 0x{property_type:04X} is missing from the gap manifest"
             );
         }
 
@@ -1025,6 +1040,14 @@ mod tests {
         assert_eq!(
             MapiPropertyType::known_unsupported_name(0x000D),
             Some("PtypObject")
+        );
+        assert_eq!(
+            MapiPropertyType::from_code(0x1040),
+            Some(MapiPropertyType::MultipleTime)
+        );
+        assert_eq!(
+            gap_status_u16(PROPERTY_TYPE_GAP_MANIFEST, 0x1040),
+            Some(GapStatus::Implemented)
         );
         assert_eq!(
             FastTransferMarker::from_u32(0x4012_0003),

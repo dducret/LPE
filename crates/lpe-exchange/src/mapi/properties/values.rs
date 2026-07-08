@@ -222,7 +222,7 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
             MapiValue::MultiI32(values) => write_multi_i32(row, values),
             _ => write_u32(row, 0),
         },
-        Some(MapiPropertyType::MultipleInteger64) => match value {
+        Some(MapiPropertyType::MultipleInteger64 | MapiPropertyType::MultipleTime) => match value {
             MapiValue::MultiI64(values) => write_multi_i64(row, values),
             _ => write_u32(row, 0),
         },
@@ -302,7 +302,7 @@ pub(in crate::mapi) fn parse_mapi_property_value(
             }
             Ok(MapiValue::MultiI32(values))
         }
-        Some(MapiPropertyType::MultipleInteger64) => {
+        Some(MapiPropertyType::MultipleInteger64 | MapiPropertyType::MultipleTime) => {
             let count = cursor.read_u32()? as usize;
             let mut values = Vec::new();
             for _ in 0..count {

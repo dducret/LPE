@@ -5100,13 +5100,11 @@ fn folder_default_view_definitions_use_type_specific_columns() {
             PID_LID_COMMON_END_TAG,
             PID_LID_LOCATION_W_TAG,
             PID_LID_BUSY_STATUS_TAG,
-            PID_LID_OUTLOOK_COMMON_8578_TAG,
-            PID_LID_SIDE_EFFECTS_TAG,
         ]
     );
     assert_eq!(
         view_descriptor_strings(&calendar),
-        "\nIcon\nSubject\nMessage Flags\nMessage Status\nStart\nEnd\nLocation\nBusy\nOutlook Common\nSide Effects\n"
+        "\nIcon\nSubject\nMessage Flags\nMessage Status\nStart\nEnd\nLocation\nBusy\n"
     );
 
     assert_eq!(task.kind, ViewDefinitionKind::TaskList);

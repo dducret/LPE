@@ -551,7 +551,12 @@ fn view_descriptor_comparable_selected_columns(columns: &[u32]) -> Vec<u32> {
         .filter(|tag| {
             !matches!(
                 *tag,
-                PID_TAG_FOLDER_ID | PID_TAG_MID | PID_TAG_INST_ID | PID_TAG_INSTANCE_NUM
+                PID_TAG_FOLDER_ID
+                    | PID_TAG_MID
+                    | PID_TAG_INST_ID
+                    | PID_TAG_INSTANCE_NUM
+                    | PID_LID_OUTLOOK_COMMON_8578_TAG
+                    | PID_LID_SIDE_EFFECTS_TAG
             )
         })
         .collect()

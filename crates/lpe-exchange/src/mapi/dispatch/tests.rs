@@ -218,8 +218,6 @@ fn outlook_view_descriptor_visible_property_tags_reports_calendar_columns() {
             PID_LID_COMMON_END_TAG,
             PID_LID_LOCATION_W_TAG,
             PID_LID_BUSY_STATUS_TAG,
-            PID_LID_OUTLOOK_COMMON_8578_TAG,
-            PID_LID_SIDE_EFFECTS_TAG,
         ]
     );
 }
@@ -618,7 +616,7 @@ fn calendar_view_handoff_table_contract_reports_calendar_default_view() {
     assert!(contract.contains("folder_local_default_supported=true"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003"
     ));
     assert!(contract.contains(&format!(
         "expected_view_message_id=0x{:016x}",
@@ -704,7 +702,7 @@ fn calendar_view_handoff_descriptor_matches_observed_calendar_projection() {
 
     assert!(contract.contains("selected_view_name=Calendar"));
     assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003,0x85780003,0x85100003"
+        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003"
     ));
     assert!(
         contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
