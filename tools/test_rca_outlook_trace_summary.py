@@ -1085,7 +1085,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             summary["setcolumns_release_response_handle_classifications"],
-            Counter({"released_slot_invalidated_in_response_handle_table": 1}),
+            Counter({"ms_oxcrops_release_invalidated_handle_table_entry": 1}),
         )
 
     def test_setcolumns_release_response_checks_all_release_slots(self) -> None:
@@ -1120,7 +1120,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             summary["setcolumns_release_response_handle_classifications"],
-            Counter({"released_slot_invalidated_in_response_handle_table": 1}),
+            Counter({"ms_oxcrops_release_invalidated_handle_table_entry": 1}),
         )
 
     def test_rr_summary_counts_setcolumns_release_response_frame(self) -> None:
@@ -1706,8 +1706,8 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             "visible_release_classifications": Counter(),
             "setcolumns_release_response_handle_classifications": Counter(
                 {
-                    "released_slot_invalidated_in_response_handle_table": 1,
-                    "released_slot_trimmed_from_response_handle_table": 1,
+                    "ms_oxcrops_release_invalidated_handle_table_entry": 1,
+                    "ms_oxcrops_release_trimmed_unreferenced_handle_table_entry": 1,
                 }
             ),
             "post_visible_release_followups": Counter(),
