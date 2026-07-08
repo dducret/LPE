@@ -5619,22 +5619,10 @@ async fn mapi_over_http_microsoft_copy_properties_copies_custom_values_and_repor
     append_mapi_utf16_property(&mut property_values, custom_tag, "copied opaque value");
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, folder_id);
-    append_rop_open_message(
-        &mut rops,
-        1,
-        2,
-        folder_id,
-        source_mapi_id,
-    );
+    append_rop_open_message(&mut rops, 1, 2, folder_id, source_mapi_id);
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
-    append_rop_save_changes_message(&mut rops, 2, 1);
-    append_rop_open_message(
-        &mut rops,
-        1,
-        3,
-        folder_id,
-        destination_mapi_id,
-    );
+    append_rop_save_changes_message(&mut rops, 1, 2);
+    append_rop_open_message(&mut rops, 1, 3, folder_id, destination_mapi_id);
     rops.extend_from_slice(&[
         0x67, 0x00, 0x02, 0x03, // RopCopyProperties: source handle 2, destination handle 3.
         0x00, 0x00, // WantAsynchronous, CopyFlags.

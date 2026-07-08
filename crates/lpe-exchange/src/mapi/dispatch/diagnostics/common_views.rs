@@ -430,18 +430,50 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     let comparable_columns = view_descriptor_comparable_selected_columns(columns);
     let selected_missing_descriptor_columns =
         missing_debug_property_tags(&comparable_columns, &descriptor_columns);
+    let descriptor_columns_not_selected = missing_debug_property_tags(&descriptor_columns, columns);
+    let projection_kind =
+        default_view_setcolumns_projection_kind(columns, &descriptor_columns_not_selected);
 
     format!(
         "phase=setcolumns;default_view_id=0x{:016x};view_name={};\
          descriptor_summary={};descriptor_columns={};\
-         selected_columns={};selected_missing_descriptor_columns={}",
+         selected_columns={};selected_missing_descriptor_columns={};\
+         descriptor_columns_not_selected={};default_view_projection_kind={}",
         message.id,
         message.name,
         format_view_descriptor_binary_summary(&descriptor),
         format_debug_property_tags(&descriptor_columns),
         format_debug_property_tags(columns),
-        selected_missing_descriptor_columns
+        selected_missing_descriptor_columns,
+        descriptor_columns_not_selected,
+        projection_kind
     )
+}
+
+fn default_view_setcolumns_projection_kind(
+    columns: &[u32],
+    descriptor_columns_not_selected: &str,
+) -> &'static str {
+    let identity_columns = columns
+        .iter()
+        .filter(|tag| {
+            matches!(
+                canonical_property_storage_tag(**tag),
+                PID_TAG_FOLDER_ID | PID_TAG_MID | PID_TAG_INST_ID | PID_TAG_INSTANCE_NUM
+            )
+        })
+        .count();
+    let selected_visible_columns = columns.len().saturating_sub(identity_columns);
+    if !descriptor_columns_not_selected.is_empty()
+        && identity_columns > 0
+        && selected_visible_columns <= 2
+    {
+        "identity_probe_subset"
+    } else if descriptor_columns_not_selected.is_empty() {
+        "descriptor_visible_complete"
+    } else {
+        "descriptor_visible_subset"
+    }
 }
 
 pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contract(

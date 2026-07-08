@@ -1023,10 +1023,19 @@ def record_visible_release_classification(summary: dict[str, Any], text: str) ->
     defaulted = first_field(text, "defaulted")
     missing_descriptor = first_field(text, "selected_missing_descriptor_columns")
     descriptor_missing_from_table = first_field(text, "descriptor_columns_missing_from_table")
+    descriptor_columns_not_selected = first_field(text, "descriptor_columns_not_selected")
+    projection_kind = first_field(text, "default_view_projection_kind")
     table_sort_matches = first_field(text, "table_sort_matches_descriptor")
     descriptor_sort = first_field(text, "descriptor_sort_tag")
     table_sort = first_field(text, "table_primary_sort_tag")
-    if descriptor_missing_from_table and missing_descriptor == "" and row_count > 0:
+    if projection_kind == "identity_probe_subset" or (
+        row_count > 0
+        and defaulted == ""
+        and missing_descriptor == ""
+        and descriptor_columns_not_selected
+    ):
+        key = "identity_probe_subset_before_query_rows"
+    elif descriptor_missing_from_table and missing_descriptor == "" and row_count > 0:
         key = "descriptor_superset_client_subset_before_query_rows"
     elif descriptor_missing_from_table:
         key = "descriptor_table_mismatch_before_query_rows"
@@ -1088,9 +1097,9 @@ def classify_setcolumns_release_response_handle_table(
             continue
         return "released_slot_reused_in_response_handle_table"
     if saw_invalidated:
-        return "released_slot_invalidated_in_response_handle_table"
+        return "ms_oxcrops_release_invalidated_handle_table_entry"
     if saw_trimmed:
-        return "released_slot_trimmed_from_response_handle_table"
+        return "ms_oxcrops_release_trimmed_unreferenced_handle_table_entry"
     return "release_input_slot_unknown"
 
 
@@ -2716,6 +2725,8 @@ def setcolumns_release_response_handle_classification_is_actionable(name: str) -
     return name not in {
         "released_slot_invalidated_in_response_handle_table",
         "released_slot_trimmed_from_response_handle_table",
+        "ms_oxcrops_release_invalidated_handle_table_entry",
+        "ms_oxcrops_release_trimmed_unreferenced_handle_table_entry",
     }
 
 

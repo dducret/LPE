@@ -781,10 +781,8 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
     assert!(contract.contains(
         "selected_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
     ));
-    assert!(
-        contract.ends_with("selected_missing_descriptor_columns="),
-        "{contract}"
-    );
+    assert!(contract.contains("selected_missing_descriptor_columns=;"));
+    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
 }
 
 #[test]
@@ -807,10 +805,8 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
     assert!(contract.contains(
         "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
     ));
-    assert!(
-        contract.ends_with("selected_missing_descriptor_columns="),
-        "{contract}"
-    );
+    assert!(contract.contains("selected_missing_descriptor_columns=;"));
+    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
 }
 
 #[test]

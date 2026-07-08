@@ -1875,8 +1875,8 @@ fn associated_config_absent_optional_getprops_returns_not_found() {
             id: 0x7fff_ffff_fffb_0001,
             folder_id: INBOX_FOLDER_ID,
             canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
-            message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
-            subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+            message_class: "IPM.Configuration.Unknown".to_string(),
+            subject: "IPM.Configuration.Unknown".to_string(),
             properties_json: serde_json::json!({
                 "0x000b0102": {"type": "binary", "value": ""}
             }),
@@ -2972,7 +2972,7 @@ fn saved_umolk_associated_config_getprops_projects_roaming_dictionary_stream() {
 }
 
 #[test]
-fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_not_found() {
+fn umolk_associated_config_property_burst_projects_empty_modeled_values() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -2999,6 +2999,13 @@ fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_
         PID_TAG_ROAMING_DICTIONARY,
         0x9001_0003,
         0x0F02_0040,
+        PID_TAG_RECEIVED_BY_NAME_W,
+        PID_TAG_REPLY_RECIPIENT_ENTRIES,
+        PID_TAG_PROCESSED,
+        PID_TAG_RETENTION_PERIOD,
+        PID_TAG_RECEIVED_BY_ENTRY_ID_ALT,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        PID_TAG_SWAPPED_TODO_DATA,
         OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
     ];
     let mut payload = Vec::new();
@@ -3023,23 +3030,57 @@ fn umolk_associated_config_property_burst_returns_absent_optional_properties_as_
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
-    assert_eq!(response[6], 1);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
     let mut cursor = Cursor::new(&response[7..]);
-    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
         MapiValue::I32(4)
     );
-    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert!(matches!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DICTIONARY).unwrap(),
         MapiValue::Binary(value) if value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
     ));
-    for _ in 0..3 {
-        assert_eq!(cursor.read_u8().unwrap(), 0x0A);
-        assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
-    }
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, 0x9001_0003).unwrap(),
+        MapiValue::I32(0)
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, 0x0F02_0040).unwrap(),
+        MapiValue::I64(0)
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_RECEIVED_BY_NAME_W).unwrap(),
+        MapiValue::String(String::new())
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_REPLY_RECIPIENT_ENTRIES).unwrap(),
+        MapiValue::Binary(Vec::new())
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_PROCESSED).unwrap(),
+        MapiValue::Bool(false)
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_RETENTION_PERIOD).unwrap(),
+        MapiValue::I32(0)
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_RECEIVED_BY_ENTRY_ID_ALT).unwrap(),
+        MapiValue::Binary(Vec::new())
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_LAST_MODIFIER_NAME_W).unwrap(),
+        MapiValue::String(String::new())
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_SWAPPED_TODO_DATA).unwrap(),
+        MapiValue::Binary(Vec::new())
+    );
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG)
+            .unwrap(),
+        MapiValue::I32(0)
+    );
 }
 
 #[test]
