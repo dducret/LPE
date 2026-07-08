@@ -34,6 +34,9 @@ def empty_log_summary() -> dict:
         "visible_release_without_query_rows": 0,
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
+        "visible_release_request_shapes": Counter(),
+        "visible_release_pre_release_states": Counter(),
+        "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_handle_tables": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
@@ -496,6 +499,50 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["visible_release_classifications"],
             Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
+    def test_visible_release_request_metrics_are_counted(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_context(
+            summary,
+            "release_request_shape=mixed_setcolumns_release_batch;"
+            "release_input_index=2;release_response_index=0;"
+            "release_rop_count=3;release_batch_rop_count=4;"
+            "release_same_execute_already_released=false;"
+            "release_handle_slots_before=0:0x00000001|1:0x00000021;"
+            "release_live_handle_count_before=5;"
+            "release_query_position_seen_before_release=true;"
+            "release_findrow_seen_before_release=false;"
+            "release_query_rows_seen_before_release=false;"
+            "release_content_sync_seen_before_release=false;"
+            "request_rops=SetColumns,Release,Release,Release;row_count=1;"
+            "defaulted=;selected_missing_descriptor_columns=;"
+            "table_sort_matches_descriptor=true",
+        )
+
+        self.assertEqual(
+            summary["visible_release_request_shapes"],
+            Counter(
+                {
+                    "shape=mixed_setcolumns_release_batch;"
+                    "rops=SetColumns,Release,Release,Release;in=2;out=0;"
+                    "release_rops=3;batch_rops=4;duplicate=false": 1
+                }
+            ),
+        )
+        self.assertEqual(
+            summary["visible_release_pre_release_states"],
+            Counter(
+                {
+                    "query_position=true;findrow=false;query_rows=false;"
+                    "content_sync=false;live_handles=5": 1
+                }
+            ),
+        )
+        self.assertEqual(
+            summary["visible_release_handle_slots"],
+            Counter({"0:0x00000001|1:0x00000021": 1}),
         )
 
     def test_view_trace_records_terminal_events_after_visible_release(self) -> None:

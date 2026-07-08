@@ -100,8 +100,16 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 .last_inbox_normal_contents_table_query_rows_handle
                 != released_handle =>
         {
+            let release_request_metrics = format_visible_inbox_release_request_metrics(
+                request,
+                request_rop_names,
+                handle_slots,
+                released_handle,
+                same_execute_released_handles,
+                session,
+            );
             Some(format!(
-                "request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={}",
+                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={}",
                 format_optional_debug_handle(released_handle),
                 position,
                 folder_message_count(*folder_id, mailboxes, emails, snapshot),
@@ -363,6 +371,14 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 input_handle_index = request.input_handle_index().unwrap_or(0),
                 input_handle_value = %format_optional_debug_handle(released_handle),
                 release_without_query_rows_context = %context,
+                live_handles_before_release = %format_live_handle_debug_summary(session),
+                last_query_position_before_release = %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_normal_contents_table_query_position_context
+                ),
+                recent_actions_before_release =
+                    %session.post_hierarchy_actions.recent_probe_actions.join(">"),
                 "rca debug mapi visible inbox released before query rows"
             );
         } else {
@@ -377,6 +393,14 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 input_handle_index = request.input_handle_index().unwrap_or(0),
                 input_handle_value = %format_optional_debug_handle(released_handle),
                 release_without_query_rows_context = %context,
+                live_handles_before_release = %format_live_handle_debug_summary(session),
+                last_query_position_before_release = %debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_normal_contents_table_query_position_context
+                ),
+                recent_actions_before_release =
+                    %session.post_hierarchy_actions.recent_probe_actions.join(">"),
                 "rca debug mapi visible inbox released before query rows"
             );
         }
@@ -465,6 +489,84 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
         remaining_handle_count = session.handles.len(),
         "rca debug mapi release before inbox probe"
     );
+}
+
+fn format_visible_inbox_release_request_metrics(
+    request: &RopRequest,
+    request_rop_names: &str,
+    handle_slots: &[u32],
+    released_handle: Option<u32>,
+    same_execute_released_handles: &HashSet<u32>,
+    session: &MapiSession,
+) -> String {
+    let rop_names: Vec<&str> = request_rop_names
+        .split(',')
+        .filter(|name| !name.is_empty())
+        .collect();
+    let release_rop_count = rop_names
+        .iter()
+        .filter(|name| name.eq_ignore_ascii_case("Release"))
+        .count();
+    let release_request_shape =
+        classify_release_request_shape(request_rop_names, rop_names.len(), release_rop_count);
+    let same_execute_already_released = released_handle
+        .map(|handle| same_execute_released_handles.contains(&handle))
+        .unwrap_or(false);
+    format!(
+        "release_request_shape={release_request_shape};release_input_index={};release_response_index={};release_rop_count={};release_batch_rop_count={};release_same_execute_already_released={};release_handle_slots_before={};release_live_handle_count_before={};release_query_position_seen_before_release={};release_findrow_seen_before_release={};release_query_rows_seen_before_release={};release_content_sync_seen_before_release={}",
+        request.input_handle_index().unwrap_or(0),
+        request.response_handle_index(),
+        release_rop_count,
+        rop_names.len(),
+        same_execute_already_released,
+        format_release_handle_slots(handle_slots),
+        session.handles.len(),
+        !session
+            .post_hierarchy_actions
+            .last_inbox_normal_contents_table_query_position_context
+            .is_empty(),
+        session
+            .post_hierarchy_actions
+            .last_inbox_normal_contents_table_find_row_handle
+            .is_some(),
+        session
+            .post_hierarchy_actions
+            .last_inbox_normal_contents_table_query_rows_handle
+            .is_some(),
+        session
+            .post_hierarchy_actions
+            .content_sync_configure_observed
+    )
+}
+
+fn classify_release_request_shape(
+    request_rop_names: &str,
+    rop_count: usize,
+    release_rop_count: usize,
+) -> &'static str {
+    if request_rop_names == "Release" {
+        "standalone_release"
+    } else if rop_count > 0 && release_rop_count == rop_count {
+        "release_only_batch"
+    } else if request_rop_names.contains("SetColumns") && release_rop_count > 0 {
+        "mixed_setcolumns_release_batch"
+    } else if release_rop_count > 0 {
+        "mixed_release_batch"
+    } else {
+        "unknown_release_request"
+    }
+}
+
+fn format_release_handle_slots(handle_slots: &[u32]) -> String {
+    if handle_slots.is_empty() {
+        return "empty".to_string();
+    }
+    handle_slots
+        .iter()
+        .enumerate()
+        .map(|(index, handle)| format!("{index}:0x{handle:08x}"))
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 pub(super) fn log_post_hierarchy_release_events(

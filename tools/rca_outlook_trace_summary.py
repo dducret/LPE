@@ -366,6 +366,9 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "stale_default_view_states": Counter(),
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
+        "visible_release_request_shapes": Counter(),
+        "visible_release_pre_release_states": Counter(),
+        "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_handle_tables": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
@@ -668,7 +671,42 @@ def record_visible_release_context(summary: dict[str, Any], text: str) -> None:
         return
     summary["visible_release_contexts"].add(segment)
     record_visible_release_classification(summary, segment)
+    record_visible_release_request_metrics(summary, segment)
     record_visible_release_descriptor_window(summary, segment)
+
+
+def record_visible_release_request_metrics(summary: dict[str, Any], text: str) -> None:
+    if text.startswith("visible_inbox_release_without_query_rows:"):
+        text = text.split(":", 1)[1]
+    shape = first_field(text, "release_request_shape") or "unknown"
+    request_rops = first_field(text, "request_rops") or "unknown"
+    input_index = first_field(text, "release_input_index") or "?"
+    response_index = first_field(text, "release_response_index") or "?"
+    release_rop_count = first_field(text, "release_rop_count") or "?"
+    batch_rop_count = first_field(text, "release_batch_rop_count") or "?"
+    already_released = first_field(text, "release_same_execute_already_released") or "?"
+    summary["visible_release_request_shapes"][
+        f"shape={shape};rops={request_rops};in={input_index};out={response_index};"
+        f"release_rops={release_rop_count};batch_rops={batch_rop_count};"
+        f"duplicate={already_released}"
+    ] += 1
+
+    query_position_seen = (
+        first_field(text, "release_query_position_seen_before_release") or "?"
+    )
+    findrow_seen = first_field(text, "release_findrow_seen_before_release") or "?"
+    query_rows_seen = first_field(text, "release_query_rows_seen_before_release") or "?"
+    content_sync_seen = first_field(text, "release_content_sync_seen_before_release") or "?"
+    live_handle_count = first_field(text, "release_live_handle_count_before") or "?"
+    summary["visible_release_pre_release_states"][
+        f"query_position={query_position_seen};findrow={findrow_seen};"
+        f"query_rows={query_rows_seen};content_sync={content_sync_seen};"
+        f"live_handles={live_handle_count}"
+    ] += 1
+
+    handle_slots = first_field(text, "release_handle_slots_before")
+    if handle_slots:
+        summary["visible_release_handle_slots"][handle_slots] += 1
 
 
 def record_post_visible_release_terminal_event(
@@ -1320,6 +1358,21 @@ def print_single_summary(
             limit=8,
         )
         print_counter(
+            "Visible Inbox release request shapes",
+            log["visible_release_request_shapes"],
+            limit=8,
+        )
+        print_counter(
+            "Visible Inbox release pre-release states",
+            log["visible_release_pre_release_states"],
+            limit=8,
+        )
+        print_counter(
+            "Visible Inbox release handle slots",
+            log["visible_release_handle_slots"],
+            limit=8,
+        )
+        print_counter(
             "Journal SetColumns+Release response frames",
             log["setcolumns_release_response_frames"],
             limit=8,
@@ -1400,6 +1453,9 @@ def print_batch_summary(
     aggregate_hierarchy_windows: Counter[str] = Counter()
     aggregate_visible_release_descriptor_windows: Counter[str] = Counter()
     aggregate_visible_release_classifications: Counter[str] = Counter()
+    aggregate_visible_release_request_shapes: Counter[str] = Counter()
+    aggregate_visible_release_pre_release_states: Counter[str] = Counter()
+    aggregate_visible_release_handle_slots: Counter[str] = Counter()
     aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
@@ -1425,6 +1481,9 @@ def print_batch_summary(
     current_descriptor_gap_windows: Counter[str] = Counter()
     current_visible_release_descriptor_windows: Counter[str] = Counter()
     current_visible_release_classifications: Counter[str] = Counter()
+    current_visible_release_request_shapes: Counter[str] = Counter()
+    current_visible_release_pre_release_states: Counter[str] = Counter()
+    current_visible_release_handle_slots: Counter[str] = Counter()
     current_setcolumns_release_response_frames: Counter[str] = Counter()
     current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     current_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
@@ -1505,6 +1564,15 @@ def print_batch_summary(
         aggregate_visible_release_classifications.update(
             log["visible_release_classifications"]
         )
+        aggregate_visible_release_request_shapes.update(
+            log["visible_release_request_shapes"]
+        )
+        aggregate_visible_release_pre_release_states.update(
+            log["visible_release_pre_release_states"]
+        )
+        aggregate_visible_release_handle_slots.update(
+            log["visible_release_handle_slots"]
+        )
         aggregate_setcolumns_release_response_frames.update(
             log["setcolumns_release_response_frames"]
         )
@@ -1566,6 +1634,15 @@ def print_batch_summary(
             )
             current_visible_release_classifications.update(
                 log["visible_release_classifications"]
+            )
+            current_visible_release_request_shapes.update(
+                log["visible_release_request_shapes"]
+            )
+            current_visible_release_pre_release_states.update(
+                log["visible_release_pre_release_states"]
+            )
+            current_visible_release_handle_slots.update(
+                log["visible_release_handle_slots"]
             )
             current_setcolumns_release_response_frames.update(
                 log["setcolumns_release_response_frames"]
@@ -1707,6 +1784,21 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate visible Inbox release request shapes",
+        aggregate_visible_release_request_shapes,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate visible Inbox release pre-release states",
+        aggregate_visible_release_pre_release_states,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate visible Inbox release handle slots",
+        aggregate_visible_release_handle_slots,
+        limit=20,
+    )
+    print_counter(
         "Aggregate Journal SetColumns+Release response frames",
         aggregate_setcolumns_release_response_frames,
         limit=20,
@@ -1827,6 +1919,21 @@ def print_batch_summary(
         print_counter(
             "Current-build visible Inbox release classifications",
             current_visible_release_classifications,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release request shapes",
+            current_visible_release_request_shapes,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release pre-release states",
+            current_visible_release_pre_release_states,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release handle slots",
+            current_visible_release_handle_slots,
             limit=20,
         )
         print_counter(
