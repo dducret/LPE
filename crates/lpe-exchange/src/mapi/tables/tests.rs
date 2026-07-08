@@ -7270,6 +7270,8 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
                 && !value.windows(b"<xml/>".len()).any(|window| window == b"<xml/>")
     ));
     let stale_minimal_dictionary = MapiAssociatedConfigMessage {
+        message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+        subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
         properties_json: serde_json::json!({
             "0x7c070102": {
                 "type": "binary",

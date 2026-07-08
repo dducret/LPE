@@ -4339,7 +4339,7 @@ async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream()
     rops.extend_from_slice(&(dictionary_stream.len() as u16).to_le_bytes());
     rops.extend_from_slice(dictionary_stream);
     rops.extend_from_slice(&[0x01, 0x00, 0x03]); // RopRelease stream handle.
-    append_rop_save_changes_message(&mut rops, 1, 2);
+    append_rop_save_changes_message(&mut rops, 2, 2);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
