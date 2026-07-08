@@ -1989,10 +1989,7 @@ def post_visible_release_followup_is_actionable(name: str) -> bool:
 
 
 def visible_release_classification_is_actionable(name: str) -> bool:
-    return name not in {
-        "descriptor_superset_client_subset_before_query_rows",
-        "valid_projection_complete_setcolumns_before_query_rows",
-    }
+    return name != "empty_or_unknown_projection_before_query_rows"
 
 
 def actionable_zero_default_tag_counts(counter: Counter[str]) -> Counter[str]:

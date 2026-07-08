@@ -987,7 +987,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
-    def test_issue_buckets_ignores_non_actionable_visible_release_classification(self) -> None:
+    def test_issue_buckets_reports_complete_projection_visible_release_classification(self) -> None:
         log = empty_log_summary()
         log["visible_release_without_query_rows"] = 1
         log["visible_release_classifications"] = Counter(
@@ -995,7 +995,11 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
-        self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
+        self.assertIn(
+            "visible_inbox_release_classification:"
+            "valid_projection_complete_setcolumns_before_query_rows",
+            rca.issue_buckets(rr, log, None),
+        )
 
     def test_issue_buckets_reports_unclassified_visible_release(self) -> None:
         log = empty_log_summary()
@@ -1017,7 +1021,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
-    def test_verdict_ignores_non_actionable_visible_release_classification(self) -> None:
+    def test_verdict_treats_descriptor_superset_visible_release_as_actionable(self) -> None:
         log = empty_log_summary()
         log["visible_release_without_query_rows"] = 1
         log["visible_release_classifications"] = Counter(
@@ -1027,7 +1031,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             rca.verdict_for_summary(rr, log, Path("LPE_last_test.log")),
-            "transport is clean; if Outlook still crashes, ETL/client crash data may be useful.",
+            "transport is clean; journal diagnostics contain actionable MAPI/view issues.",
         )
 
     def test_verdict_prioritizes_concrete_issue_over_stall_symptoms(self) -> None:
