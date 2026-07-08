@@ -811,6 +811,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
                     Some(MapiValue::U32(0))
                 }
+                tag if crate::mapi_store::is_outlook_umolk_user_options_message_class(
+                    &message.message_class,
+                ) =>
+                {
+                    outlook_umolk_user_options_empty_property_value(tag)
+                }
                 0x685D_0003 if is_outlook_contacts_helper_config(message) => {
                     Some(MapiValue::U32(outlook_configuration_stamp(message)))
                 }
@@ -999,6 +1005,26 @@ fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiVa
         0x0102 => Some(MapiValue::Binary(Vec::new())),
         0x1003 => Some(MapiValue::MultiI32(Vec::new())),
         0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
+        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
+        _ => None,
+    }
+}
+
+fn outlook_umolk_user_options_empty_property_value(property_tag: u32) -> Option<MapiValue> {
+    match MapiPropertyTag::new(property_tag).property_type_code() {
+        0x0002 => Some(MapiValue::I16(0)),
+        0x0003 => Some(MapiValue::U32(0)),
+        0x0004 | 0x0005 => Some(MapiValue::F64(0)),
+        0x000B => Some(MapiValue::Bool(false)),
+        0x0014 | 0x0040 => Some(MapiValue::I64(0)),
+        0x001E | 0x001F => Some(MapiValue::String(String::new())),
+        0x0048 => Some(MapiValue::Guid(Uuid::nil().into_bytes())),
+        0x0102 => Some(MapiValue::Binary(Vec::new())),
+        0x1002 => Some(MapiValue::MultiI16(Vec::new())),
+        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
+        0x1014 => Some(MapiValue::MultiI64(Vec::new())),
+        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
+        0x1048 => Some(MapiValue::MultiGuid(Vec::new())),
         0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
         _ => None,
     }

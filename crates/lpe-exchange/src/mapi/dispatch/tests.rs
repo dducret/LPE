@@ -210,10 +210,6 @@ fn outlook_view_descriptor_visible_property_tags_reports_calendar_columns() {
     assert_eq!(
         tags,
         vec![
-            PID_TAG_FOLDER_ID,
-            PID_TAG_MID,
-            PID_TAG_INST_ID,
-            PID_TAG_INSTANCE_NUM,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_MESSAGE_FLAGS,

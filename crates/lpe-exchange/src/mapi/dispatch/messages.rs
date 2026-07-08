@@ -1280,7 +1280,6 @@ pub(super) async fn append_delete_messages_response<S>(
             return;
         }
     };
-    let mut completed_or_resolved = 0usize;
     let mut failed = 0usize;
     if !snapshot
         .folder_access_for_principal(folder_id, principal.account_id)
@@ -1309,7 +1308,6 @@ pub(super) async fn append_delete_messages_response<S>(
                 continue;
             }
             let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id) else {
-                completed_or_resolved += 1;
                 continue;
             };
             if store
@@ -1326,8 +1324,6 @@ pub(super) async fn append_delete_messages_response<S>(
                 .is_err()
             {
                 failed += 1;
-            } else {
-                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1338,8 +1334,6 @@ pub(super) async fn append_delete_messages_response<S>(
                 .is_err()
             {
                 failed += 1;
-            } else {
-                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1351,8 +1345,6 @@ pub(super) async fn append_delete_messages_response<S>(
                     .is_err()
                 {
                     failed += 1;
-                } else {
-                    completed_or_resolved += 1;
                 }
                 continue;
             }
@@ -1364,8 +1356,6 @@ pub(super) async fn append_delete_messages_response<S>(
                 .is_err()
             {
                 failed += 1;
-            } else {
-                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1377,7 +1367,6 @@ pub(super) async fn append_delete_messages_response<S>(
             {
                 failed += 1;
             } else {
-                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
@@ -1390,7 +1379,6 @@ pub(super) async fn append_delete_messages_response<S>(
             {
                 failed += 1;
             } else {
-                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
@@ -1405,8 +1393,6 @@ pub(super) async fn append_delete_messages_response<S>(
                 .is_err()
             {
                 failed += 1;
-            } else {
-                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1421,8 +1407,6 @@ pub(super) async fn append_delete_messages_response<S>(
                     .is_err()
                 {
                     failed += 1;
-                } else {
-                    completed_or_resolved += 1;
                 }
                 continue;
             }
@@ -1442,13 +1426,11 @@ pub(super) async fn append_delete_messages_response<S>(
             {
                 failed += 1;
             } else {
-                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
         }
         if folder_local_default_named_view_is_supported(snapshot, folder_id, message_id) {
-            completed_or_resolved += 1;
             continue;
         }
         if let Some(item) = snapshot.public_folder_item_for_id(folder_id, message_id) {
@@ -1467,13 +1449,10 @@ pub(super) async fn append_delete_messages_response<S>(
                 .is_err()
             {
                 failed += 1;
-            } else {
-                completed_or_resolved += 1;
             }
             continue;
         }
         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) else {
-            completed_or_resolved += 1;
             continue;
         };
         let result = if request.rop_id == 0x91
@@ -1527,11 +1506,10 @@ pub(super) async fn append_delete_messages_response<S>(
         if result.is_err() {
             failed += 1;
         } else {
-            completed_or_resolved += 1;
             record_sync_upload_content_checkpoint(session, folder_id);
         }
     }
-    let partial_completion = failed > 0 && completed_or_resolved > 0;
+    let partial_completion = failed > 0;
     if failed == 0 {
         session.record_notification(MapiNotificationEvent::content(folder_id, None));
     }

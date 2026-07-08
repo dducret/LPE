@@ -5510,10 +5510,10 @@ async fn mapi_over_http_microsoft_copy_to_copies_custom_values_excluding_tags() 
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x39, 0x02, 0, 0, 0, 0, 0, 0]
-    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x39, 0x02, 0, 0, 0, 0, 0, 0]),
+        "response_rops={response_rops:02x?}"
+    );
     let copied = store
         .fetch_mapi_custom_property_values(
             FakeStore::account().account_id,
@@ -5656,7 +5656,10 @@ async fn mapi_over_http_microsoft_copy_properties_copies_custom_values_and_repor
     ];
     expected_problem.extend_from_slice(&missing_custom_tag.to_le_bytes());
     expected_problem.extend_from_slice(&0x8004_010Fu32.to_le_bytes());
-    assert!(contains_bytes(&response_rops, &expected_problem));
+    assert!(
+        contains_bytes(&response_rops, &expected_problem),
+        "response_rops={response_rops:02x?}; expected_problem={expected_problem:02x?}"
+    );
     assert!(contains_bytes(
         &response_rops,
         &utf16z("copied opaque value")

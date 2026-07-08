@@ -633,6 +633,49 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ],
         )
 
+    def test_issue_buckets_reports_problem_getprops_before_stall_symptoms(self) -> None:
+        log = empty_log_summary()
+        log["problem_getprops_tags"] = Counter({"0x120c0102": 1})
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            ["problem_getprops:0x120c0102"],
+        )
+
+    def test_issue_buckets_reports_umolk_problem_getprops_before_stall_symptoms(self) -> None:
+        log = empty_log_summary()
+        log["umolk_problem_getprops_tags"] = Counter(
+            {"0x8a1c0048": 1, "0x859f000b": 2}
+        )
+        log["stall_warnings"] = Counter(
+            {"after_common_views_inbox_notification_without_contents": 1}
+        )
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            [
+                "umolk_problem_getprops_type:0x000b",
+                "umolk_problem_getprops_type:0x0048",
+            ],
+        )
+
+    def test_problem_getprops_bucket_order_is_stable_for_ties(self) -> None:
+        log = empty_log_summary()
+        log["problem_getprops_tags"] = Counter({"0x90010003": 1, "0x120c0102": 1})
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            ["problem_getprops:0x120c0102", "problem_getprops:0x90010003"],
+        )
+
     def test_visible_inbox_query_rows_event_is_tracked(self) -> None:
         summary = empty_log_summary()
 
@@ -1471,7 +1514,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
-    def test_issue_buckets_reports_complete_projection_visible_release_classification(self) -> None:
+    def test_issue_buckets_ignores_complete_projection_visible_release_classification(self) -> None:
         log = empty_log_summary()
         log["visible_release_without_query_rows"] = 1
         log["visible_release_classifications"] = Counter(
@@ -1479,10 +1522,9 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
-        self.assertIn(
-            "visible_inbox_release_classification:"
-            "valid_projection_complete_setcolumns_before_query_rows",
+        self.assertEqual(
             rca.issue_buckets(rr, log, None),
+            ["no_server_issue_detected"],
         )
 
     def test_issue_buckets_reports_unclassified_visible_release(self) -> None:

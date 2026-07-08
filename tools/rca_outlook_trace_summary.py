@@ -2596,6 +2596,14 @@ def issue_buckets(
     if log.get("common_view_descriptor_getprops_issues"):
         for name, _count in log["common_view_descriptor_getprops_issues"].most_common(2):
             issues.append(f"common_view_descriptor_getprops:{name}")
+    if log.get("problem_getprops_tags"):
+        for name, _count in stable_counter_items(log["problem_getprops_tags"], 2):
+            issues.append(f"problem_getprops:{name}")
+    if log.get("umolk_problem_getprops_tags"):
+        for name, _count in problem_getprops_property_type_counts(
+            log["umolk_problem_getprops_tags"]
+        )[:4]:
+            issues.append(f"umolk_problem_getprops_type:{name}")
     if log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
             if visible_release_classification_is_actionable(name):
@@ -2678,6 +2686,21 @@ def suppress_symptom_only_issues(issues: list[str]) -> list[str]:
     return issues
 
 
+def stable_counter_items(counter: Counter[str], limit: int) -> list[tuple[str, int]]:
+    return sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
+
+
+def problem_getprops_property_type_counts(counter: Counter[str]) -> list[tuple[str, int]]:
+    type_counts: Counter[str] = Counter()
+    for tag, count in counter.items():
+        match = HEX_TAG_RE.fullmatch(tag)
+        if not match:
+            type_counts["malformed"] += count
+            continue
+        type_counts[f"0x{int(tag, 16) & 0xFFFF:04x}"] += count
+    return stable_counter_items(type_counts, len(type_counts))
+
+
 def actionable_issue_buckets(
     rr: dict[str, Any], log: dict[str, Any], log_path: Path | None
 ) -> list[str]:
@@ -2715,7 +2738,10 @@ def post_visible_release_followup_is_actionable(name: str) -> bool:
 
 
 def visible_release_classification_is_actionable(name: str) -> bool:
-    return name != "empty_or_unknown_projection_before_query_rows"
+    return name not in {
+        "empty_or_unknown_projection_before_query_rows",
+        "valid_projection_complete_setcolumns_before_query_rows",
+    }
 
 
 def visible_release_descriptor_contract_issue_is_actionable(name: str) -> bool:
