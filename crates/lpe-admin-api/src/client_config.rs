@@ -200,6 +200,7 @@ struct PublishedEndpoints {
     mapi_emsmdb_url: String,
     mapi_nspi_url: String,
     activesync_url: String,
+    webmail_url: String,
     jmap_session_url: String,
     autodiscover_xml_url: String,
 }
@@ -260,6 +261,8 @@ impl PublishedEndpoints {
         let activesync_url = env::var("LPE_AUTOCONFIG_ACTIVESYNC_URL").unwrap_or_else(|_| {
             format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync")
         });
+        let webmail_url = env::var("LPE_AUTOCONFIG_WEBMAIL_URL")
+            .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/mail/"));
 
         Self {
             display_domain,
@@ -280,6 +283,7 @@ impl PublishedEndpoints {
             mapi_emsmdb_url,
             mapi_nspi_url,
             activesync_url,
+            webmail_url,
             jmap_session_url,
             autodiscover_xml_url,
         }
@@ -636,6 +640,7 @@ fn render_mapi_http_autodiscover_protocol(config: &PublishedEndpoints) -> String
 }
 
 fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str) -> String {
+    let external_protocol = web_external_protocol(config);
     format!(
         concat!(
             "      <Protocol>\n",
@@ -645,14 +650,36 @@ fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str
             "        <SSL>on</SSL>\n",
             "        <AuthPackage>Basic</AuthPackage>\n",
             "        <External>\n",
-            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
-            "          <ASUrl>{ews_url}</ASUrl>\n",
+            "          <OWAUrl AuthenticationMethod=\"Basic\">{webmail_url}</OWAUrl>\n",
+            "{external_protocol}",
             "        </External>\n",
             "      </Protocol>\n"
         ),
         public_host =
             escape_xml(&ews_host(&config.ews_url).unwrap_or_else(|| fallback_host(config))),
         email = escape_xml(email),
+        webmail_url = escape_xml(&config.webmail_url),
+        external_protocol = external_protocol,
+    )
+}
+
+fn web_external_protocol(config: &PublishedEndpoints) -> String {
+    let protocol_type = if config.exch_autodiscover_enabled() {
+        "EXCH"
+    } else if config.expr_autodiscover_enabled() {
+        "EXPR"
+    } else {
+        return String::new();
+    };
+
+    format!(
+        concat!(
+            "          <Protocol>\n",
+            "            <Type>{protocol_type}</Type>\n",
+            "            <ASUrl>{ews_url}</ASUrl>\n",
+            "          </Protocol>\n",
+        ),
+        protocol_type = protocol_type,
         ews_url = escape_xml(&config.ews_url),
     )
 }

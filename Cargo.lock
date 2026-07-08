@@ -1399,6 +1399,7 @@ dependencies = [
  "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
+ "quick-xml 0.39.2",
  "reqwest",
  "serde",
  "serde_json",

@@ -1280,7 +1280,8 @@ pub(super) async fn append_delete_messages_response<S>(
             return;
         }
     };
-    let mut partial_completion = false;
+    let mut completed_or_resolved = 0usize;
+    let mut failed = 0usize;
     if !snapshot
         .folder_access_for_principal(folder_id, principal.account_id)
         .map(|access| access.may_delete)
@@ -1304,11 +1305,11 @@ pub(super) async fn append_delete_messages_response<S>(
     for message_id in request.message_ids() {
         if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
             if request.rop_id == RopId::DeleteMessages.as_u8() {
-                partial_completion = true;
+                failed += 1;
                 continue;
             }
             let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id) else {
-                partial_completion = true;
+                completed_or_resolved += 1;
                 continue;
             };
             if store
@@ -1324,7 +1325,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
+            } else {
+                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1334,7 +1337,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
+            } else {
+                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1345,7 +1350,9 @@ pub(super) async fn append_delete_messages_response<S>(
                     .await
                     .is_err()
                 {
-                    partial_completion = true;
+                    failed += 1;
+                } else {
+                    completed_or_resolved += 1;
                 }
                 continue;
             }
@@ -1356,7 +1363,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
+            } else {
+                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1366,8 +1375,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
             } else {
+                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
@@ -1378,8 +1388,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
             } else {
+                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
@@ -1393,7 +1404,9 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
+            } else {
+                completed_or_resolved += 1;
             }
             continue;
         }
@@ -1407,7 +1420,9 @@ pub(super) async fn append_delete_messages_response<S>(
                     .await
                     .is_err()
                 {
-                    partial_completion = true;
+                    failed += 1;
+                } else {
+                    completed_or_resolved += 1;
                 }
                 continue;
             }
@@ -1425,13 +1440,15 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
             } else {
+                completed_or_resolved += 1;
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;
         }
         if folder_local_default_named_view_is_supported(snapshot, folder_id, message_id) {
+            completed_or_resolved += 1;
             continue;
         }
         if let Some(item) = snapshot.public_folder_item_for_id(folder_id, message_id) {
@@ -1449,12 +1466,14 @@ pub(super) async fn append_delete_messages_response<S>(
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                failed += 1;
+            } else {
+                completed_or_resolved += 1;
             }
             continue;
         }
         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) else {
-            partial_completion = true;
+            completed_or_resolved += 1;
             continue;
         };
         let result = if request.rop_id == 0x91
@@ -1506,12 +1525,14 @@ pub(super) async fn append_delete_messages_response<S>(
                 .map(|_| ())
         };
         if result.is_err() {
-            partial_completion = true;
+            failed += 1;
         } else {
+            completed_or_resolved += 1;
             record_sync_upload_content_checkpoint(session, folder_id);
         }
     }
-    if !partial_completion {
+    let partial_completion = failed > 0 && completed_or_resolved > 0;
+    if failed == 0 {
         session.record_notification(MapiNotificationEvent::content(folder_id, None));
     }
     responses.extend_from_slice(&rop_partial_completion_response(

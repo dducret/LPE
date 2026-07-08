@@ -7538,6 +7538,13 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+fn decode_partial_completion_response(bytes: &[u8]) -> (u8, u8) {
+    assert_eq!(bytes.len(), 7);
+    let return_value = u32::from_le_bytes(bytes[2..6].try_into().unwrap());
+    assert_eq!(return_value, 0);
+    (bytes[0], bytes[6])
+}
+
 fn notification_detail_strings(mut bytes: &[u8]) -> Vec<String> {
     let mut values = Vec::new();
     while bytes.len() >= 2 {

@@ -7,9 +7,103 @@ use super::{
     AutodiscoverJsonQuery, PublishedEndpoints,
 };
 use axum::{body, extract::Path, extract::Query, http::HeaderMap, http::Uri};
+use quick_xml::{events::Event, Reader};
 use std::sync::Mutex;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[derive(Debug, Clone)]
+struct XmlNode {
+    name: String,
+    text: String,
+    children: Vec<XmlNode>,
+}
+
+impl XmlNode {
+    fn child(&self, name: &str) -> Option<&XmlNode> {
+        self.children.iter().find(|child| child.name == name)
+    }
+
+    fn child_text(&self, name: &str) -> Option<&str> {
+        self.child(name)
+            .map(|child| child.text.trim())
+            .filter(|text| !text.is_empty())
+    }
+
+    fn children_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a XmlNode> + 'a {
+        self.children.iter().filter(move |child| child.name == name)
+    }
+}
+
+fn parse_xml(xml: &str) -> XmlNode {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut stack = vec![XmlNode {
+        name: String::new(),
+        text: String::new(),
+        children: Vec::new(),
+    }];
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf).unwrap() {
+            Event::Start(start) => stack.push(XmlNode {
+                name: String::from_utf8_lossy(local_name(start.name().as_ref())).to_string(),
+                text: String::new(),
+                children: Vec::new(),
+            }),
+            Event::Empty(empty) => {
+                let node = XmlNode {
+                    name: String::from_utf8_lossy(local_name(empty.name().as_ref())).to_string(),
+                    text: String::new(),
+                    children: Vec::new(),
+                };
+                stack.last_mut().unwrap().children.push(node);
+            }
+            Event::Text(text) => {
+                stack
+                    .last_mut()
+                    .unwrap()
+                    .text
+                    .push_str(&text.xml_content().unwrap());
+            }
+            Event::End(_) => {
+                let node = stack.pop().unwrap();
+                stack.last_mut().unwrap().children.push(node);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    stack
+        .pop()
+        .unwrap()
+        .children
+        .pop()
+        .expect("POX XML should have a document root")
+}
+
+fn local_name(name: &[u8]) -> &[u8] {
+    name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
+}
+
+fn outlook_account(xml: &str) -> XmlNode {
+    parse_xml(xml)
+        .child("Response")
+        .and_then(|response| response.child("Account"))
+        .cloned()
+        .expect("POX Autodiscover response should contain Account")
+}
+
+fn web_protocol(account: &XmlNode) -> &XmlNode {
+    account
+        .children_named("Protocol")
+        .find(|protocol| protocol.child_text("Type") == Some("WEB"))
+        .expect("POX Autodiscover response should contain WEB protocol")
+}
 
 fn sample_config() -> PublishedEndpoints {
     PublishedEndpoints {
@@ -33,6 +127,7 @@ fn sample_config() -> PublishedEndpoints {
         mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
             .to_string(),
         activesync_url: "https://mail.example.test/Microsoft-Server-ActiveSync".to_string(),
+        webmail_url: "https://mail.example.test/mail/".to_string(),
         jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
         autodiscover_xml_url: "https://mail.example.test/autodiscover/autodiscover.xml".to_string(),
     }
@@ -414,14 +509,59 @@ fn outlook_autodiscover_can_publish_explicit_ews_web_endpoint() {
     let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
     assert!(xml.contains("<Type>WEB</Type>"));
-    assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
-    assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+    assert!(xml.contains(
+        "<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/mail/</OWAUrl>"
+    ));
+    assert!(!xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
+    assert!(!xml.contains("<ASUrl>"));
     assert!(!xml.contains("<Type>EXPR</Type>"));
     assert!(xml.contains("<Server>mail.example.test</Server>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
     assert!(!xml.contains("<Type>MobileSync</Type>"));
     assert!(!xml.contains("<Type>MAPI</Type>"));
+}
+
+#[test]
+fn outlook_autodiscover_web_external_uses_ms_oxdscli_protocol_shape() {
+    let config = PublishedEndpoints {
+        ews_enabled: true,
+        ..sample_config()
+    };
+    let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+    let account = outlook_account(&xml);
+    let external = web_protocol(&account)
+        .child("External")
+        .expect("WEB protocol should contain External settings");
+    let owa_url = external
+        .child_text("OWAUrl")
+        .expect("WEB External should contain OWAUrl");
+
+    assert_eq!(owa_url, "https://mail.example.test/mail/");
+    assert!(!owa_url.ends_with("/EWS/Exchange.asmx"));
+    assert!(external.child("ASUrl").is_none());
+    assert!(external.child("Protocol").is_none());
+
+    let config = PublishedEndpoints {
+        ews_enabled: true,
+        legacy_exch_autodiscover_enabled: true,
+        ..sample_config()
+    };
+    let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+    let account = outlook_account(&xml);
+    let external = web_protocol(&account)
+        .child("External")
+        .expect("WEB protocol should contain External settings");
+    let protocol = external
+        .child("Protocol")
+        .expect("WEB External should contain nested Protocol when EXCH is published");
+
+    assert!(external.child("ASUrl").is_none());
+    assert_eq!(protocol.child_text("Type"), Some("EXCH"));
+    assert_eq!(
+        protocol.child_text("ASUrl"),
+        Some("https://mail.example.test/EWS/Exchange.asmx")
+    );
 }
 
 #[test]
@@ -468,8 +608,11 @@ fn outlook_autodiscover_mapi_probe_keeps_opt_in_ews_web_endpoint() {
 
     assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
     assert!(xml.contains("<Type>WEB</Type>"));
-    assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
-    assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+    assert!(xml.contains(
+        "<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/mail/</OWAUrl>"
+    ));
+    assert!(!xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
+    assert!(!xml.contains("<ASUrl>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
 }
@@ -852,6 +995,10 @@ fn legacy_exchange_autodiscover_survives_mapi_capability_header_without_mapi_pub
 fn outlook_autodiscover_ews_publication_is_env_opt_in() {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("LPE_AUTOCONFIG_EWS_ENABLED", "true");
+    std::env::set_var(
+        "LPE_AUTOCONFIG_WEBMAIL_URL",
+        "https://webmail.example.test/mail/",
+    );
     std::env::remove_var("LPE_AUTOCONFIG_EWS_URL");
     std::env::remove_var("LPE_PUBLIC_HOSTNAME");
     std::env::remove_var("LPE_PUBLIC_SCHEME");
@@ -866,13 +1013,21 @@ fn outlook_autodiscover_ews_publication_is_env_opt_in() {
         config.ews_url,
         "https://mail.example.test/EWS/Exchange.asmx"
     );
+    assert_eq!(config.webmail_url, "https://webmail.example.test/mail/");
     assert!(xml.contains("<Type>WEB</Type>"));
-    assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+    assert!(xml.contains(
+        "<OWAUrl AuthenticationMethod=\"Basic\">https://webmail.example.test/mail/</OWAUrl>"
+    ));
+    assert!(!xml.contains(
+        "<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"
+    ));
+    assert!(!xml.contains("<ASUrl>"));
     assert!(!xml.contains("<Type>EXPR</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
 
     std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
+    std::env::remove_var("LPE_AUTOCONFIG_WEBMAIL_URL");
 }
 
 #[test]

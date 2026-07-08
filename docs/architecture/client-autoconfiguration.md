@@ -78,6 +78,7 @@
 | `LPE_AUTOCONFIG_MAPI_EMSMDB_URL` | `{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={email}` |
 | `LPE_AUTOCONFIG_MAPI_NSPI_URL` | `{public_scheme}://{public_host}/mapi/nspi/?MailboxId={email}` |
 | `LPE_AUTOCONFIG_ACTIVESYNC_URL` | `{public_scheme}://{public_host}/Microsoft-Server-ActiveSync` |
+| `LPE_AUTOCONFIG_WEBMAIL_URL` | `{public_scheme}://{public_host}/mail/`; used as POX `WEB` / `External` / `OWAUrl` and must not point at EWS |
 | `LPE_AUTOCONFIG_JMAP_SESSION_URL` | `{public_scheme}://{public_host}/api/jmap/session` |
 
 | Autodiscover protocol request | Response rule |

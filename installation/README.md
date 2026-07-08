@@ -659,8 +659,8 @@ guarded MAPI paths, and the bounded RCA RPC proxy auth shim:
 `/.well-known/autoconfig/`, and `/.well-known/jmap`. A healthy public
 publication returns an Outlook autodiscover XML response containing `IMAP`,
 an Autodiscover v2 JSON response for single-protocol endpoint probes, an
-opt-in `WEB` EWS discovery block when
-`LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
+opt-in `WEB` discovery block with `OWAUrl` pointing at the public `/mail/`
+webmail URL when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
 both `LPE_AUTOCONFIG_MAPI_ENABLED` and
 `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are enabled, a legacy top-level
 `EXCH` provider only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also
@@ -708,7 +708,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
-The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, `LPE_AUTOCONFIG_MAPI_NSPI_URL`, and `LPE_AUTOCONFIG_WEBMAIL_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 For Microsoft Remote Connectivity Analyzer troubleshooting, run `LPE` with
 `RUST_LOG=info` and preferably `LPE_LOG_FORMAT=json`. The core service emits
