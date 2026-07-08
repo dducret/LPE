@@ -108,8 +108,10 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 same_execute_released_handles,
                 session,
             );
+            let release_stage =
+                format_visible_inbox_release_stage(&session.post_hierarchy_actions);
             Some(format!(
-                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
+                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};release_stage={};last_contents_table={};last_setcolumns={};last_query_position={};last_query_rows={};last_findrow={};last_associated_find={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
                 format_optional_debug_handle(released_handle),
                 position,
                 folder_message_count(*folder_id, mailboxes, emails, snapshot),
@@ -118,6 +120,12 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 normal_message_defaulted_column_detail(columns),
                 format_debug_sort_orders(sort_orders),
                 format_debug_restriction_option(restriction.as_ref()),
+                release_stage,
+                debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_contents_table_context
+                ),
                 debug_context_or_none(
                     &session
                         .post_hierarchy_actions
@@ -126,7 +134,22 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 debug_context_or_none(
                     &session
                         .post_hierarchy_actions
+                        .last_inbox_normal_contents_table_query_position_context
+                ),
+                debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
                         .last_inbox_normal_contents_table_query_rows_context
+                ),
+                debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_normal_contents_table_find_row_context
+                ),
+                debug_context_or_none(
+                    &session
+                        .post_hierarchy_actions
+                        .last_inbox_associated_find_context
                 ),
                 format_outlook_view_handoff_table_contract(
                     *folder_id,
@@ -491,6 +514,29 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
         remaining_handle_count = session.handles.len(),
         "rca debug mapi release before inbox probe"
     );
+}
+
+fn format_visible_inbox_release_stage(state: &PostHierarchyActionState) -> &'static str {
+    if state.inbox_normal_contents_table_query_rows_observed {
+        "after_normal_query_rows"
+    } else if state.inbox_normal_contents_table_find_row_observed {
+        "after_normal_findrow_without_query_rows"
+    } else if !state
+        .last_inbox_normal_contents_table_query_position_context
+        .is_empty()
+    {
+        "after_normal_query_position_without_rows"
+    } else if state.inbox_normal_contents_table_setcolumns_observed {
+        "after_normal_setcolumns_without_rows"
+    } else if state.inbox_normal_contents_table_observed {
+        "after_normal_open_without_columns"
+    } else if state.inbox_associated_findrow_returned_content {
+        "after_associated_findrow_without_normal_open"
+    } else if state.inbox_associated_contents_table_observed {
+        "after_associated_table_without_normal_open"
+    } else {
+        "before_inbox_table_handoff"
+    }
 }
 
 fn format_visible_inbox_release_request_metrics(
