@@ -37,6 +37,7 @@ def empty_log_summary() -> dict:
         "descriptor_gap_windows": Counter(),
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
+        "broad_ipm_configuration_row_count_gaps": Counter(),
         "visible_release_without_query_rows": 0,
         "visible_inbox_query_rows": Counter(),
         "visible_inbox_query_rows_contexts": Counter(),
@@ -790,6 +791,41 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         )
         self.assertIn(
             "folder_local_default_view_missing_from_fai",
+            rca.issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                Path("LPE_last_test.log"),
+            ),
+        )
+
+    def test_broad_ipm_configuration_row_count_gap_is_actionable(self) -> None:
+        summary = empty_log_summary()
+        fields = {
+            "folder_role": "inbox",
+            "associated": True,
+            "table_restriction_decoded": (
+                "content;property_tag=0x001a001f;fuzzy_low=0x0002;"
+                "fuzzy_high=0x0001;value=IPM.Configuration."
+            ),
+            "table_total_row_count": "2",
+            "ipm_configuration_contract_summary": "rows=7;not_selected_required_columns=;",
+            "mapi_request_id": "{session}:60",
+            "current_position": "1",
+        }
+
+        rca.record_broad_ipm_configuration_row_count_gap(summary, fields)
+
+        self.assertEqual(
+            summary["broad_ipm_configuration_row_count_gaps"],
+            Counter(
+                {
+                    "request={session}:60;position=1;table_rows=2;config_rows=7;missing=5": 1
+                }
+            ),
+        )
+        self.assertIn(
+            "broad_ipm_configuration_row_count_gap:"
+            "request={session}:60;position=1;table_rows=2;config_rows=7;missing=5",
             rca.issue_buckets(
                 {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
                 summary,
