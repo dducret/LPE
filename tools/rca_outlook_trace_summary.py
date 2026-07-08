@@ -391,6 +391,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
+        "umolk_dictionary_olprefs_versions": Counter(),
+        "umolk_dictionary_info_versions": Counter(),
         "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
@@ -415,6 +417,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
         "umolk_getprops_request_ids": set(),
+        "umolk_optional_defaulted_getprops_tags": Counter(),
+        "umolk_optional_defaulted_getprops_contexts": Counter(),
         "associated_config_optional_defaulted_getprops_tags": Counter(),
         "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
@@ -682,6 +686,15 @@ def record_umolk_dictionary_shapes(summary: dict[str, Any], text: str) -> None:
     shape = first_field(text, "dictionary_shape")
     if shape:
         summary["umolk_dictionary_shapes"][shape] += 1
+    olprefs_version = first_field(text, "dictionary_olprefs_version")
+    if olprefs_version:
+        value = first_field(text, "dictionary_olprefs_value") or "unknown"
+        summary["umolk_dictionary_olprefs_versions"][
+            f"{olprefs_version};value={value}"
+        ] += 1
+    info_version = first_field(text, "dictionary_info_version")
+    if info_version:
+        summary["umolk_dictionary_info_versions"][info_version] += 1
     record_umolk_dictionary_contract(summary, text)
 
 
@@ -1533,12 +1546,19 @@ def record_unknown_getprops_tag(
     role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
     folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
     response = (first_field(contract, "response") or "").rstrip(")")
+    associated_config_class = field_text(fields or {}, "associated_config_class")
     optional_associated_config_default = (
         source.endswith("-defaulted")
         and object_kind == "associated_config"
         and response == "0x00000000"
     )
-    if optional_associated_config_default:
+    if optional_associated_config_default and (
+        associated_config_class == UMOLK_USER_OPTIONS_CLASS
+        or (request_id and request_id in summary["umolk_getprops_request_ids"])
+    ):
+        tag_counter = "umolk_optional_defaulted_getprops_tags"
+        context_counter = "umolk_optional_defaulted_getprops_contexts"
+    elif optional_associated_config_default:
         tag_counter = "associated_config_optional_defaulted_getprops_tags"
         context_counter = "associated_config_optional_defaulted_getprops_contexts"
     summary[tag_counter][tag] += 1
@@ -1547,6 +1567,8 @@ def record_unknown_getprops_tag(
         f"folder={folder or 'unknown'};request={request_id or 'unknown'};"
         f"source={source}"
     )
+    if associated_config_class and associated_config_class != "none":
+        context = f"{context};class={associated_config_class}"
     if response:
         context = f"{context};response={response}"
     summary[context_counter][context] += 1
@@ -1778,6 +1800,16 @@ def print_single_summary(
             limit=20,
         )
         print_counter(
+            "UMOLK optional defaulted GetProps tags",
+            log["umolk_optional_defaulted_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "UMOLK optional defaulted GetProps contexts",
+            log["umolk_optional_defaulted_getprops_contexts"],
+            limit=20,
+        )
+        print_counter(
             "Unknown defaulted GetProps tags",
             log["unknown_defaulted_getprops_tags"],
             limit=20,
@@ -1907,6 +1939,16 @@ def print_single_summary(
             for event in log["post_visible_release_terminal_tail"]:
                 print(f"  {event}")
         print_counter("UMOLK dictionary shapes", log["umolk_dictionary_shapes"], limit=8)
+        print_counter(
+            "UMOLK dictionary OLPrefsVersion",
+            log["umolk_dictionary_olprefs_versions"],
+            limit=8,
+        )
+        print_counter(
+            "UMOLK dictionary Info versions",
+            log["umolk_dictionary_info_versions"],
+            limit=8,
+        )
         print_counter("UMOLK dictionary issues", log["umolk_dictionary_issues"], limit=8)
         print(
             "Post-visible-release hierarchy QueryPosition max: "
@@ -1973,6 +2015,8 @@ def print_batch_summary(
     aggregate_problem_getprops_contexts: Counter[str] = Counter()
     aggregate_umolk_problem_getprops_tags: Counter[str] = Counter()
     aggregate_umolk_problem_getprops_contexts: Counter[str] = Counter()
+    aggregate_umolk_optional_defaulted_tags: Counter[str] = Counter()
+    aggregate_umolk_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_associated_config_optional_defaulted_tags: Counter[str] = Counter()
     aggregate_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     aggregate_hierarchy_windows: Counter[str] = Counter()
@@ -1992,6 +2036,8 @@ def print_batch_summary(
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
+    aggregate_umolk_dictionary_olprefs_versions: Counter[str] = Counter()
+    aggregate_umolk_dictionary_info_versions: Counter[str] = Counter()
     aggregate_umolk_dictionary_issues: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
@@ -2012,6 +2058,8 @@ def print_batch_summary(
     current_problem_getprops_contexts: Counter[str] = Counter()
     current_umolk_problem_getprops_tags: Counter[str] = Counter()
     current_umolk_problem_getprops_contexts: Counter[str] = Counter()
+    current_umolk_optional_defaulted_tags: Counter[str] = Counter()
+    current_umolk_optional_defaulted_contexts: Counter[str] = Counter()
     current_associated_config_optional_defaulted_tags: Counter[str] = Counter()
     current_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     current_descriptor_gap_windows: Counter[str] = Counter()
@@ -2031,6 +2079,8 @@ def print_batch_summary(
     current_post_visible_release_followups: Counter[str] = Counter()
     current_post_visible_release_terminal_events: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
+    current_umolk_dictionary_olprefs_versions: Counter[str] = Counter()
+    current_umolk_dictionary_info_versions: Counter[str] = Counter()
     current_umolk_dictionary_issues: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
@@ -2079,6 +2129,12 @@ def print_batch_summary(
         aggregate_umolk_problem_getprops_contexts.update(
             log["umolk_problem_getprops_contexts"]
         )
+        aggregate_umolk_optional_defaulted_tags.update(
+            log["umolk_optional_defaulted_getprops_tags"]
+        )
+        aggregate_umolk_optional_defaulted_contexts.update(
+            log["umolk_optional_defaulted_getprops_contexts"]
+        )
         aggregate_associated_config_optional_defaulted_tags.update(
             log["associated_config_optional_defaulted_getprops_tags"]
         )
@@ -2097,6 +2153,12 @@ def print_batch_summary(
             log["post_visible_release_terminal_events"]
         )
         aggregate_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
+        aggregate_umolk_dictionary_olprefs_versions.update(
+            log["umolk_dictionary_olprefs_versions"]
+        )
+        aggregate_umolk_dictionary_info_versions.update(
+            log["umolk_dictionary_info_versions"]
+        )
         aggregate_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
         aggregate_default_view_folder_open_without_rows.update(
             log["default_view_folder_open_without_rows"]
@@ -2176,6 +2238,12 @@ def print_batch_summary(
             current_umolk_problem_getprops_contexts.update(
                 log["umolk_problem_getprops_contexts"]
             )
+            current_umolk_optional_defaulted_tags.update(
+                log["umolk_optional_defaulted_getprops_tags"]
+            )
+            current_umolk_optional_defaulted_contexts.update(
+                log["umolk_optional_defaulted_getprops_contexts"]
+            )
             current_associated_config_optional_defaulted_tags.update(
                 log["associated_config_optional_defaulted_getprops_tags"]
             )
@@ -2193,6 +2261,12 @@ def print_batch_summary(
                 log["post_visible_release_terminal_events"]
             )
             current_umolk_dictionary_shapes.update(log["umolk_dictionary_shapes"])
+            current_umolk_dictionary_olprefs_versions.update(
+                log["umolk_dictionary_olprefs_versions"]
+            )
+            current_umolk_dictionary_info_versions.update(
+                log["umolk_dictionary_info_versions"]
+            )
             current_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
             current_default_view_folder_open_without_rows.update(
                 log["default_view_folder_open_without_rows"]
@@ -2316,6 +2390,16 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate UMOLK optional defaulted GetProps tags",
+        aggregate_umolk_optional_defaulted_tags,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK optional defaulted GetProps contexts",
+        aggregate_umolk_optional_defaulted_contexts,
+        limit=20,
+    )
+    print_counter(
         "Aggregate unknown defaulted GetProps tags",
         aggregate_unknown_defaulted_tags,
         limit=20,
@@ -2364,6 +2448,16 @@ def print_batch_summary(
     print_counter(
         "Aggregate UMOLK dictionary shapes",
         aggregate_umolk_dictionary_shapes,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK dictionary OLPrefsVersion",
+        aggregate_umolk_dictionary_olprefs_versions,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate UMOLK dictionary Info versions",
+        aggregate_umolk_dictionary_info_versions,
         limit=20,
     )
     print_counter(
@@ -2510,6 +2604,16 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build UMOLK optional defaulted GetProps tags",
+            current_umolk_optional_defaulted_tags,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK optional defaulted GetProps contexts",
+            current_umolk_optional_defaulted_contexts,
+            limit=20,
+        )
+        print_counter(
             "Current-build unknown defaulted GetProps tags",
             current_unknown_defaulted_tags,
             limit=20,
@@ -2557,6 +2661,16 @@ def print_batch_summary(
         print_counter(
             "Current-build UMOLK dictionary shapes",
             current_umolk_dictionary_shapes,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK dictionary OLPrefsVersion",
+            current_umolk_dictionary_olprefs_versions,
+            limit=20,
+        )
+        print_counter(
+            "Current-build UMOLK dictionary Info versions",
+            current_umolk_dictionary_info_versions,
             limit=20,
         )
         print_counter(
@@ -2709,6 +2823,11 @@ def issue_buckets(
             log["umolk_problem_getprops_tags"]
         )[:4]:
             issues.append(f"umolk_problem_getprops_type:{name}")
+    if log.get("umolk_optional_defaulted_getprops_tags"):
+        for name, _count in problem_getprops_property_type_counts(
+            log["umolk_optional_defaulted_getprops_tags"]
+        )[:4]:
+            issues.append(f"umolk_optional_defaulted_getprops_type:{name}")
     if log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
             if visible_release_classification_is_actionable(name):

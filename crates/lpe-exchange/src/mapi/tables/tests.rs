@@ -7253,7 +7253,7 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         Some(MapiValue::Binary(value))
             if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
                 && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
-                && value.windows(b"9-0".len()).any(|window| window == b"9-0")
+                && value.windows(b"9-1".len()).any(|window| window == b"9-1")
     ));
     let stale_dictionary = MapiAssociatedConfigMessage {
         properties_json: serde_json::json!({
@@ -7266,7 +7266,7 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         Some(MapiValue::Binary(value))
             if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
                 && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
-                && value.windows(b"9-0".len()).any(|window| window == b"9-0")
+                && value.windows(b"9-1".len()).any(|window| window == b"9-1")
                 && !value.windows(b"<xml/>".len()).any(|window| window == b"<xml/>")
     ));
     assert!(matches!(

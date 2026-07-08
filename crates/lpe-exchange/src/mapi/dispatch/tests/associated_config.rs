@@ -430,7 +430,7 @@ fn associated_config_persist_normalizes_stale_configuration_roaming_dictionary()
         Some(MapiValue::Binary(value)) => {
             let text = std::str::from_utf8(value).expect("dictionary xml");
             assert!(text.contains("18-OLPrefsVersion"), "{text}");
-            assert!(text.contains("9-0"), "{text}");
+            assert!(text.contains("9-1"), "{text}");
             assert_ne!(value.as_slice(), b"<xml/>");
         }
         other => panic!("unexpected dictionary value: {other:?}"),

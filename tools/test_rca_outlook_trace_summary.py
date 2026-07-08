@@ -30,6 +30,8 @@ def empty_log_summary() -> dict:
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
         "umolk_getprops_request_ids": set(),
+        "umolk_optional_defaulted_getprops_tags": Counter(),
+        "umolk_optional_defaulted_getprops_contexts": Counter(),
         "associated_config_optional_defaulted_getprops_tags": Counter(),
         "associated_config_optional_defaulted_getprops_contexts": Counter(),
         "resolved_named_getprops_tags": set(),
@@ -61,6 +63,8 @@ def empty_log_summary() -> dict:
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
         "umolk_dictionary_shapes": Counter(),
+        "umolk_dictionary_olprefs_versions": Counter(),
+        "umolk_dictionary_info_versions": Counter(),
         "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
@@ -250,6 +254,33 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                     "source=unknown-name-defaulted;response=0x00000000": 1
                 }
             ),
+        )
+
+    def test_umolk_getprops_defaulted_tags_are_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x90010003;names=unknown;"
+            "problem_tags=;zero_default_tags=0x90010003;response=0x00000000)",
+            {
+                "object_kind": "associated_config",
+                "associated_config_class": "IPM.Configuration.UMOLK.UserOptions",
+            },
+        )
+
+        self.assertEqual(
+            summary["umolk_optional_defaulted_getprops_tags"],
+            Counter({"0x90010003": 1}),
+        )
+        self.assertEqual(
+            summary["associated_config_optional_defaulted_getprops_tags"],
+            Counter(),
+        )
+        self.assertIn(
+            "umolk_optional_defaulted_getprops_type:0x0003",
+            rca.issue_buckets({"nonzero_response_codes": Counter(), "parse_errors": Counter()}, summary, None),
         )
 
     def test_non_config_unknown_getprops_defaulted_tags_remain_actionable(self) -> None:
@@ -1263,6 +1294,25 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["umolk_dictionary_shapes"],
             Counter({"xml_user_configuration_dictionary": 1}),
+        )
+
+    def test_umolk_dictionary_olprefs_versions_are_counted_from_context(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_umolk_dictionary_shapes(
+            summary,
+            "request_id=x;dictionary_shape=xml_user_configuration_dictionary;"
+            "dictionary_olprefs_version=positive;dictionary_olprefs_value=9-1;"
+            "dictionary_info_version=Outlook.16;response_shape=values",
+        )
+
+        self.assertEqual(
+            summary["umolk_dictionary_olprefs_versions"],
+            Counter({"positive;value=9-1": 1}),
+        )
+        self.assertEqual(
+            summary["umolk_dictionary_info_versions"],
+            Counter({"Outlook.16": 1}),
         )
 
     def test_umolk_dictionary_contract_flags_requested_missing_dictionary(self) -> None:

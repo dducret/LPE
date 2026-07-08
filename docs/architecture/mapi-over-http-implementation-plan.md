@@ -317,9 +317,10 @@ non-canonical LPE state.
   `PidTagRoamingDictionary` values, including the `[MS-OXOCFG]` reserved
   `OLPrefsVersion` entry, are preserved as Outlook writes them. For
   LPE-synthesized minimal Inbox `IPM.Configuration.*` compatibility rows, LPE
-  emits only the dictionary default `OLPrefsVersion = 0`, encoded as `9-0`, so
-  Outlook can choose its local/default settings and rewrite the row without LPE
-  fabricating unsupported Exchange preference data. Inbox associated-content
+  emits only `OLPrefsVersion = 1`, encoded as `9-1`, so Outlook treats the
+  dictionary as valid per `[MS-OXOCFG]` section 2.2.5.1 instead of being forced
+  into the documented local-default rewrite path before the Inbox table handoff.
+  Inbox associated-content
   sync does not emit broad synthetic or virtual-only rows such as aggregation,
   sharing, EAS, ELC, rule organizer, account preferences, message-list
   settings, or extended-rule messages during broad Inbox associated-table

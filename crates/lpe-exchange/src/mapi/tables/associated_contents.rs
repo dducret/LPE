@@ -812,12 +812,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
                     Some(MapiValue::U32(0))
                 }
-                tag if crate::mapi_store::is_outlook_umolk_user_options_message_class(
-                    &message.message_class,
-                ) =>
-                {
-                    outlook_umolk_user_options_empty_property_value(tag)
-                }
                 0x685D_0003 if is_outlook_contacts_helper_config(message) => {
                     Some(MapiValue::U32(outlook_configuration_stamp(message)))
                 }
@@ -1011,26 +1005,6 @@ fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiVa
     }
 }
 
-fn outlook_umolk_user_options_empty_property_value(property_tag: u32) -> Option<MapiValue> {
-    match MapiPropertyTag::new(property_tag).property_type_code() {
-        0x0002 => Some(MapiValue::I16(0)),
-        0x0003 => Some(MapiValue::U32(0)),
-        0x0004 | 0x0005 => Some(MapiValue::F64(0)),
-        0x000B => Some(MapiValue::Bool(false)),
-        0x0014 | 0x0040 => Some(MapiValue::I64(0)),
-        0x001E | 0x001F => Some(MapiValue::String(String::new())),
-        0x0048 => Some(MapiValue::Guid(Uuid::nil().into_bytes())),
-        0x0102 => Some(MapiValue::Binary(Vec::new())),
-        0x1002 => Some(MapiValue::MultiI16(Vec::new())),
-        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
-        0x1014 => Some(MapiValue::MultiI64(Vec::new())),
-        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
-        0x1048 => Some(MapiValue::MultiGuid(Vec::new())),
-        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
-        _ => None,
-    }
-}
-
 fn configuration_roaming_datatypes(
     message_class: &str,
     properties: &HashMap<u32, MapiValue>,
@@ -1091,7 +1065,7 @@ fn configuration_uses_xml_stream(message_class: &str) -> bool {
 }
 
 pub(in crate::mapi) fn minimal_roaming_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="Outlook.16"/><Data><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn minimal_custom_action_roaming_xml_stream() -> Vec<u8> {

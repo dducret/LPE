@@ -352,19 +352,24 @@ fn record_outlook_umolk_getprops_materialization(
     let materialization =
         summarize_flagged_getprops_materialization(property_tags, property_response);
     let dictionary_shape = classify_umolk_dictionary_shape(response_shape);
+    let dictionary_contract =
+        summarize_umolk_roaming_dictionary_contract(property_tags, property_response);
     session
         .post_hierarchy_actions
         .outlook_umolk_getprops_not_found_count = materialization.not_found_count;
     session
         .post_hierarchy_actions
         .last_outlook_umolk_getprops_materialization_context = format!(
-        "request_id={request_id};handle={};config={config_id};class={message_class};subject={subject};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};dictionary_shape={dictionary_shape};response_shape={};response_bytes={}",
+        "request_id={request_id};handle={};config={config_id};class={message_class};subject={subject};property_tag_count={};returned_value_count={};problem_count={};not_found_count={};first_problem_tags={};dictionary_shape={dictionary_shape};dictionary_olprefs_version={};dictionary_olprefs_value={};dictionary_info_version={};response_shape={};response_bytes={}",
         request.input_handle_index().unwrap_or(0),
         property_tags.len(),
         materialization.returned_value_count,
         materialization.problem_count,
         materialization.not_found_count,
         materialization.first_problem_tags,
+        dictionary_contract.olprefs_version,
+        dictionary_contract.olprefs_value,
+        dictionary_contract.info_version,
         truncate_debug_field(response_shape, 1024),
         property_response.len(),
     );
@@ -419,6 +424,144 @@ fn classify_umolk_dictionary_shape(response_shape: &str) -> &'static str {
         return "xml_dictionary";
     }
     "unknown_binary_dictionary"
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct UmolkRoamingDictionaryContractSummary {
+    olprefs_version: &'static str,
+    olprefs_value: String,
+    info_version: String,
+}
+
+impl Default for UmolkRoamingDictionaryContractSummary {
+    fn default() -> Self {
+        Self {
+            olprefs_version: "not_returned",
+            olprefs_value: "none".to_string(),
+            info_version: "none".to_string(),
+        }
+    }
+}
+
+fn summarize_umolk_roaming_dictionary_contract(
+    property_tags: &[u32],
+    response: &[u8],
+) -> UmolkRoamingDictionaryContractSummary {
+    let Some(dictionary) =
+        extract_getprops_binary_value(property_tags, response, PID_TAG_ROAMING_DICTIONARY)
+    else {
+        return UmolkRoamingDictionaryContractSummary::default();
+    };
+    summarize_umolk_roaming_dictionary_xml(&dictionary)
+}
+
+fn extract_getprops_binary_value(
+    property_tags: &[u32],
+    response: &[u8],
+    target_tag: u32,
+) -> Option<Vec<u8>> {
+    let row_kind = response.get(6).copied()?;
+    let mut cursor = Cursor::new(response.get(7..).unwrap_or_default());
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if row_kind == 1 {
+            match cursor.read_u8().ok()? {
+                0 => {}
+                0x0A => {
+                    let _ = cursor.read_u32().ok()?;
+                    continue;
+                }
+                _ => return None,
+            }
+        } else if row_kind != 0 {
+            return None;
+        }
+        let value = parse_property_value_for_tag(&mut cursor, *tag).ok()?;
+        if storage_tag == target_tag {
+            if let MapiValue::Binary(bytes) = value {
+                return Some(bytes);
+            }
+            return None;
+        }
+    }
+    None
+}
+
+fn summarize_umolk_roaming_dictionary_xml(bytes: &[u8]) -> UmolkRoamingDictionaryContractSummary {
+    let text = String::from_utf8_lossy(bytes);
+    let info_version = xml_attr_value(text.as_ref(), "Info", "version")
+        .as_deref()
+        .map(sanitize_debug_token)
+        .unwrap_or_else(|| "missing".to_string());
+    let Some(raw_value) = xml_element_attr_by_key(text.as_ref(), "e", "18-OLPrefsVersion", "v")
+    else {
+        return UmolkRoamingDictionaryContractSummary {
+            olprefs_version: "missing",
+            olprefs_value: "missing".to_string(),
+            info_version,
+        };
+    };
+    let olprefs_value = sanitize_debug_token(&raw_value);
+    let olprefs_version = classify_olprefs_version_value(&raw_value);
+    UmolkRoamingDictionaryContractSummary {
+        olprefs_version,
+        olprefs_value,
+        info_version,
+    }
+}
+
+fn classify_olprefs_version_value(raw_value: &str) -> &'static str {
+    let version_part = raw_value
+        .rsplit_once('-')
+        .map_or(raw_value, |(_, value)| value);
+    match version_part.trim().parse::<i64>() {
+        Ok(value) if value > 0 => "positive",
+        Ok(_) => "zero_or_negative",
+        Err(_) => "invalid",
+    }
+}
+
+fn xml_element_attr_by_key(text: &str, element: &str, key: &str, attr: &str) -> Option<String> {
+    let key_attr = format!(r#"k="{key}""#);
+    let mut remaining = text;
+    while let Some(start) = remaining.find(&format!("<{element} ")) {
+        remaining = &remaining[start..];
+        let Some(end) = remaining.find('>') else {
+            return None;
+        };
+        let tag = &remaining[..=end];
+        if tag.contains(&key_attr) {
+            return xml_attr_value(tag, element, attr);
+        }
+        remaining = &remaining[end + 1..];
+    }
+    None
+}
+
+fn xml_attr_value(text: &str, element: &str, attr: &str) -> Option<String> {
+    let element_start = format!("<{element}");
+    let attr_start = format!(r#"{attr}=""#);
+    let start = text.find(&element_start)?;
+    let tag = &text[start..];
+    let end = tag.find('>')?;
+    let tag = &tag[..end];
+    let attr_start_index = tag.find(&attr_start)? + attr_start.len();
+    let attr_tail = &tag[attr_start_index..];
+    let attr_end = attr_tail.find('"')?;
+    Some(attr_tail[..attr_end].to_string())
+}
+
+fn sanitize_debug_token(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        .take(64)
+        .collect();
+    if sanitized.is_empty() {
+        "invalid".to_string()
+    } else {
+        sanitized
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -668,5 +811,54 @@ mod tests {
             classify_umolk_dictionary_shape(shape),
             "stale_xml_placeholder"
         );
+    }
+
+    #[test]
+    fn umolk_dictionary_contract_classifies_positive_olprefs_version() {
+        let summary = summarize_umolk_roaming_dictionary_xml(
+            br#"<?xml version="1.0"?><UserConfiguration><Info version="Outlook.16"/><Data><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#,
+        );
+
+        assert_eq!(
+            summary,
+            UmolkRoamingDictionaryContractSummary {
+                olprefs_version: "positive",
+                olprefs_value: "9-1".to_string(),
+                info_version: "Outlook.16".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn umolk_dictionary_contract_classifies_zero_olprefs_version() {
+        let summary = summarize_umolk_roaming_dictionary_xml(
+            br#"<?xml version="1.0"?><UserConfiguration><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-0"/></Data></UserConfiguration>"#,
+        );
+
+        assert_eq!(summary.olprefs_version, "zero_or_negative");
+        assert_eq!(summary.olprefs_value, "9-0");
+        assert_eq!(summary.info_version, "LPE.1");
+    }
+
+    #[test]
+    fn umolk_dictionary_contract_reports_missing_olprefs_version() {
+        let summary = summarize_umolk_roaming_dictionary_xml(
+            br#"<?xml version="1.0"?><UserConfiguration><Info version="Outlook.16"/></UserConfiguration>"#,
+        );
+
+        assert_eq!(summary.olprefs_version, "missing");
+        assert_eq!(summary.olprefs_value, "missing");
+        assert_eq!(summary.info_version, "Outlook.16");
+    }
+
+    #[test]
+    fn umolk_dictionary_contract_reports_invalid_olprefs_version() {
+        let summary = summarize_umolk_roaming_dictionary_xml(
+            br#"<?xml version="1.0"?><UserConfiguration><Info version="Outlook.16"/><Data><e k="18-OLPrefsVersion" v="bad"/></Data></UserConfiguration>"#,
+        );
+
+        assert_eq!(summary.olprefs_version, "invalid");
+        assert_eq!(summary.olprefs_value, "bad");
+        assert_eq!(summary.info_version, "Outlook.16");
     }
 }

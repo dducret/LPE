@@ -2972,7 +2972,7 @@ fn saved_umolk_associated_config_getprops_projects_roaming_dictionary_stream() {
 }
 
 #[test]
-fn umolk_associated_config_property_burst_projects_empty_modeled_values() {
+fn umolk_associated_config_property_burst_reports_absent_values_not_found() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -2998,15 +2998,9 @@ fn umolk_associated_config_property_burst_projects_empty_modeled_values() {
         PID_TAG_ROAMING_DATATYPES,
         PID_TAG_ROAMING_DICTIONARY,
         0x9001_0003,
-        0x0F02_0040,
-        PID_TAG_RECEIVED_BY_NAME_W,
-        PID_TAG_REPLY_RECIPIENT_ENTRIES,
-        PID_TAG_PROCESSED,
-        PID_TAG_RETENTION_PERIOD,
-        PID_TAG_RECEIVED_BY_ENTRY_ID_ALT,
-        PID_TAG_LAST_MODIFIER_NAME_W,
-        PID_TAG_SWAPPED_TODO_DATA,
-        OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+        0x9020_0102,
+        0x85B2_1102,
+        0x9269_000B,
     ];
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -3030,57 +3024,22 @@ fn umolk_associated_config_property_burst_projects_empty_modeled_values() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
         MapiValue::I32(4)
     );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert!(matches!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DICTIONARY).unwrap(),
         MapiValue::Binary(value) if value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
     ));
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x9001_0003).unwrap(),
-        MapiValue::I32(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, 0x0F02_0040).unwrap(),
-        MapiValue::I64(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_RECEIVED_BY_NAME_W).unwrap(),
-        MapiValue::String(String::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_REPLY_RECIPIENT_ENTRIES).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_PROCESSED).unwrap(),
-        MapiValue::Bool(false)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_RETENTION_PERIOD).unwrap(),
-        MapiValue::I32(0)
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_RECEIVED_BY_ENTRY_ID_ALT).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_LAST_MODIFIER_NAME_W).unwrap(),
-        MapiValue::String(String::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, PID_TAG_SWAPPED_TODO_DATA).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG)
-            .unwrap(),
-        MapiValue::I32(0)
-    );
+    for tag in tags.iter().skip(2) {
+        assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
+        assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F, "tag {tag:#010x}");
+    }
 }
 
 #[test]
