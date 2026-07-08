@@ -467,7 +467,9 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
     let descriptor_sort_tag =
         descriptor_sort_column.and_then(|index| all_descriptor_columns.get(index).copied());
     let table_primary_sort_tag = sort_orders.first().map(|sort| sort.property_tag);
-    let descriptor_missing_from_table = missing_debug_property_tags(&descriptor_columns, columns);
+    let descriptor_missing_from_table =
+        normal_message_table_unsupported_columns_from_summary(&descriptor_columns);
+    let descriptor_columns_not_selected = missing_debug_property_tags(&descriptor_columns, columns);
     let table_sort_matches_descriptor = descriptor_sort_tag
         .zip(table_primary_sort_tag)
         .is_some_and(|(expected, actual)| expected == actual);
@@ -475,6 +477,7 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
     format!(
         "folder=0x{folder_id:016x};view_folder=0x{:016x};view=0x{:016x};\
          view_name={};descriptor_summary={};descriptor_columns_missing_from_table={};\
+         descriptor_columns_not_selected={};\
          descriptor_sort_tag={};table_primary_sort_tag={};table_sort_matches_descriptor={};\
          table_sort_count={};table_restriction_present={}",
         message.folder_id,
@@ -482,6 +485,7 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
         message.name,
         format_view_descriptor_binary_summary(&descriptor),
         descriptor_missing_from_table,
+        descriptor_columns_not_selected,
         descriptor_sort_tag
             .map(|tag| format!("0x{tag:08x}"))
             .unwrap_or_else(|| "none".to_string()),
@@ -492,6 +496,25 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
         sort_orders.len(),
         restriction.is_some()
     )
+}
+
+fn normal_message_table_unsupported_columns_from_summary(columns: &[u32]) -> String {
+    let support = normal_message_table_column_support_summary(columns);
+    let defaulted = support_field(&support, "defaulted");
+    let named_or_dynamic = support_field(&support, "named_or_dynamic");
+    [defaulted, named_or_dynamic]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn support_field(summary: &str, name: &str) -> String {
+    summary
+        .split(';')
+        .find_map(|field| field.strip_prefix(name)?.strip_prefix('='))
+        .unwrap_or_default()
+        .to_string()
 }
 
 pub(in crate::mapi::dispatch) fn warn_outlook_view_handoff_table_invariants(

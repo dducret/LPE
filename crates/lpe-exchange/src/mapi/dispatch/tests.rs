@@ -814,6 +814,38 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
 }
 
 #[test]
+fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_subset() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let contract = format_default_view_table_compatibility_contract(
+        INBOX_FOLDER_ID,
+        false,
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 1,
+        }],
+        None,
+        &snapshot,
+    );
+
+    assert!(
+        contract.contains("descriptor_columns_missing_from_table=;"),
+        "{contract}"
+    );
+    assert!(contract.contains(
+        "descriptor_columns_not_selected=0x00170003,0x8514000b,0x001a001f,0x0e170003,0x0e1b000b,0x0042001f,0x12130003"
+    ));
+    assert!(contract.contains("table_sort_matches_descriptor=true"));
+}
+
+#[test]
 fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release() {
     let inbox_id = Uuid::from_u128(0x5555);
     crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
