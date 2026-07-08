@@ -677,6 +677,8 @@ fn log_post_common_views_handoff_execute_response(
         account: Some(&principal.email),
         status: Some(200),
         metadata: vec![
+            ("protocol_event", "false".to_string()),
+            ("diagnostic_stream", "post_common_views_handoff".to_string()),
             ("account_id", account_id),
             ("mapi_request_id", request_id.to_string()),
             ("handoff_phase", handoff_phase.to_string()),

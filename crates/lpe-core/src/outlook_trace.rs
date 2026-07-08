@@ -84,12 +84,18 @@ pub fn write_outlook_trace_with_config(config: &OutlookTraceConfig, event: &Outl
 fn write_event(config: &OutlookTraceConfig, event: &OutlookTraceEvent<'_>) -> std::io::Result<()> {
     create_trace_dir(&config.directory)?;
     let paths = trace_file_paths(&config.directory, event.component, event.session_key);
-    let sequence = next_trace_sequence(&paths.replay)?;
+    let sequence = next_trace_sequence(&paths.legacy)?;
     let context = TraceRenderContext::new(event.session_key, sequence);
     let path = paths.legacy;
     let mut file = open_trace_file(&path)?;
     file.write_all(render_event(config, event, &context).as_bytes())?;
     file.write_all(b"\n")?;
+    if !is_protocol_event(event) {
+        let mut diagnostics = open_trace_file(&paths.diagnostics)?;
+        diagnostics.write_all(render_event(config, event, &context).as_bytes())?;
+        diagnostics.write_all(b"\n")?;
+        return Ok(());
+    }
     let mut rr = open_trace_file(&paths.rr)?;
     rr.write_all(render_request_response_event(config, event, &context).as_bytes())?;
     rr.write_all(b"\n")?;
@@ -138,6 +144,7 @@ fn open_trace_file_with_mode(options: OpenOptions, path: &Path) -> std::io::Resu
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TraceFilePaths {
     legacy: PathBuf,
+    diagnostics: PathBuf,
     replay: PathBuf,
     rr: PathBuf,
 }
@@ -150,6 +157,7 @@ fn trace_file_paths(directory: &Path, component: &str, session_key: &str) -> Tra
     );
     TraceFilePaths {
         legacy: directory.join(format!("{stem}.jsonl")),
+        diagnostics: directory.join(format!("{stem}.diagnostics.jsonl")),
         replay: directory.join(format!("{stem}.replay.jsonl")),
         rr: directory.join(format!("{stem}.rr.jsonl")),
     }
@@ -205,6 +213,9 @@ fn render_event(
         json_pair("direction", event.direction.as_str().to_string(), true),
         json_pair("phase", event.phase.to_string(), true),
     ];
+    if !is_protocol_event(event) {
+        fields.push(json_pair("protocol_event", "false".to_string(), false));
+    }
     if let Some(remote_peer) = event.remote_peer {
         fields.push(json_pair("remote_peer", remote_peer.to_string(), true));
     }
@@ -217,7 +228,11 @@ fn render_event(
     if let Some(status) = event.status {
         fields.push(json_pair("status", status.to_string(), false));
     }
-    for (key, value) in &event.metadata {
+    for (key, value) in event
+        .metadata
+        .iter()
+        .filter(|(key, _)| !key.eq_ignore_ascii_case("protocol_event"))
+    {
         fields.push(json_pair(key, redact_metadata_value(key, value), true));
     }
     if let Some(payload) = event.payload {
@@ -337,6 +352,12 @@ fn redacted_metadata(event: &OutlookTraceEvent<'_>) -> Vec<(String, String)> {
         .iter()
         .map(|(key, value)| (key.to_string(), redact_metadata_value(key, value)))
         .collect()
+}
+
+fn is_protocol_event(event: &OutlookTraceEvent<'_>) -> bool {
+    !event.metadata.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("protocol_event") && value.trim().eq_ignore_ascii_case("false")
+    })
 }
 
 fn sanitized_payload_summary(payload: &[u8]) -> String {
@@ -504,7 +525,7 @@ fn env_flag(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{collections::HashMap, fs};
 
     fn temp_trace_dir(name: &str) -> PathBuf {
         let path = env::temp_dir().join(format!("lpe-outlook-trace-{name}-{}", Uuid::new_v4()));
@@ -541,6 +562,7 @@ mod tests {
             .find(|path| {
                 let name = path.file_name().unwrap().to_string_lossy();
                 name.ends_with(".jsonl")
+                    && !name.ends_with(".diagnostics.jsonl")
                     && !name.ends_with(".replay.jsonl")
                     && !name.ends_with(".rr.jsonl")
             })
@@ -637,6 +659,54 @@ mod tests {
     }
 
     #[test]
+    fn mapi_protocol_exports_ignore_non_protocol_diagnostics_for_request_pairing() {
+        let dir = temp_trace_dir("mapi-pairing");
+        let config = OutlookTraceConfig {
+            enabled: true,
+            raw_payloads: false,
+            directory: dir.clone(),
+        };
+
+        let mut diagnostic = sample_event("session-2b", b"");
+        diagnostic.direction = OutlookTraceDirection::Outbound;
+        diagnostic.phase = "ExecutePostCommonViewsHandoff";
+        diagnostic.status = Some(200);
+        diagnostic.metadata = vec![
+            ("protocol_event", "false".to_string()),
+            ("diagnostic_stream", "post_common_views_handoff".to_string()),
+            ("mapi_request_id", "req-1".to_string()),
+        ];
+        diagnostic.payload = None;
+        write_outlook_trace_with_config(&config, &diagnostic);
+
+        let mut inbound = sample_event("session-2b", b"execute-request");
+        inbound.direction = OutlookTraceDirection::Inbound;
+        inbound.phase = "Execute";
+        inbound.metadata = vec![("mapi_request_id", "req-1".to_string())];
+        write_outlook_trace_with_config(&config, &inbound);
+        let mut outbound = sample_event("session-2b", b"execute-response");
+        outbound.direction = OutlookTraceDirection::Outbound;
+        outbound.phase = "Execute";
+        outbound.status = Some(200);
+        outbound.metadata = vec![("mapi_request_id", "req-1".to_string())];
+        write_outlook_trace_with_config(&config, &outbound);
+
+        let diagnostics =
+            fs::read_to_string(trace_file_with_suffix(&dir, ".diagnostics.jsonl")).unwrap();
+        assert!(diagnostics.contains("\"phase\":\"ExecutePostCommonViewsHandoff\""));
+        assert!(diagnostics.contains("\"protocol_event\":false"));
+
+        let replay = fs::read_to_string(trace_file_with_suffix(&dir, ".replay.jsonl")).unwrap();
+        let rr = fs::read_to_string(trace_file_with_suffix(&dir, ".rr.jsonl")).unwrap();
+        let replay_lines = replay.lines().collect::<Vec<_>>();
+        let rr_lines = rr.lines().collect::<Vec<_>>();
+        assert_eq!(replay_lines.len(), 2);
+        assert_eq!(rr_lines.len(), 2);
+        validate_mapi_protocol_request_response_pairs(&replay_lines);
+        validate_mapi_protocol_request_response_pairs(&rr_lines);
+    }
+
+    #[test]
     fn sanitized_mode_redacts_secrets_without_raw_payload() {
         let dir = temp_trace_dir("redact");
         let config = OutlookTraceConfig {
@@ -698,6 +768,46 @@ mod tests {
         assert!(rr.contains("response_body_base64"));
         assert!(rr.contains(&BASE64_STANDARD.encode(b"response-body")));
         assert!(!rr.contains("request_body_base64"));
+    }
+
+    fn validate_mapi_protocol_request_response_pairs(lines: &[&str]) {
+        let mut open_requests: HashMap<String, usize> = HashMap::new();
+        let mut inbound_count: HashMap<String, usize> = HashMap::new();
+        let mut outbound_count: HashMap<String, usize> = HashMap::new();
+        for line in lines
+            .iter()
+            .copied()
+            .filter(|line| line.contains("\"component\":\"mapi\""))
+        {
+            let request_id = json_string_value(line, "mapi_request_id");
+            match json_string_value(line, "direction").as_str() {
+                "inbound" => {
+                    *open_requests.entry(request_id.clone()).or_default() += 1;
+                    *inbound_count.entry(request_id).or_default() += 1;
+                }
+                "outbound" => {
+                    let pending = open_requests
+                        .get_mut(&request_id)
+                        .expect("outbound MAPI response without preceding request");
+                    assert!(
+                        *pending > 0,
+                        "outbound MAPI response without preceding request"
+                    );
+                    *pending -= 1;
+                    *outbound_count.entry(request_id).or_default() += 1;
+                }
+                direction => panic!("unexpected MAPI trace direction {direction}"),
+            }
+        }
+
+        assert!(
+            open_requests.values().all(|pending| *pending == 0),
+            "every inbound MAPI request must have a protocol response"
+        );
+        assert_eq!(
+            inbound_count, outbound_count,
+            "each inbound MAPI request must have exactly one protocol response"
+        );
     }
 
     fn sample_event<'a>(session_key: &'a str, payload: &'a [u8]) -> OutlookTraceEvent<'a> {
