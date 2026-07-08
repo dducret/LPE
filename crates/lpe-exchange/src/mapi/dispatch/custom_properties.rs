@@ -152,6 +152,10 @@ where
         .into_iter()
         .map(|value| (value.property_tag, value))
         .collect::<HashMap<_, _>>();
+    let mut source_values = source_values;
+    for value in staged_custom_property_values(source, Some(property_tags)) {
+        source_values.insert(value.property_tag, value);
+    }
     let mut copied_values = Vec::new();
     let mut problems = Vec::new();
     for (index, property_tag) in property_tags.iter().copied().enumerate() {
@@ -205,12 +209,17 @@ where
         .iter()
         .copied()
         .collect::<HashSet<_>>();
-    let values = store
+    let mut values = store
         .fetch_all_mapi_custom_property_values(principal.account_id, source_kind, source_id)
         .await?
         .into_iter()
+        .chain(staged_custom_property_values(source, None).into_iter())
         .filter(|value| !excluded.contains(&value.property_tag))
+        .map(|value| (value.property_tag, value))
+        .collect::<HashMap<_, _>>()
+        .into_values()
         .collect::<Vec<_>>();
+    values.sort_by_key(|value| value.property_tag);
     if values.is_empty() {
         return Ok(false);
     }
@@ -323,6 +332,34 @@ pub(super) fn custom_property_object_identity(
             .map(|item| (MapiCustomPropertyObjectKind::PublicFolderItem, item.item.id)),
         _ => None,
     }
+}
+
+fn staged_custom_property_values(
+    object: Option<&MapiObject>,
+    property_tags: Option<&[u32]>,
+) -> Vec<MapiCustomPropertyValue> {
+    let Some(MapiObject::Message {
+        pending_properties, ..
+    }) = object
+    else {
+        return Vec::new();
+    };
+    pending_properties
+        .iter()
+        .filter(|(tag, _value)| {
+            is_custom_property_tag(**tag)
+                && property_tags.is_none_or(|property_tags| property_tags.contains(tag))
+        })
+        .map(|(property_tag, value)| {
+            let mut property_value = Vec::new();
+            write_mapi_value(&mut property_value, *property_tag, value);
+            MapiCustomPropertyValue {
+                property_tag: *property_tag,
+                property_type: MapiPropertyTag::new(*property_tag).property_type_code(),
+                property_value,
+            }
+        })
+        .collect()
 }
 
 pub(super) fn is_custom_property_tag(property_tag: u32) -> bool {

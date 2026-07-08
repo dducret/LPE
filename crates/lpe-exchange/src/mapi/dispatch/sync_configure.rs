@@ -362,9 +362,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     let checkpoint_zero_delta = checkpoint.is_some() && checkpoint_delta_total_count == 0;
     let checkpoint_incremental_response_candidate =
         checkpoint.is_some() && incremental_transfer_buffer.is_some();
-    let initial_checkpoint_delta_selected = checkpoint_kind == MapiCheckpointKind::Hierarchy
-        && checkpoint_zero_delta
-        && checkpoint_incremental_response_candidate;
+    let initial_checkpoint_delta_selected = false;
     let initial_transfer_selection = if initial_checkpoint_delta_selected {
         "checkpoint_delta_zero_delta_initial"
     } else if checkpoint_incremental_response_candidate {

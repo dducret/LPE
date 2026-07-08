@@ -5578,7 +5578,7 @@ async fn mapi_over_http_microsoft_copy_properties_empty_tag_list_succeeds_as_noo
 async fn mapi_over_http_microsoft_copy_properties_copies_custom_values_and_reports_missing_tags() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let source_message_id = "47474747-4747-4747-4747-474747474741";
-    let destination_message_id = "47474747-4747-4747-4747-474747474742";
+    let destination_message_id = "48484848-4848-4848-4848-484848484842";
     let custom_tag = 0x8001_001F_u32;
     let missing_custom_tag = 0x8002_001F_u32;
     let store = FakeStore {
