@@ -661,7 +661,7 @@ fn fallback_default_specific_property(
 
 fn associated_config_modeled_property(
     object: Option<&MapiObject>,
-    principal: &AccountPrincipal,
+    _principal: &AccountPrincipal,
     snapshot: &MapiMailStoreSnapshot,
     tag: u32,
 ) -> bool {
@@ -677,10 +677,15 @@ fn associated_config_modeled_property(
         .associated_config_message_for_id(*config_id)
         .or_else(|| saved_message.clone())
         .filter(|message| message.folder_id == *folder_id)
-        .and_then(|message| {
-            associated_config_property_value_with_mailbox_guid(&message, principal.account_id, tag)
-        })
-        .is_some()
+        .is_some_and(|message| associated_config_has_stored_property(&message, tag))
+}
+
+fn associated_config_has_stored_property(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+    tag: u32,
+) -> bool {
+    let lookup_tag = canonical_property_storage_tag(tag);
+    mapi_properties_from_json(&message.properties_json).contains_key(&lookup_tag)
 }
 
 fn flagged_property_error_code(

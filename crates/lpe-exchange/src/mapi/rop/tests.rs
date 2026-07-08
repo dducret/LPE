@@ -1815,6 +1815,78 @@ fn associated_config_zero_metadata_defaults_are_intentional() {
 }
 
 #[test]
+fn associated_config_absent_optional_getprops_returns_not_found() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@example.test".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let object = MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        config_id: 0x7fff_ffff_fffb_0001,
+        saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+            id: 0x7fff_ffff_fffb_0001,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap(),
+            message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+            subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+            properties_json: serde_json::json!({
+                "0x000b0102": {"type": "binary", "value": ""}
+            }),
+        }),
+    };
+
+    assert!(!fallback_default_specific_property(
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+        0x000B_0102,
+    ));
+    assert!(fallback_default_specific_property(
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+        0x0014_000B,
+    ));
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&1u16.to_le_bytes());
+    payload.extend_from_slice(&0x0014_000B_u32.to_le_bytes());
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload,
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+    assert_eq!(response[6], 1);
+    assert_eq!(response[7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(response[8..12].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[test]
 fn quick_step_custom_action_defaults_undocumented_0e0b_to_empty_binary() {
     let object = MapiObject::AssociatedConfig {
         folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
