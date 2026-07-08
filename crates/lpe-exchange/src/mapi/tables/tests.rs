@@ -6056,11 +6056,12 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
             .all(|row| matches!(row, AssociatedTableRow::Config(_))),
         "broad IPM.Configuration startup scans must not return FolderDesign views"
     );
-    let classes = rows
+    let mut classes = rows
         .iter()
         .filter_map(associated_table_row_config)
         .map(|message| message.message_class.as_str())
         .collect::<Vec<_>>();
+    classes.sort_unstable();
 
     assert_eq!(
         classes,
@@ -6072,13 +6073,27 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_suppresses_persisted_followup_configs() {
+fn inbox_associated_broad_configuration_restriction_projects_persisted_configs() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let autocomplete_id = Uuid::from_u128(0x6d617069_6175_746f_8000_000000000101);
+    let conversation_id = Uuid::from_u128(0x6d617069_636f_6e76_8000_000000000101);
+    let table_view_id = Uuid::from_u128(0x6d617069_7476_7072_8000_000000000101);
     crate::mapi::identity::remember_mapi_identity(
         autocomplete_id,
         crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 185,
+        ),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        conversation_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 186,
+        ),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        table_view_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 187,
         ),
     );
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
@@ -6092,25 +6107,51 @@ fn inbox_associated_broad_configuration_restriction_suppresses_persisted_followu
                 "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
             }),
         },
+        crate::store::MapiAssociatedConfigRecord {
+            id: conversation_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.ConversationPrefs".to_string(),
+            subject: "IPM.Configuration.ConversationPrefs".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+        },
+        crate::store::MapiAssociatedConfigRecord {
+            id: table_view_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.TableViewPreviewPrefs".to_string(),
+            subject: "IPM.Configuration.TableViewPreviewPrefs".to_string(),
+            properties_json: serde_json::json!({
+                "0x0e0b0102": {"type": "binary", "value": "01020304"}
+            }),
+        },
     ]);
-    let restriction = MapiRestriction::Property {
-        relop: 0x02,
+    let restriction = MapiRestriction::Content {
         property_tag: PID_TAG_MESSAGE_CLASS_W,
-        value: MapiValue::String("IPM.Configuration.".to_string()),
+        value: "IPM.Configuration.".to_string(),
+        fuzzy_level_low: 0x0002,
+        fuzzy_level_high: 0x0001,
     };
 
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
-    let classes = rows
+    let mut classes = rows
         .iter()
         .filter_map(associated_table_row_config)
         .map(|message| message.message_class.as_str())
         .collect::<Vec<_>>();
+    classes.sort_unstable();
 
     assert_eq!(
         classes,
         vec![
             "IPM.Configuration.AccountPrefs",
-            "IPM.Configuration.MessageListSettings"
+            "IPM.Configuration.Autocomplete",
+            "IPM.Configuration.ConversationPrefs",
+            "IPM.Configuration.MessageListSettings",
+            "IPM.Configuration.TableViewPreviewPrefs"
         ]
     );
 }

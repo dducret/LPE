@@ -404,6 +404,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "default_view_descriptor_identity_columns": Counter(),
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
+        "broad_ipm_configuration_row_count_gaps": Counter(),
         "stale_default_view_contexts": set(),
         "unknown_getprops_tags": Counter(),
         "unknown_getprops_contexts": Counter(),
@@ -503,6 +504,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_setcolumns_release_response(summary, fields)
             elif message == "rca debug mapi visible inbox query rows tracked":
                 record_visible_inbox_query_rows(summary, fields)
+            elif message == "rca debug outlook contents table query rows":
+                record_broad_ipm_configuration_row_count_gap(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi umolk getprops materialization":
@@ -629,6 +632,35 @@ def record_visible_inbox_query_rows(
     key = f"returned={returned};position={position};requested={requested}"
     summary["visible_inbox_query_rows"][key] += 1
     summary["visible_inbox_query_rows_contexts"][f"request={request_id};{context}"] += 1
+
+
+def record_broad_ipm_configuration_row_count_gap(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if field_text(fields, "folder_role") != "inbox":
+        return
+    if not is_truthy(fields.get("associated")):
+        return
+    restriction = field_text(fields, "table_restriction_decoded")
+    if (
+        "property_tag=0x001a001f" not in restriction
+        or "value=IPM.Configuration." not in restriction
+        or "fuzzy_low=0x0002" not in restriction
+    ):
+        return
+    table_rows = int_field(fields, "table_total_row_count")
+    config_rows = int_text_field(
+        field_text(fields, "ipm_configuration_contract_summary"),
+        "rows",
+    )
+    if config_rows <= table_rows:
+        return
+    request_id = field_text(fields, "mapi_request_id") or "unknown"
+    position = field_text(fields, "current_position") or "?"
+    summary["broad_ipm_configuration_row_count_gaps"][
+        f"request={request_id};position={position};table_rows={table_rows};"
+        f"config_rows={config_rows};missing={config_rows - table_rows}"
+    ] += 1
 
 
 def record_folder_local_default_view_visibility(
@@ -1788,6 +1820,11 @@ def print_single_summary(
             log["folder_local_default_view_visibility"],
             limit=12,
         )
+        print_counter(
+            "Broad IPM.Configuration row-count gaps",
+            log["broad_ipm_configuration_row_count_gaps"],
+            limit=12,
+        )
         print_counter("Hierarchy QueryRows windows", log["hierarchy_query_windows"], limit=12)
         print_counter(
             "Default-view folder open without QueryRows",
@@ -1963,6 +2000,7 @@ def print_batch_summary(
     aggregate_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     aggregate_descriptor_gap_windows: Counter[str] = Counter()
     aggregate_default_view_descriptor_identity_columns: Counter[str] = Counter()
+    aggregate_broad_ipm_configuration_row_count_gaps: Counter[str] = Counter()
     aggregate_nonzero_response_codes: Counter[str] = Counter()
     current_missing_gates: Counter[str] = Counter()
     current_stalls: Counter[str] = Counter()
@@ -2001,6 +2039,7 @@ def print_batch_summary(
     current_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     current_nonzero_response_codes: Counter[str] = Counter()
     current_default_view_descriptor_identity_columns: Counter[str] = Counter()
+    current_broad_ipm_configuration_row_count_gaps: Counter[str] = Counter()
     build_issue_counts: Counter[tuple[str, str]] = Counter()
     current_issue_counts: Counter[tuple[str, str]] = Counter()
     actionable_runs = 0
@@ -2071,6 +2110,9 @@ def print_batch_summary(
         )
         aggregate_post_calendar_query_position_named_property_probes.update(
             log["post_calendar_query_position_named_property_probes"]
+        )
+        aggregate_broad_ipm_configuration_row_count_gaps.update(
+            log["broad_ipm_configuration_row_count_gaps"]
         )
         aggregate_visible_release_descriptor_windows.update(
             log["visible_release_descriptor_windows"]
@@ -2164,6 +2206,9 @@ def print_batch_summary(
             )
             current_post_calendar_query_position_named_property_probes.update(
                 log["post_calendar_query_position_named_property_probes"]
+            )
+            current_broad_ipm_configuration_row_count_gaps.update(
+                log["broad_ipm_configuration_row_count_gaps"]
             )
             current_visible_release_descriptor_windows.update(
                 log["visible_release_descriptor_windows"]
@@ -2349,6 +2394,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate post-Calendar QueryPosition named-property probes",
         aggregate_post_calendar_query_position_named_property_probes,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate broad IPM.Configuration row-count gaps",
+        aggregate_broad_ipm_configuration_row_count_gaps,
         limit=20,
     )
     print_counter(
@@ -2540,6 +2590,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build broad IPM.Configuration row-count gaps",
+            current_broad_ipm_configuration_row_count_gaps,
+            limit=20,
+        )
+        print_counter(
             "Current-build visible Inbox release descriptor windows",
             current_visible_release_descriptor_windows,
             limit=20,
@@ -2698,6 +2753,9 @@ def issue_buckets(
             "post_calendar_query_position_named_property_probes"
         ].most_common(2):
             issues.append(f"post_calendar_query_position_named_property_probe:{name}")
+    if log.get("broad_ipm_configuration_row_count_gaps"):
+        for name, _count in log["broad_ipm_configuration_row_count_gaps"].most_common(2):
+            issues.append(f"broad_ipm_configuration_row_count_gap:{name}")
     if log["raw_umolk_placeholder"]:
         issues.append("raw_umolk_placeholder")
     if log["stale_default_view_states"]:
