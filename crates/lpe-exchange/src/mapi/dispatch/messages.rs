@@ -337,6 +337,7 @@ pub(super) async fn apply_staged_message_property_values<S>(
     principal: &AccountPrincipal,
     folder_id: u64,
     message_id: u64,
+    saved_email: Option<MapiSavedEmail>,
     pending_properties: HashMap<u32, MapiValue>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -346,16 +347,41 @@ where
     S: ExchangeStore,
 {
     let values = pending_properties.into_iter().collect::<Vec<_>>();
+    let (canonical_values, custom_values) = split_custom_property_values(values);
     let object = MapiObject::Message {
         folder_id,
         message_id,
-        saved_email: None,
+        saved_email: saved_email.clone(),
         pending_properties: HashMap::new(),
     };
-    apply_supported_object_property_values(
-        store, principal, &object, values, mailboxes, emails, snapshot,
-    )
-    .await
+    if !canonical_values.is_empty() {
+        apply_supported_object_property_values(
+            store,
+            principal,
+            &object,
+            canonical_values,
+            mailboxes,
+            emails,
+            snapshot,
+        )
+        .await?;
+    }
+    if !custom_values.is_empty() {
+        let canonical_id = saved_email
+            .as_ref()
+            .map(|saved| saved.email.id)
+            .or_else(|| message_for_id(folder_id, message_id, mailboxes, emails).map(|email| email.id))
+            .ok_or_else(|| anyhow!("canonical MAPI message was not found"))?;
+        upsert_custom_property_values(
+            store,
+            principal,
+            MapiCustomPropertyObjectKind::Message,
+            canonical_id,
+            custom_values,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 pub(super) async fn apply_staged_message_recipient_replacement<S>(

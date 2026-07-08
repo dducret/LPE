@@ -109,7 +109,7 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 session,
             );
             Some(format!(
-                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={}",
+                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};last_setcolumns={};last_query_rows={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
                 format_optional_debug_handle(released_handle),
                 position,
                 folder_message_count(*folder_id, mailboxes, emails, snapshot),
@@ -160,7 +160,9 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                     mailboxes,
                     emails,
                     snapshot,
-                )
+                ),
+                session.default_view_advertisement_state_for_folder(*folder_id),
+                format_live_handle_debug_summary(session)
             ))
         }
         _ => None,

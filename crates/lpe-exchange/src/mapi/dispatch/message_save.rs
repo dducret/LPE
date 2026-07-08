@@ -822,6 +822,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     principal,
                     folder_id,
                     message_id,
+                    saved_email.clone(),
                     pending_properties.clone(),
                     mailboxes,
                     emails,

@@ -4339,7 +4339,7 @@ async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream()
     rops.extend_from_slice(&(dictionary_stream.len() as u16).to_le_bytes());
     rops.extend_from_slice(dictionary_stream);
     rops.extend_from_slice(&[0x01, 0x00, 0x03]); // RopRelease stream handle.
-    append_rop_save_changes_message(&mut rops, 2, 2);
+    append_rop_save_changes_message(&mut rops, 2, 1);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -5490,7 +5490,7 @@ async fn mapi_over_http_microsoft_copy_to_copies_custom_values_excluding_tags() 
     append_rop_open_folder(&mut rops, 0, 1, folder_id);
     append_rop_open_message(&mut rops, 1, 2, folder_id, source_mapi_id);
     append_rop_set_properties(&mut rops, 2, 2, &property_values);
-    append_rop_save_changes_message(&mut rops, 2, 2);
+    append_rop_save_changes_message(&mut rops, 2, 1);
     append_rop_open_message(&mut rops, 1, 3, folder_id, destination_mapi_id);
     rops.extend_from_slice(&[
         0x39, 0x00, 0x02, 0x03, // RopCopyTo: source handle 2, destination handle 3.
@@ -5579,6 +5579,12 @@ async fn mapi_over_http_microsoft_copy_properties_copies_custom_values_and_repor
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let source_message_id = "47474747-4747-4747-4747-474747474741";
     let destination_message_id = "48484848-4848-4848-4848-484848484842";
+    let source_message_uuid = Uuid::parse_str(source_message_id).unwrap();
+    let destination_message_uuid = Uuid::parse_str(destination_message_id).unwrap();
+    let source_mapi_id = test_mapi_uuid_id(&source_message_uuid);
+    let destination_mapi_id = test_mapi_uuid_id(&destination_message_uuid);
+    crate::mapi::identity::remember_mapi_identity(source_message_uuid, source_mapi_id);
+    crate::mapi::identity::remember_mapi_identity(destination_message_uuid, destination_mapi_id);
     let custom_tag = 0x8001_001F_u32;
     let missing_custom_tag = 0x8002_001F_u32;
     let store = FakeStore {
@@ -5618,16 +5624,16 @@ async fn mapi_over_http_microsoft_copy_properties_copies_custom_values_and_repor
         1,
         2,
         folder_id,
-        test_mapi_message_id(source_message_id),
+        source_mapi_id,
     );
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
-    append_rop_save_changes_message(&mut rops, 2, 2);
+    append_rop_save_changes_message(&mut rops, 2, 1);
     append_rop_open_message(
         &mut rops,
         1,
         3,
         folder_id,
-        test_mapi_message_id(destination_message_id),
+        destination_mapi_id,
     );
     rops.extend_from_slice(&[
         0x67, 0x00, 0x02, 0x03, // RopCopyProperties: source handle 2, destination handle 3.

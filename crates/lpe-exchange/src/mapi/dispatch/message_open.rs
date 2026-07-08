@@ -20,7 +20,9 @@ pub(super) fn append_open_message_response(
             MapiObject::Message {
                 folder_id,
                 message_id,
-                saved_email: None,
+                saved_email: Some(MapiSavedEmail {
+                    email: email.clone(),
+                }),
                 pending_properties: HashMap::new(),
             },
         );
@@ -57,7 +59,9 @@ pub(super) fn append_open_message_response(
             MapiObject::Message {
                 folder_id,
                 message_id,
-                saved_email: None,
+                saved_email: Some(MapiSavedEmail {
+                    email: message.email.clone(),
+                }),
                 pending_properties: HashMap::new(),
             },
         );
@@ -103,7 +107,9 @@ pub(super) fn append_open_message_response(
             MapiObject::Message {
                 folder_id: handle_folder_id,
                 message_id,
-                saved_email: None,
+                saved_email: Some(MapiSavedEmail {
+                    email: email.clone(),
+                }),
                 pending_properties: HashMap::new(),
             },
         );
