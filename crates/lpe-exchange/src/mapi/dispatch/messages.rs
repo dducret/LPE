@@ -371,6 +371,7 @@ where
             .as_ref()
             .map(|saved| saved.email.id)
             .or_else(|| message_for_id(folder_id, message_id, mailboxes, emails).map(|email| email.id))
+            .or_else(|| unique_message_for_id(message_id, emails).map(|email| email.id))
             .ok_or_else(|| anyhow!("canonical MAPI message was not found"))?;
         upsert_custom_property_values(
             store,

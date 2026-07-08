@@ -280,6 +280,7 @@ pub(super) fn custom_property_object_identity(
             .as_ref()
             .map(|saved| &saved.email)
             .or_else(|| message_for_id(*folder_id, *message_id, mailboxes, emails))
+            .or_else(|| unique_message_for_id(*message_id, emails))
             .map(|email| (MapiCustomPropertyObjectKind::Message, email.id)),
         MapiObject::Contact {
             folder_id,
