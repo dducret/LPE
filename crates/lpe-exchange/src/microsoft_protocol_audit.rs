@@ -295,6 +295,14 @@ const REPORT_ROWS: &[ReportRow] = &[
         gaps: "Coverage is bounded to private mailbox folders and the public-folder operations modeled by LPE; full Exchange managed-folder policy behavior and arbitrary search-folder providers remain outside the current interoperability claim.",
     },
     ReportRow {
+        surface: "Outlook special folders",
+        spec: "MS-OXOSFLD special folders, identifiers, and search-folder criteria",
+        source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosfld/",
+        anchor: "`crates/lpe-exchange/src/mapi/tables.rs::tests::microsoft_oxosfld_special_folder_metadata_covers_bounded_list`, `folder_type_rows_follow_microsoft_values`, `crates/lpe-exchange/src/mapi/sync.rs::tests::hierarchy_scope_places_reminders_under_root_not_ipm_subtree`, `hierarchy_scope_places_contacts_search_under_search_not_ipm_subtree`, `crates/lpe-exchange/src/tests/mapi_over_http.rs::mapi_over_http_empty_store_root_and_ipm_subtree_report_virtual_children`, `mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_display_name`",
+        implemented: "MS-OXOSFLD 2.2.1 special folders modeled by LPE are manifest-checked with stable folder ids, display names, parents, and container classes. Root, Top of Information Store, Deferred Action, Spooler Queue, Finder/Search, Common Views, Personal Views, FreeBusy Data, standard mail folders, calendar, contacts, suggested contacts, quick contacts, IM contacts, contacts search, document libraries, journal, notes, tasks, reminders, sync issue folders, junk, RSS, tracked mail processing, To-Do, Conversation Action Settings, and Outlook compatibility extensions such as Archive and Quick Step Settings are projected through MAPI hierarchy/table paths. MS-OXOSFLD search folders use `FOLDER_SEARCH`, reminders are rooted outside the IPM subtree, and contacts search is scoped below the Finder/Search folder.",
+        gaps: "LPE does not claim full Exchange special-folder lifecycle parity. Special-folder creation is bounded by canonical LPE mailbox state and Outlook compatibility metadata; Personal Views and legacy/free-busy public-folder behavior are compatibility projections, not independent canonical stores. Finder is exposed with LPE's existing `Search` display label, and FreeBusy Data uses the bounded container-class projection required by current Outlook startup tests.",
+    },
+    ReportRow {
         surface: "MAPI property types",
         spec: "MS-OXCDATA property data types",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/0c77892e-288e-435a-9c49-be1c20c7afdb",

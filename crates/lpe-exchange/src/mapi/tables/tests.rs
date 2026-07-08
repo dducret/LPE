@@ -3052,6 +3052,178 @@ fn folder_type_rows_follow_microsoft_values() {
 }
 
 #[test]
+fn microsoft_oxosfld_special_folder_metadata_covers_bounded_list() {
+    let expected = [
+        (ROOT_FOLDER_ID, "Root", 0, ""),
+        (
+            IPM_SUBTREE_FOLDER_ID,
+            "Top of Information Store",
+            ROOT_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            DEFERRED_ACTION_FOLDER_ID,
+            "Deferred Action",
+            ROOT_FOLDER_ID,
+            "",
+        ),
+        (SPOOLER_QUEUE_FOLDER_ID, "Spooler Queue", ROOT_FOLDER_ID, ""),
+        (SEARCH_FOLDER_ID, "Search", ROOT_FOLDER_ID, "IPF.Note"),
+        (COMMON_VIEWS_FOLDER_ID, "Common Views", ROOT_FOLDER_ID, ""),
+        (VIEWS_FOLDER_ID, "Personal Views", ROOT_FOLDER_ID, ""),
+        (
+            FREEBUSY_DATA_FOLDER_ID,
+            "FreeBusy Data",
+            ROOT_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (INBOX_FOLDER_ID, "Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note"),
+        (
+            OUTBOX_FOLDER_ID,
+            "Outbox",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (SENT_FOLDER_ID, "Sent", IPM_SUBTREE_FOLDER_ID, "IPF.Note"),
+        (
+            TRASH_FOLDER_ID,
+            "Deleted Items",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            DRAFTS_FOLDER_ID,
+            "Drafts",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            CALENDAR_FOLDER_ID,
+            "Calendar",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Appointment",
+        ),
+        (
+            CONTACTS_FOLDER_ID,
+            "Contacts",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact",
+        ),
+        (
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            "Suggested Contacts",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact",
+        ),
+        (
+            QUICK_CONTACTS_FOLDER_ID,
+            "Quick Contacts",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact.MOC.QuickContacts",
+        ),
+        (
+            IM_CONTACT_LIST_FOLDER_ID,
+            "IM Contact List",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact.MOC.ImContactList",
+        ),
+        (
+            CONTACTS_SEARCH_FOLDER_ID,
+            "Contacts Search",
+            SEARCH_FOLDER_ID,
+            "IPF.Contact",
+        ),
+        (
+            DOCUMENT_LIBRARIES_FOLDER_ID,
+            "Document Libraries",
+            ROOT_FOLDER_ID,
+            "IPF.ShortcutFolder",
+        ),
+        (
+            JOURNAL_FOLDER_ID,
+            "Journal",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Journal",
+        ),
+        (
+            NOTES_FOLDER_ID,
+            "Notes",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.StickyNote",
+        ),
+        (TASKS_FOLDER_ID, "Tasks", IPM_SUBTREE_FOLDER_ID, "IPF.Task"),
+        (
+            REMINDERS_FOLDER_ID,
+            "Reminders",
+            ROOT_FOLDER_ID,
+            "Outlook.Reminder",
+        ),
+        (
+            SYNC_ISSUES_FOLDER_ID,
+            "Sync Issues",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            CONFLICTS_FOLDER_ID,
+            "Conflicts",
+            SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            LOCAL_FAILURES_FOLDER_ID,
+            "Local Failures",
+            SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            SERVER_FAILURES_FOLDER_ID,
+            "Server Failures",
+            SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            JUNK_FOLDER_ID,
+            "Junk E-mail",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (
+            RSS_FEEDS_FOLDER_ID,
+            "RSS Feeds",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note.OutlookHomepage",
+        ),
+        (
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            "Tracked Mail Processing",
+            ROOT_FOLDER_ID,
+            "IPF.Note",
+        ),
+        (TODO_SEARCH_FOLDER_ID, "To-Do", ROOT_FOLDER_ID, "IPF.Task"),
+        (
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            "Conversation Action Settings",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Configuration",
+        ),
+    ];
+
+    for (folder_id, display_name, parent_id, container_class) in expected {
+        let (actual_name, actual_parent, actual_class, _) = special_folder_metadata(folder_id);
+        assert_eq!(
+            actual_name, display_name,
+            "display name for 0x{folder_id:016x}"
+        );
+        assert_eq!(actual_parent, parent_id, "parent for 0x{folder_id:016x}");
+        assert_eq!(
+            actual_class, container_class,
+            "container class for 0x{folder_id:016x}"
+        );
+    }
+}
+
+#[test]
 fn hierarchy_table_projects_user_saved_search_folder() {
     let definition_id = Uuid::parse_str("aaaaaaaa-5556-4111-8111-aaaaaaaaaaaa").unwrap();
     let folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_1124);
