@@ -19,6 +19,7 @@ from typing import Any
 
 HEX_TAG_RE = re.compile(r"0x[0-9a-fA-F]{8}")
 RUN_STAMP_RE = re.compile(r"(\d{12})")
+FRAME_PREVIEW_RE = re.compile(r"preview=([0-9a-fA-F]+)")
 UMOLK_USER_OPTIONS_CLASS = "IPM.Configuration.UMOLK.UserOptions"
 UMOLK_MANDATORY_DICTIONARY_TAGS = {
     "0x7c060003": "PidTagRoamingDatatypes",
@@ -363,7 +364,10 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "stall_warnings": Counter(),
         "startup_missing_gates": Counter(),
         "sequence_counts": Counter(),
+        "query_rows_response_frames": Counter(),
         "visible_release_without_query_rows": 0,
+        "visible_inbox_query_rows": Counter(),
+        "visible_inbox_query_rows_contexts": Counter(),
         "raw_visible_release_marker_lines": 0,
         "raw_umolk_placeholder": 0,
         "stale_default_view_states": Counter(),
@@ -453,6 +457,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 )
                 if signature:
                     summary["sequence_counts"][str(signature)] += 1
+                record_query_rows_response_frames(summary, fields, str(signature or "unknown"))
                 missing_gate = fields.get("outlook_startup_first_missing_gate")
                 if missing_gate:
                     summary["startup_missing_gates"][str(missing_gate)] += 1
@@ -495,6 +500,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_common_view_descriptor_getprops(summary, "", fields)
             elif message == "rca debug mapi setcolumns release response framing":
                 record_setcolumns_release_response(summary, fields)
+            elif message == "rca debug mapi visible inbox query rows tracked":
+                record_visible_inbox_query_rows(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi umolk getprops materialization":
@@ -543,6 +550,84 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         }
     )
     return summary
+
+
+def record_query_rows_response_frames(
+    summary: dict[str, Any], fields: dict[str, Any], signature: str
+) -> None:
+    frames = str(fields.get("response_rop_frames") or "")
+    if not frames:
+        return
+    request_id = str(fields.get("mapi_request_id") or "unknown")
+    handle_table = str(
+        fields.get("request_handle_table")
+        or fields.get("input_handle_table_summary")
+        or "unknown"
+    )
+    buffer_text_hint = query_rows_preview_text_hint(
+        str(fields.get("response_rop_buffer_preview") or "")
+    )
+    for frame in frames.split("|"):
+        if not frame.startswith("0x15@"):
+            continue
+        match = FRAME_PREVIEW_RE.search(frame)
+        preview = match.group(1) if match else None
+        if not preview or len(preview) < 18:
+            continue
+        try:
+            origin = int(preview[12:14], 16)
+            row_count = int.from_bytes(bytes.fromhex(preview[14:18]), "little")
+        except ValueError:
+            continue
+        preview_text = query_rows_preview_text_hint(preview)
+        if preview_text == "none":
+            preview_text = buffer_text_hint
+        key = (
+            f"signature={signature};handles={handle_table};"
+            f"rows={row_count};origin=0x{origin:02x};text={preview_text}"
+        )
+        summary["query_rows_response_frames"][key] += 1
+        if row_count:
+            summary["query_rows_response_frames"][
+                f"nonempty;request={request_id};{key}"
+            ] += 1
+
+
+def query_rows_preview_text_hint(preview: str) -> str:
+    try:
+        data = bytes.fromhex(preview)
+    except ValueError:
+        return "none"
+    text = data.decode("utf-16-le", errors="ignore")
+    runs: list[str] = []
+    current: list[str] = []
+    for char in text:
+        if 32 <= ord(char) < 127:
+            current.append(char)
+            continue
+        if len(current) >= 4:
+            runs.append("".join(current))
+        current = []
+    if len(current) >= 4:
+        runs.append("".join(current))
+    if not runs:
+        return "none"
+    return ",".join(runs)[:120]
+
+
+def record_visible_inbox_query_rows(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    context = str(fields.get("query_rows_context") or "")
+    request_id = str(fields.get("mapi_request_id") or "unknown")
+    if not context:
+        return
+    returned = field_in_semicolon_text(context, "returned") or "unknown"
+    position = field_in_semicolon_text(context, "position") or "unknown"
+    requested = field_in_semicolon_text(context, "requested_row_count") or "unknown"
+    key = f"returned={returned};position={position};requested={requested}"
+    summary["visible_inbox_query_rows"][key] += 1
+    summary["visible_inbox_query_rows_contexts"][f"request={request_id};{context}"] += 1
 
 
 def record_folder_local_default_view_visibility(
@@ -1597,6 +1682,16 @@ def print_single_summary(
         print_counter("Startup first missing gates", log["startup_missing_gates"])
         print_counter("Execute stall names", log["stall_warnings"])
         print_counter("Journal ROP sequence signatures", log["sequence_counts"], limit=20)
+        print_counter(
+            "Visible Inbox QueryRows tracked",
+            log["visible_inbox_query_rows"],
+            limit=12,
+        )
+        print_counter(
+            "Journal QueryRows response frames",
+            log["query_rows_response_frames"],
+            limit=32,
+        )
         print_counter("Unknown GetProps tags", log["unknown_getprops_tags"], limit=20)
         print_counter(
             "Unknown GetProps tag classes",
@@ -2561,7 +2656,11 @@ def issue_buckets(
             issues.append(f"stall:{name}")
     if log_path and log["startup_missing_gates"]:
         gate = log["startup_missing_gates"].most_common(1)[0][0]
-        issues.append(f"missing_gate:{gate}")
+        if not (
+            gate == "normal_inbox_visible_row_observed"
+            and log.get("visible_inbox_query_rows")
+        ):
+            issues.append(f"missing_gate:{gate}")
     issues = suppress_symptom_only_issues(issues)
     if not issues:
         issues.append("no_server_issue_detected")

@@ -1027,7 +1027,7 @@ pub(super) fn append_query_rows_response(
             columns.clone()
         };
         let hierarchy_wire_row_summary =
-            format_hierarchy_query_rows_wire_summary(&response, &selected_columns, 8);
+            format_hierarchy_query_rows_wire_summary(&response, &selected_columns, 64);
         let after_visible_inbox_release_without_query_rows = session
             .post_hierarchy_actions
             .last_inbox_related_release_context

@@ -1604,6 +1604,7 @@ fn hierarchy_query_rows_wire_summary_decodes_compact_folder_projection() {
 
     assert!(summary.contains("total=1"), "{summary}");
     assert!(summary.contains("decoded=1"), "{summary}");
+    assert!(summary.contains("truncated=false"), "{summary}");
     assert!(
         summary.contains(
             "index=0;row_status=0x00;id=0x0000000000050001;class=IPF.Note;name=Inbox;count=3"

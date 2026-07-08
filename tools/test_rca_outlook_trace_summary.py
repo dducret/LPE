@@ -19,6 +19,7 @@ def empty_log_summary() -> dict:
     return {
         "stall_warnings": Counter(),
         "startup_missing_gates": Counter(),
+        "query_rows_response_frames": Counter(),
         "raw_umolk_placeholder": 0,
         "unknown_getprops_tags": Counter(),
         "unknown_getprops_contexts": Counter(),
@@ -37,6 +38,8 @@ def empty_log_summary() -> dict:
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "visible_release_without_query_rows": 0,
+        "visible_inbox_query_rows": Counter(),
+        "visible_inbox_query_rows_contexts": Counter(),
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "visible_release_request_shapes": Counter(),
@@ -628,6 +631,86 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "stall:after_common_views_inbox_notification_without_contents",
                 "missing_gate:normal_inbox_visible_row_observed",
             ],
+        )
+
+    def test_visible_inbox_query_rows_event_is_tracked(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_inbox_query_rows(
+            summary,
+            {
+                "mapi_request_id": "request:64",
+                "query_rows_context": (
+                    "handle=27;position=0;requested_row_count=40;"
+                    "row_summary=total=1;start=0;forward=true;returned=1"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["visible_inbox_query_rows"],
+            Counter({"returned=1;position=0;requested=40": 1}),
+        )
+        self.assertIn(
+            "request=request:64;handle=27;position=0;requested_row_count=40;"
+            "row_summary=total=1;start=0;forward=true;returned=1",
+            summary["visible_inbox_query_rows_contexts"],
+        )
+
+    def test_query_rows_response_frames_are_counted_by_signature(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_query_rows_response_frames(
+            summary,
+            {
+                "mapi_request_id": "request:64",
+                "input_handle_table_summary": "count=1;handles=0x0000001c",
+                "response_rop_frames": (
+                    "0x18@0..11:len=11:out=0:rv=0x00000000:"
+                    "preview=1800000000000000000000|"
+                    "0x15@11..141:len=130:out=0:rv=0x00000000:"
+                    "preview=15000000000001010000010000000000"
+                ),
+            },
+            "SeekRow>QueryRows",
+        )
+
+        self.assertEqual(
+            summary["query_rows_response_frames"],
+            Counter(
+                {
+                    "signature=SeekRow>QueryRows;"
+                    "handles=count=1;handles=0x0000001c;"
+                    "rows=1;origin=0x01;text=none": 1,
+                    "nonempty;request=request:64;signature=SeekRow>QueryRows;"
+                    "handles=count=1;handles=0x0000001c;"
+                    "rows=1;origin=0x01;text=none": 1,
+                }
+            ),
+        )
+
+    def test_query_rows_preview_text_hint_decodes_utf16_samples(self) -> None:
+        preview = (
+            "150000000000010100000100000000000005010000000000013f01003f010000"
+            "00000000000004000000490050004d002e0043006f006e0066006900670075"
+            "0072006100740069006f006e00"
+        )
+
+        self.assertIn("IPM.Configuration", rca.query_rows_preview_text_hint(preview))
+
+    def test_issue_buckets_suppresses_visible_inbox_missing_gate_when_rows_tracked(
+        self,
+    ) -> None:
+        log = empty_log_summary()
+        log["startup_missing_gates"] = Counter({"normal_inbox_visible_row_observed": 1})
+        log["visible_inbox_query_rows"] = Counter(
+            {"returned=1;position=0;requested=40": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            ["no_server_issue_detected"],
         )
 
     def test_actionable_descriptor_gap_counts_filters_backed_columns(self) -> None:
