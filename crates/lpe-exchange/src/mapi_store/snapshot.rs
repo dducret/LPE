@@ -1057,6 +1057,7 @@ impl MapiMailStoreSnapshot {
             .filter(common_views_table_projects_navigation_shortcut)
             .collect::<Vec<_>>();
         append_missing_default_common_views_shortcuts(&mut table_shortcuts);
+        replace_persisted_default_mail_favorite_shortcuts(&mut table_shortcuts);
         materialize_default_mail_group_header(&mut table_shortcuts);
         let messages = table_shortcuts
             .into_iter()

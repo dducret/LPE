@@ -43,6 +43,7 @@ def empty_log_summary() -> dict:
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "visible_release_request_shapes": Counter(),
+        "visible_release_setcolumns_shapes": Counter(),
         "visible_release_pre_release_states": Counter(),
         "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
@@ -990,6 +991,33 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["visible_release_handle_slots"],
             Counter({"0:0x00000001|1:0x00000021": 1}),
+        )
+
+    def test_visible_release_setcolumns_shape_is_counted(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_context(
+            summary,
+            "request_id={A}:141;columns=0x67480014,0x674a0014,0x674d0014,"
+            "0x674e0003,0x0037001f,0x0e060040;sort=0x0e060040:1;"
+            "default_view_projection_kind=identity_probe_subset;"
+            "descriptor_columns_not_selected=0x00170003,0x8503000b;"
+            "descriptor_columns_missing_from_table=;"
+            "table_contract=ms_oxocfg_ok;row_count=1;"
+            "defaulted=;selected_missing_descriptor_columns=",
+        )
+
+        self.assertEqual(
+            summary["visible_release_setcolumns_shapes"],
+            Counter(
+                {
+                    "columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,"
+                    "0x0037001f,0x0e060040;sort=0x0e060040:1;"
+                    "projection=identity_probe_subset;"
+                    "descriptor_not_selected=0x00170003,0x8503000b;"
+                    "descriptor_missing_from_table=;contract=ms_oxocfg_ok": 1
+                }
+            ),
         )
 
     def test_view_trace_records_terminal_events_after_visible_release(self) -> None:

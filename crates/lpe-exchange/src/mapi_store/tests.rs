@@ -1785,6 +1785,21 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
             if shortcut.subject == "Inbox"
                 && shortcut.target_folder_id == Some(crate::mapi::identity::INBOX_FOLDER_ID)
+                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+    )));
+    assert!(table_messages.iter().any(|message| matches!(
+        message,
+        MapiCommonViewsMessage::NavigationShortcut(shortcut)
+            if shortcut.subject == "Sent"
+                && shortcut.target_folder_id == Some(crate::mapi::identity::SENT_FOLDER_ID)
+                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
+    )));
+    assert!(table_messages.iter().any(|message| matches!(
+        message,
+        MapiCommonViewsMessage::NavigationShortcut(shortcut)
+            if shortcut.subject == "Trash"
+                && shortcut.target_folder_id == Some(crate::mapi::identity::TRASH_FOLDER_ID)
+                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
     )));
 }
 

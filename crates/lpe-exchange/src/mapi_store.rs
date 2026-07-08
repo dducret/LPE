@@ -1150,6 +1150,32 @@ fn append_missing_default_common_views_shortcuts(
     }
 }
 
+fn replace_persisted_default_mail_favorite_shortcuts(
+    shortcuts: &mut Vec<MapiNavigationShortcutMessage>,
+) {
+    let defaults = outlook_common_views_default_navigation_shortcuts();
+    for default_shortcut in defaults.into_iter().filter(|shortcut| {
+        shortcut.shortcut_type == 0
+            && shortcut.section == 1
+            && shortcut.group_name == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
+            && matches!(
+                shortcut.target_folder_id,
+                Some(crate::mapi::identity::INBOX_FOLDER_ID)
+                    | Some(crate::mapi::identity::SENT_FOLDER_ID)
+                    | Some(crate::mapi::identity::TRASH_FOLDER_ID)
+            )
+    }) {
+        if let Some(existing) = shortcuts.iter_mut().find(|shortcut| {
+            shortcut.shortcut_type == default_shortcut.shortcut_type
+                && shortcut.target_folder_id == default_shortcut.target_folder_id
+                && shortcut.section == default_shortcut.section
+                && shortcut.subject.eq_ignore_ascii_case(&default_shortcut.subject)
+        }) {
+            *existing = default_shortcut;
+        }
+    }
+}
+
 fn normalize_navigation_shortcut_group_name(
     section: u32,
     group_header_id: Option<Uuid>,

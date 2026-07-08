@@ -374,6 +374,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
         "visible_release_request_shapes": Counter(),
+        "visible_release_setcolumns_shapes": Counter(),
         "visible_release_pre_release_states": Counter(),
         "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
@@ -909,6 +910,7 @@ def record_visible_release_context(summary: dict[str, Any], text: str) -> None:
     summary["visible_release_contexts"].add(segment)
     record_visible_release_classification(summary, segment)
     record_visible_release_request_metrics(summary, segment)
+    record_visible_release_setcolumns_shape(summary, segment)
     record_visible_release_descriptor_window(summary, segment)
     record_visible_release_descriptor_contract(summary, segment)
 
@@ -945,6 +947,22 @@ def record_visible_release_request_metrics(summary: dict[str, Any], text: str) -
     handle_slots = first_field(text, "release_handle_slots_before")
     if handle_slots:
         summary["visible_release_handle_slots"][handle_slots] += 1
+
+
+def record_visible_release_setcolumns_shape(summary: dict[str, Any], text: str) -> None:
+    if text.startswith("visible_inbox_release_without_query_rows:"):
+        text = text.split(":", 1)[1]
+    columns = first_field(text, "columns") or "unknown"
+    sort = first_field(text, "sort") or "unknown"
+    projection_kind = first_field(text, "default_view_projection_kind") or "unknown"
+    descriptor_not_selected = first_field(text, "descriptor_columns_not_selected") or ""
+    table_contract = first_field(text, "table_contract") or first_field(text, "contract") or ""
+    descriptor_missing = first_field(text, "descriptor_columns_missing_from_table") or ""
+    summary["visible_release_setcolumns_shapes"][
+        f"columns={columns};sort={sort};projection={projection_kind};"
+        f"descriptor_not_selected={descriptor_not_selected};"
+        f"descriptor_missing_from_table={descriptor_missing};contract={table_contract}"
+    ] += 1
 
 
 def record_post_visible_release_terminal_event(
@@ -1808,6 +1826,11 @@ def print_single_summary(
             limit=8,
         )
         print_counter(
+            "Visible Inbox release SetColumns shapes",
+            log["visible_release_setcolumns_shapes"],
+            limit=8,
+        )
+        print_counter(
             "Visible Inbox release pre-release states",
             log["visible_release_pre_release_states"],
             limit=8,
@@ -1922,6 +1945,7 @@ def print_batch_summary(
     aggregate_common_view_descriptor_getprops_issues: Counter[str] = Counter()
     aggregate_visible_release_classifications: Counter[str] = Counter()
     aggregate_visible_release_request_shapes: Counter[str] = Counter()
+    aggregate_visible_release_setcolumns_shapes: Counter[str] = Counter()
     aggregate_visible_release_pre_release_states: Counter[str] = Counter()
     aggregate_visible_release_handle_slots: Counter[str] = Counter()
     aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
@@ -1959,6 +1983,7 @@ def print_batch_summary(
     current_common_view_descriptor_getprops_issues: Counter[str] = Counter()
     current_visible_release_classifications: Counter[str] = Counter()
     current_visible_release_request_shapes: Counter[str] = Counter()
+    current_visible_release_setcolumns_shapes: Counter[str] = Counter()
     current_visible_release_pre_release_states: Counter[str] = Counter()
     current_visible_release_handle_slots: Counter[str] = Counter()
     current_setcolumns_release_response_frames: Counter[str] = Counter()
@@ -2065,6 +2090,9 @@ def print_batch_summary(
         aggregate_visible_release_request_shapes.update(
             log["visible_release_request_shapes"]
         )
+        aggregate_visible_release_setcolumns_shapes.update(
+            log["visible_release_setcolumns_shapes"]
+        )
         aggregate_visible_release_pre_release_states.update(
             log["visible_release_pre_release_states"]
         )
@@ -2154,6 +2182,9 @@ def print_batch_summary(
             )
             current_visible_release_request_shapes.update(
                 log["visible_release_request_shapes"]
+            )
+            current_visible_release_setcolumns_shapes.update(
+                log["visible_release_setcolumns_shapes"]
             )
             current_visible_release_pre_release_states.update(
                 log["visible_release_pre_release_states"]
@@ -2351,6 +2382,11 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate visible Inbox release SetColumns shapes",
+        aggregate_visible_release_setcolumns_shapes,
+        limit=20,
+    )
+    print_counter(
         "Aggregate visible Inbox release pre-release states",
         aggregate_visible_release_pre_release_states,
         limit=20,
@@ -2531,6 +2567,11 @@ def print_batch_summary(
         print_counter(
             "Current-build visible Inbox release request shapes",
             current_visible_release_request_shapes,
+            limit=20,
+        )
+        print_counter(
+            "Current-build visible Inbox release SetColumns shapes",
+            current_visible_release_setcolumns_shapes,
             limit=20,
         )
         print_counter(
