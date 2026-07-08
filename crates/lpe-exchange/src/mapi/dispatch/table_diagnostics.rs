@@ -467,7 +467,8 @@ pub(super) fn debug_associated_table_rows(
         .map(DebugAssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(message) = debug_default_folder_associated_named_view(snapshot, folder_id) {
-        if (folder_id != INBOX_FOLDER_ID || restriction.is_some())
+        if !(folder_id == INBOX_FOLDER_ID
+            && restriction.is_some_and(is_broad_ipm_configuration_restriction))
             && restriction_matches_common_view_named_view(restriction, &message, mailbox_guid)
         {
             rows.push(DebugAssociatedTableRow::NamedView(message));

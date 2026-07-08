@@ -29,6 +29,8 @@ def empty_log_summary() -> dict:
         "resolved_named_getprops_tags": set(),
         "zero_default_tags": Counter(),
         "descriptor_gap_windows": Counter(),
+        "folder_local_default_view_visibility": Counter(),
+        "folder_local_default_view_visibility_contexts": Counter(),
         "visible_release_without_query_rows": 0,
         "visible_release_contexts": set(),
         "visible_release_classifications": Counter(),
@@ -318,6 +320,30 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             counts,
             Counter({"visible;role=calendar;view=Calendar;missing=0xdead0003": 2}),
+        )
+
+    def test_folder_local_default_view_visibility_missing_is_actionable(self) -> None:
+        summary = empty_log_summary()
+        fields = {
+            "folder_local_default_view_visibility": (
+                "folder=0x0000000000050001;role=inbox;view=0x7fffffffffe90001;"
+                "name=Compact;expected=true;present=false;associated_row_count=7"
+            )
+        }
+
+        rca.record_folder_local_default_view_visibility(summary, fields)
+
+        self.assertEqual(
+            summary["folder_local_default_view_visibility"],
+            Counter({"role=inbox;name=Compact;present=false": 1}),
+        )
+        self.assertIn(
+            "folder_local_default_view_missing_from_fai",
+            rca.issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                Path("LPE_last_test.log"),
+            ),
         )
 
     def test_unknown_getprops_tag_classes_group_unconfirmed_ranges(self) -> None:

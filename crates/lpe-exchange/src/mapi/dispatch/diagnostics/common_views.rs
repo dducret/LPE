@@ -507,6 +507,35 @@ pub(in crate::mapi::dispatch) fn warn_outlook_view_handoff_table_invariants(
     let _ = (principal, request_rop_id, view_handoff_table_contract);
 }
 
+pub(in crate::mapi::dispatch) fn format_folder_local_default_view_fai_visibility_contract(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<String> {
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        return None;
+    }
+    let view = debug_default_folder_associated_named_view(snapshot, folder_id)?;
+    if default_common_views_named_view_id(
+        advertised_special_folder_container_class(folder_id)?,
+        folder_id,
+    )
+    .is_some()
+    {
+        return None;
+    }
+    let rows = debug_associated_table_rows(folder_id, snapshot, None, Uuid::nil());
+    let present = rows
+        .iter()
+        .any(|row| debug_associated_row_id(row) == view.id);
+    Some(format!(
+        "folder=0x{folder_id:016x};role={};view=0x{:016x};name={};expected=true;present={present};associated_row_count={}",
+        debug_role_for_folder_id(folder_id),
+        view.id,
+        view.name,
+        rows.len()
+    ))
+}
+
 pub(in crate::mapi::dispatch) fn format_view_descriptor_binary_summary(
     descriptor: &[u8],
 ) -> String {

@@ -318,6 +318,10 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_open(
         &selected_columns,
         snapshot,
     );
+    let folder_local_default_view_visibility = associated
+        .then(|| format_folder_local_default_view_fai_visibility_contract(folder_id, snapshot))
+        .flatten()
+        .unwrap_or_default();
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -339,8 +343,25 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_open(
         selected_property_tag_count = 0,
         selected_property_tags = "",
         view_handoff_table_contract = %view_handoff_table_contract,
+        folder_local_default_view_visibility = %folder_local_default_view_visibility,
         "rca debug outlook contents table opened"
     );
+    if folder_local_default_view_visibility.contains("expected=true;present=false") {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = %request_id,
+            request_rop_id = "0x05",
+            folder_id = %format!("0x{folder_id:016x}"),
+            folder_role = debug_role_for_folder_id(folder_id),
+            folder_local_default_view_visibility = %folder_local_default_view_visibility,
+            "rca debug outlook folder local default view visibility mismatch"
+        );
+    }
     warn_outlook_view_handoff_table_invariants(
         principal,
         "0x05",

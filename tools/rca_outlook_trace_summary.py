@@ -385,6 +385,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
+        "folder_local_default_view_visibility": Counter(),
+        "folder_local_default_view_visibility_contexts": Counter(),
         "stale_default_view_contexts": set(),
         "unknown_getprops_tags": Counter(),
         "unknown_getprops_contexts": Counter(),
@@ -477,10 +479,13 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_hierarchy_query_window(summary, fields)
             for key in (
                 "view_handoff_table_contract",
+                "folder_local_default_view_visibility",
                 "descriptor_behavior",
                 "descriptor_query_window",
             ):
                 value = fields.get(key)
+                if key == "folder_local_default_view_visibility" and isinstance(value, str):
+                    record_folder_local_default_view_visibility(summary, fields)
                 if isinstance(value, str) and "selected_missing_descriptor_columns=" in value:
                     record_descriptor_gap(summary, value, fields)
     summary["visible_release_without_query_rows"] = len(summary["visible_release_contexts"])
@@ -505,6 +510,21 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         }
     )
     return summary
+
+
+def record_folder_local_default_view_visibility(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    context = str(fields.get("folder_local_default_view_visibility") or "")
+    if not context:
+        return
+    role = field_in_semicolon_text(context, "role") or "unknown"
+    name = field_in_semicolon_text(context, "name") or "unknown"
+    present = field_in_semicolon_text(context, "present") or "unknown"
+    key = f"role={role};name={name};present={present}"
+    summary["folder_local_default_view_visibility"][key] += 1
+    if present == "false":
+        summary["folder_local_default_view_visibility_contexts"][context] += 1
 
 
 def record_umolk_dictionary_shapes(summary: dict[str, Any], text: str) -> None:
@@ -973,6 +993,10 @@ def first_field(text: str, key: str) -> str | None:
     return None
 
 
+def field_in_semicolon_text(text: str, key: str) -> str | None:
+    return first_field(text, key)
+
+
 def inspect_contract(
     summary: dict[str, Any], contract: str, fields: dict[str, Any] | None = None
 ) -> None:
@@ -1256,6 +1280,11 @@ def print_single_summary(
         print_counter(
             "Actionable descriptor gap windows",
             actionable_descriptor_gap_counts(log["descriptor_gap_windows"]),
+            limit=12,
+        )
+        print_counter(
+            "Folder-local default view FAI visibility",
+            log["folder_local_default_view_visibility"],
             limit=12,
         )
         print_counter("Hierarchy QueryRows windows", log["hierarchy_query_windows"], limit=12)
@@ -1900,6 +1929,11 @@ def issue_buckets(
         issues.append("stale_default_view_state")
     if any(descriptor_gap_is_actionable(key) for key in log.get("descriptor_gap_windows", {})):
         issues.append("visible_descriptor_gap")
+    if any(
+        "present=false" in key
+        for key in log.get("folder_local_default_view_visibility", {})
+    ):
+        issues.append("folder_local_default_view_missing_from_fai")
     if log["stall_warnings"]:
         for name, _count in log["stall_warnings"].most_common(2):
             issues.append(f"stall:{name}")

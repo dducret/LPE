@@ -5188,6 +5188,34 @@ fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_look
 }
 
 #[test]
+fn inbox_associated_table_exposes_folder_local_default_named_view_without_restriction() {
+    let rows = associated_table_rows(
+        INBOX_FOLDER_ID,
+        &MapiMailStoreSnapshot::empty(),
+        None,
+        Uuid::nil(),
+    );
+
+    assert_eq!(
+        rows.iter()
+            .filter(
+                |row| matches!(row, AssociatedTableRow::NamedView(view) if view.name == "Compact")
+            )
+            .count(),
+        1
+    );
+    assert_eq!(
+        restricted_associated_folder_message_count(
+            INBOX_FOLDER_ID,
+            &MapiMailStoreSnapshot::empty(),
+            None,
+            Uuid::nil()
+        ),
+        rows.len()
+    );
+}
+
+#[test]
 fn quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
     assert_contact_folder_associated_find_row_returns_osc_contact_sync(QUICK_CONTACTS_FOLDER_ID);
 }

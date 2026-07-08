@@ -297,6 +297,48 @@ fn inbox_view_handoff_table_contract_reports_folder_local_default_view() {
 }
 
 #[test]
+fn inbox_folder_local_default_view_visibility_contract_reports_present_named_view() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let contract =
+        format_folder_local_default_view_fai_visibility_contract(INBOX_FOLDER_ID, &snapshot)
+            .expect("Inbox should have a folder-local default view");
+
+    assert!(contract.contains("role=inbox"));
+    assert!(contract.contains("name=Compact"));
+    assert!(contract.contains("expected=true;present=true"));
+    assert!(contract.contains("associated_row_count="));
+}
+
+#[test]
+fn folder_local_default_view_visibility_contract_reports_present_for_special_folders() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+
+    for folder_id in [
+        INBOX_FOLDER_ID,
+        TRASH_FOLDER_ID,
+        JUNK_FOLDER_ID,
+        OUTBOX_FOLDER_ID,
+        DRAFTS_FOLDER_ID,
+        CONTACTS_FOLDER_ID,
+        CALENDAR_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        TASKS_FOLDER_ID,
+    ] {
+        let contract =
+            format_folder_local_default_view_fai_visibility_contract(folder_id, &snapshot)
+                .unwrap_or_else(|| {
+                    panic!("expected folder-local default view for 0x{folder_id:016x}")
+                });
+
+        assert!(
+            contract.contains("expected=true;present=true"),
+            "{contract}"
+        );
+    }
+}
+
+#[test]
 fn sent_view_handoff_table_contract_reports_common_views_sent_to_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
