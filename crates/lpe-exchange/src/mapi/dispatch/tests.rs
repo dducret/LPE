@@ -2120,12 +2120,23 @@ fn calendar_event_column_support_covers_observed_outlook_view_probe_columns() {
         PID_TAG_MESSAGE_STATUS,
         PID_LID_OUTLOOK_COMMON_8578_TAG,
         PID_LID_SIDE_EFFECTS_TAG,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_COMMON_END_TAG,
+        PID_LID_LOCATION_W_TAG,
+        PID_LID_BUSY_STATUS_TAG,
     ]);
 
     assert!(summary.contains(
-        "backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85780003,0x85100003"
+        "backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85780003,0x85100003,0x85160040,0x85170040,0x8208001f,0x82050003"
     ));
     assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+}
+
+#[test]
+fn calendar_event_column_support_reports_unknown_named_properties_as_dynamic() {
+    let summary = calendar_event_table_column_support_summary(&[0x9234_001f]);
+
+    assert_eq!(summary, "backed=;defaulted=;named_or_dynamic=0x9234001f");
 }
 
 #[test]

@@ -3533,6 +3533,10 @@ fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folde
         notes: String::new(),
         body_html: String::new(),
     };
+    crate::mapi::identity::remember_mapi_identity(
+        event.id,
+        crate::mapi::identity::mapi_store_id(0x42),
+    );
     let snapshot = MapiMailStoreSnapshot::new(
         Vec::new(),
         Vec::new(),

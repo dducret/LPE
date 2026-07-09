@@ -923,9 +923,6 @@ fn table_column_support_summary(columns: &[u32], is_backed: impl Fn(u32) -> bool
 }
 
 fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
-    if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
-        return true;
-    }
     matches!(
         storage_tag,
         PID_TAG_FOLDER_ID
@@ -939,6 +936,52 @@ fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_MESSAGE_STATUS
             | PID_TAG_ENTRY_ID
             | PID_TAG_INSTANCE_KEY
+            | PID_TAG_NORMALIZED_SUBJECT_W
+            | PID_TAG_DISPLAY_NAME_W
+            | PID_TAG_BODY_W
+            | PID_TAG_START_DATE
+            | PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_END_DATE
+            | PID_TAG_LOCATION_W
+            | PID_TAG_ACCESS
+            | PID_TAG_HAS_ATTACHMENTS
+            | PID_TAG_MESSAGE_SIZE
+            | PID_TAG_MESSAGE_SIZE_EXTENDED
+            | PID_TAG_SENDER_NAME_W
+            | PID_TAG_SENDER_EMAIL_ADDRESS_W
+            | PID_TAG_DISPLAY_TO_W
+            | PID_TAG_DISPLAY_CC_W
+            | PID_TAG_BODY_HTML_W
+            | PID_TAG_HTML_BINARY
+            | PID_TAG_SOURCE_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+            | PID_LID_COMMON_START_TAG
+            | PID_LID_APPOINTMENT_START_WHOLE_TAG
+            | PID_LID_COMMON_END_TAG
+            | PID_LID_APPOINTMENT_END_WHOLE_TAG
+            | PID_LID_LOCATION_W_TAG
+            | PID_LID_ALL_ATTENDEES_STRING_W_TAG
+            | PID_LID_TO_ATTENDEES_STRING_W_TAG
+            | PID_LID_CC_ATTENDEES_STRING_W_TAG
+            | PID_LID_BUSY_STATUS_TAG
+            | PID_LID_APPOINTMENT_DURATION_TAG
+            | PID_LID_APPOINTMENT_COLOR_TAG
+            | PID_LID_SIDE_EFFECTS_TAG
+            | PID_LID_OUTLOOK_COMMON_8578_TAG
+            | PID_LID_APPOINTMENT_SUB_TYPE_TAG
+            | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_RECURRING_TAG
+            | PID_LID_TIME_ZONE_STRUCT_TAG
+            | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
+            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
+            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG
+            | PID_LID_APPOINTMENT_RECUR_TAG
+            | PID_LID_GLOBAL_OBJECT_ID_TAG
+            | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
     )
 }
 
