@@ -448,6 +448,34 @@ pub(in crate::smtp) async fn receive_message_with_validator<D: Detector>(
             message.rcpt_to.len()
         ),
     });
+    if let Some(outlook_test) = crate::outlook_test_message::classify_smtp_message(
+        &message.mail_from,
+        &message.rcpt_to,
+        &message.data,
+    ) {
+        observability::record_outlook_test_message("smtp_ingress", "received");
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "outlook-account-test".to_string(),
+            outcome: "observed".to_string(),
+            detail: format!(
+                "subject={} from_header={} mail_from={} rcpt_count={}",
+                outlook_test.subject,
+                outlook_test.from_header,
+                outlook_test.mail_from,
+                outlook_test.rcpt_to.len()
+            ),
+        });
+        info!(
+            trace_id = %message.id,
+            peer = %message.peer,
+            helo = %message.helo,
+            mail_from = %outlook_test.mail_from,
+            rcpt_to = ?outlook_test.rcpt_to,
+            subject = %outlook_test.subject,
+            from_header = %outlook_test.from_header,
+            "outlook smtp account-test message observed on public ingress"
+        );
+    }
 
     if config.drain_mode {
         message.status = "held".to_string();

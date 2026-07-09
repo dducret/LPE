@@ -27,6 +27,7 @@ struct CtMetrics {
     outbound_handoffs_total: BTreeMap<String, u64>,
     inbound_delivery_total: BTreeMap<String, u64>,
     smtp_sessions_total: BTreeMap<String, u64>,
+    outlook_test_messages_total: BTreeMap<(String, String), u64>,
     smtp_backpressure_total: u64,
     active_smtp_sessions: u32,
     security_events_total: BTreeMap<String, u64>,
@@ -150,6 +151,15 @@ pub fn record_smtp_session(result: &str) {
     }
 }
 
+pub fn record_outlook_test_message(path: &str, status: &str) {
+    if let Ok(mut guard) = metrics().lock() {
+        *guard
+            .outlook_test_messages_total
+            .entry((path.to_string(), status.to_string()))
+            .or_insert(0) += 1;
+    }
+}
+
 pub fn record_smtp_backpressure() {
     if let Ok(mut guard) = metrics().lock() {
         guard.smtp_backpressure_total += 1;
@@ -256,6 +266,18 @@ fn render_metrics(spool_dir: &Path) -> String {
         output.push_str(&format!(
             "lpe_ct_smtp_sessions_total{{result=\"{}\"}} {}\n",
             escape_label(result),
+            value
+        ));
+    }
+    output.push_str(
+        "# HELP lpe_ct_outlook_test_messages_total Outlook account-test messages observed over SMTP.\n",
+    );
+    output.push_str("# TYPE lpe_ct_outlook_test_messages_total counter\n");
+    for ((path, status), value) in &guard.outlook_test_messages_total {
+        output.push_str(&format!(
+            "lpe_ct_outlook_test_messages_total{{path=\"{}\",status=\"{}\"}} {}\n",
+            escape_label(path),
+            escape_label(status),
             value
         ));
     }

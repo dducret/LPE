@@ -26,7 +26,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
-    integration_shared_secret,
+    integration_shared_secret, observability, outlook_test_message,
     smtp::{max_smtp_message_size_bytes, parse_smtp_path, smtp_path_error_reply, SmtpPathKind},
     transport_policy,
 };
@@ -265,6 +265,25 @@ async fn handle_submission_session(
             let data = read_data(&mut reader).await?;
             let validator = Validator::from_env();
             let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
+            let outlook_test = outlook_test_message::classify_smtp_message(
+                &transaction.mail_from,
+                &transaction.rcpt_to,
+                &data,
+            );
+            if let Some(outlook_test) = &outlook_test {
+                observability::record_outlook_test_message("smtp_submission", "attempt");
+                info!(
+                    peer = %peer,
+                    account_id = %principal.account_id,
+                    account_email = %principal.email,
+                    helo = %transaction.helo,
+                    mail_from = %outlook_test.mail_from,
+                    rcpt_to = ?outlook_test.rcpt_to,
+                    subject = %outlook_test.subject,
+                    from_header = %outlook_test.from_header,
+                    "outlook smtp account-test message observed on authenticated submission"
+                );
+            }
             match transport_policy::evaluate_attachment_policy_with_config(
                 &config.attachment_policy,
                 &validator,
@@ -273,6 +292,9 @@ async fn handle_submission_session(
             )? {
                 transport_policy::AttachmentPolicyVerdict::Accept => {}
                 transport_policy::AttachmentPolicyVerdict::Restrict(reason) => {
+                    if outlook_test.is_some() {
+                        observability::record_outlook_test_message("smtp_submission", "rejected");
+                    }
                     write_line(&mut writer, &format!("554 submission rejected ({reason})")).await?;
                     transaction.reset_message();
                     continue;
@@ -293,6 +315,9 @@ async fn handle_submission_session(
                 Ok(response) => {
                     let detail = response.detail.as_deref().unwrap_or("submission accepted");
                     write_line(&mut writer, &format!("250 {detail}")).await?;
+                    if outlook_test.is_some() {
+                        observability::record_outlook_test_message("smtp_submission", "accepted");
+                    }
                     info!(
                         trace_id = %response.trace_id,
                         peer = %peer,
@@ -303,6 +328,9 @@ async fn handle_submission_session(
                     transaction.reset_message();
                 }
                 Err((status, detail)) => {
+                    if outlook_test.is_some() {
+                        observability::record_outlook_test_message("smtp_submission", "rejected");
+                    }
                     write_line(&mut writer, &smtp_submission_failure_reply(status, &detail))
                         .await?;
                     transaction.reset_message();

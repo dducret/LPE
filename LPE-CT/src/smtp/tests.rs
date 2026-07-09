@@ -912,6 +912,44 @@ async fn smtp_data_accepts_plaintext_for_local_domain_and_hands_to_core() {
 }
 
 #[tokio::test]
+async fn smtp_ingress_marks_outlook_account_test_message() {
+    let _guard = env_test_lock();
+    std::env::set_var(
+        "LPE_INTEGRATION_SHARED_SECRET",
+        "0123456789abcdef0123456789abcdef",
+    );
+    let spool = temp_dir("outlook-account-test");
+    initialize_spool(&spool).unwrap();
+    let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+    let core_base_url = spawn_dummy_core(captured).await;
+    let mut config = runtime_config("127.0.0.1:9".to_string(), core_base_url);
+    config.require_spf = false;
+    config.require_dmarc_enforcement = false;
+    config.defer_on_auth_tempfail = false;
+    config.bayespam_enabled = false;
+    config.reputation_enabled = false;
+
+    let message = receive_message(
+        &spool,
+        &config,
+        "203.0.113.10:25".to_string(),
+        "outlook-client".to_string(),
+        "test@l-p-e.ch".to_string(),
+        vec!["test@l-p-e.ch".to_string()],
+        b"From: Microsoft Outlook <test@l-p-e.ch>\r\nTo: test@l-p-e.ch\r\nSubject: Microsoft Outlook Test Message\r\n\r\nThis is an email message sent automatically by Microsoft Outlook while testing the settings for your account.\r\n".to_vec(),
+    )
+    .await
+    .unwrap();
+
+    assert!(message.decision_trace.iter().any(|entry| {
+        entry.stage == "outlook-account-test"
+            && entry.outcome == "observed"
+            && entry.detail.contains("Microsoft Outlook Test Message")
+    }));
+    std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+}
+
+#[tokio::test]
 async fn inbound_delivery_keeps_durable_spool_custody_until_core_accepts() {
     let _guard = env_test_lock();
     std::env::set_var(

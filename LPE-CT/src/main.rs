@@ -38,6 +38,7 @@ mod http_routes;
 mod imaps_proxy;
 mod management_auth;
 mod observability;
+mod outlook_test_message;
 mod readiness;
 mod reporting;
 mod smtp;
