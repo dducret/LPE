@@ -6097,10 +6097,10 @@ fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
     assert_eq!(find_response[0], RopId::FindRow.as_u8());
     assert_eq!(
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
-        0x8004_010F
+        0
     );
-    assert_eq!(find_response.len(), 6);
-    assert_eq!(table_position(&table), Some(broad_row_count));
+    assert_response_contains_utf16(&find_response, "IPM.Microsoft.FolderDesign.NamedView");
+    assert_eq!(table_position(&table), Some(0));
 
     let query_response = rop_query_rows_response(
         &RopRequest {
@@ -6117,12 +6117,11 @@ fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(query_response[6], 0x02);
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        0
+        1
     );
-    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
 }
 
 #[test]
@@ -6465,14 +6464,31 @@ fn inbox_associated_query_rows_uses_sort_order() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
+}
+
+#[test]
+fn inbox_associated_open_count_includes_unrestricted_persisted_configuration_rows() {
+    let snapshot = inbox_associated_sort_snapshot();
+    let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, None, Uuid::nil());
+
+    assert_eq!(
+        associated_folder_message_count(INBOX_FOLDER_ID, &snapshot) as usize,
+        rows.len()
+    );
+    assert_eq!(rows.len(), 3);
+    assert!(rows.iter().any(|row| matches!(
+        row,
+        AssociatedTableRow::Config(message)
+            if message.message_class == "IPM.Configuration.AccountPrefs"
+    )));
 }
 
 #[test]
@@ -6506,12 +6522,12 @@ fn inbox_associated_query_rows_suppresses_extended_rule_message() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
@@ -6578,11 +6594,14 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert_eq!(
+        utf16_occurrences(&response, "IPM.Microsoft.FolderDesign.NamedView"),
+        1
+    );
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
@@ -6651,11 +6670,14 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert_eq!(
+        utf16_occurrences(&response, "IPM.Microsoft.FolderDesign.NamedView"),
+        1
+    );
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
@@ -8347,6 +8369,15 @@ fn utf16_position(response: &[u8], value: &str) -> Option<usize> {
     response
         .windows(encoded.len())
         .position(|window| window == encoded.as_slice())
+}
+
+fn utf16_occurrences(response: &[u8], value: &str) -> usize {
+    let mut encoded = Vec::new();
+    write_utf16z(&mut encoded, value);
+    response
+        .windows(encoded.len())
+        .filter(|window| *window == encoded.as_slice())
+        .count()
 }
 
 #[test]

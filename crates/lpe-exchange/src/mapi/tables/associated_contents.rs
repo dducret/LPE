@@ -352,6 +352,9 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
         if is_inbox_broad_startup_config_visible(restriction, message) {
             return true;
         }
+        if restriction.is_none() {
+            return !is_empty_inbox_configuration_placeholder(message);
+        }
         return restriction.is_some_and(|restriction| {
             message_class_restriction_matches_exact(restriction, &message.message_class)
         }) && !is_empty_inbox_configuration_placeholder(message);
