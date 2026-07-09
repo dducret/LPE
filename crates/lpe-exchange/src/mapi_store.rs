@@ -1121,8 +1121,6 @@ fn common_views_table_projects_navigation_shortcut(
             | Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
             | Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
             | Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
-            | Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID)
-            | Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID)
             | Some(crate::mapi::identity::TASKS_FOLDER_ID)
             | Some(crate::mapi::identity::NOTES_FOLDER_ID)
             | Some(crate::mapi::identity::JOURNAL_FOLDER_ID)

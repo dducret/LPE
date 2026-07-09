@@ -1299,13 +1299,13 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
     assert_eq!(snapshot.common_views_messages().count(), 0);
     let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-    assert_eq!(messages.len(), 19);
+    assert_eq!(messages.len(), 17);
     assert_eq!(
         messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        17
+        15
     );
     let named_views = messages
         .iter()
@@ -1360,6 +1360,16 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
             OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID
         )
         .is_some());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_QUICK_CONTACTS_NAVIGATION_SHORTCUT_ID
+        )
+        .is_none());
+    assert!(snapshot
+        .navigation_shortcut_table_message_for_id(
+            OUTLOOK_COMMON_VIEWS_DEFAULT_IM_CONTACT_LIST_NAVIGATION_SHORTCUT_ID
+        )
+        .is_none());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID
@@ -1562,7 +1572,7 @@ fn common_views_preserves_persisted_navigation_shortcuts() {
     assert_eq!(shortcut.subject, "Alpha");
     assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
     assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-    assert_eq!(messages.len(), 19);
+    assert_eq!(messages.len(), 17);
     assert_eq!(
         messages
             .iter()
@@ -1785,14 +1795,22 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
 
     assert_eq!(snapshot.navigation_shortcut_messages().len(), 3);
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    assert_eq!(table_messages.len(), 19);
+    assert_eq!(table_messages.len(), 17);
     assert_eq!(
         table_messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        17
+        15
     );
+    assert!(!table_messages.iter().any(|message| matches!(
+        message,
+        MapiCommonViewsMessage::NavigationShortcut(shortcut)
+            if shortcut.target_folder_id
+                == Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID)
+                || shortcut.target_folder_id
+                    == Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID)
+    )));
     assert!(table_messages.iter().any(|message| matches!(
         message,
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
