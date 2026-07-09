@@ -576,10 +576,15 @@ pub(super) fn serialize_hierarchy_row(
             )
         }
         HierarchyRow::Special(folder_id) => {
-            serialize_advertised_special_folder_row_with_mailbox_guid(
+            let emails = snapshot.emails();
+            let content_count = folder_message_count(folder_id, mailboxes, &emails, snapshot);
+            serialize_advertised_special_folder_row_with_counts(
                 folder_id,
                 columns,
                 mailbox_guid,
+                content_count,
+                0,
+                0,
             )
         }
     }

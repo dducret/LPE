@@ -3502,6 +3502,37 @@ fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folde
             may_share: true,
         },
     };
+    let event = AccessibleEvent {
+        id: Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726),
+        uid: "hierarchy-count".to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: Uuid::nil(),
+        owner_email: "test@example.test".to_string(),
+        owner_display_name: "Test".to_string(),
+        rights: CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        },
+        date: "2026-06-01".to_string(),
+        time: "10:00".to_string(),
+        time_zone: String::new(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Hierarchy Count".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
     let snapshot = MapiMailStoreSnapshot::new(
         Vec::new(),
         Vec::new(),
@@ -3510,7 +3541,7 @@ fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folde
         Vec::new(),
         vec![task_collection],
         Vec::new(),
-        Vec::new(),
+        vec![event],
         Vec::new(),
         Vec::new(),
     );
@@ -3582,6 +3613,14 @@ fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folde
     assert!(serialized
         .windows(class.len())
         .any(|window| window == class));
+    let serialized_count = serialize_hierarchy_row(
+        *calendar_row,
+        &mailboxes,
+        &snapshot,
+        &[PID_TAG_CONTENT_COUNT],
+        Uuid::nil(),
+    );
+    assert_eq!(u32::from_le_bytes(serialized_count.try_into().unwrap()), 1);
 
     for (folder_id, expected) in [(TASKS_FOLDER_ID, "IPF.Task")] {
         let row = rows

@@ -262,6 +262,17 @@ pub(in crate::mapi) fn serialize_advertised_special_folder_row_with_mailbox_guid
     columns: &[u32],
     mailbox_guid: Uuid,
 ) -> Vec<u8> {
+    serialize_advertised_special_folder_row_with_counts(folder_id, columns, mailbox_guid, 0, 0, 0)
+}
+
+pub(super) fn serialize_advertised_special_folder_row_with_counts(
+    folder_id: u64,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+    content_count: u32,
+    unread_count: u32,
+    deleted_count: u32,
+) -> Vec<u8> {
     let mut row = Vec::new();
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
@@ -285,9 +296,9 @@ pub(in crate::mapi) fn serialize_advertised_special_folder_row_with_mailbox_guid
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, special_folder_type(folder_id)),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
-            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
-                write_u32(&mut row, 0)
-            }
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, content_count),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, unread_count),
+            PID_TAG_DELETED_COUNT_TOTAL => write_u32(&mut row, deleted_count),
             PID_TAG_SUBFOLDERS => {
                 row.push((has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID) as u8)
             }
