@@ -164,13 +164,20 @@ pub(in crate::mapi::dispatch) fn format_inbox_associated_config_summary(
     if !associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let messages = debug_associated_table_rows(folder_id, snapshot, None, Uuid::nil())
-        .into_iter()
-        .filter_map(|row| match row {
-            DebugAssociatedTableRow::Config(message) => Some(message),
-            DebugAssociatedTableRow::NamedView(_) => None,
-        })
-        .collect::<Vec<_>>();
+    let restriction = MapiRestriction::Content {
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: "IPM.Configuration.".to_string(),
+        fuzzy_level_low: 0x0002,
+        fuzzy_level_high: 0x0001,
+    };
+    let messages =
+        debug_associated_table_rows(folder_id, snapshot, Some(&restriction), Uuid::nil())
+            .into_iter()
+            .filter_map(|row| match row {
+                DebugAssociatedTableRow::Config(message) => Some(message),
+                DebugAssociatedTableRow::NamedView(_) => None,
+            })
+            .collect::<Vec<_>>();
     let mut parts = Vec::new();
     for message in &messages {
         let source_key = mapi_mailstore::source_key_for_store_id(message.id);

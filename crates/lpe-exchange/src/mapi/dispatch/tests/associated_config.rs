@@ -513,8 +513,15 @@ fn calendar_configuration_debug_contract_uses_roaming_properties() {
 #[test]
 fn inbox_associated_config_summary_reports_modeled_startup_rows() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let account_prefs_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000021);
     let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000099999);
     let header_id = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
+    crate::mapi::identity::remember_mapi_identity(
+        account_prefs_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 997,
+        ),
+    );
     crate::mapi::identity::remember_mapi_identity(
         shortcut_id,
         crate::mapi::identity::mapi_store_id(
@@ -527,39 +534,50 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 998,
         ),
     );
-    let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
-        crate::store::MapiNavigationShortcutRecord {
-            id: header_id,
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+            id: account_prefs_id,
             account_id,
-            subject: "Mail".to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 0,
-            group_header_id: Some(header_id),
-            group_name: "Mail".to_string(),
-        },
-        crate::store::MapiNavigationShortcutRecord {
-            id: shortcut_id,
-            account_id,
-            subject: "Pinned Inbox".to_string(),
-            target_folder_id: Some(INBOX_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 127,
-            group_header_id: Some(header_id),
-            group_name: "Mail".to_string(),
-        },
-    ]);
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "IPM.Configuration.AccountPrefs".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+            }),
+        }])
+        .with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: header_id,
+                account_id,
+                subject: "Mail".to_string(),
+                target_folder_id: None,
+                shortcut_type: 4,
+                flags: 0,
+                save_stamp: 0,
+                section: 1,
+                ordinal: 0,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Pinned Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                save_stamp: 0,
+                section: 1,
+                ordinal: 127,
+                group_header_id: Some(header_id),
+                group_name: "Mail".to_string(),
+            },
+        ]);
 
     let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
     assert!(
-        !summary.contains("class=IPM.Configuration.AccountPrefs"),
+        summary.contains("class=IPM.Configuration.AccountPrefs"),
         "{summary}"
     );
     assert!(

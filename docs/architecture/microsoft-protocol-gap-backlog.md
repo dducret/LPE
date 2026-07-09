@@ -29,8 +29,8 @@ Status as of 2026-07-09:
 | Generated report freshness | Passed: `cargo test -p lpe-exchange microsoft_protocol_gap_report_is_current` |
 | Report rows classified in this backlog | Passed: 120 of 120 generated rows are referenced after expanding row ranges |
 | Duplicate protocol IDs in `docs/microsoft/protocol-sources.toml` | Passed: none found |
-| Cached PDF has a protocol-source entry | Failed: `[MS-OXCFXICS].pdf`, `[MS-OXCMAPIHTTP].pdf`, and `[MS-OXNSPI].pdf` exist under `docs/microsoft/exchange_protocols/`, but their protocol-source entries point to `docs/microsoft/cache/` paths |
-| Cached protocol ID appears in the generated constants gap report | Failed: `ReadmefirstExProto` is recorded in `docs/microsoft/protocol-sources.toml` but does not appear in `docs/architecture/microsoft-protocol-constants-gap.md` |
+| Cached PDF has a protocol-source entry | Passed: `MS-OXCFXICS`, `MS-OXCMAPIHTTP`, and `MS-OXNSPI` source entries point to the cached `docs/microsoft/exchange_protocols/` PDFs used by the audit |
+| Cached protocol ID appears in the generated constants gap report | Passed: protocol entries map to generated report rows; the Exchange documentation-set readme is recorded as a non-protocol `[[reference]]` and is intentionally outside the constants gap report |
 
 Final row status counts for the generated report:
 
@@ -41,9 +41,8 @@ Final row status counts for the generated report:
 | Deferred with clear architecture rationale / trace gate | G023-G024, G028, G032, G065-G068, G079, G081-G085 | 14 |
 | Still untriaged or weakly evidenced | none at row level | 0 |
 
-The row-level audit is classified, but the overall gap audit is not complete
-until the two protocol-source coverage failures above are resolved or explicitly
-documented as accepted exceptions.
+The row-level audit is classified, and the protocol-source coverage blockers are
+resolved for this revision.
 
 ## Outlook Profile/MAPI
 

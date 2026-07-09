@@ -67,14 +67,21 @@ pub(super) fn format_ipm_configuration_contract_summary(
     if !associated || folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
-    let rows = snapshot
-        .associated_config_messages_for_folder(folder_id)
-        .into_iter()
-        .filter(|message| {
-            crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
-                && associated_config_visible_in_table(folder_id, None, message)
-        })
-        .collect::<Vec<_>>();
+    let prefix_restriction = outlook_configuration_prefix_debug_restriction();
+    let rows =
+        debug_associated_table_rows(folder_id, snapshot, Some(&prefix_restriction), Uuid::nil())
+            .into_iter()
+            .filter_map(|row| match row {
+                DebugAssociatedTableRow::Config(message)
+                    if crate::mapi_store::is_outlook_configuration_message_class(
+                        &message.message_class,
+                    ) =>
+                {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
     let missing_columns = missing_debug_property_tags(
         &[
             PID_TAG_FOLDER_ID,
@@ -598,12 +605,7 @@ pub(super) fn format_inbox_fai_handoff_visibility_context(
     let unfiltered_rows = debug_associated_table_rows(INBOX_FOLDER_ID, snapshot, None, account_id);
     let current_rows =
         debug_associated_table_rows(INBOX_FOLDER_ID, snapshot, restriction, account_id);
-    let prefix_restriction = MapiRestriction::Content {
-        property_tag: PID_TAG_MESSAGE_CLASS_W,
-        value: "IPM.Configuration.".to_string(),
-        fuzzy_level_low: 0x0002,
-        fuzzy_level_high: 0x0001,
-    };
+    let prefix_restriction = outlook_configuration_prefix_debug_restriction();
     let prefix_rows = debug_associated_table_rows(
         INBOX_FOLDER_ID,
         snapshot,
@@ -891,8 +893,19 @@ fn format_inbox_associated_prefix_find_summary(
     sort_orders: &[MapiSortOrder],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
-    rows.retain(|message| associated_config_visible_in_table(INBOX_FOLDER_ID, None, message));
+    let prefix_restriction = outlook_configuration_prefix_debug_restriction();
+    let mut rows = debug_associated_table_rows(
+        INBOX_FOLDER_ID,
+        snapshot,
+        Some(&prefix_restriction),
+        Uuid::nil(),
+    )
+    .into_iter()
+    .filter_map(|row| match row {
+        DebugAssociatedTableRow::Config(message) => Some(message),
+        DebugAssociatedTableRow::NamedView(_) => None,
+    })
+    .collect::<Vec<_>>();
     sort_associated_config_messages_for_debug(&mut rows, sort_orders);
     let first_class = rows
         .get(position)
@@ -909,6 +922,15 @@ fn format_inbox_associated_prefix_find_summary(
         first_class == "IPM.Configuration.AccountPrefs",
         classes
     )
+}
+
+fn outlook_configuration_prefix_debug_restriction() -> MapiRestriction {
+    MapiRestriction::Content {
+        property_tag: PID_TAG_MESSAGE_CLASS_W,
+        value: "IPM.Configuration.".to_string(),
+        fuzzy_level_low: 0x0002,
+        fuzzy_level_high: 0x0001,
+    }
 }
 
 pub(super) fn inbox_associated_broad_findrow_matched(
