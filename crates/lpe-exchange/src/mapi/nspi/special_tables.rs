@@ -21,10 +21,12 @@ struct NspiSpecialTableContainer {
     is_master: bool,
 }
 
+// MS-OXOABK 2.2.1.1 requires "/" for the GAL and "/guid=<32 HEXDIG>" for
+// every other address-list DN embedded in an MS-OXNSPI 3.1.4.1.3 hierarchy row.
 const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "Global Address List",
-        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
+        dn: "/",
         container_id: 0,
         depth: 0,
         flags: AB_RECIPIENTS | AB_SUBCONTAINERS | AB_UNMODIFIABLE,
@@ -32,7 +34,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Users",
-        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Users",
+        dn: "/guid=5f462d24409b4de39ac520f4bb7bf2a1",
         container_id: 2,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -40,7 +42,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Groups",
-        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Groups",
+        dn: "/guid=ca66e476bca14d44aa1012e422225805",
         container_id: 3,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -48,7 +50,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     },
     NspiSpecialTableContainer {
         display_name: "All Contacts",
-        dn: "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Contacts",
+        dn: "/guid=69f67788f05649cd862d51c09217eaa8",
         container_id: 4,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
@@ -219,4 +221,34 @@ fn format_nspi_special_table_containers_for_debug(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchy_permanent_entry_ids_use_address_list_dn_forms() {
+        for container in NSPI_SPECIAL_TABLE_CONTAINERS {
+            let entry_id = nspi_container_entry_id(container.dn);
+
+            assert_eq!(&entry_id[..4], &[0, 0, 0, 0]);
+            assert_eq!(&entry_id[4..20], &NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);
+            assert_eq!(u32::from_le_bytes(entry_id[20..24].try_into().unwrap()), 1);
+            assert_eq!(
+                u32::from_le_bytes(entry_id[24..28].try_into().unwrap()),
+                DT_CONTAINER
+            );
+            assert_eq!(entry_id.last(), Some(&0));
+
+            let dn = std::str::from_utf8(&entry_id[28..entry_id.len() - 1]).unwrap();
+            if container.container_id == 0 {
+                assert_eq!(dn, "/");
+            } else {
+                let guid = dn.strip_prefix("/guid=").expect("address-list DN");
+                assert_eq!(guid.len(), 32);
+                assert!(guid.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            }
+        }
+    }
 }

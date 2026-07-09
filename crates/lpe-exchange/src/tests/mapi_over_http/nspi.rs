@@ -1627,7 +1627,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     "{request_type}"
                 );
                 let mut offset = 22usize;
-                let gal_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List\0";
+                let gal_dn = b"/\0";
                 let special_rows: [(&str, &[u8], u32, u32, u32, u8); 4] = [
                     (
                         "Global Address List",
@@ -1639,8 +1639,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     ),
                     (
                         "All Users",
-                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Users\0"
-                            .as_slice(),
+                        b"/guid=5f462d24409b4de39ac520f4bb7bf2a1\0".as_slice(),
                         1,
                         2,
                         0x0000_0009,
@@ -1648,8 +1647,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     ),
                     (
                         "All Groups",
-                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Groups\0"
-                            .as_slice(),
+                        b"/guid=ca66e476bca14d44aa1012e422225805\0".as_slice(),
                         1,
                         3,
                         0x0000_0009,
@@ -1657,8 +1655,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                     ),
                     (
                         "All Contacts",
-                        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=All Contacts\0"
-                            .as_slice(),
+                        b"/guid=69f67788f05649cd862d51c09217eaa8\0".as_slice(),
                         1,
                         4,
                         0x0000_0009,

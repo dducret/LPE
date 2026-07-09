@@ -48,7 +48,7 @@ published version available from Microsoft Learn on that date.
 | `DNToMId` / `DNToEPH` | Maps tenant-visible legacy DNs and SMTP values to minimal IDs for Outlook address-book bootstrap. | Canonical account/contact/distribution-list row projection. | Supported |
 | `GetPropList` / `QueryColumns` | Returns the bounded bootstrap property set used by Outlook profile/address-book probes. | No storage mutation. | Supported |
 | `SeekEntries` | Returns matching row data over the tenant-visible projection. | Canonical accounts and readable contacts. | Supported |
-| `GetSpecialTable` | Returns the bounded static address-book hierarchy rows for Global Address List, All Users, All Groups, and All Contacts with the documented hierarchy properties in order: entry ID, container flags, depth, container ID, display name, and master flag. | Static compatibility projection. | Supported |
+| `GetSpecialTable` | Returns the bounded static address-book hierarchy rows for Global Address List, All Users, All Groups, and All Contacts with the documented hierarchy properties in order: entry ID, container flags, depth, container ID, display name, and master flag. Permanent entry IDs use the `MS-OXOABK` address-list DN forms: `/` for the GAL and `/guid=<32 hex digits>` for other containers. | Static compatibility projection. | Supported |
 | `GetTemplateInfo` | Returns bounded principal properties for compatibility probes. | Authenticated principal projection. | Bounded |
 | `GetAddressBookUrl` | Returns `/mapi/nspi/` public URL. | Request headers only. | Supported |
 | `GetMailboxUrl` | Returns `/mapi/emsmdb/` public URL. | Request headers only. | Supported |

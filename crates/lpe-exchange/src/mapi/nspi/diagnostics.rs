@@ -248,8 +248,9 @@ pub(super) fn log_nspi_response_contract(
         body_contains_no_support = nspi_body_contains_status(body, 0x8004_0102),
         special_table_contains_parent_entry_id =
             nspi_body_contains_property_tag(body, 0xFFFC_0102),
-        special_table_contains_synthetic_guid_dn = nspi_body_contains_ascii(body, b"/guid="),
-        special_table_contains_configuration_address_list_dn =
+        special_table_contains_gal_root_dn = nspi_body_contains_ascii(body, b"/\0"),
+        special_table_contains_address_list_guid_dn = nspi_body_contains_ascii(body, b"/guid="),
+        special_table_contains_legacy_configuration_dn =
             nspi_body_contains_ascii(body, b"cn=Configuration/cn=Address Lists"),
         rowset_present = rowset_present,
         returned_row_count = returned_row_count,

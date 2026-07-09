@@ -62,34 +62,32 @@ async fn get_hierarchy_info_returns_successful_address_book_hierarchy() {
     assert!(!body
         .windows(4)
         .any(|window| window == 0xFFFC_0102u32.to_le_bytes()));
-    assert!(body
-        .windows(
-            b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List"
-                .len()
-        )
-        .any(|window| window
-            == b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List"));
-    assert!(!body.windows(6).any(|window| window == b"/guid="));
+    assert!(body.windows(2).any(|window| window == b"/\0"));
+    assert!(body.windows(6).any(|window| window == b"/guid="));
+    assert!(!body
+        .windows(b"cn=Configuration/cn=Address Lists".len())
+        .any(|window| window == b"cn=Configuration/cn=Address Lists"));
 }
 
 #[test]
-fn nspi_special_table_compatibility_detectors_catch_old_outlook_blockers() {
+fn nspi_special_table_compatibility_detectors_identify_spec_address_list_dns() {
     let mut old_shape = Vec::new();
     old_shape.extend_from_slice(&0xFFFC_0102u32.to_le_bytes());
-    old_shape.extend_from_slice(b"/guid=741f6fd38e1a654f9d422dfb451c8f11");
+    old_shape.extend_from_slice(
+        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
+    );
 
     assert!(nspi_body_contains_property_tag(&old_shape, 0xFFFC_0102));
-    assert!(nspi_body_contains_ascii(&old_shape, b"/guid="));
-    assert!(!nspi_body_contains_ascii(
+    assert!(!nspi_body_contains_ascii(&old_shape, b"/guid="));
+    assert!(nspi_body_contains_ascii(
         &old_shape,
         b"cn=Configuration/cn=Address Lists"
     ));
 
-    let fixed_shape =
-        b"/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List";
+    let fixed_shape = b"/guid=5f462d24409b4de39ac520f4bb7bf2a1";
     assert!(!nspi_body_contains_property_tag(fixed_shape, 0xFFFC_0102));
-    assert!(!nspi_body_contains_ascii(fixed_shape, b"/guid="));
-    assert!(nspi_body_contains_ascii(
+    assert!(nspi_body_contains_ascii(fixed_shape, b"/guid="));
+    assert!(!nspi_body_contains_ascii(
         fixed_shape,
         b"cn=Configuration/cn=Address Lists"
     ));
