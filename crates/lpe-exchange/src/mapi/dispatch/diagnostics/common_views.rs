@@ -521,7 +521,7 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
     let table_primary_sort_tag = sort_orders.first().map(|sort| sort.property_tag);
     let table_primary_sort_order = sort_orders.first().map(|sort| sort.order);
     let descriptor_missing_from_table =
-        normal_message_table_unsupported_columns_from_summary(&descriptor_columns);
+        default_view_table_unsupported_columns_from_summary(folder_id, &descriptor_columns);
     let descriptor_columns_not_selected = missing_debug_property_tags(&descriptor_columns, columns);
     let table_sort_matches_descriptor = descriptor_sort_tag
         .zip(table_primary_sort_tag)
@@ -562,8 +562,12 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
     )
 }
 
-fn normal_message_table_unsupported_columns_from_summary(columns: &[u32]) -> String {
-    let support = normal_message_table_column_support_summary(columns);
+fn default_view_table_unsupported_columns_from_summary(folder_id: u64, columns: &[u32]) -> String {
+    let support = if folder_id == CALENDAR_FOLDER_ID {
+        calendar_event_table_column_support_summary(columns)
+    } else {
+        normal_message_table_column_support_summary(columns)
+    };
     let defaulted = support_field(&support, "defaulted");
     let named_or_dynamic = support_field(&support, "named_or_dynamic");
     [defaulted, named_or_dynamic]

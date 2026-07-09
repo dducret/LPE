@@ -346,7 +346,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "LDAP directory extensions",
         spec: "MS-OXLDAP Exchange LDAP extensions",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxldap/",
-        anchor: "`ARCHITECTURE.md`, `docs/architecture/client-autoconfiguration.md`, `docs/architecture/ews-mapi-mvp.md`",
+        anchor: "`ARCHITECTURE.md`, `docs/architecture/client-autoconfiguration.md`, `docs/architecture/ews-mapi-mvp.md`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "LPE does not expose an Exchange LDAP listener or Active Directory service connection point. Client discovery and address-book behavior use documented Autodiscover, EWS, NSPI, and canonical directory/contact APIs instead.",
         gaps: "MS-OXLDAP attribute extensions, LDAP search/bind behavior, directory replication, and Active Directory schema objects are not implemented or advertised by LPE.",
     },
@@ -354,7 +354,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "Offline Address Book files",
         spec: "MS-OXOAB OAB file format",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoab/",
-        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/outlook-exchange-parity-roadmap.md`, `crates/lpe-exchange/src/mapi/nspi.rs`",
+        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/outlook-exchange-parity-roadmap.md`, `crates/lpe-exchange/src/mapi/nspi.rs`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "LPE exposes address-book data through bounded NSPI, EWS name resolution, contacts, and directory/group projections. It does not generate or publish OAB version 2, 3, or 4 files.",
         gaps: "MS-OXOAB browse/detail/RDN/ANR files, differential OAB generation, OAB manifest/versioning, compressed download packages, and OAB client download endpoints are not implemented.",
     },
@@ -378,7 +378,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "OAB public-folder retrieval",
         spec: "MS-OXPFOAB OAB public-folder retrieval",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxpfoab/",
-        anchor: "`docs/architecture/ews-mapi-mvp.md`, `crates/lpe-exchange/src/tests/mapi_over_http/public_folders.rs`, `crates/lpe-exchange/src/mapi/nspi.rs`",
+        anchor: "`docs/architecture/ews-mapi-mvp.md`, `crates/lpe-exchange/src/tests/mapi_over_http/public_folders.rs`, `crates/lpe-exchange/src/mapi/nspi.rs`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "LPE supports bounded public-folder items and NSPI address-book projections, but does not use public folders as the OAB distribution mechanism.",
         gaps: "OAB public-folder hierarchy discovery, full/differential OAB messages, OAB attachment properties, version files, and client retrieval through public-folder OAB messages are not implemented.",
     },
@@ -394,7 +394,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "TNEF transport encapsulation",
         spec: "MS-OXTNEF TNEF data algorithm",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxtnef/",
-        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/mapi-full-object-support-execution.md`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs`",
+        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/mapi-full-object-support-execution.md`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "TNEF is tracked as an explicit interoperability gap. Canonical message, MIME, MAPI, EWS, and ActiveSync paths use LPE message/attachment state rather than generating or parsing TNEF blobs.",
         gaps: "MS-OXTNEF attribute parsing, checksum handling, attachment/message attribute conversion, `winmail.dat` generation, and inbound TNEF extraction are not implemented.",
     },
@@ -506,7 +506,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "Offline Address Book web retrieval",
         spec: "MS-OXWOAB OAB retrieval file format",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwoab/",
-        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/outlook-exchange-parity-roadmap.md`, `crates/lpe-exchange/src/mapi/nspi.rs`",
+        anchor: "`docs/architecture/ews-mapi-mvp.md`, `docs/architecture/outlook-exchange-parity-roadmap.md`, `crates/lpe-exchange/src/mapi/nspi.rs`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "LPE exposes address-book data through bounded NSPI/EWS/contact projections and does not publish OAB web download files.",
         gaps: "OAB retrieval manifests, web distribution files, compressed OAB payloads, differential download behavior, and OAB virtual directory semantics are not implemented.",
     },
@@ -522,7 +522,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "Journal report file format",
         spec: "MS-XJRNL journal record message file format",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xjrnl/",
-        anchor: "`docs/architecture/notes-journal-reminders.md`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs`",
+        anchor: "`docs/architecture/notes-journal-reminders.md`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "LPE supports canonical Outlook journal entries as user-visible collaboration state, but does not implement Exchange transport journal report file generation or parsing.",
         gaps: "Envelope-part structures, journal report recipient classification, redirection metadata, and transport journal record serialization are not implemented.",
     },
@@ -530,7 +530,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "Exchange postmark validation",
         spec: "MS-OXPSVAL email postmark validation",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxpsval/",
-        anchor: "`docs/architecture/mail-security-and-traceability.md`, `LPE-CT/src/smtp.rs`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs`",
+        anchor: "`docs/architecture/mail-security-and-traceability.md`, `LPE-CT/src/smtp.rs`, `crates/lpe-exchange/src/microsoft_protocol_audit.rs::documentation_only_rows_pin_explicit_unsupported_boundaries`",
         implemented: "Perimeter anti-abuse behavior is owned by LPE-CT scoring, authentication, reputation, DKIM/SPF/DMARC, quarantine, and trace state. LPE does not use Exchange postmark puzzles as a trust signal.",
         gaps: "Postmark puzzle generation, hash validation, postmark header processing, and postmark-based spam scoring are not implemented.",
     },
@@ -546,9 +546,9 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "SMTP OAuth extension",
         spec: "MS-XOAUTH OAuth 2.0 SMTP extension",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xoauth/",
-        anchor: "`docs/architecture/client-autoconfiguration.md`, `docs/architecture/mailbox-modern-auth-mvp.md`, `LPE-CT/src/submission.rs::tests::submit_message_posts_trace_header_and_returns_success`",
-        implemented: "LPE does not advertise SMTP XOAUTH on public ingress or client submission. Mailbox bearer-token support remains scoped to adapters that explicitly implement it, such as ActiveSync and DAV, and does not imply SMTP XOAUTH publication.",
-        gaps: "Exchange server-to-server OAuth extension semantics, arbitrary OAuth token formats across SMTP, and SMTP XOAUTH SASL negotiation are not implemented.",
+        anchor: "`docs/architecture/client-autoconfiguration.md`, `docs/architecture/mailbox-modern-auth-mvp.md`, `LPE-CT/src/submission.rs::tests::smtp_xoauth_is_rejected_before_core_auth_request`, `submit_message_posts_trace_header_and_returns_success`",
+        implemented: "LPE does not advertise SMTP XOAUTH on public ingress or client submission. The LPE-CT submission listener rejects `AUTH XOAUTH2` before contacting core authentication, while bounded `AUTH PLAIN`/`LOGIN` submission continues through canonical LPE submission.",
+        gaps: "Exchange server-to-server OAuth extension semantics, arbitrary OAuth token formats across SMTP, and SMTP XOAUTH SASL negotiation are not implemented or advertised.",
     },
     ReportRow {
         surface: "DAV calendar extensions",
@@ -1066,7 +1066,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         surface: "EWS site mailboxes",
         spec: "MS-OXWSSMBX site mailbox operations",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwssmbx/",
-        anchor: "`ARCHITECTURE.md`, `docs/architecture/ews-interoperability-matrix.md`",
+        anchor: "`ARCHITECTURE.md`, `docs/architecture/ews-interoperability-matrix.md`, `crates/lpe-exchange/src/service/ews/responses.rs::tests::site_mailbox_operations_return_explicit_unsupported_errors`",
         implemented: "No site mailbox EWS operation is implemented or advertised. LPE keeps collaboration state in canonical mailbox, public-folder, contact, calendar, task, and rights stores.",
         gaps: "`SetTeamMailbox` and `UnpinTeamMailbox` are not implemented. SharePoint site-mailbox coupling and Exchange site-mailbox pinning state are outside current LPE scope.",
     },
@@ -1270,5 +1270,76 @@ mod tests {
         let actual = include_str!("../../../docs/architecture/microsoft-protocol-constants-gap.md");
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn documentation_only_rows_pin_explicit_unsupported_boundaries() {
+        let rows = [
+            (
+                "LDAP directory extensions",
+                "MS-OXLDAP",
+                ["LDAP listener", "not implemented or advertised"],
+            ),
+            (
+                "Offline Address Book files",
+                "MS-OXOAB",
+                ["does not generate or publish OAB", "not implemented"],
+            ),
+            (
+                "OAB public-folder retrieval",
+                "MS-OXPFOAB",
+                [
+                    "does not use public folders as the OAB distribution mechanism",
+                    "not implemented",
+                ],
+            ),
+            (
+                "TNEF transport encapsulation",
+                "MS-OXTNEF",
+                ["explicit interoperability gap", "not implemented"],
+            ),
+            (
+                "Offline Address Book web retrieval",
+                "MS-OXWOAB",
+                ["does not publish OAB web download files", "not implemented"],
+            ),
+            (
+                "Journal report file format",
+                "MS-XJRNL",
+                [
+                    "does not implement Exchange transport journal report",
+                    "not implemented",
+                ],
+            ),
+            (
+                "Exchange postmark validation",
+                "MS-OXPSVAL",
+                ["does not use Exchange postmark puzzles", "not implemented"],
+            ),
+        ];
+
+        for (surface, spec_id, required_phrases) in rows {
+            let row = REPORT_ROWS
+                .iter()
+                .find(|row| row.surface == surface)
+                .unwrap_or_else(|| panic!("missing audit row for {surface}"));
+            let row_text = format!("{} {} {}", row.implemented, row.gaps, row.anchor);
+
+            assert!(
+                row.spec.contains(spec_id),
+                "{surface} should cite the focused Microsoft protocol id"
+            );
+            assert!(
+                row.anchor
+                    .contains("documentation_only_rows_pin_explicit_unsupported_boundaries"),
+                "{surface} should point to this boundary test instead of only broad documentation"
+            );
+            for phrase in required_phrases {
+                assert!(
+                    row_text.contains(phrase),
+                    "{surface} should keep explicit unsupported wording for {phrase}"
+                );
+            }
+        }
     }
 }

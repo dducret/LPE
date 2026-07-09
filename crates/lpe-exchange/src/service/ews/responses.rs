@@ -327,3 +327,21 @@ pub(in crate::service) fn get_password_expiration_date_error_response(
         message = escape_xml(message),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn site_mailbox_operations_return_explicit_unsupported_errors() {
+        for operation in ["SetTeamMailbox", "UnpinTeamMailbox"] {
+            let response = unsupported_operation_response(operation);
+
+            assert!(response.contains(&format!("<m:{operation}Response>")));
+            assert!(response.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+            assert!(response.contains(&format!(
+                "<m:MessageText>{operation} is not implemented by the EWS MVP.</m:MessageText>"
+            )));
+        }
+    }
+}

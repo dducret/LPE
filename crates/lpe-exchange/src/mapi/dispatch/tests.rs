@@ -851,6 +851,41 @@ fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_s
 }
 
 #[test]
+fn calendar_table_compatibility_validates_calendar_descriptor_support() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let contract = format_default_view_table_compatibility_contract(
+        CALENDAR_FOLDER_ID,
+        false,
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
+            PID_LID_OUTLOOK_COMMON_8578_TAG,
+            PID_LID_SIDE_EFFECTS_TAG,
+        ],
+        &[MapiSortOrder {
+            property_tag: PID_LID_COMMON_START_TAG,
+            order: 0,
+        }],
+        None,
+        &snapshot,
+    );
+
+    assert!(
+        contract.contains("descriptor_columns_missing_from_table=;"),
+        "{contract}"
+    );
+    assert!(contract
+        .contains("descriptor_columns_not_selected=0x85160040,0x85170040,0x8208001f,0x82050003"));
+    assert!(contract.contains("table_sort_matches_descriptor=true"));
+}
+
+#[test]
 fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release() {
     let inbox_id = Uuid::from_u128(0x5555);
     crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);

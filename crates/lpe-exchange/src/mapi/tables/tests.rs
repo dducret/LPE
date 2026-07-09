@@ -5807,7 +5807,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
 
     let query_request = RopRequest {
         rop_id: RopId::QueryRows.as_u8(),
@@ -5827,10 +5827,10 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        2
     );
+    assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
-    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
@@ -5942,7 +5942,7 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
     assert_eq!(table_position(&table), Some(0));
     assert!(matches!(
         table,
@@ -5990,9 +5990,9 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        0
+        1
     );
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
+    assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
 }
 
 #[test]
@@ -6312,7 +6312,15 @@ fn inbox_associated_broad_configuration_restriction_projects_persisted_configs()
         .collect::<Vec<_>>();
     classes.sort_unstable();
 
-    assert_eq!(classes, vec!["IPM.Configuration.MessageListSettings",]);
+    assert_eq!(
+        classes,
+        vec![
+            "IPM.Configuration.Autocomplete",
+            "IPM.Configuration.ConversationPrefs",
+            "IPM.Configuration.MessageListSettings",
+            "IPM.Configuration.TableViewPreviewPrefs",
+        ]
+    );
 }
 
 #[test]
