@@ -1212,6 +1212,11 @@ impl MapiMailStoreSnapshot {
                 .into_iter()
                 .find(|message| message.id == item_id)
             })
+            .or_else(|| {
+                outlook_inbox_broad_startup_associated_config_defaults()
+                    .into_iter()
+                    .find(|message| message.id == item_id)
+            })
             .or_else(|| outlook_inbox_exact_virtual_associated_config_for_id(item_id))
             .or_else(|| {
                 outlook_quick_step_associated_config_defaults(
