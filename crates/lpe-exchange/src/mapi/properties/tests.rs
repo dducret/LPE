@@ -1938,6 +1938,7 @@ fn free_busy_entry_ids_advertises_freebusy_data_at_documented_index() {
 
 #[test]
 fn typed_scalar_property_values_round_trip() {
+    assert_eq!(round_trip(0x3001_0001, &MapiValue::Null), MapiValue::Null);
     assert_eq!(
         round_trip(0x3001_001F, &MapiValue::String("Inbox".to_string())),
         MapiValue::String("Inbox".to_string())

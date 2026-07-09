@@ -227,6 +227,10 @@ pub(in crate::mapi) fn message_body_stream_data(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
+    if property_tag == PID_TAG_RTF_COMPRESSED && open_mode != 0 {
+        return None;
+    }
+
     let (body_text, body_html) = match session.handles.get(&input_handle)? {
         MapiObject::Message {
             folder_id,
@@ -564,6 +568,7 @@ pub(in crate::mapi) fn stream_property_value(
     data: Vec<u8>,
 ) -> Option<MapiValue> {
     match property_tag {
+        PID_TAG_RTF_COMPRESSED => None,
         PID_TAG_BODY_STRING8 => Some(MapiValue::String(decode_string8_stream_value(&data))),
         PID_TAG_BODY_W | PID_TAG_BODY_HTML_W => {
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
@@ -718,4 +723,114 @@ fn decode_basic_html_entities(value: &str) -> String {
         .replace("&#39;", "'")
         .replace("&apos;", "'")
         .replace("&amp;", "&")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_session(object: MapiObject) -> MapiSession {
+        let mut handles = HashMap::new();
+        handles.insert(1, object);
+        MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376),
+            email: "sender@example.test".to_string(),
+            created_at: SystemTime::UNIX_EPOCH,
+            last_seen_at: SystemTime::UNIX_EPOCH,
+            first_request_type: String::new(),
+            first_request_id: String::new(),
+            last_request_type: String::new(),
+            last_request_id: String::new(),
+            request_count: 0,
+            execute_request_count: 0,
+            next_handle: 2,
+            handles,
+            message_statuses: HashMap::new(),
+            message_save_generations: HashMap::new(),
+            message_handle_generations: HashMap::new(),
+            pending_message_recipient_replacements: HashMap::new(),
+            pending_message_attachments: HashMap::new(),
+            pending_attachment_parent_messages: HashMap::new(),
+            pending_attachment_deletions: HashSet::new(),
+            pending_embedded_message_ids: HashMap::new(),
+            pending_embedded_message_attachments: HashMap::new(),
+            saved_embedded_messages: HashMap::new(),
+            saved_search_folder_definitions: HashMap::new(),
+            special_folder_aliases: HashMap::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            deleted_search_folder_definitions: HashSet::new(),
+            named_properties: HashMap::new(),
+            named_property_ids: HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: VecDeque::new(),
+            completed_execute_requests: HashMap::new(),
+            completed_execute_request_order: VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+            default_view_advertisements: HashMap::new(),
+            inbox_associated_config_stream_handles: HashSet::new(),
+            inbox_rule_organizer_stream_handles: HashSet::new(),
+            logon_identity: None,
+            outlook_smart_input_variant: "none".to_string(),
+            outlook_smart_input_variant_applied: false,
+        }
+    }
+
+    #[test]
+    fn rtf_compressed_body_stream_is_read_only_projection() {
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_TAG_BODY_W,
+            MapiValue::String("Canonical body".to_string()),
+        );
+        let object = MapiObject::PendingMessage {
+            folder_id: DRAFTS_FOLDER_ID,
+            properties,
+            recipients: Vec::new(),
+        };
+        let session = test_session(object);
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let (stream, writable_target) =
+            message_body_stream_data(&session, 1, PID_TAG_RTF_COMPRESSED, 0, &[], &[], &snapshot)
+                .expect("readable synthesized RTF stream");
+        assert!(writable_target.is_none());
+        assert_eq!(
+            u32::from_le_bytes(stream[8..12].try_into().unwrap()),
+            0x414C_454D
+        );
+        assert!(String::from_utf8_lossy(&stream[16..]).contains("Canonical body"));
+
+        assert!(message_body_stream_data(
+            &session,
+            1,
+            PID_TAG_RTF_COMPRESSED,
+            1,
+            &[],
+            &[],
+            &snapshot,
+        )
+        .is_none());
+        assert!(message_body_stream_data(
+            &session,
+            1,
+            PID_TAG_RTF_COMPRESSED,
+            2,
+            &[],
+            &[],
+            &snapshot,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn stream_property_value_rejects_client_originated_rtf_bytes() {
+        assert_eq!(
+            stream_property_value(PID_TAG_RTF_COMPRESSED, b"opaque rtf".to_vec()),
+            None
+        );
+    }
 }

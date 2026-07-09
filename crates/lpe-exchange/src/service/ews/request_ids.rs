@@ -26,15 +26,10 @@ pub(in crate::service) fn requested_transfer_item_ids(request: &str) -> Vec<Stri
         element_contents(request, "Item")
             .into_iter()
             .filter_map(|item| {
-                element_text(item, "ItemId")
-                    .or_else(|| element_text(item, "SourceItemId"))
-                    .or_else(|| element_text(item, "Subject"))
+                element_text(item, "ItemId").or_else(|| element_text(item, "SourceItemId"))
             })
             .filter(|value| !value.trim().is_empty()),
     );
-    if ids.is_empty() && request.contains("<t:Item") {
-        ids.push(format!("ews-upload:{}", Uuid::new_v4()));
-    }
     ids
 }
 

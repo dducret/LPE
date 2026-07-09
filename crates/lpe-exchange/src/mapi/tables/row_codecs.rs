@@ -44,6 +44,7 @@ fn write_query_rows_property_value(
 ) -> Option<usize> {
     let property_type = MapiPropertyTag::new(property_tag).property_type()?;
     match property_type {
+        MapiPropertyType::Null => Some(offset),
         MapiPropertyType::Integer16 => {
             write_fixed_query_rows_property_value(response, values, offset, 2)
         }
@@ -211,6 +212,7 @@ fn write_counted_query_rows_binary_values(
 
 pub(in crate::mapi) fn write_property_default(row: &mut Vec<u8>, property_tag: u32) {
     match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::Null) => {}
         Some(MapiPropertyType::Integer16) => write_u16(row, 0),
         Some(MapiPropertyType::Integer32) | Some(MapiPropertyType::Error) => write_u32(row, 0),
         Some(MapiPropertyType::Floating32) => row.extend_from_slice(&0.0f32.to_le_bytes()),

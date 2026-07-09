@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) fn format_debug_mapi_value(value: &MapiValue) -> String {
     match value {
+        MapiValue::Null => "null".to_string(),
         MapiValue::String(value) => format_debug_text_value(value),
         MapiValue::Binary(value) => {
             format!(

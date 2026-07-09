@@ -565,6 +565,7 @@ impl RopId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub(in crate::mapi) enum MapiPropertyType {
+    Null = 0x0001,
     Integer16 = 0x0002,
     Integer32 = 0x0003,
     Floating32 = 0x0004,
@@ -596,6 +597,7 @@ impl MapiPropertyType {
 
     pub(in crate::mapi) fn from_code(value: u16) -> Option<Self> {
         match value {
+            0x0001 => Some(Self::Null),
             0x0002 => Some(Self::Integer16),
             0x0003 => Some(Self::Integer32),
             0x0004 => Some(Self::Floating32),
@@ -636,7 +638,6 @@ impl MapiPropertyType {
     pub(in crate::mapi) fn known_unsupported_name(value: u16) -> Option<&'static str> {
         match value {
             0x0000 => Some("PtypUnspecified"),
-            0x0001 => Some("PtypNull"),
             0x0006 => Some("PtypCurrency"),
             0x0007 => Some("PtypFloatingTime"),
             0x000D => Some("PtypObject"),
@@ -943,6 +944,7 @@ mod tests {
         }
 
         let property_types = [
+            MapiPropertyType::Null,
             MapiPropertyType::Integer16,
             MapiPropertyType::Integer32,
             MapiPropertyType::Floating32,
@@ -1036,6 +1038,11 @@ mod tests {
             MapiPropertyType::from_code(0x001F),
             Some(MapiPropertyType::String)
         );
+        assert_eq!(
+            MapiPropertyType::from_code(0x0001),
+            Some(MapiPropertyType::Null)
+        );
+        assert_eq!(MapiPropertyType::known_unsupported_name(0x0001), None);
         assert_eq!(MapiPropertyType::from_code(0x000D), None);
         assert_eq!(
             MapiPropertyType::known_unsupported_name(0x000D),

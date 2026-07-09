@@ -5727,7 +5727,7 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
             <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
               <s:Body>
                 <m:UploadItems>
-                  <m:Items><t:Item><t:Subject>Imported fixture</t:Subject></t:Item></m:Items>
+                  <m:Items><t:Item><t:SourceItemId>message:22222222-2222-2222-2222-222222222222</t:SourceItemId></t:Item></m:Items>
                 </m:UploadItems>
               </s:Body>
             </s:Envelope>
@@ -5740,12 +5740,59 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
     assert!(body.contains("<m:UploadItemsResponse>"));
     assert!(body.contains("<m:Direction>import</m:Direction>"));
     assert!(body.contains("<m:TotalItems>1</m:TotalItems>"));
-    assert!(body.contains("Imported fixture"));
+    assert!(body.contains("message:22222222-2222-2222-2222-222222222222"));
 
     let jobs = jobs.lock().unwrap();
     assert_eq!(jobs.len(), 2);
     assert_eq!(jobs[0].direction, "export");
     assert_eq!(jobs[1].direction, "import");
+}
+
+#[tokio::test]
+async fn bulk_transfer_rejects_arbitrary_packages_without_side_effects() {
+    let jobs = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ews_transfer_jobs: jobs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:UploadItems>
+                  <m:Items><t:Item><t:Subject>Unsupported package</t:Subject></t:Item></m:Items>
+                </m:UploadItems>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UploadItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("arbitrary Exchange item packages are not imported"));
+    assert!(jobs.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ExportItems /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ExportItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("ExportItems requires at least one canonical ItemId"));
+    assert!(jobs.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

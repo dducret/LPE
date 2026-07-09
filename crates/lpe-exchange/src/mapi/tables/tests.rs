@@ -205,6 +205,10 @@ fn sent_default_view_sort_orders_by_client_submit_time() {
 
 #[test]
 fn property_defaults_serialize_floating_types_with_wire_widths() {
+    let mut null = Vec::new();
+    write_property_default(&mut null, 0x80BF_0001);
+    assert!(null.is_empty());
+
     let mut single = Vec::new();
     write_property_default(&mut single, 0x80BF_0004);
     assert_eq!(single, 0.0f32.to_le_bytes());

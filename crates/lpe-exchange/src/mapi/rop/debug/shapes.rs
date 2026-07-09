@@ -29,6 +29,7 @@ pub(in crate::mapi) fn view_descriptor_value_shape_for_debug(value: &MapiValue) 
 
 pub(in crate::mapi) fn mapi_value_shape_for_debug(value: &MapiValue) -> String {
     match value {
+        MapiValue::Null => "null".to_string(),
         MapiValue::Bool(value) => format!("bool={value}"),
         MapiValue::I16(value) => format!("i16={value}"),
         MapiValue::I32(value) => format!("i32={value}"),

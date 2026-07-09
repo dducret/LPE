@@ -780,8 +780,8 @@ fn classify_submission_failure_status(status: StatusCode) -> SubmissionFailureKi
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_auth_failure_status, classify_submission_failure_status, decode_auth_login_token,
-        decode_auth_plain, sanitize_smtp_text, smtp_auth_failure_reply,
+        authenticate_smtp_client, classify_auth_failure_status, classify_submission_failure_status,
+        decode_auth_login_token, decode_auth_plain, sanitize_smtp_text, smtp_auth_failure_reply,
         smtp_submission_failure_reply, submit_message, SmtpAuthFailureKind, SubmissionFailureKind,
     };
     use crate::env_test_lock;
@@ -865,6 +865,27 @@ mod tests {
             smtp_auth_failure_reply(SmtpAuthFailureKind::Permanent),
             "535 authentication mechanism rejected"
         );
+    }
+
+    #[tokio::test]
+    async fn smtp_xoauth_is_rejected_before_core_auth_request() {
+        let client = reqwest::Client::builder().build().unwrap();
+        let mut reader = tokio::io::BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+
+        let error = authenticate_smtp_client(
+            &client,
+            "http://127.0.0.1:9",
+            &mut reader,
+            &mut writer,
+            "AUTH XOAUTH2 bearer-token",
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.0, SmtpAuthFailureKind::Permanent);
+        assert_eq!(error.1, "unsupported auth mechanism");
+        assert!(writer.is_empty());
     }
 
     #[tokio::test]

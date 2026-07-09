@@ -3,6 +3,7 @@ use lpe_domain::crypto::hex_lower;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiValue {
+    Null,
     Bool(bool),
     I16(i16),
     I32(i32),
@@ -51,6 +52,7 @@ pub(in crate::mapi) fn mapi_properties_from_json(
 
 fn mapi_value_to_json(value: &MapiValue) -> serde_json::Value {
     match value {
+        MapiValue::Null => serde_json::json!({"type": "null", "value": null}),
         MapiValue::Bool(value) => serde_json::json!({"type": "bool", "value": value}),
         MapiValue::I16(value) => serde_json::json!({"type": "i16", "value": value}),
         MapiValue::I32(value) => serde_json::json!({"type": "i32", "value": value}),
@@ -87,6 +89,7 @@ fn mapi_value_from_json(value: &serde_json::Value) -> Option<MapiValue> {
     let value_type = value.get("type")?.as_str()?;
     let value = value.get("value")?;
     match value_type {
+        "null" => Some(MapiValue::Null),
         "bool" => Some(MapiValue::Bool(value.as_bool()?)),
         "i16" => Some(MapiValue::I16(value.as_i64()?.try_into().ok()?)),
         "i32" => Some(MapiValue::I32(value.as_i64()?.try_into().ok()?)),
@@ -158,6 +161,7 @@ pub(super) fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {
 
 pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue) {
     match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::Null) => {}
         Some(MapiPropertyType::Integer16) => write_u16(
             row,
             value
@@ -251,6 +255,7 @@ pub(in crate::mapi) fn parse_mapi_property_value(
     property_tag: u32,
 ) -> Result<MapiValue> {
     match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::Null) => Ok(MapiValue::Null),
         Some(MapiPropertyType::Integer16) => Ok(MapiValue::I16(cursor.read_u16()? as i16)),
         Some(MapiPropertyType::Integer32) => Ok(MapiValue::I32(cursor.read_i32()?)),
         Some(MapiPropertyType::Floating32) => {
@@ -458,6 +463,7 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 impl MapiValue {
     pub(in crate::mapi) fn as_i64(&self) -> Option<i64> {
         match self {
+            MapiValue::Null => None,
             MapiValue::Bool(value) => Some(i64::from(*value)),
             MapiValue::I16(value) => Some(i64::from(*value)),
             MapiValue::I32(value) => Some(i64::from(*value)),
@@ -480,6 +486,7 @@ impl MapiValue {
 
     pub(in crate::mapi) fn as_bool(&self) -> Option<bool> {
         match self {
+            MapiValue::Null => None,
             MapiValue::Bool(value) => Some(*value),
             MapiValue::I16(value) => Some(*value != 0),
             MapiValue::I32(value) => Some(*value != 0),
@@ -502,6 +509,7 @@ impl MapiValue {
 
     pub(in crate::mapi) fn as_text(&self) -> Option<&str> {
         match self {
+            MapiValue::Null => None,
             MapiValue::String(value) => Some(value),
             _ => None,
         }
@@ -509,6 +517,7 @@ impl MapiValue {
 
     pub(in crate::mapi) fn into_text(self) -> Option<String> {
         match self {
+            MapiValue::Null => None,
             MapiValue::Bool(value) => Some(value.to_string()),
             MapiValue::I16(value) => Some(value.to_string()),
             MapiValue::I32(value) => Some(value.to_string()),
@@ -531,6 +540,7 @@ impl MapiValue {
 
     pub(in crate::mapi) fn into_u32(self) -> Option<u32> {
         match self {
+            MapiValue::Null => None,
             MapiValue::Bool(value) => Some(u32::from(value)),
             MapiValue::I16(value) => u32::try_from(value).ok(),
             MapiValue::I32(value) => u32::try_from(value).ok(),
@@ -560,6 +570,7 @@ impl MapiValue {
 
     pub(in crate::mapi) fn size(&self) -> usize {
         match self {
+            MapiValue::Null => 0,
             MapiValue::Bool(_) => 1,
             MapiValue::I16(_) => 2,
             MapiValue::I32(_) | MapiValue::U32(_) => 4,

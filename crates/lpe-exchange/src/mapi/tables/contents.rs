@@ -73,6 +73,7 @@ fn named_property_id_matches(left: u32, right: u32) -> bool {
 
 fn category_value_to_string(value: &MapiValue) -> String {
     match value {
+        MapiValue::Null => String::new(),
         MapiValue::Bool(value) => value.to_string(),
         MapiValue::I16(value) => value.to_string(),
         MapiValue::I32(value) => value.to_string(),

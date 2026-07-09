@@ -61,6 +61,7 @@ pub(in crate::mapi::dispatch) fn format_optional_folder_id(folder_id: Option<u64
 
 pub(in crate::mapi::dispatch) fn mapi_value_debug_shape(value: &MapiValue) -> String {
     match value {
+        MapiValue::Null => "null".to_string(),
         MapiValue::Bool(_) => "bool".to_string(),
         MapiValue::I16(_) => "i16".to_string(),
         MapiValue::I32(_) => "i32".to_string(),

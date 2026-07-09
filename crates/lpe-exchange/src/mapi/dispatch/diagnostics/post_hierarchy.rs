@@ -337,6 +337,7 @@ fn set_properties_problem_details_for_debug(response: &[u8]) -> String {
 
 fn mapi_value_is_zero_or_default(value: &MapiValue) -> bool {
     match value {
+        MapiValue::Null => true,
         MapiValue::Bool(value) => !*value,
         MapiValue::I16(value) => *value == 0,
         MapiValue::I32(value) => *value == 0,

@@ -984,6 +984,7 @@ fn format_associated_config_selected_values(
 
 fn format_mapi_value_for_log(value: MapiValue) -> String {
     match value {
+        MapiValue::Null => "null".to_string(),
         MapiValue::Binary(bytes) => {
             format!(
                 "binary:bytes={};preview={}",

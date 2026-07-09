@@ -1497,9 +1497,8 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 &properties,
                 &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
             );
-            let sender_name =
-                optional_pending_text_property(&properties, &[PID_TAG_SENDER_NAME_W])
-                    .unwrap_or_default();
+            let sender_name = optional_pending_text_property(&properties, &[PID_TAG_SENDER_NAME_W])
+                .unwrap_or_default();
             let sender_email =
                 optional_pending_text_property(&properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
                     .unwrap_or_default();

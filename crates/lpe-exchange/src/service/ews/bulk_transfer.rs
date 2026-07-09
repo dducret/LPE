@@ -11,6 +11,13 @@ where
         request: &str,
     ) -> Result<String> {
         let item_ids = requested_transfer_item_ids(request);
+        if item_ids.is_empty() {
+            return Ok(operation_error_response(
+                "UploadItems",
+                "ErrorInvalidOperation",
+                "UploadItems requires explicit canonical ItemId or SourceItemId values; arbitrary Exchange item packages are not imported.",
+            ));
+        }
         let job = self
             .store
             .create_ews_transfer_job(
@@ -34,6 +41,13 @@ where
         request: &str,
     ) -> Result<String> {
         let item_ids = requested_item_ids(request);
+        if item_ids.is_empty() {
+            return Ok(operation_error_response(
+                "ExportItems",
+                "ErrorInvalidOperation",
+                "ExportItems requires at least one canonical ItemId.",
+            ));
+        }
         let job = self
             .store
             .create_ews_transfer_job(
