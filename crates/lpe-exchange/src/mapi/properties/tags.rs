@@ -455,8 +455,8 @@ pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 // PidLidSideEffects: [MS-OXPROPS] 2.299, behavior flags in [MS-OXCMSG] 2.2.1.16.
 pub(in crate::mapi) const PID_LID_SIDE_EFFECTS: u32 = 0x0000_8510;
-// PidLidSideEffects: MS-OXCMSG 2.2.1.16 open-on-delete/copy/move/context-menu bits.
-pub(in crate::mapi) const CALENDAR_EVENT_SIDE_EFFECTS: i32 = 0x0000_0161;
+// MS-OXOCAL 2.2.2.2 recommends delete/copy/move/coerce/context-menu side effects.
+pub(in crate::mapi) const CALENDAR_EVENT_SIDE_EFFECTS: i32 = 0x0000_0171;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8514: u32 = 0x0000_8514;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_8578: u32 = 0x0000_8578;
 pub(in crate::mapi) const PID_LID_OUTLOOK_COMMON_85B1: u32 = 0x0000_85B1;

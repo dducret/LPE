@@ -2370,7 +2370,7 @@ fn calendar_query_position_summary_projects_observed_outlook_columns() {
     assert!(summary.contains("duration_minutes=30"));
     assert!(summary.contains("zero_duration_timed=false"));
     assert!(summary.contains("0x85780003=0"));
-    assert!(summary.contains("0x85100003=353"));
+    assert!(summary.contains("0x85100003=369"));
     assert!(!summary.contains("0x67480014=default"));
     assert!(!summary.contains("0x674d0014=default"));
     assert!(!summary.contains("0x674e0003=default"));
