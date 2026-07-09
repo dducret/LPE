@@ -210,6 +210,15 @@ def parse_args() -> argparse.Namespace:
         "--current-build",
         help="current deployed git commit prefix to highlight current-build failures in --all",
     )
+    parser.add_argument(
+        "--last-runs",
+        type=int,
+        help="with --all, summarize only the newest N child run directories",
+    )
+    parser.add_argument(
+        "--since-run",
+        help="with --all, summarize child run directories whose names are >= this run stamp",
+    )
     return parser.parse_args()
 
 
@@ -376,6 +385,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "visible_release_request_shapes": Counter(),
         "visible_release_setcolumns_shapes": Counter(),
         "visible_release_pre_release_states": Counter(),
+        "visible_release_associated_prefix_find": Counter(),
         "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_handle_tables": Counter(),
@@ -386,6 +396,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "common_view_descriptor_getprops_issues": Counter(),
         "common_view_descriptor_getprops_contexts": set(),
         "post_visible_release_followups": Counter(),
+        "post_visible_release_rows_elsewhere_contexts": Counter(),
         "post_visible_release_terminal_events": Counter(),
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
@@ -395,6 +406,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "umolk_dictionary_info_versions": Counter(),
         "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
+        "default_view_special_folder_bootstrap_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
         "default_view_id_owners": defaultdict(set),
@@ -659,13 +671,15 @@ def record_broad_ipm_configuration_row_count_gap(
         field_text(fields, "ipm_configuration_contract_summary"),
         "rows",
     )
-    if config_rows <= table_rows:
+    expected_startup_rows = 1
+    if table_rows >= expected_startup_rows:
         return
     request_id = field_text(fields, "mapi_request_id") or "unknown"
     position = field_text(fields, "current_position") or "?"
     summary["broad_ipm_configuration_row_count_gaps"][
         f"request={request_id};position={position};table_rows={table_rows};"
-        f"config_rows={config_rows};missing={config_rows - table_rows}"
+        f"config_rows={config_rows};expected_startup_rows={expected_startup_rows};"
+        f"missing_startup_rows={expected_startup_rows - table_rows}"
     ] += 1
 
 
@@ -860,6 +874,15 @@ def record_post_visible_release_followup(
         summary["post_visible_release_followups"][
             "default_view_rows_elsewhere_without_inbox_rows"
         ] += 1
+        context = str(fields.get("last_default_view_normal_query_rows_context") or "")
+        if context:
+            role = first_field(context, "role") or "unknown"
+            folder = first_field(context, "folder") or "unknown"
+            handle = first_field(context, "handle") or "unknown"
+            position = first_field(context, "position") or "unknown"
+            summary["post_visible_release_rows_elsewhere_contexts"][
+                f"role={role};folder={folder};handle={handle};position={position}"
+            ] += 1
 
     umolk_probe_count = int_field(fields, "outlook_umolk_named_property_probe_count")
     umolk_not_found_count = int_field(fields, "outlook_umolk_getprops_not_found_count")
@@ -1003,6 +1026,13 @@ def record_visible_release_request_metrics(summary: dict[str, Any], text: str) -
         f"query_rows={query_rows_seen};content_sync={content_sync_seen};"
         f"live_handles={live_handle_count}"
     ] += 1
+
+    prefix_first_class = first_field(text, "prefix_find_summary")
+    account_prefs_first = first_field(text, "account_prefs_first") or "?"
+    if prefix_first_class:
+        summary["visible_release_associated_prefix_find"][
+            f"{prefix_first_class};account_prefs_first={account_prefs_first}"
+        ] += 1
 
     handle_slots = first_field(text, "release_handle_slots_before")
     if handle_slots:
@@ -1236,15 +1266,110 @@ def record_query_position_wire_fields(
 def record_default_view_folder_open_without_rows(
     summary: dict[str, Any], fields: dict[str, Any]
 ) -> None:
-    if field_text(fields, "default_view_folder_open_without_query_rows").lower() != "true":
+    direct_marker = (
+        field_text(fields, "default_view_folder_open_without_query_rows").lower() == "true"
+    )
+    failure_trace = field_text(fields, "outlook_view_failure_trace_summary")
+    setprops_context = field_text(fields, "post_hierarchy_last_setprops_request_contract")
+    if not direct_marker and not (
+        failure_trace and "default_view_folder_open:" in failure_trace and setprops_context
+    ):
+        if "default_folder_entry_ids_touched=true" in setprops_context:
+            base_keys = [
+                key
+                for key, count in summary["default_view_folder_open_without_rows"].items()
+                if count > 0 and "next=" not in key
+            ]
+            if len(base_keys) == 1:
+                if default_view_open_is_special_folder_bootstrap(
+                    fields, base_keys[0], setprops_context
+                ):
+                    move_default_view_folder_open_without_rows_to_special_folder_bootstrap(
+                        summary, base_keys[0], setprops_context
+                    )
+                else:
+                    refine_default_view_folder_open_without_rows_key(
+                        summary, base_keys[0], setprops_context
+                    )
         return
-    context = field_text(fields, "last_default_view_folder_open_context")
+    context = field_text(fields, "last_default_view_folder_open_context") or failure_trace
     role = first_field(context, "role") or "unknown"
     folder_id = first_field(context, "folder") or field_text(
         fields, "last_default_view_folder_open_folder_id"
     )
-    key = f"role={role};folder={folder_id or 'unknown'}"
+    base_key = f"role={role};folder={folder_id or 'unknown'}"
+    if default_view_open_is_special_folder_bootstrap(fields, base_key, setprops_context):
+        summary["default_view_special_folder_bootstrap_open_without_rows"][
+            default_view_folder_open_setprops_key(base_key, setprops_context)
+        ] += 1
+        if not direct_marker and summary["default_view_folder_open_without_rows"][base_key] > 0:
+            decrement_default_view_folder_open_without_rows(summary, base_key)
+        return
+    key = base_key
+    if "default_folder_entry_ids_touched=true" in setprops_context:
+        key = default_view_folder_open_setprops_key(base_key, setprops_context)
+        if not direct_marker and summary["default_view_folder_open_without_rows"][base_key] > 0:
+            summary["default_view_folder_open_without_rows"][base_key] -= 1
+            if summary["default_view_folder_open_without_rows"][base_key] == 0:
+                del summary["default_view_folder_open_without_rows"][base_key]
     summary["default_view_folder_open_without_rows"][key] += 1
+
+
+def default_view_open_is_special_folder_bootstrap(
+    fields: dict[str, Any], base_key: str, setprops_context: str
+) -> bool:
+    if not base_key.startswith("role=inbox;folder=0x0000000000050001"):
+        return False
+    if "default_folder_entry_ids_touched=true" not in setprops_context:
+        return False
+    if first_field(setprops_context, "problem_count") != "0":
+        return False
+    if first_field(setprops_context, "write_mode") != "ignored_canonical_projection":
+        return False
+    getprops_context = field_text(fields, "post_hierarchy_last_getprops_request_contract")
+    failure_trace = field_text(fields, "outlook_view_failure_trace_summary")
+    special_folder_probe_seen = (
+        "PidTagIpmAppointmentEntryId" in getprops_context
+        or "PidTagIpmAppointmentEntryId" in failure_trace
+        or "0x36d00102" in getprops_context.lower()
+        or "0x36d00102" in failure_trace.lower()
+    )
+    canonical_values_seen = "matches_expected=true" in setprops_context
+    return special_folder_probe_seen and canonical_values_seen
+
+
+def refine_default_view_folder_open_without_rows_key(
+    summary: dict[str, Any], base_key: str, setprops_context: str
+) -> None:
+    refined_key = default_view_folder_open_setprops_key(base_key, setprops_context)
+    decrement_default_view_folder_open_without_rows(summary, base_key)
+    summary["default_view_folder_open_without_rows"][refined_key] += 1
+
+
+def move_default_view_folder_open_without_rows_to_special_folder_bootstrap(
+    summary: dict[str, Any], base_key: str, setprops_context: str
+) -> None:
+    decrement_default_view_folder_open_without_rows(summary, base_key)
+    summary["default_view_special_folder_bootstrap_open_without_rows"][
+        default_view_folder_open_setprops_key(base_key, setprops_context)
+    ] += 1
+
+
+def decrement_default_view_folder_open_without_rows(
+    summary: dict[str, Any], key: str
+) -> None:
+    summary["default_view_folder_open_without_rows"][key] -= 1
+    if summary["default_view_folder_open_without_rows"][key] == 0:
+        del summary["default_view_folder_open_without_rows"][key]
+
+
+def default_view_folder_open_setprops_key(base_key: str, setprops_context: str) -> str:
+    write_mode = first_field(setprops_context, "write_mode") or "unknown"
+    problem_count = first_field(setprops_context, "problem_count") or "unknown"
+    return (
+        f"{base_key};next=setproperties_default_folder_entryids;"
+        f"write_mode={write_mode};problem_count={problem_count}"
+    )
 
 
 def record_post_calendar_query_position_named_property_probe(
@@ -1896,6 +2021,11 @@ def print_single_summary(
             limit=12,
         )
         print_counter(
+            "Default-view special-folder bootstrap open without QueryRows",
+            log["default_view_special_folder_bootstrap_open_without_rows"],
+            limit=12,
+        )
+        print_counter(
             "Default-view QueryPosition without QueryRows",
             log["default_view_query_position_without_rows"],
             limit=12,
@@ -1937,6 +2067,11 @@ def print_single_summary(
             limit=8,
         )
         print_counter(
+            "Visible Inbox release associated prefix FindRow",
+            log["visible_release_associated_prefix_find"],
+            limit=8,
+        )
+        print_counter(
             "Visible Inbox release handle slots",
             log["visible_release_handle_slots"],
             limit=8,
@@ -1959,6 +2094,11 @@ def print_single_summary(
         print_counter(
             "Post-visible-release followups",
             log["post_visible_release_followups"],
+            limit=8,
+        )
+        print_counter(
+            "Post-visible-release rows elsewhere contexts",
+            log["post_visible_release_rows_elsewhere_contexts"],
             limit=8,
         )
         print_counter(
@@ -2032,9 +2172,13 @@ def verdict_for_summary(
 
 
 def print_batch_summary(
-    trace_root: Path, logs_root: Path, current_build: str | None
+    trace_root: Path,
+    logs_root: Path,
+    current_build: str | None,
+    last_runs: int | None = None,
+    since_run: str | None = None,
 ) -> int:
-    runs = [path for path in sorted(trace_root.iterdir()) if path.is_dir()]
+    runs = selected_batch_runs(trace_root, last_runs, since_run)
     logs_by_stamp = indexed_log_files(logs_root)
     aggregate_missing_gates: Counter[str] = Counter()
     aggregate_stalls: Counter[str] = Counter()
@@ -2062,18 +2206,21 @@ def print_batch_summary(
     aggregate_visible_release_request_shapes: Counter[str] = Counter()
     aggregate_visible_release_setcolumns_shapes: Counter[str] = Counter()
     aggregate_visible_release_pre_release_states: Counter[str] = Counter()
+    aggregate_visible_release_associated_prefix_find: Counter[str] = Counter()
     aggregate_visible_release_handle_slots: Counter[str] = Counter()
     aggregate_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
+    aggregate_post_visible_release_rows_elsewhere_contexts: Counter[str] = Counter()
     aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
     aggregate_umolk_dictionary_shapes: Counter[str] = Counter()
     aggregate_umolk_dictionary_olprefs_versions: Counter[str] = Counter()
     aggregate_umolk_dictionary_info_versions: Counter[str] = Counter()
     aggregate_umolk_dictionary_issues: Counter[str] = Counter()
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
+    aggregate_default_view_special_folder_bootstrap_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
     aggregate_default_view_id_collisions: Counter[str] = Counter()
     aggregate_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
@@ -2107,18 +2254,21 @@ def print_batch_summary(
     current_visible_release_request_shapes: Counter[str] = Counter()
     current_visible_release_setcolumns_shapes: Counter[str] = Counter()
     current_visible_release_pre_release_states: Counter[str] = Counter()
+    current_visible_release_associated_prefix_find: Counter[str] = Counter()
     current_visible_release_handle_slots: Counter[str] = Counter()
     current_setcolumns_release_response_frames: Counter[str] = Counter()
     current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     current_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     current_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
+    current_post_visible_release_rows_elsewhere_contexts: Counter[str] = Counter()
     current_post_visible_release_terminal_events: Counter[str] = Counter()
     current_umolk_dictionary_shapes: Counter[str] = Counter()
     current_umolk_dictionary_olprefs_versions: Counter[str] = Counter()
     current_umolk_dictionary_info_versions: Counter[str] = Counter()
     current_umolk_dictionary_issues: Counter[str] = Counter()
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
+    current_default_view_special_folder_bootstrap_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
     current_default_view_id_collisions: Counter[str] = Counter()
     current_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
@@ -2191,6 +2341,9 @@ def print_batch_summary(
         aggregate_post_visible_release_followups.update(
             log["post_visible_release_followups"]
         )
+        aggregate_post_visible_release_rows_elsewhere_contexts.update(
+            log["post_visible_release_rows_elsewhere_contexts"]
+        )
         aggregate_post_visible_release_terminal_events.update(
             log["post_visible_release_terminal_events"]
         )
@@ -2204,6 +2357,9 @@ def print_batch_summary(
         aggregate_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
         aggregate_default_view_folder_open_without_rows.update(
             log["default_view_folder_open_without_rows"]
+        )
+        aggregate_default_view_special_folder_bootstrap_open_without_rows.update(
+            log["default_view_special_folder_bootstrap_open_without_rows"]
         )
         aggregate_default_view_query_position_without_rows.update(
             log["default_view_query_position_without_rows"]
@@ -2241,6 +2397,9 @@ def print_batch_summary(
         )
         aggregate_visible_release_pre_release_states.update(
             log["visible_release_pre_release_states"]
+        )
+        aggregate_visible_release_associated_prefix_find.update(
+            log["visible_release_associated_prefix_find"]
         )
         aggregate_visible_release_handle_slots.update(
             log["visible_release_handle_slots"]
@@ -2305,6 +2464,9 @@ def print_batch_summary(
             current_post_visible_release_followups.update(
                 log["post_visible_release_followups"]
             )
+            current_post_visible_release_rows_elsewhere_contexts.update(
+                log["post_visible_release_rows_elsewhere_contexts"]
+            )
             current_post_visible_release_terminal_events.update(
                 log["post_visible_release_terminal_events"]
             )
@@ -2318,6 +2480,9 @@ def print_batch_summary(
             current_umolk_dictionary_issues.update(log["umolk_dictionary_issues"])
             current_default_view_folder_open_without_rows.update(
                 log["default_view_folder_open_without_rows"]
+            )
+            current_default_view_special_folder_bootstrap_open_without_rows.update(
+                log["default_view_special_folder_bootstrap_open_without_rows"]
             )
             current_default_view_query_position_without_rows.update(
                 log["default_view_query_position_without_rows"]
@@ -2355,6 +2520,9 @@ def print_batch_summary(
             )
             current_visible_release_pre_release_states.update(
                 log["visible_release_pre_release_states"]
+            )
+            current_visible_release_associated_prefix_find.update(
+                log["visible_release_associated_prefix_find"]
             )
             current_visible_release_handle_slots.update(
                 log["visible_release_handle_slots"]
@@ -2499,6 +2667,11 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate post-visible-release rows elsewhere contexts",
+        aggregate_post_visible_release_rows_elsewhere_contexts,
+        limit=20,
+    )
+    print_counter(
         "Aggregate post-visible-release terminal events",
         aggregate_post_visible_release_terminal_events,
         limit=20,
@@ -2526,6 +2699,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate default-view folder open without QueryRows",
         aggregate_default_view_folder_open_without_rows,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate default-view special-folder bootstrap open without QueryRows",
+        aggregate_default_view_special_folder_bootstrap_open_without_rows,
         limit=20,
     )
     print_counter(
@@ -2591,6 +2769,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate visible Inbox release pre-release states",
         aggregate_visible_release_pre_release_states,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate visible Inbox release associated prefix FindRow",
+        aggregate_visible_release_associated_prefix_find,
         limit=20,
     )
     print_counter(
@@ -2722,6 +2905,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build post-visible-release rows elsewhere contexts",
+            current_post_visible_release_rows_elsewhere_contexts,
+            limit=20,
+        )
+        print_counter(
             "Current-build post-visible-release terminal events",
             current_post_visible_release_terminal_events,
             limit=20,
@@ -2749,6 +2937,11 @@ def print_batch_summary(
         print_counter(
             "Current-build default-view folder open without QueryRows",
             current_default_view_folder_open_without_rows,
+            limit=20,
+        )
+        print_counter(
+            "Current-build default-view special-folder bootstrap open without QueryRows",
+            current_default_view_special_folder_bootstrap_open_without_rows,
             limit=20,
         )
         print_counter(
@@ -2817,6 +3010,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build visible Inbox release associated prefix FindRow",
+            current_visible_release_associated_prefix_find,
+            limit=20,
+        )
+        print_counter(
             "Current-build visible Inbox release handle slots",
             current_visible_release_handle_slots,
             limit=20,
@@ -2868,11 +3066,13 @@ def issue_buckets(
     rr: dict[str, Any], log: dict[str, Any], log_path: Path | None
 ) -> list[str]:
     issues: list[str] = []
+    associated_prefix_issues = visible_release_associated_prefix_issue_buckets(log)
     if rr["nonzero_response_codes"]:
         issues.append("nonzero_mapi_response")
     if rr["parse_errors"]:
         issues.append("rop_parse_error")
-    if visible_release_needs_action(log):
+    issues.extend(associated_prefix_issues)
+    if not associated_prefix_issues and visible_release_needs_action(log):
         issues.append("visible_inbox_release_before_query_rows")
     if log.get("visible_release_descriptor_contract_issues"):
         for name, _count in log[
@@ -2896,7 +3096,7 @@ def issue_buckets(
             log["umolk_optional_defaulted_getprops_tags"]
         )[:4]:
             issues.append(f"umolk_optional_defaulted_getprops_type:{name}")
-    if log.get("visible_release_classifications"):
+    if not associated_prefix_issues and log.get("visible_release_classifications"):
         for name, _count in log["visible_release_classifications"].most_common(2):
             if visible_release_classification_is_actionable(name):
                 issues.append(f"visible_inbox_release_classification:{name}")
@@ -2985,6 +3185,19 @@ def stable_counter_items(counter: Counter[str], limit: int) -> list[tuple[str, i
     return sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
 
 
+def selected_batch_runs(
+    trace_root: Path, last_runs: int | None = None, since_run: str | None = None
+) -> list[Path]:
+    runs = [path for path in sorted(trace_root.iterdir()) if path.is_dir()]
+    if since_run:
+        runs = [path for path in runs if path.name >= since_run]
+    if last_runs is not None:
+        if last_runs <= 0:
+            return []
+        runs = runs[-last_runs:]
+    return runs
+
+
 def problem_getprops_property_type_counts(counter: Counter[str]) -> list[tuple[str, int]]:
     type_counts: Counter[str] = Counter()
     for tag, count in counter.items():
@@ -3016,6 +3229,15 @@ def setcolumns_release_response_handle_classification_is_actionable(name: str) -
     }
 
 
+def visible_release_associated_prefix_issue_buckets(log: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    if log.get("visible_release_associated_prefix_find"):
+        for name, _count in log["visible_release_associated_prefix_find"].most_common(2):
+            if visible_release_associated_prefix_find_is_actionable(name):
+                issues.append(f"visible_release_associated_prefix_find:{name}")
+    return issues
+
+
 def visible_release_needs_action(log: dict[str, Any]) -> bool:
     if not log.get("visible_release_without_query_rows"):
         return False
@@ -3032,6 +3254,10 @@ def visible_release_needs_action(log: dict[str, Any]) -> bool:
 
 def post_visible_release_followup_is_actionable(name: str) -> bool:
     return name in {"create_save_batch_after_visible_release"}
+
+
+def visible_release_associated_prefix_find_is_actionable(name: str) -> bool:
+    return "account_prefs_first=true" in name
 
 
 def visible_release_classification_is_actionable(name: str) -> bool:
@@ -3136,7 +3362,13 @@ def parse_stamp(value: str) -> datetime | None:
 def main() -> int:
     args = parse_args()
     if args.all:
-        return print_batch_summary(args.trace_dir, args.logs_root, args.current_build)
+        return print_batch_summary(
+            args.trace_dir,
+            args.logs_root,
+            args.current_build,
+            args.last_runs,
+            args.since_run,
+        )
     print_single_summary(trace_dir_for_log(args.trace_dir, args.log), args.log)
     return 0
 

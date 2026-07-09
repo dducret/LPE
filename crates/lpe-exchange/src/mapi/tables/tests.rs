@@ -5137,8 +5137,8 @@ fn inbox_associated_broad_configuration_find_row_ignores_virtual_defaults() {
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
     assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
+    assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert_eq!(table_position(&table), Some(0));
@@ -5809,7 +5809,7 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
 
     let query_request = RopRequest {
         rop_id: RopId::QueryRows.as_u8(),
@@ -5829,10 +5829,10 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        2
+        1
     );
-    assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
+    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
@@ -5944,7 +5944,7 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
     assert_eq!(table_position(&table), Some(0));
     assert!(matches!(
         table,
@@ -5992,9 +5992,9 @@ fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        0
     );
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -6169,7 +6169,7 @@ fn inbox_associated_broad_find_row_followup_returns_only_startup_rows() {
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
     assert_eq!(table_position(&table), Some(0));
 
     let seek_response = rop_seek_row_response(
@@ -6208,9 +6208,13 @@ fn inbox_associated_broad_find_row_followup_returns_only_startup_rows() {
     );
 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
+    assert_eq!(
+        u16::from_le_bytes([query_response[7], query_response[8]]),
+        0
+    );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
+    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_some());
 }
 
 #[test]
@@ -6235,13 +6239,7 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
         .collect::<Vec<_>>();
     classes.sort_unstable();
 
-    assert_eq!(
-        classes,
-        vec![
-            "IPM.Configuration.AccountPrefs",
-            "IPM.Configuration.MessageListSettings"
-        ]
-    );
+    assert_eq!(classes, vec!["IPM.Configuration.MessageListSettings"]);
 }
 
 #[test]
@@ -6316,16 +6314,7 @@ fn inbox_associated_broad_configuration_restriction_projects_persisted_configs()
         .collect::<Vec<_>>();
     classes.sort_unstable();
 
-    assert_eq!(
-        classes,
-        vec![
-            "IPM.Configuration.AccountPrefs",
-            "IPM.Configuration.Autocomplete",
-            "IPM.Configuration.ConversationPrefs",
-            "IPM.Configuration.MessageListSettings",
-            "IPM.Configuration.TableViewPreviewPrefs"
-        ]
-    );
+    assert_eq!(classes, vec!["IPM.Configuration.MessageListSettings",]);
 }
 
 #[test]
@@ -6338,13 +6327,13 @@ fn inbox_associated_broad_configuration_restriction_dedupes_modeled_startup_clas
     };
 
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
-    let account_prefs_count = rows
+    let message_list_settings_count = rows
         .iter()
         .filter_map(associated_table_row_config)
-        .filter(|message| message.message_class == "IPM.Configuration.AccountPrefs")
+        .filter(|message| message.message_class == "IPM.Configuration.MessageListSettings")
         .count();
 
-    assert_eq!(account_prefs_count, 1);
+    assert_eq!(message_list_settings_count, 1);
 }
 
 #[test]
@@ -6388,7 +6377,7 @@ fn inbox_associated_broad_configuration_find_row_ignores_extended_rule_message()
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
     assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
+    assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
 }
 
@@ -6423,8 +6412,8 @@ fn inbox_associated_query_rows_uses_sort_order() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
@@ -6464,9 +6453,9 @@ fn inbox_associated_query_rows_suppresses_extended_rule_message() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
@@ -6536,8 +6525,8 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 4);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
@@ -6609,8 +6598,8 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
@@ -6843,8 +6832,8 @@ fn inbox_associated_query_rows_prefix_configuration_exposes_message_list_setting
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
 }
 

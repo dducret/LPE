@@ -108,8 +108,7 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 same_execute_released_handles,
                 session,
             );
-            let release_stage =
-                format_visible_inbox_release_stage(&session.post_hierarchy_actions);
+            let release_stage = format_visible_inbox_release_stage(&session.post_hierarchy_actions);
             Some(format!(
                 "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};release_stage={};last_contents_table={};last_setcolumns={};last_query_position={};last_query_rows={};last_findrow={};last_associated_find={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
                 format_optional_debug_handle(released_handle),

@@ -50,6 +50,7 @@ def empty_log_summary() -> dict:
         "visible_release_request_shapes": Counter(),
         "visible_release_setcolumns_shapes": Counter(),
         "visible_release_pre_release_states": Counter(),
+        "visible_release_associated_prefix_find": Counter(),
         "visible_release_handle_slots": Counter(),
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_handle_tables": Counter(),
@@ -60,6 +61,7 @@ def empty_log_summary() -> dict:
         "common_view_descriptor_getprops_issues": Counter(),
         "common_view_descriptor_getprops_contexts": set(),
         "post_visible_release_followups": Counter(),
+        "post_visible_release_rows_elsewhere_contexts": Counter(),
         "post_visible_release_terminal_events": Counter(),
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
@@ -69,6 +71,7 @@ def empty_log_summary() -> dict:
         "umolk_dictionary_info_versions": Counter(),
         "umolk_dictionary_issues": Counter(),
         "default_view_folder_open_without_rows": Counter(),
+        "default_view_special_folder_bootstrap_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
         "default_view_id_owners": defaultdict(set),
@@ -85,6 +88,38 @@ def empty_log_summary() -> dict:
 
 
 class RcaOutlookTraceSummaryTests(unittest.TestCase):
+    def test_selected_batch_runs_filters_newest_runs(self) -> None:
+        trace_root = Path(self._testMethodName)
+        try:
+            for run in ("202607081930", "202607081945", "202607081958"):
+                (trace_root / run).mkdir(parents=True, exist_ok=True)
+
+            self.assertEqual(
+                [path.name for path in rca.selected_batch_runs(trace_root, last_runs=2)],
+                ["202607081945", "202607081958"],
+            )
+            self.assertEqual(rca.selected_batch_runs(trace_root, last_runs=0), [])
+        finally:
+            shutil.rmtree(trace_root, ignore_errors=True)
+
+    def test_selected_batch_runs_filters_since_run(self) -> None:
+        trace_root = Path(self._testMethodName)
+        try:
+            for run in ("202607081930", "202607081945", "202607081958"):
+                (trace_root / run).mkdir(parents=True, exist_ok=True)
+
+            self.assertEqual(
+                [
+                    path.name
+                    for path in rca.selected_batch_runs(
+                        trace_root, since_run="202607081945"
+                    )
+                ],
+                ["202607081945", "202607081958"],
+            )
+        finally:
+            shutil.rmtree(trace_root, ignore_errors=True)
+
     def test_unknown_getprops_counts_only_unknown_name_positions(self) -> None:
         summary = empty_log_summary()
 
@@ -869,7 +904,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
 
-    def test_broad_ipm_configuration_row_count_gap_is_actionable(self) -> None:
+    def test_broad_ipm_configuration_row_count_gap_requires_startup_row(self) -> None:
         summary = empty_log_summary()
         fields = {
             "folder_role": "inbox",
@@ -878,7 +913,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "content;property_tag=0x001a001f;fuzzy_low=0x0002;"
                 "fuzzy_high=0x0001;value=IPM.Configuration."
             ),
-            "table_total_row_count": "2",
+            "table_total_row_count": "0",
             "ipm_configuration_contract_summary": "rows=7;not_selected_required_columns=;",
             "mapi_request_id": "{session}:60",
             "current_position": "1",
@@ -890,19 +925,42 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             summary["broad_ipm_configuration_row_count_gaps"],
             Counter(
                 {
-                    "request={session}:60;position=1;table_rows=2;config_rows=7;missing=5": 1
+                    "request={session}:60;position=1;table_rows=0;config_rows=7;"
+                    "expected_startup_rows=1;missing_startup_rows=1": 1
                 }
             ),
         )
         self.assertIn(
             "broad_ipm_configuration_row_count_gap:"
-            "request={session}:60;position=1;table_rows=2;config_rows=7;missing=5",
+            "request={session}:60;position=1;table_rows=0;config_rows=7;"
+            "expected_startup_rows=1;missing_startup_rows=1",
             rca.issue_buckets(
                 {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
                 summary,
                 Path("LPE_last_test.log"),
             ),
         )
+
+    def test_broad_ipm_configuration_row_count_gap_ignores_suppressed_non_startup_rows(
+        self,
+    ) -> None:
+        summary = empty_log_summary()
+        fields = {
+            "folder_role": "inbox",
+            "associated": True,
+            "table_restriction_decoded": (
+                "content;property_tag=0x001a001f;fuzzy_low=0x0002;"
+                "fuzzy_high=0x0001;value=IPM.Configuration."
+            ),
+            "table_total_row_count": "1",
+            "ipm_configuration_contract_summary": "rows=7;not_selected_required_columns=;",
+            "mapi_request_id": "{session}:60",
+            "current_position": "1",
+        }
+
+        rca.record_broad_ipm_configuration_row_count_gap(summary, fields)
+
+        self.assertEqual(summary["broad_ipm_configuration_row_count_gaps"], Counter())
 
     def test_unknown_getprops_tag_classes_group_unconfirmed_ranges(self) -> None:
         counts = rca.unknown_tag_class_counts(
@@ -940,6 +998,9 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                 "post_visible_inbox_release_create_save_batch_count": "2",
                 "default_view_normal_query_rows_observed": True,
                 "normal_inbox_contents_query_rows_observed": False,
+                "last_default_view_normal_query_rows_context": (
+                    "handle=55;folder=0x00000000000e0001;role=drafts;position=1"
+                ),
                 "outlook_umolk_named_property_probe_count": "1",
                 "outlook_umolk_getprops_not_found_count": "0",
             },
@@ -954,6 +1015,14 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
                     "create_save_batch_after_visible_release": 1,
                     "default_view_rows_elsewhere_without_inbox_rows": 1,
                     "umolk_materialized_before_stop": 1,
+                }
+            ),
+        )
+        self.assertEqual(
+            summary["post_visible_release_rows_elsewhere_contexts"],
+            Counter(
+                {
+                    "role=drafts;folder=0x00000000000e0001;handle=55;position=1": 1,
                 }
             ),
         )
@@ -972,6 +1041,35 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["visible_release_classifications"],
             Counter({"valid_projection_complete_setcolumns_before_query_rows": 1}),
+        )
+
+    def test_visible_release_records_associated_prefix_find_context(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_visible_release_request_metrics(
+            summary,
+            "visible_inbox_release_without_query_rows:"
+            "release_request_shape=mixed_setcolumns_release_batch;"
+            "request_rops=SetColumns,Release;release_input_index=0;"
+            "release_response_index=0;release_rop_count=1;release_batch_rop_count=2;"
+            "release_same_execute_already_released=false;"
+            "release_query_position_seen_before_release=false;"
+            "release_findrow_seen_before_release=false;"
+            "release_query_rows_seen_before_release=false;"
+            "release_content_sync_seen_before_release=false;"
+            "release_live_handle_count_before=49;"
+            "last_associated_find=request_id=abc;"
+            "prefix_find_summary=first_class=IPM.Configuration.AccountPrefs;"
+            "account_prefs_first=true;available_classes=IPM.Configuration.AccountPrefs",
+        )
+
+        self.assertEqual(
+            summary["visible_release_associated_prefix_find"],
+            Counter(
+                {
+                    "first_class=IPM.Configuration.AccountPrefs;account_prefs_first=true": 1,
+                }
+            ),
         )
 
     def test_visible_release_classifies_incomplete_projection_before_query_rows(self) -> None:
@@ -1664,6 +1762,184 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets(rr, log, None),
         )
 
+    def test_default_view_folder_open_records_followup_default_folder_setprops(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "default_view_folder_open_without_query_rows": "true",
+                "last_default_view_folder_open_context": (
+                    "request_id={A}:14;folder=0x0000000000050001;role=inbox"
+                ),
+                "post_hierarchy_last_setprops_request_contract": (
+                    "SetProperties(kind=folder;folder=0x0000000000010001;"
+                    "default_folder_entry_ids_touched=true;"
+                    "write_mode=ignored_canonical_projection;"
+                    "problem_count=0;problem_tags=none)"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["default_view_folder_open_without_rows"],
+            Counter(
+                {
+                    "role=inbox;folder=0x0000000000050001;"
+                    "next=setproperties_default_folder_entryids;"
+                    "write_mode=ignored_canonical_projection;problem_count=0": 1,
+                }
+            ),
+        )
+
+    def test_default_view_folder_open_refines_counter_from_disconnect_trace(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "default_view_folder_open_without_query_rows": "true",
+                "last_default_view_folder_open_context": (
+                    "request_id={A}:14;folder=0x0000000000050001;role=inbox"
+                ),
+            },
+        )
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "outlook_view_failure_trace_summary": (
+                    "default_view_folder_open:request_id={A}:14;"
+                    "folder=0x0000000000050001;role=inbox"
+                ),
+                "post_hierarchy_last_setprops_request_contract": (
+                    "SetProperties(kind=folder;folder=0x0000000000010001;"
+                    "default_folder_entry_ids_touched=true;"
+                    "write_mode=ignored_canonical_projection;"
+                    "problem_count=0;problem_tags=none)"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["default_view_folder_open_without_rows"],
+            Counter(
+                {
+                    "role=inbox;folder=0x0000000000050001;"
+                    "next=setproperties_default_folder_entryids;"
+                    "write_mode=ignored_canonical_projection;problem_count=0": 1,
+                }
+            ),
+        )
+
+    def test_default_view_folder_open_refines_single_pending_key_from_setprops(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "default_view_folder_open_without_query_rows": "true",
+                "last_default_view_folder_open_context": (
+                    "request_id={A}:14;folder=0x0000000000050001;role=inbox"
+                ),
+            },
+        )
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "post_hierarchy_last_setprops_request_contract": (
+                    "SetProperties(kind=folder;folder=0x0000000000010001;"
+                    "default_folder_entry_ids_touched=true;"
+                    "write_mode=ignored_canonical_projection;"
+                    "problem_count=0;problem_tags=none)"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["default_view_folder_open_without_rows"],
+            Counter(
+                {
+                    "role=inbox;folder=0x0000000000050001;"
+                    "next=setproperties_default_folder_entryids;"
+                    "write_mode=ignored_canonical_projection;problem_count=0": 1,
+                }
+            ),
+        )
+
+    def test_default_view_folder_open_suppresses_special_folder_bootstrap(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "default_view_folder_open_without_query_rows": "true",
+                "last_default_view_folder_open_context": (
+                    "request_id={A}:14;folder=0x0000000000050001;role=inbox"
+                ),
+                "post_hierarchy_last_getprops_request_contract": (
+                    "GetPropertiesSpecific(kind=folder;folder=0x0000000000050001;"
+                    "probe=receive_folder_probe;tags=0x36d00102;"
+                    "names=PidTagIpmAppointmentEntryId;response=0x00000000)"
+                ),
+                "post_hierarchy_last_setprops_request_contract": (
+                    "SetProperties(kind=folder;folder=0x0000000000010001;"
+                    "default_folder_entry_ids_touched=true;"
+                    "decoded_values=0x36d00102:PidTagIpmAppointmentEntryId:"
+                    "matches_expected=true;"
+                    "write_mode=ignored_canonical_projection;"
+                    "problem_count=0;problem_tags=none)"
+                ),
+            },
+        )
+
+        expected_key = (
+            "role=inbox;folder=0x0000000000050001;"
+            "next=setproperties_default_folder_entryids;"
+            "write_mode=ignored_canonical_projection;problem_count=0"
+        )
+        self.assertEqual(summary["default_view_folder_open_without_rows"], Counter())
+        self.assertEqual(
+            summary["default_view_special_folder_bootstrap_open_without_rows"],
+            Counter({expected_key: 1}),
+        )
+
+    def test_default_view_folder_open_keeps_noncanonical_setprops_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_default_view_folder_open_without_rows(
+            summary,
+            {
+                "default_view_folder_open_without_query_rows": "true",
+                "last_default_view_folder_open_context": (
+                    "request_id={A}:14;folder=0x0000000000050001;role=inbox"
+                ),
+                "post_hierarchy_last_getprops_request_contract": (
+                    "GetPropertiesSpecific(kind=folder;folder=0x0000000000050001;"
+                    "probe=receive_folder_probe;tags=0x36d00102;"
+                    "names=PidTagIpmAppointmentEntryId;response=0x00000000)"
+                ),
+                "post_hierarchy_last_setprops_request_contract": (
+                    "SetProperties(kind=folder;folder=0x0000000000010001;"
+                    "default_folder_entry_ids_touched=true;"
+                    "decoded_values=0x36d00102:PidTagIpmAppointmentEntryId:"
+                    "matches_expected=false;"
+                    "write_mode=ignored_canonical_projection;"
+                    "problem_count=0;problem_tags=none)"
+                ),
+            },
+        )
+
+        self.assertEqual(
+            summary["default_view_folder_open_without_rows"],
+            Counter(
+                {
+                    "role=inbox;folder=0x0000000000050001;"
+                    "next=setproperties_default_folder_entryids;"
+                    "write_mode=ignored_canonical_projection;problem_count=0": 1,
+                }
+            ),
+        )
+
     def test_issue_buckets_reports_default_view_id_collision(self) -> None:
         log = {
             "visible_release_without_query_rows": 0,
@@ -1723,6 +1999,42 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertIn(
             "visible_inbox_release_classification:incomplete_projection_before_query_rows",
             rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_reports_account_prefs_first_associated_prefix_find(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"valid_projection_complete_setcolumns_before_query_rows": 1}
+        )
+        log["visible_release_associated_prefix_find"] = Counter(
+            {"first_class=IPM.Configuration.AccountPrefs;account_prefs_first=true": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertIn(
+            "visible_release_associated_prefix_find:"
+            "first_class=IPM.Configuration.AccountPrefs;account_prefs_first=true",
+            rca.issue_buckets(rr, log, None),
+        )
+
+    def test_issue_buckets_prioritizes_associated_prefix_over_release_symptom(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_without_query_rows"] = 1
+        log["visible_release_classifications"] = Counter(
+            {"identity_probe_subset_before_query_rows": 1}
+        )
+        log["visible_release_associated_prefix_find"] = Counter(
+            {"first_class=IPM.Configuration.AccountPrefs;account_prefs_first=true": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, None),
+            [
+                "visible_release_associated_prefix_find:"
+                "first_class=IPM.Configuration.AccountPrefs;account_prefs_first=true"
+            ],
         )
 
     def test_verdict_treats_descriptor_superset_visible_release_as_actionable(self) -> None:

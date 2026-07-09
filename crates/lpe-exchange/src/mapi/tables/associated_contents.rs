@@ -343,8 +343,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     }
     if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         if is_broad_outlook_configuration_restriction(restriction) {
-            return is_inbox_broad_startup_config_class(message)
-                || !is_empty_inbox_configuration_placeholder(message);
+            return is_inbox_broad_startup_config_class(message);
         }
         if is_inbox_broad_startup_config_visible(restriction, message) {
             return true;
@@ -373,8 +372,7 @@ fn is_inbox_broad_startup_config_visible(
         return is_inbox_broad_startup_config_class(message);
     }
     if restriction.is_none() {
-        return is_inbox_broad_startup_config_class(message)
-            || !is_empty_inbox_configuration_placeholder(message);
+        return is_inbox_broad_startup_config_class(message);
     }
     false
 }

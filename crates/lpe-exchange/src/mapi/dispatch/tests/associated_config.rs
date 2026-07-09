@@ -562,7 +562,7 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
     let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
     assert!(
-        summary.contains("class=IPM.Configuration.AccountPrefs"),
+        !summary.contains("class=IPM.Configuration.AccountPrefs"),
         "{summary}"
     );
     assert!(
