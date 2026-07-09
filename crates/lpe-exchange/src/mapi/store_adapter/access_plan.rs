@@ -154,6 +154,9 @@ pub(in crate::mapi) fn requires_snapshot_backed_contents(
     mailboxes: &[JmapMailbox],
 ) -> bool {
     plan.requires_associated_contents
+        || plan
+            .object_ids
+            .contains(&crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         || plan.object_ids.contains(&COMMON_VIEWS_FOLDER_ID)
         || plan
             .object_ids

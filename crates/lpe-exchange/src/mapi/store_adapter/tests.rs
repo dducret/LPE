@@ -352,6 +352,10 @@ fn access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle() {
         "plan={plan:?}"
     );
     assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    assert!(
+        requires_snapshot_backed_contents(&plan, &[]),
+        "IPM subtree hierarchy rows need collaboration item counts: {plan:?}"
+    );
 }
 
 #[test]
@@ -398,6 +402,10 @@ fn access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle() {
         "plan={plan:?}"
     );
     assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    assert!(
+        requires_snapshot_backed_contents(&plan, &[]),
+        "IPM subtree hierarchy rows need collaboration item counts: {plan:?}"
+    );
 }
 
 #[test]
