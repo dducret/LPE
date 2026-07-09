@@ -332,6 +332,8 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) visible_inbox_open_create_save_batch_count: usize,
     pub(in crate::mapi) last_visible_inbox_open_create_save_batch_context: String,
     pub(in crate::mapi) last_post_hierarchy_create_save_object_context: String,
+    pub(in crate::mapi) post_hierarchy_submit_attempt_count: usize,
+    pub(in crate::mapi) last_post_hierarchy_submit_attempt_context: String,
     pub(in crate::mapi) last_hierarchy_table_query_position_context: String,
     pub(in crate::mapi) first_post_visible_release_hierarchy_query_position_context: String,
     pub(in crate::mapi) post_visible_release_hierarchy_query_position_count: usize,
@@ -398,6 +400,10 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
             .clone(),
         last_post_hierarchy_create_save_object_context: actions
             .last_post_hierarchy_create_save_object_context
+            .clone(),
+        post_hierarchy_submit_attempt_count: actions.post_hierarchy_submit_attempt_count,
+        last_post_hierarchy_submit_attempt_context: actions
+            .last_post_hierarchy_submit_attempt_context
             .clone(),
         last_hierarchy_table_query_position_context: actions
             .last_hierarchy_table_query_position_context
@@ -1457,6 +1463,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
         post_hierarchy_last_create_save_object_context =
             %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
+        post_hierarchy_submit_attempt_count =
+            post_hierarchy_summary.post_hierarchy_submit_attempt_count,
+        post_hierarchy_last_submit_attempt_context =
+            %post_hierarchy_summary.last_post_hierarchy_submit_attempt_context,
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
@@ -1551,6 +1561,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
         post_hierarchy_last_create_save_object_context =
             %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
+        post_hierarchy_submit_attempt_count =
+            post_hierarchy_summary.post_hierarchy_submit_attempt_count,
+        post_hierarchy_last_submit_attempt_context =
+            %post_hierarchy_summary.last_post_hierarchy_submit_attempt_context,
         special_folder_contract_summary = %special_folder_contract_summary,
         required_default_folder_coverage = %required_default_folder_coverage,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
@@ -1607,6 +1621,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             %post_hierarchy_summary.first_post_visible_findrow_release_hierarchy_query_position_context,
         post_hierarchy_last_create_save_object_context =
             %post_hierarchy_summary.last_post_hierarchy_create_save_object_context,
+        post_hierarchy_submit_attempt_count =
+            post_hierarchy_summary.post_hierarchy_submit_attempt_count,
+        post_hierarchy_last_submit_attempt_context =
+            %post_hierarchy_summary.last_post_hierarchy_submit_attempt_context,
         next_debug_focus =
             if post_fai_inbox_probe_loop_terminal {
                 "post_fai_inbox_folder_type_probe_loop"

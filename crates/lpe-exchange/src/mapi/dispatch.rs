@@ -983,6 +983,7 @@ where
                 append_submission_dispatch_response(
                     store,
                     principal,
+                    request_id,
                     session,
                     &handle_slots,
                     &request,

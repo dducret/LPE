@@ -126,6 +126,12 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             %debug_context_or_none(
                 &post_hierarchy.last_post_hierarchy_create_save_object_context
             ),
+        post_hierarchy_submit_attempt_count =
+            post_hierarchy.post_hierarchy_submit_attempt_count,
+        last_post_hierarchy_submit_attempt_context =
+            %debug_context_or_none(
+                &post_hierarchy.last_post_hierarchy_submit_attempt_context
+            ),
         post_visible_release_hierarchy_query_position_count =
             post_hierarchy.post_visible_release_hierarchy_query_position_count,
         first_post_visible_release_hierarchy_query_position_context =
@@ -228,6 +234,12 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             last_post_hierarchy_create_save_object_context =
                 %debug_context_or_none(
                     &post_hierarchy.last_post_hierarchy_create_save_object_context
+                ),
+            post_hierarchy_submit_attempt_count =
+                post_hierarchy.post_hierarchy_submit_attempt_count,
+            last_post_hierarchy_submit_attempt_context =
+                %debug_context_or_none(
+                    &post_hierarchy.last_post_hierarchy_submit_attempt_context
                 ),
             outlook_umolk_named_property_probe_count =
                 session

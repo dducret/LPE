@@ -124,6 +124,7 @@ pub(super) fn is_submission_dispatch_rop(rop_id: RopId) -> bool {
 pub(super) async fn append_submission_dispatch_response<S>(
     store: &S,
     principal: &AccountPrincipal,
+    mapi_request_id: &str,
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
@@ -145,6 +146,7 @@ pub(super) async fn append_submission_dispatch_response<S>(
             append_submit_message_response(
                 store,
                 principal,
+                mapi_request_id,
                 session,
                 handle_slots,
                 request,
@@ -279,6 +281,7 @@ pub(super) fn append_deferred_action_messages_dispatch_response(
 pub(super) async fn append_submit_message_response<S>(
     store: &S,
     principal: &AccountPrincipal,
+    mapi_request_id: &str,
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
@@ -289,7 +292,15 @@ pub(super) async fn append_submit_message_response<S>(
 ) where
     S: ExchangeStore,
 {
+    let submit_rop_name = if request.rop_id == RopId::TransportSend.as_u8() {
+        "TransportSend"
+    } else {
+        "SubmitMessage"
+    };
     let Some(handle) = input_handle(handle_slots, request) else {
+        session.record_post_hierarchy_submit_attempt_context(format!(
+            "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=missing_input_handle;input_handle=none;send_attempt=true"
+        ));
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -309,6 +320,9 @@ pub(super) async fn append_submit_message_response<S>(
         return;
     };
     let Some(object) = session.handles.get(&handle).cloned() else {
+        session.record_post_hierarchy_submit_attempt_context(format!(
+            "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=session_handle_not_found;input_handle={handle};send_attempt=true"
+        ));
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -343,6 +357,10 @@ pub(super) async fn append_submit_message_response<S>(
             let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                 .or(saved_email.as_ref().map(|saved| &saved.email))
             else {
+                session.record_post_hierarchy_submit_attempt_context(format!(
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=message_identity_not_found;input_handle={handle};object_kind=message;folder=0x{folder_id:016x};role={};message_id=0x{message_id:016x};send_attempt=true",
+                    role_for_folder_id(folder_id).unwrap_or("")
+                ));
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -365,6 +383,11 @@ pub(super) async fn append_submit_message_response<S>(
                 return;
             };
             if !submit_source_is_outgoing(email) {
+                session.record_post_hierarchy_submit_attempt_context(format!(
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=message_not_in_outgoing_folder;input_handle={handle};object_kind=message;folder=0x{folder_id:016x};role={};message_id=0x{message_id:016x};mailbox_role={};send_attempt=true",
+                    role_for_folder_id(folder_id).unwrap_or(""),
+                    email.mailbox_role
+                ));
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -390,6 +413,11 @@ pub(super) async fn append_submit_message_response<S>(
             match mapi_submit_from_existing_email(store, principal, email).await {
                 Ok(input) => input,
                 Err(error) => {
+                    session.record_post_hierarchy_submit_attempt_context(format!(
+                        "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=existing_message_submit_input_failed;input_handle={handle};object_kind=message;folder=0x{folder_id:016x};role={};message_id=0x{message_id:016x};submit_input_error={};send_attempt=true",
+                        role_for_folder_id(folder_id).unwrap_or(""),
+                        error
+                    ));
                     warn!(
                         error = %error,
                         "failed to build canonical input for MAPI draft submit"
@@ -404,6 +432,11 @@ pub(super) async fn append_submit_message_response<S>(
             }
         }
         _ => {
+            session.record_post_hierarchy_submit_attempt_context(format!(
+                "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=unsupported_object_for_submit;input_handle={handle};object_kind={};folder={};send_attempt=true",
+                mapi_object_debug_kind(Some(&object)),
+                mapi_object_debug_folder_id(Some(&object))
+            ));
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",
@@ -423,6 +456,18 @@ pub(super) async fn append_submit_message_response<S>(
             return;
         }
     };
+    let submit_attempt_context = format!(
+        "request_id={mapi_request_id};rop={submit_rop_name};input_handle={handle};subject={};to_count={};cc_count={};bcc_count={};attachment_count={};body_text_bytes={};body_html_bytes={};draft_message_id={};source={};send_attempt=true",
+        input.subject,
+        input.to.len(),
+        input.cc.len(),
+        input.bcc.len(),
+        input.attachments.len(),
+        input.body_text.len(),
+        input.body_html_sanitized.as_deref().map(str::len).unwrap_or(0),
+        input.draft_message_id.map(|id| id.to_string()).unwrap_or_default(),
+        input.source
+    );
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -451,6 +496,10 @@ pub(super) async fn append_submit_message_response<S>(
         .await
     {
         Ok(submitted) => {
+            session.record_post_hierarchy_submit_attempt_context(format!(
+                "{submit_attempt_context};result=canonical_submit_success;submitted_message_id={}",
+                submitted.message_id
+            ));
             let message_id = match remember_created_mapi_identity(
                 store,
                 principal,
@@ -497,6 +546,10 @@ pub(super) async fn append_submit_message_response<S>(
             responses.extend_from_slice(&submit_success_response(request));
         }
         Err(error) => {
+            session.record_post_hierarchy_submit_attempt_context(format!(
+                "{submit_attempt_context};result=error;failure_reason=canonical_submit_failed;submit_error={}",
+                error
+            ));
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",

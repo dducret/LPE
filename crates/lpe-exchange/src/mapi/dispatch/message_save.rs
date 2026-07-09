@@ -650,7 +650,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             match store.upsert_mapi_navigation_shortcut(input).await {
                 Ok(saved) => {
                     session.record_last_post_hierarchy_create_save_object_context(format!(
-                        "kind=navigation_shortcut;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};subject={};target_folder={};shortcut_type={};section={};ordinal={};group_name={};canonical_id={}",
+                        "kind=navigation_shortcut;send_candidate=false;create_associated=true;class=IPM.Microsoft.WunderBar.Link;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};subject={};target_folder={};shortcut_type={};section={};ordinal={};group_name={};canonical_id={}",
                         debug_role_for_folder_id(folder_id),
                         saved.subject,
                         saved.target_folder_id
@@ -1085,7 +1085,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             {
                 Ok((saved, message_id)) => {
                     session.record_last_post_hierarchy_create_save_object_context(format!(
-                        "kind=associated_config;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={};subject={};mapi_message_id=0x{message_id:016x};canonical_id={};property_count={}",
+                        "kind=associated_config;send_candidate=false;create_associated=true;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={};subject={};mapi_message_id=0x{message_id:016x};canonical_id={};property_count={}",
                         debug_role_for_folder_id(folder_id),
                         saved.message_class,
                         saved.subject,
@@ -1490,6 +1490,31 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 properties.get(&PID_TAG_ASSOCIATED),
                 Some(MapiValue::Bool(true))
             );
+            let message_class =
+                optional_pending_text_property(&properties, &[PID_TAG_MESSAGE_CLASS_W])
+                    .unwrap_or_else(|| "IPM.Note".to_string());
+            let subject = pending_text_property(
+                &properties,
+                &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+            );
+            let sender_name =
+                optional_pending_text_property(&properties, &[PID_TAG_SENDER_NAME_W])
+                    .unwrap_or_default();
+            let sender_email =
+                optional_pending_text_property(&properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
+                    .unwrap_or_default();
+            let to_count = recipients
+                .iter()
+                .filter(|recipient| !matches!(recipient.recipient_type, 0x02 | 0x03))
+                .count();
+            let cc_count = recipients
+                .iter()
+                .filter(|recipient| recipient.recipient_type == 0x02)
+                .count();
+            let bcc_count = recipients
+                .iter()
+                .filter(|recipient| recipient.recipient_type == 0x03)
+                .count();
             record_sync_upload_content_change(
                 session,
                 folder_id,
@@ -1498,9 +1523,16 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 associated,
                 !associated,
             );
+            let canonical_email_id = email.id;
             created_emails.push(email);
             session
                 .record_notification(MapiNotificationEvent::content(folder_id, Some(message_id)));
+            session.record_last_post_hierarchy_create_save_object_context(format!(
+                "kind=message;send_candidate=true;create_associated={associated};request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={message_class};subject={subject};sender_name={sender_name};sender_email={sender_email};recipient_count={};to_count={to_count};cc_count={cc_count};bcc_count={bcc_count};mapi_message_id=0x{message_id:016x};canonical_id={}",
+                role_for_folder_id(folder_id).unwrap_or(""),
+                recipients.len(),
+                canonical_email_id
+            ));
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",

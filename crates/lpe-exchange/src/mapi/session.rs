@@ -516,6 +516,24 @@ impl MapiSession {
         }
     }
 
+    pub(in crate::mapi) fn record_post_hierarchy_submit_attempt_context(&mut self, context: String) {
+        if self.hierarchy_sync_completed() {
+            self.post_hierarchy_actions.post_hierarchy_submit_attempt_count = self
+                .post_hierarchy_actions
+                .post_hierarchy_submit_attempt_count
+                .saturating_add(1);
+            let context = format!(
+                "attempt_count={};{context}",
+                self.post_hierarchy_actions.post_hierarchy_submit_attempt_count
+            );
+            self.post_hierarchy_actions
+                .last_post_hierarchy_submit_attempt_context = context.clone();
+            self.record_outlook_view_failure_trace_event(format!(
+                "post_hierarchy_submit_attempt:{context}"
+            ));
+        }
+    }
+
     pub(in crate::mapi) fn record_last_inbox_folder_type_getprops_context(
         &mut self,
         context: String,

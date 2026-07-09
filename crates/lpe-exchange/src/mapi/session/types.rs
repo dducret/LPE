@@ -169,6 +169,8 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) visible_inbox_open_create_save_batch_count: usize,
     pub(in crate::mapi) last_visible_inbox_open_create_save_batch_context: String,
     pub(in crate::mapi) last_post_hierarchy_create_save_object_context: String,
+    pub(in crate::mapi) post_hierarchy_submit_attempt_count: usize,
+    pub(in crate::mapi) last_post_hierarchy_submit_attempt_context: String,
     pub(in crate::mapi) last_successful_execute_context: String,
     pub(in crate::mapi) last_successful_non_release_execute_context: String,
     pub(in crate::mapi) last_table_context: String,

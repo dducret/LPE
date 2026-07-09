@@ -401,6 +401,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
+        "post_hierarchy_create_save_object_contexts": Counter(),
+        "post_hierarchy_submit_attempt_contexts": Counter(),
         "umolk_dictionary_shapes": Counter(),
         "umolk_dictionary_olprefs_versions": Counter(),
         "umolk_dictionary_info_versions": Counter(),
@@ -456,6 +458,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
             message = fields.get("message") or ""
             record_default_view_folder_open_without_rows(summary, fields)
             record_query_position_wire_fields(summary, fields)
+            record_post_hierarchy_create_save_submit_metrics(summary, fields)
             if not summary["build"]:
                 build = {
                     key: fields.get(key)

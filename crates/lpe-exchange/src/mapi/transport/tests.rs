@@ -515,7 +515,8 @@ fn post_hierarchy_action_summary_records_last_create_save_object() {
     let mut session = test_session(HashMap::new());
 
     session.record_last_post_hierarchy_create_save_object_context(
-        "kind=associated_config;class=IPM.Configuration.MessageListSettings".to_string(),
+        "kind=associated_config;send_candidate=false;class=IPM.Configuration.MessageListSettings"
+            .to_string(),
     );
     assert_eq!(
         post_hierarchy_action_summary(&session, false)
@@ -529,18 +530,50 @@ fn post_hierarchy_action_summary_records_last_create_save_object() {
         "calendar:row_present=true".to_string(),
     );
     session.record_last_post_hierarchy_create_save_object_context(
-        "kind=associated_config;class=IPM.Configuration.MessageListSettings".to_string(),
+        "kind=associated_config;send_candidate=false;class=IPM.Configuration.MessageListSettings"
+            .to_string(),
     );
 
     let summary = post_hierarchy_action_summary(&session, false);
 
     assert_eq!(
         summary.last_post_hierarchy_create_save_object_context,
-        "kind=associated_config;class=IPM.Configuration.MessageListSettings"
+        "kind=associated_config;send_candidate=false;class=IPM.Configuration.MessageListSettings"
     );
     assert!(summary
         .outlook_view_trace_events
-        .contains("post_hierarchy_create_save_object:kind=associated_config"));
+        .contains("post_hierarchy_create_save_object:kind=associated_config;send_candidate=false"));
+}
+
+#[test]
+fn post_hierarchy_action_summary_records_submit_attempt_context() {
+    let mut session = test_session(HashMap::new());
+
+    session.record_post_hierarchy_submit_attempt_context(
+        "request_id={A}:92;rop=SubmitMessage;subject=Microsoft Outlook Test Message".to_string(),
+    );
+    let summary = post_hierarchy_action_summary(&session, false);
+    assert_eq!(summary.post_hierarchy_submit_attempt_count, 0);
+    assert_eq!(summary.last_post_hierarchy_submit_attempt_context, "");
+
+    session.record_completed_hierarchy_sync(
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "folder=0x0000000000040001;status=0x0003".to_string(),
+        "calendar:row_present=true".to_string(),
+    );
+    session.record_post_hierarchy_submit_attempt_context(
+        "request_id={A}:93;rop=SubmitMessage;subject=Microsoft Outlook Test Message".to_string(),
+    );
+
+    let summary = post_hierarchy_action_summary(&session, false);
+
+    assert_eq!(summary.post_hierarchy_submit_attempt_count, 1);
+    assert!(summary
+        .last_post_hierarchy_submit_attempt_context
+        .contains("attempt_count=1;request_id={A}:93;rop=SubmitMessage"));
+    assert!(summary
+        .outlook_view_trace_events
+        .contains("post_hierarchy_submit_attempt:attempt_count=1;request_id={A}:93"));
 }
 
 #[test]
