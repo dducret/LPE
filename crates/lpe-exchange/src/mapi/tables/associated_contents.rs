@@ -196,9 +196,9 @@ fn default_folder_associated_named_view(
             let (_, _, container_class, _) = special_folder_metadata(folder_id);
             (!container_class.is_empty()).then_some(container_class)
         })?;
-    if !default_view_supported_folder(folder_id, container_class) {
-        None
-    } else if default_common_views_named_view_id(container_class, folder_id).is_some() {
+    if !default_view_supported_folder(folder_id, container_class)
+        || default_common_views_named_view_id(container_class, folder_id).is_some()
+    {
         None
     } else {
         snapshot.default_folder_named_view_message(

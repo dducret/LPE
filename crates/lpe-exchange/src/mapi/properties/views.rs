@@ -111,7 +111,6 @@ pub(in crate::mapi) fn default_common_views_named_view_id(
     (container_class == "IPF.Note" || container_class.starts_with("IPF.Note."))
         .then_some(folder_id)
         .and_then(|folder_id| match folder_id {
-            INBOX_FOLDER_ID => Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID),
             SENT_FOLDER_ID => Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID),
             _ => None,
         })

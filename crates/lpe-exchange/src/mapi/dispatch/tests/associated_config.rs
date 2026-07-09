@@ -144,14 +144,17 @@ fn common_views_open_rejects_default_named_view_from_wrong_folder() {
 }
 
 #[test]
-fn folder_default_named_view_open_rejects_inbox_common_views_default_folder() {
+fn folder_default_named_view_open_materializes_for_inbox() {
     let selected = common_view_named_view_message_for_open(
         &MapiMailStoreSnapshot::empty(),
         INBOX_FOLDER_ID,
         crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
     );
 
-    assert!(selected.is_none());
+    assert_eq!(
+        selected.map(|message| (message.folder_id, message.name)),
+        Some((INBOX_FOLDER_ID, "Compact".to_string()))
+    );
 }
 
 #[test]
@@ -811,7 +814,7 @@ fn associated_config_debug_summaries_honor_table_restriction() {
 }
 
 #[test]
-fn inbox_associated_named_view_debug_summaries_report_common_views_default_view() {
+fn inbox_associated_named_view_debug_summaries_report_folder_local_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let restriction = MapiRestriction::Property {
@@ -872,7 +875,7 @@ fn inbox_associated_named_view_debug_summaries_report_common_views_default_view(
     );
     let expected_id = format!(
         "id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
     );
     assert!(values.contains(&expected_id), "{values}");
     assert!(wire.contains(&expected_id), "{wire}");

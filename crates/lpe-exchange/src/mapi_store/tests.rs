@@ -1402,6 +1402,7 @@ fn default_folder_named_views_use_folder_family_names() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     for (folder_id, expected_name) in [
+        (crate::mapi::identity::INBOX_FOLDER_ID, "Compact"),
         (crate::mapi::identity::CALENDAR_FOLDER_ID, "Calendar"),
         (crate::mapi::identity::TASKS_FOLDER_ID, "Tasks"),
         (crate::mapi::identity::NOTES_FOLDER_ID, "Notes"),
@@ -1420,23 +1421,19 @@ fn default_folder_named_views_use_folder_family_names() {
 }
 
 #[test]
-fn common_views_owned_default_views_do_not_materialize_folder_local_messages() {
+fn sent_common_views_default_view_does_not_materialize_folder_local_message() {
     let snapshot = MapiMailStoreSnapshot::empty();
+    let folder_id = crate::mapi::identity::SENT_FOLDER_ID;
 
-    for folder_id in [
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        crate::mapi::identity::SENT_FOLDER_ID,
-    ] {
-        assert!(snapshot
-            .default_folder_named_view_message(
-                folder_id,
-                outlook_default_folder_named_view_id(folder_id),
-            )
-            .is_none());
-        assert!(snapshot
-            .default_folder_named_view_message(folder_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID)
-            .is_none());
-    }
+    assert!(snapshot
+        .default_folder_named_view_message(
+            folder_id,
+            outlook_default_folder_named_view_id(folder_id)
+        )
+        .is_none());
+    assert!(snapshot
+        .default_folder_named_view_message(folder_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID)
+        .is_none());
 }
 
 #[test]

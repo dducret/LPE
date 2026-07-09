@@ -4923,10 +4923,8 @@ fn outlook_smart_input_variant_test_lock() -> std::sync::MutexGuard<'static, ()>
 }
 
 #[test]
-fn inbox_associated_find_row_does_not_return_common_views_default_named_view() {
-    assert_inbox_associated_find_row_no_match_for_message_class(
-        "IPM.Microsoft.FolderDesign.NamedView",
-    );
+fn inbox_associated_find_row_returns_folder_local_default_named_view() {
+    assert_inbox_associated_find_row_returns_message_class("IPM.Microsoft.FolderDesign.NamedView");
 }
 
 #[test]
@@ -5330,7 +5328,7 @@ fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view
 }
 
 #[test]
-fn inbox_associated_table_does_not_expose_common_views_default_named_view_for_exact_lookup() {
+fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup() {
     let restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -5345,7 +5343,13 @@ fn inbox_associated_table_does_not_expose_common_views_default_named_view_for_ex
         Uuid::nil(),
     );
 
-    assert!(rows.is_empty());
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(
+        rows.first(),
+        Some(AssociatedTableRow::NamedView(view)) if view.folder_id == INBOX_FOLDER_ID
+            && view.id == crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
+            && view.name == "Compact"
+    ));
     assert_eq!(
         restricted_associated_folder_message_count(
             INBOX_FOLDER_ID,
@@ -5353,12 +5357,12 @@ fn inbox_associated_table_does_not_expose_common_views_default_named_view_for_ex
             Some(&restriction),
             Uuid::nil()
         ),
-        0
+        1
     );
 }
 
 #[test]
-fn inbox_associated_table_does_not_expose_common_views_default_named_view_without_restriction() {
+fn inbox_associated_table_exposes_folder_local_default_named_view_without_restriction() {
     let rows = associated_table_rows(
         INBOX_FOLDER_ID,
         &MapiMailStoreSnapshot::empty(),
@@ -5372,7 +5376,7 @@ fn inbox_associated_table_does_not_expose_common_views_default_named_view_withou
                 |row| matches!(row, AssociatedTableRow::NamedView(view) if view.name == "Compact")
             )
             .count(),
-        0
+        1
     );
     assert_eq!(
         restricted_associated_folder_message_count(

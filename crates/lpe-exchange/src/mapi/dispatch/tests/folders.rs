@@ -1104,13 +1104,11 @@ fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
         default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
 
     assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-    assert!(debug.contains(&format!(
-        "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
-    )));
-    assert!(debug.contains("decoded_folder_name=common_views"));
+    assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
+    assert!(debug.contains("decoded_folder_name=inbox"));
     assert!(debug.contains(&format!(
         "decoded_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID
+        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
     )));
 }
 
