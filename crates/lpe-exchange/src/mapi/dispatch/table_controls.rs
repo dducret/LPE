@@ -96,6 +96,7 @@ pub(super) fn append_table_control_dispatch_response(
             handle_slots,
             request,
             request_id,
+            request_rop_names,
             mailboxes,
             emails,
             snapshot,
@@ -108,6 +109,7 @@ pub(super) fn append_table_control_dispatch_response(
                 handle_slots,
                 request,
                 request_id,
+                request_rop_names,
                 snapshot,
                 responses,
             );
@@ -119,6 +121,7 @@ pub(super) fn append_table_control_dispatch_response(
             handle_slots,
             request,
             request_id,
+            request_rop_names,
             snapshot,
             responses,
         ),
@@ -138,7 +141,7 @@ pub(super) fn append_table_control_dispatch_response(
             TableControlFlow::Continue
         }
         Some(
-            RopId::GetStatus
+            rop_id @ (RopId::GetStatus
             | RopId::QueryPosition
             | RopId::SeekRow
             | RopId::SeekRowBookmark
@@ -148,8 +151,34 @@ pub(super) fn append_table_control_dispatch_response(
             | RopId::CollapseRow
             | RopId::GetCollapseState
             | RopId::SetCollapseState
-            | RopId::ExpandRow,
+            | RopId::ExpandRow),
         ) => {
+            if let Some(phase) = match rop_id {
+                RopId::QueryPosition => Some("query_position"),
+                RopId::SeekRow => Some("seek_row"),
+                RopId::SeekRowBookmark => Some("seek_row_bookmark"),
+                RopId::SeekRowFractional => Some("seek_row_fractional"),
+                RopId::QueryColumnsAll => Some("query_columns_all"),
+                RopId::GetStatus => Some("get_status"),
+                RopId::ResetTable => Some("reset_table"),
+                _ => None,
+            } {
+                if let Some((handle, details)) = normal_inbox_table_lifecycle_details(
+                    handle_slots,
+                    request,
+                    input_object(session, handle_slots, request),
+                ) {
+                    record_normal_inbox_table_lifecycle(
+                        session,
+                        phase,
+                        request_id,
+                        request_rop_names,
+                        request.input_handle_index().unwrap_or(0),
+                        handle,
+                        &details,
+                    );
+                }
+            }
             append_table_control_response(
                 principal,
                 request_id,
@@ -171,6 +200,7 @@ pub(super) fn append_table_control_dispatch_response(
                 handle_slots,
                 request,
                 request_id,
+                request_rop_names,
                 mailboxes,
                 emails,
                 snapshot,
@@ -188,6 +218,7 @@ pub(super) fn append_set_columns_response(
     handle_slots: &[u32],
     request: &RopRequest,
     request_id: &str,
+    request_rop_names: &str,
     mailboxes: &[lpe_storage::JmapMailbox],
     emails: &[lpe_storage::JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -368,10 +399,18 @@ pub(super) fn append_set_columns_response(
                     emails,
                     snapshot,
                 );
+                let first_row_projection_audit = format_visible_inbox_first_row_projection_audit(
+                    0,
+                    sort_orders,
+                    restriction.as_ref(),
+                    columns,
+                    mailboxes,
+                    emails,
+                );
                 inbox_normal_setcolumns_context = Some((
                     input_handle_value,
                     format!(
-                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};first_row_preview={};view_handoff={};table_compatibility={};descriptor_behavior={}",
+                        "handle={};input_index={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};named_properties={};first_row_preview={};first_row_projection_audit={};first_row_projection_valid={};first_row_projection_row_available={};first_row_projection_missing_count={};first_row_projection_defaulted_count={};first_row_projection_error_count={};first_row_projection_wire_row_bytes={};first_row_projection_status_row_bytes={};view_handoff={};table_compatibility={};descriptor_behavior={}",
                         format_optional_debug_handle(input_handle_value),
                         request.input_handle_index().unwrap_or(0),
                         row_count,
@@ -380,6 +419,14 @@ pub(super) fn append_set_columns_response(
                         normal_message_defaulted_column_detail(columns),
                         selected_named_property_context,
                         first_row_preview,
+                        &first_row_projection_audit.summary,
+                        first_row_projection_audit.valid,
+                        first_row_projection_audit.row_available,
+                        first_row_projection_audit.missing_count,
+                        first_row_projection_audit.defaulted_count,
+                        first_row_projection_audit.error_count,
+                        first_row_projection_audit.wire_row_bytes,
+                        first_row_projection_audit.status_row_bytes,
                         view_handoff_table_contract,
                         format_default_view_table_compatibility_contract(
                             *folder_id,
@@ -484,6 +531,15 @@ pub(super) fn append_set_columns_response(
         session.record_inbox_normal_contents_table_setcolumns(handle, context.clone());
         session
             .record_outlook_view_failure_trace_event(format!("visible_inbox_setcolumns:{context}"));
+        record_normal_inbox_table_lifecycle(
+            session,
+            "setcolumns",
+            request_id,
+            request_rop_names,
+            request.input_handle_index().unwrap_or(0),
+            handle,
+            &context,
+        );
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -525,6 +581,7 @@ pub(super) fn append_sort_table_response(
     handle_slots: &[u32],
     request: &RopRequest,
     request_id: &str,
+    request_rop_names: &str,
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
@@ -609,6 +666,17 @@ pub(super) fn append_sort_table_response(
         )),
     }
     if let Some(trace) = sort_trace {
+        if trace.contains("associated=false") {
+            record_normal_inbox_table_lifecycle(
+                session,
+                "sort",
+                request_id,
+                request_rop_names,
+                request.input_handle_index().unwrap_or(0),
+                input_handle(handle_slots, request),
+                &trace,
+            );
+        }
         session.record_outlook_view_failure_trace_event(trace);
     }
 }
@@ -634,6 +702,7 @@ pub(super) fn append_restrict_response(
     handle_slots: &[u32],
     request: &RopRequest,
     request_id: &str,
+    request_rop_names: &str,
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) -> TableControlFlow {
@@ -746,6 +815,17 @@ pub(super) fn append_restrict_response(
     };
 
     if let Some(trace) = restrict_trace {
+        if trace.contains("associated=false") {
+            record_normal_inbox_table_lifecycle(
+                session,
+                "restrict",
+                request_id,
+                request_rop_names,
+                request.input_handle_index().unwrap_or(0),
+                input_handle(handle_slots, request),
+                &trace,
+            );
+        }
         session.record_outlook_view_failure_trace_event(trace);
     }
 
@@ -758,6 +838,7 @@ pub(super) fn append_restrict_table_control_response(
     handle_slots: &[u32],
     request: &RopRequest,
     request_id: &str,
+    request_rop_names: &str,
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) -> TableControlFlow {
@@ -775,6 +856,7 @@ pub(super) fn append_restrict_table_control_response(
         handle_slots,
         request,
         request_id,
+        request_rop_names,
         snapshot,
         responses,
     )
@@ -1227,6 +1309,15 @@ pub(super) fn append_query_rows_response(
             .last_visible_inbox_message_row_context = context.clone();
         session
             .record_outlook_view_failure_trace_event(format!("visible_inbox_query_rows:{context}"));
+        record_normal_inbox_table_lifecycle(
+            session,
+            "query_rows",
+            request_id,
+            request_rop_names,
+            request.input_handle_index().unwrap_or(0),
+            handle,
+            &context,
+        );
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -1287,6 +1378,7 @@ pub(super) fn append_find_row_response(
     handle_slots: &[u32],
     request: &RopRequest,
     request_id: &str,
+    request_rop_names: &str,
     mailboxes: &[lpe_storage::JmapMailbox],
     emails: &[lpe_storage::JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -1381,6 +1473,17 @@ pub(super) fn append_find_row_response(
             "inbox_find_row:request_id={request_id};handle={handle};associated={associated};position_before={position};position_after={position_after};columns={columns};request_restriction={restriction};response={response_return_value:#010x};found={response_found};response_row_wire_bytes={response_row_wire_bytes}"
         );
         session.record_outlook_view_failure_trace_event(context.clone());
+        if !associated {
+            record_normal_inbox_table_lifecycle(
+                session,
+                "find_row",
+                request_id,
+                request_rop_names,
+                request.input_handle_index().unwrap_or(0),
+                input_handle(handle_slots, request),
+                &context,
+            );
+        }
         if !associated && response_return_value == 0 && response_found == 1 {
             session.record_inbox_normal_contents_table_find_row(
                 input_handle(handle_slots, request),

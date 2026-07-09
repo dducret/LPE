@@ -109,8 +109,12 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 session,
             );
             let release_stage = format_visible_inbox_release_stage(&session.post_hierarchy_actions);
+            let first_row_projection_valid = session
+                .post_hierarchy_actions
+                .last_inbox_normal_contents_table_setcolumns_context
+                .contains("first_row_projection_valid=true");
             Some(format!(
-                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};release_stage={};last_contents_table={};last_setcolumns={};last_query_position={};last_query_rows={};last_findrow={};last_associated_find={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
+                "{release_request_metrics};request_id={request_id};request_rops={request_rop_names};handle={};folder=0x{folder_id:016x};position={};row_count={};columns={};column_support={};normal_message_defaulted_column_detail={};sort={};restriction={};release_stage={};normal_inbox_release_classifier=release_before_query_rows;normal_inbox_table_opened={};normal_inbox_setcolumns_seen={};normal_inbox_query_position_seen={};normal_inbox_query_rows_seen={};normal_inbox_findrow_seen={};content_sync_seen={};first_row_projection_valid={};last_contents_table={};last_setcolumns={};last_query_position={};last_query_rows={};last_findrow={};last_associated_find={};view_handoff={};table_compatibility={};descriptor_behavior={};descriptor_query_window={};default_view_advertisement_state={};live_handles_before_release={}",
                 format_optional_debug_handle(released_handle),
                 position,
                 folder_message_count(*folder_id, mailboxes, emails, snapshot),
@@ -120,6 +124,26 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                 format_debug_sort_orders(sort_orders),
                 format_debug_restriction_option(restriction.as_ref()),
                 release_stage,
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed,
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_setcolumns_observed,
+                !session
+                    .post_hierarchy_actions
+                    .last_inbox_normal_contents_table_query_position_context
+                    .is_empty(),
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_query_rows_observed,
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_find_row_observed,
+                session
+                    .post_hierarchy_actions
+                    .content_sync_configure_observed,
+                first_row_projection_valid,
                 debug_context_or_none(
                     &session
                         .post_hierarchy_actions
@@ -344,6 +368,15 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
     if let Some(context) = visible_inbox_release_without_query_rows {
         let has_defaulted_columns =
             context.contains(";defaulted=0x") || context.contains("backed=false");
+        record_normal_inbox_table_lifecycle(
+            session,
+            "release",
+            request_id,
+            request_rop_names,
+            request.input_handle_index().unwrap_or(0),
+            released_handle,
+            &context,
+        );
         session.record_outlook_view_failure_trace_event(format!(
             "visible_inbox_release_without_query_rows:{context}"
         ));

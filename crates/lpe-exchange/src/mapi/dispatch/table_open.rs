@@ -342,6 +342,20 @@ pub(super) async fn append_open_table_response<S>(
                 } else {
                     session.record_inbox_normal_contents_table();
                     record_mapi_outlook_view_inbox_normal_contents_opened();
+                    record_normal_inbox_table_lifecycle(
+                        session,
+                        "open",
+                        request_id,
+                        request_rop_names,
+                        request.input_handle_index().unwrap_or(0),
+                        Some(handle),
+                        &format!(
+                            "output_index={};folder=0x{contents_folder_id:016x};role={};row_count={row_count};table_flags=0x{table_flags:02x};initial_sort={}",
+                            request.output_handle_index.unwrap_or(0),
+                            debug_role_for_folder_id(contents_folder_id),
+                            format_debug_sort_orders(&initial_sort)
+                        ),
+                    );
                 }
                 session.record_last_inbox_contents_table_context(format!(
                     "input_index={};output_index={};output_handle={};table_flags=0x{table_flags:02x};associated={associated};row_count={row_count}",
