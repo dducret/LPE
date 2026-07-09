@@ -895,6 +895,26 @@ def record_post_visible_release_followup(
         ] += 1
 
 
+def record_post_hierarchy_create_save_submit_metrics(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    for key in (
+        "last_post_hierarchy_create_save_object_context",
+        "post_hierarchy_last_create_save_object_context",
+    ):
+        context = field_text(fields, key)
+        if context and context != "none":
+            summary["post_hierarchy_create_save_object_contexts"][context] += 1
+
+    for key in (
+        "last_post_hierarchy_submit_attempt_context",
+        "post_hierarchy_last_submit_attempt_context",
+    ):
+        context = field_text(fields, key)
+        if context and context != "none":
+            summary["post_hierarchy_submit_attempt_contexts"][context] += 1
+
+
 def int_field(fields: dict[str, Any], key: str) -> int:
     value = fields.get(key)
     if isinstance(value, bool):
@@ -2078,6 +2098,16 @@ def print_single_summary(
             "Visible Inbox release handle slots",
             log["visible_release_handle_slots"],
             limit=8,
+        )
+        print_counter(
+            "Post-hierarchy Create/Save object contexts",
+            log["post_hierarchy_create_save_object_contexts"],
+            limit=12,
+        )
+        print_counter(
+            "Post-hierarchy Submit/Transport attempts",
+            log["post_hierarchy_submit_attempt_contexts"],
+            limit=12,
         )
         print_counter(
             "Journal SetColumns+Release response frames",

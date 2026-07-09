@@ -66,6 +66,8 @@ def empty_log_summary() -> dict:
         "post_visible_release_terminal_tail": deque(maxlen=12),
         "post_visible_release_terminal_contexts": set(),
         "post_visible_release_hierarchy_query_position_max": 0,
+        "post_hierarchy_create_save_object_contexts": Counter(),
+        "post_hierarchy_submit_attempt_contexts": Counter(),
         "umolk_dictionary_shapes": Counter(),
         "umolk_dictionary_olprefs_versions": Counter(),
         "umolk_dictionary_info_versions": Counter(),
@@ -1023,6 +1025,52 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             Counter(
                 {
                     "role=drafts;folder=0x00000000000e0001;handle=55;position=1": 1,
+                }
+            ),
+        )
+
+    def test_post_hierarchy_create_save_submit_metrics_are_counted(self) -> None:
+        summary = empty_log_summary()
+
+        rca.record_post_hierarchy_create_save_submit_metrics(
+            summary,
+            {
+                "last_post_hierarchy_create_save_object_context": (
+                    "kind=navigation_shortcut;send_candidate=false;"
+                    "class=IPM.Microsoft.WunderBar.Link"
+                ),
+                "last_post_hierarchy_submit_attempt_context": (
+                    "attempt_count=1;request_id={A}:93;rop=SubmitMessage;"
+                    "subject=Microsoft Outlook Test Message"
+                ),
+            },
+        )
+        rca.record_post_hierarchy_create_save_submit_metrics(
+            summary,
+            {
+                "post_hierarchy_last_create_save_object_context": (
+                    "kind=message;send_candidate=true;subject=Microsoft Outlook Test Message"
+                ),
+                "post_hierarchy_last_submit_attempt_context": "none",
+            },
+        )
+
+        self.assertEqual(
+            summary["post_hierarchy_create_save_object_contexts"],
+            Counter(
+                {
+                    "kind=navigation_shortcut;send_candidate=false;"
+                    "class=IPM.Microsoft.WunderBar.Link": 1,
+                    "kind=message;send_candidate=true;subject=Microsoft Outlook Test Message": 1,
+                }
+            ),
+        )
+        self.assertEqual(
+            summary["post_hierarchy_submit_attempt_contexts"],
+            Counter(
+                {
+                    "attempt_count=1;request_id={A}:93;rop=SubmitMessage;"
+                    "subject=Microsoft Outlook Test Message": 1,
                 }
             ),
         )
