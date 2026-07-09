@@ -198,8 +198,8 @@ fn default_folder_associated_named_view(
         })?;
     if !default_view_supported_folder(folder_id, container_class) {
         None
-    } else if let Some(view_id) = default_common_views_named_view_id(container_class, folder_id) {
-        snapshot.common_view_named_view_message_for_id(view_id)
+    } else if default_common_views_named_view_id(container_class, folder_id).is_some() {
+        None
     } else {
         snapshot.default_folder_named_view_message(
             folder_id,
@@ -311,6 +311,9 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     if folder_id != INBOX_FOLDER_ID {
         return true;
     }
+    if is_inbox_folder_design_default_named_view(message) {
+        return false;
+    }
     if message.message_class == "IPM.ExtendedRule.Message" {
         return false;
     }
@@ -385,6 +388,13 @@ fn is_inbox_broad_startup_config_class(message: &MapiAssociatedConfigMessage) ->
                 .message_class
                 .eq_ignore_ascii_case(&modeled.message_class)
         })
+}
+
+fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
+    message
+        .message_class
+        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        && message.subject.eq_ignore_ascii_case("Compact")
 }
 
 pub(super) fn message_class_restriction_matches_exact(

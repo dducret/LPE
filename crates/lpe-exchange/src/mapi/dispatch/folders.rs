@@ -1323,6 +1323,7 @@ pub(super) fn folder_local_default_named_view_is_supported(
                 .or_else(|| advertised_special_folder_container_class(folder_id));
             container_class.is_some_and(|container_class| {
                 default_view_supported_folder(folder_id, container_class)
+                    && !default_view_uses_common_views(container_class, folder_id)
             })
         })
 }

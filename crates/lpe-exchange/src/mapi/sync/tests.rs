@@ -225,7 +225,7 @@ fn persisted_common_views_shortcuts(
 }
 
 #[test]
-fn common_views_fai_fasttransfer_boundaries_cover_four_items() {
+fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
@@ -234,11 +234,27 @@ fn common_views_fai_fasttransfer_boundaries_cover_four_items() {
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
 
-    assert_fai_boundary_summary(&buffer, &summary, 4);
-    assert!(summary
-        .fai_items
-        .iter()
-        .all(|item| item.message_class == "IPM.Microsoft.WunderBar.Link"));
+    assert_fai_boundary_summary(&buffer, &summary, 6);
+    assert_eq!(
+        summary
+            .fai_items
+            .iter()
+            .filter(|item| item.message_class == "IPM.Microsoft.WunderBar.Link")
+            .count(),
+        4
+    );
+    assert_eq!(
+        summary
+            .fai_items
+            .iter()
+            .filter(|item| item.message_class == "IPM.Microsoft.FolderDesign.NamedView")
+            .count(),
+        2
+    );
+    assert!(summary.fai_items.iter().any(|item| {
+        item.item_id == Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID)
+            && item.subject == "Compact"
+    }));
     let summary_property_count = summary
         .fai_items
         .iter()
@@ -248,15 +264,18 @@ fn common_views_fai_fasttransfer_boundaries_cover_four_items() {
     for item in &summary.fai_items {
         let item_id = item.item_id.unwrap();
         let special_object = objects.iter().find(|object| object.item_id == item_id);
-        assert_eq!(
-            mapi_mailstore::fai_debug_state_origin(COMMON_VIEWS_FOLDER_ID, special_object, item_id),
-            "sql_associated"
-        );
+        let origin =
+            mapi_mailstore::fai_debug_state_origin(COMMON_VIEWS_FOLDER_ID, special_object, item_id);
+        if item.message_class == "IPM.Microsoft.FolderDesign.NamedView" {
+            assert_eq!(origin, "mapi_synthetic_default");
+        } else {
+            assert_eq!(origin, "sql_associated");
+        }
     }
 }
 
 #[test]
-fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
+fn inbox_fai_fasttransfer_boundaries_do_not_export_common_views_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_associated_configs(persisted_inbox_associated_configs(account_id));
@@ -265,7 +284,7 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
 
-    assert_fai_boundary_summary(&buffer, &summary, 7);
+    assert_fai_boundary_summary(&buffer, &summary, 6);
     let summary_property_count = summary
         .fai_items
         .iter()
@@ -277,14 +296,10 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
         let special_object = objects.iter().find(|object| object.item_id == item_id);
         let origin =
             mapi_mailstore::fai_debug_state_origin(INBOX_FOLDER_ID, special_object, item_id);
-        if item_id == crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID {
-            assert_eq!(origin, "mapi_synthetic_default");
-        } else {
-            assert_eq!(origin, "sql_associated");
-        }
+        assert_eq!(origin, "sql_associated");
     }
-    assert!(summary.fai_items.iter().any(|item| {
-        item.item_id == Some(crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID)
+    assert!(!summary.fai_items.iter().any(|item| {
+        item.item_id == Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID)
             || item.message_class == "IPM.Microsoft.FolderDesign.NamedView"
     }));
 }

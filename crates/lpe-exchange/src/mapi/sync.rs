@@ -270,8 +270,8 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .into_iter()
                 .map(|entry| journal_sync_object(entry))
                 .collect(),
-            COMMON_VIEWS_FOLDER_ID => snapshot
-                .common_views_messages()
+            COMMON_VIEWS_FOLDER_ID => common_views_sync_messages(snapshot)
+                .into_iter()
                 .map(|message| common_views_sync_object(message, account_id))
                 .collect(),
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
@@ -299,6 +299,24 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .map(associated_config_sync_object),
     );
     objects
+}
+
+fn common_views_sync_messages(
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<crate::mapi_store::MapiCommonViewsMessage> {
+    let mut messages = snapshot.common_views_messages().collect::<Vec<_>>();
+    for message in [
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    ]
+    .into_iter()
+    .filter_map(|id| snapshot.common_view_named_view_message_for_id(id))
+    {
+        messages.push(crate::mapi_store::MapiCommonViewsMessage::NamedView(
+            message,
+        ));
+    }
+    messages
 }
 
 fn default_folder_named_view_sync_supported(folder_id: u64) -> bool {

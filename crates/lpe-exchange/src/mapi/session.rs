@@ -516,15 +516,20 @@ impl MapiSession {
         }
     }
 
-    pub(in crate::mapi) fn record_post_hierarchy_submit_attempt_context(&mut self, context: String) {
+    pub(in crate::mapi) fn record_post_hierarchy_submit_attempt_context(
+        &mut self,
+        context: String,
+    ) {
         if self.hierarchy_sync_completed() {
-            self.post_hierarchy_actions.post_hierarchy_submit_attempt_count = self
+            self.post_hierarchy_actions
+                .post_hierarchy_submit_attempt_count = self
                 .post_hierarchy_actions
                 .post_hierarchy_submit_attempt_count
                 .saturating_add(1);
             let context = format!(
                 "attempt_count={};{context}",
-                self.post_hierarchy_actions.post_hierarchy_submit_attempt_count
+                self.post_hierarchy_actions
+                    .post_hierarchy_submit_attempt_count
             );
             self.post_hierarchy_actions
                 .last_post_hierarchy_submit_attempt_context = context.clone();
@@ -1524,15 +1529,17 @@ pub(in crate::mapi) fn response_handle_table_with_released_handle_sentinel(
     handle_slots: &[u32],
     output_handles: &[u32],
     echo_input_handles: bool,
-    use_released_handle_sentinel: bool,
+    released_handle_indexes: &[u8],
 ) -> Vec<u32> {
     let mut handles = response_handle_table(handle_slots, output_handles, echo_input_handles);
-    if use_released_handle_sentinel {
+    if !released_handle_indexes.is_empty() {
         // MS-OXCROPS Appendix A notes Exchange can return a non-0xFFFFFFFF invalid handle
         // for released slots in multi-ROP release batches.
-        for handle in &mut handles {
-            if *handle == u32::MAX {
-                *handle = RELEASED_HANDLE_RESPONSE_SENTINEL;
+        for released_index in released_handle_indexes {
+            if let Some(handle) = handles.get_mut(usize::from(*released_index)) {
+                if *handle == u32::MAX {
+                    *handle = RELEASED_HANDLE_RESPONSE_SENTINEL;
+                }
             }
         }
     }

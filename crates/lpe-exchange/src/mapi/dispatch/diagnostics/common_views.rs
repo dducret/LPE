@@ -501,19 +501,32 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
         .and_then(|column| usize::try_from(column).ok());
     let descriptor_sort_tag =
         descriptor_sort_column.and_then(|index| all_descriptor_columns.get(index).copied());
+    let descriptor_sort_order = if definition.sort_descending {
+        0x01
+    } else {
+        0x00
+    };
     let table_primary_sort_tag = sort_orders.first().map(|sort| sort.property_tag);
+    let table_primary_sort_order = sort_orders.first().map(|sort| sort.order);
     let descriptor_missing_from_table =
         normal_message_table_unsupported_columns_from_summary(&descriptor_columns);
     let descriptor_columns_not_selected = missing_debug_property_tags(&descriptor_columns, columns);
     let table_sort_matches_descriptor = descriptor_sort_tag
         .zip(table_primary_sort_tag)
-        .is_some_and(|(expected, actual)| expected == actual);
+        .zip(table_primary_sort_order)
+        .is_some_and(|((expected_tag, actual_tag), actual_order)| {
+            expected_tag == actual_tag && descriptor_sort_order == actual_order
+        });
+    let table_sort_direction_matches_descriptor =
+        table_primary_sort_order.is_some_and(|actual_order| descriptor_sort_order == actual_order);
 
     format!(
         "folder=0x{folder_id:016x};view_folder=0x{:016x};view=0x{:016x};\
          view_name={};descriptor_summary={};descriptor_columns_missing_from_table={};\
          descriptor_columns_not_selected={};\
-         descriptor_sort_tag={};table_primary_sort_tag={};table_sort_matches_descriptor={};\
+         descriptor_sort_tag={};descriptor_sort_order=0x{descriptor_sort_order:02x};\
+         table_primary_sort_tag={};table_primary_sort_order={};\
+         table_sort_matches_descriptor={};table_sort_direction_matches_descriptor={};\
          table_sort_count={};table_restriction_present={}",
         message.folder_id,
         message.id,
@@ -527,7 +540,11 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
         table_primary_sort_tag
             .map(|tag| format!("0x{tag:08x}"))
             .unwrap_or_else(|| "none".to_string()),
+        table_primary_sort_order
+            .map(|order| format!("0x{order:02x}"))
+            .unwrap_or_else(|| "none".to_string()),
         table_sort_matches_descriptor,
+        table_sort_direction_matches_descriptor,
         sort_orders.len(),
         restriction.is_some()
     )
@@ -784,7 +801,7 @@ mod tests {
         ];
         let sort_orders = [MapiSortOrder {
             property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
-            order: 0,
+            order: 1,
         }];
         let restriction = MapiRestriction::Bitmask {
             property_tag: PID_TAG_MESSAGE_FLAGS,
@@ -801,12 +818,52 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("view_folder=0x0000000000050001"));
+        assert!(summary.contains("view_folder=0x0000000000090001"));
         assert!(summary.contains("view_name=Compact"));
         assert!(summary.contains("descriptor_columns_missing_from_table="));
         assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
+        assert!(summary.contains("descriptor_sort_order=0x01"));
         assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
+        assert!(summary.contains("table_primary_sort_order=0x01"));
         assert!(summary.contains("table_sort_matches_descriptor=true"));
+        assert!(summary.contains("table_sort_direction_matches_descriptor=true"));
         assert!(summary.contains("table_restriction_present=true"));
+    }
+
+    #[test]
+    fn default_view_table_compatibility_reports_visible_inbox_sort_direction_mismatch() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let columns = [
+            PID_TAG_IMPORTANCE,
+            PID_LID_REMINDER_SET_TAG,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_FLAG_STATUS,
+            PID_TAG_HAS_ATTACHMENTS,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_MESSAGE_SIZE,
+            PID_NAME_KEYWORDS_TAG,
+        ];
+        let sort_orders = [MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 0,
+        }];
+
+        let summary = format_default_view_table_compatibility_contract(
+            INBOX_FOLDER_ID,
+            false,
+            &columns,
+            &sort_orders,
+            None,
+            &snapshot,
+        );
+
+        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
+        assert!(summary.contains("descriptor_sort_order=0x01"));
+        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
+        assert!(summary.contains("table_primary_sort_order=0x00"));
+        assert!(summary.contains("table_sort_matches_descriptor=false"));
+        assert!(summary.contains("table_sort_direction_matches_descriptor=false"));
     }
 }

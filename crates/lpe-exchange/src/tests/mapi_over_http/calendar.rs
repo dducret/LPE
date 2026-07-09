@@ -5257,7 +5257,23 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     let common_views_rops = response_rops_from_execute_response(common_views_response).await;
     let common_views_stream =
         strict_content_sync_transfer_from_response(&common_views_rops).unwrap();
-    assert!(common_views_stream.message_changes.is_empty());
+    assert_eq!(common_views_stream.message_changes.len(), 2);
+    assert!(common_views_stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+    assert!(common_views_stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Compact"));
+    assert!(common_views_stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Sent To"));
+    assert!(contains_bytes(
+        &common_views_rops,
+        &utf16z("IPM.Microsoft.FolderDesign.NamedView")
+    ));
     assert!(!contains_bytes(
         &common_views_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")

@@ -144,6 +144,7 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     # for these columns into a current actionable issue bucket.
     "0x001a001f",  # PidTagMessageClass
     "0x00170003",  # PidTagImportance
+    "0x00410102",  # PidTagSentRepresentingEntryId
     "0x0037001f",  # PidTagSubject
     "0x00390040",  # PidTagClientSubmitTime
     "0x0042001f",  # PidTagSentRepresentingName
@@ -159,6 +160,8 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     "0x0ff60102",  # PidTagInstanceKey
     "0x12130003",  # Outlook compact-view auxiliary flags
     "0x0f030102",  # Outlook messages view binary descriptor blob
+    "0x1035001f",  # PidTagInternetMessageId
+    "0x30070040",  # PidTagCreationTime
     "0x30080040",  # PidTagLastModificationTime
     "0x67480014",  # PidTagFolderId
     "0x674a0014",  # PidTagMid
@@ -179,6 +182,8 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     "0x85170040",  # PidLidCommonEnd
     "0x85780003",  # Outlook calendar auxiliary status
     "0x85ef000b",  # PidLidOutlookCommon85EF
+    "0x8f07000b",  # Outlook internal default-view flag
+    "0x801f001f",  # PidNameContentClass
 }
 ACTIONABLE_ZERO_DEFAULT_TAGS = {}
 
@@ -390,6 +395,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_handle_tables": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
+        "mixed_release_queryposition_handle_tables": Counter(),
+        "mixed_release_queryposition_classifications": Counter(),
         "visible_release_descriptor_windows": Counter(),
         "visible_release_descriptor_contract_issues": Counter(),
         "common_view_descriptor_getprops": Counter(),
@@ -410,13 +417,21 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "default_view_folder_open_without_rows": Counter(),
         "default_view_special_folder_bootstrap_open_without_rows": Counter(),
         "default_view_query_position_without_rows": Counter(),
+        "positive_default_view_query_position_without_rows": Counter(),
         "default_view_query_position_without_rows_contexts": set(),
         "default_view_id_owners": defaultdict(set),
         "default_view_id_collision_contexts": set(),
         "default_view_id_collisions": Counter(),
+        "inbox_default_view_advertisements": Counter(),
+        "inbox_default_view_advertisement_contexts": Counter(),
+        "common_views_fai_transfer_summaries": Counter(),
+        "common_views_fai_item_classes": Counter(),
+        "common_views_fai_named_view_items": Counter(),
+        "common_views_fai_item_states": Counter(),
         "calendar_zero_duration_timed_query_position_rows": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
+        "selected_extra_descriptor_columns": Counter(),
         "default_view_descriptor_identity_columns": Counter(),
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
@@ -498,6 +513,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 }
                 inspect_view_trace(summary, str(fields.get("outlook_view_trace_events") or ""))
                 record_setcolumns_release_response(summary, fields)
+                record_mixed_release_queryposition_response(summary, fields)
                 record_post_visible_release_followup(summary, fields)
                 record_umolk_dictionary_shapes(
                     summary,
@@ -523,6 +539,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_common_view_descriptor_getprops(summary, "", fields)
             elif message == "rca debug mapi setcolumns release response framing":
                 record_setcolumns_release_response(summary, fields)
+            elif message == "rca debug mapi execute response framing":
+                record_mixed_release_queryposition_response(summary, fields)
             elif message == "rca debug mapi visible inbox query rows tracked":
                 record_visible_inbox_query_rows(summary, fields)
             elif message == "rca debug outlook contents table query rows":
@@ -537,6 +555,10 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                     summary,
                     str(fields.get("umolk_getprops_materialization_context") or ""),
                 )
+            elif message == "rca debug mapi fai fasttransfer transfer summary":
+                record_common_views_fai_transfer_summary(summary, fields)
+            elif message == "rca debug mapi common views fai content sync item":
+                record_common_views_fai_content_sync_item(summary, fields)
             release_context = fields.get("release_without_query_rows_context")
             if isinstance(release_context, str) and release_context:
                 record_visible_release_context(summary, release_context)
@@ -699,6 +721,58 @@ def record_folder_local_default_view_visibility(
     summary["folder_local_default_view_visibility"][key] += 1
     if present == "false":
         summary["folder_local_default_view_visibility_contexts"][context] += 1
+
+
+def record_common_views_fai_transfer_summary(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if field_text(fields, "folder_role") != "__mapi_common_views":
+        return
+    key = (
+        f"items={int_field(fields, 'item_count')};"
+        f"persisted={int_field(fields, 'persisted_count')};"
+        f"synthetic={int_field(fields, 'synthetic_count')};"
+        f"virtual={int_field(fields, 'virtual_count')};"
+        f"first={field_text(fields, 'first_item_class')}/{field_text(fields, 'first_item_subject')};"
+        f"last={field_text(fields, 'last_item_class')}/{field_text(fields, 'last_item_subject')};"
+        f"selection={field_text(fields, 'active_transfer_selection') or 'unknown'}"
+    )
+    summary["common_views_fai_transfer_summaries"][key] += 1
+
+
+def record_common_views_fai_content_sync_item(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if field_text(fields, "folder_role") != "__mapi_common_views":
+        return
+    classification = field_text(fields, "classification") or "unknown"
+    message_class = field_text(fields, "message_class") or "unknown"
+    subject = field_text(fields, "subject") or "unknown"
+    state_origin = field_text(fields, "state_origin") or "unknown"
+    source_repository = field_text(fields, "source_repository") or "unknown"
+    item_id = field_text(fields, "item_id") or "unknown"
+    key = (
+        f"classification={classification};class={message_class};"
+        f"subject={subject};state={state_origin}"
+    )
+    summary["common_views_fai_item_classes"][key] += 1
+    summary["common_views_fai_item_states"][
+        f"classification={classification};state={state_origin};source={source_repository}"
+    ] += 1
+    if classification == "default_named_view":
+        name = common_views_named_view_name(subject)
+        summary["common_views_fai_named_view_items"][
+            f"name={name};subject={subject};item={item_id};state={state_origin}"
+        ] += 1
+
+
+def common_views_named_view_name(subject: str) -> str:
+    normalized = subject.strip().lower()
+    if normalized == "compact":
+        return "compact"
+    if normalized in {"sent to", "sentto"}:
+        return "sent_to"
+    return "other"
 
 
 def record_umolk_dictionary_shapes(summary: dict[str, Any], text: str) -> None:
@@ -1001,6 +1075,7 @@ def inspect_view_trace(summary: dict[str, Any], trace_events: str) -> None:
             record_post_visible_release_terminal_event(summary, segment)
         record_default_view_query_position_without_rows(summary, segment)
         record_default_view_id_collision(summary, segment)
+        record_inbox_default_view_advertisement(summary, segment)
         record_default_view_descriptor_identity_columns(summary, segment)
         record_descriptor_gap(summary, segment)
         inspect_contract(summary, segment)
@@ -1147,6 +1222,33 @@ def record_default_view_id_collision(summary: dict[str, Any], segment: str) -> N
     summary["default_view_id_collisions"][key] += 1
 
 
+def record_inbox_default_view_advertisement(
+    summary: dict[str, Any], segment: str
+) -> None:
+    if not segment.startswith("default_view_advertised:"):
+        return
+    fields = segment.split(":", 1)[1]
+    owner_folder = first_field(fields, "owner_folder")
+    view_folder = first_field(fields, "view_folder") or "unknown"
+    view_id = first_field(fields, "view") or "unknown"
+    view_name = first_field(fields, "name") or "unknown"
+    request_id = first_field(fields, "request_id") or "unknown"
+    if owner_folder != "0x0000000000050001" or view_name.lower() != "compact":
+        return
+    if view_folder == "0x0000000000090001":
+        status = "common_views"
+    elif view_folder == "0x0000000000050001":
+        status = "folder_local"
+    else:
+        status = "unexpected_folder"
+    key = f"status={status};view_folder={view_folder};view={view_id};name={view_name}"
+    summary["inbox_default_view_advertisements"][key] += 1
+    if status != "common_views":
+        summary["inbox_default_view_advertisement_contexts"][
+            f"request={request_id};{key}"
+        ] += 1
+
+
 def record_visible_release_classification(summary: dict[str, Any], text: str) -> None:
     if text.startswith("visible_inbox_release_without_query_rows:"):
         text = text.split(":", 1)[1]
@@ -1157,8 +1259,13 @@ def record_visible_release_classification(summary: dict[str, Any], text: str) ->
     descriptor_columns_not_selected = first_field(text, "descriptor_columns_not_selected")
     projection_kind = first_field(text, "default_view_projection_kind")
     table_sort_matches = first_field(text, "table_sort_matches_descriptor")
+    table_sort_direction_matches = first_field(
+        text, "table_sort_direction_matches_descriptor"
+    )
     descriptor_sort = first_field(text, "descriptor_sort_tag")
     table_sort = first_field(text, "table_primary_sort_tag")
+    descriptor_sort_order = first_field(text, "descriptor_sort_order")
+    table_sort_order = first_field(text, "table_primary_sort_order")
     if projection_kind == "identity_probe_subset" or (
         row_count > 0
         and defaulted == ""
@@ -1171,12 +1278,24 @@ def record_visible_release_classification(summary: dict[str, Any], text: str) ->
     elif descriptor_missing_from_table:
         key = "descriptor_table_mismatch_before_query_rows"
     elif row_count > 0 and defaulted == "" and missing_descriptor == "":
-        if table_sort_matches == "true" or (
-            descriptor_sort and table_sort and descriptor_sort == table_sort
+        if table_sort_matches == "true":
+            key = "valid_projection_complete_setcolumns_before_query_rows"
+        elif (
+            table_sort_direction_matches == "false"
+            or (
+                descriptor_sort
+                and table_sort
+                and descriptor_sort == table_sort
+                and descriptor_sort_order
+                and table_sort_order
+                and descriptor_sort_order != table_sort_order
+            )
         ):
+            key = "valid_projection_sort_direction_mismatch_before_query_rows"
+        elif descriptor_sort and table_sort and descriptor_sort == table_sort:
             key = "valid_projection_complete_setcolumns_before_query_rows"
         else:
-            key = "valid_projection_sort_mismatch_before_query_rows"
+            key = "valid_projection_sort_tag_mismatch_before_query_rows"
     elif defaulted or missing_descriptor:
         key = "incomplete_projection_before_query_rows"
     else:
@@ -1234,6 +1353,64 @@ def classify_setcolumns_release_response_handle_table(
     return "release_input_slot_unknown"
 
 
+def record_mixed_release_queryposition_response(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    names = field_text(fields, "request_rop_names")
+    if not names:
+        names = field_text(fields, "request_full_rop_names")
+    rops = [part.strip() for part in names.split(",") if part.strip()]
+    if not {"Release", "GetContentsTable", "QueryPosition"}.issubset(rops):
+        return
+    if "RegisterNotification" not in rops:
+        return
+    handle_table = field_text(fields, "output_handle_table_summary")
+    if handle_table:
+        summary["mixed_release_queryposition_handle_tables"][
+            f"rops={names};{handle_table}"
+        ] += 1
+    summary["mixed_release_queryposition_classifications"][
+        classify_mixed_release_queryposition_response(fields, handle_table)
+    ] += 1
+
+
+def classify_mixed_release_queryposition_response(
+    fields: dict[str, Any], handle_table: str
+) -> str:
+    handles = parse_handle_table_summary(handle_table)
+    if not handles:
+        return "response_handle_table_unknown"
+    frames = field_text(fields, "response_rop_frames")
+    output_indexes = [
+        (match.group(1).lower(), int(match.group(2)))
+        for match in re.finditer(r"(0x[0-9a-fA-F]{2})@[^|]*:out=(\d+):", frames)
+    ]
+    query_position_indexes = [index for rop, index in output_indexes if rop == "0x17"]
+    register_indexes = [index for rop, index in output_indexes if rop == "0x29"]
+    if not query_position_indexes:
+        return "queryposition_response_frame_missing"
+    query_position_index = query_position_indexes[-1]
+    if query_position_index >= len(handles):
+        return "queryposition_handle_slot_trimmed"
+    release_slots = handles[:query_position_index]
+    invalidated_release_slots = [
+        handle.lower() in {"0x00000000", "0xffffffff"} for handle in release_slots
+    ]
+    query_handle = handles[query_position_index].lower()
+    if query_handle in {"0x00000000", "0xffffffff"}:
+        return "queryposition_table_handle_invalidated"
+    if register_indexes:
+        register_index = register_indexes[-1]
+        if register_index >= len(handles):
+            return "notification_handle_slot_trimmed"
+        notification_handle = handles[register_index].lower()
+        if notification_handle in {"0x00000000", "0xffffffff"}:
+            return "notification_handle_invalidated"
+    if any(invalidated_release_slots):
+        return "sparse_release_slots_with_valid_table_and_notification_handles"
+    return "no_invalidated_release_slots_before_queryposition"
+
+
 def parse_handle_table_summary(summary: str) -> list[str]:
     match = re.search(r"(?:^|;)handles=([^;]+)", summary)
     if not match:
@@ -1265,6 +1442,27 @@ def record_default_view_query_position_without_rows(
     next_step = first_field(event_fields, "next_expected_client_step") or ""
     key = f"role={role};next={next_step}"
     summary["default_view_query_position_without_rows"][key] += 1
+    row_count = int_text_field(event_fields, "response_row_count")
+    if row_count > 0:
+        position = first_field(event_fields, "response_position") or "unknown"
+        request_id = first_field(event_fields, "request_id") or "unknown"
+        sort_match = first_field(event_fields, "table_sort_matches_descriptor")
+        sort_direction_match = first_field(
+            event_fields, "table_sort_direction_matches_descriptor"
+        )
+        descriptor_sort_order = first_field(event_fields, "descriptor_sort_order")
+        table_sort_order = first_field(event_fields, "table_primary_sort_order")
+        sort_detail = ""
+        if sort_match or sort_direction_match or descriptor_sort_order or table_sort_order:
+            sort_detail = (
+                f";sort_match={sort_match or 'unknown'}"
+                f";sort_direction_match={sort_direction_match or 'unknown'}"
+                f";descriptor_sort_order={descriptor_sort_order or 'unknown'}"
+                f";table_sort_order={table_sort_order or 'unknown'}"
+            )
+        summary["positive_default_view_query_position_without_rows"][
+            f"role={role};rows={row_count};position={position};next={next_step}{sort_detail};request={request_id}"
+        ] += 1
     if role == "calendar" and "zero_duration_timed=true" in text:
         row_title = first_field(event_fields, "title") or "unknown"
         duration = first_field(event_fields, "duration_minutes") or "unknown"
@@ -1463,6 +1661,31 @@ def record_descriptor_gap(
         table_kind = "unknown"
     key = f"{table_kind};role={folder_role};view={view_name};missing={missing}"
     summary["descriptor_gap_windows"][key] += 1
+    record_selected_extra_descriptor_columns(
+        summary, table_kind, folder_role, view_name, missing, text
+    )
+
+
+def record_selected_extra_descriptor_columns(
+    summary: dict[str, Any],
+    table_kind: str,
+    folder_role: str | None,
+    view_name: str | None,
+    missing: str,
+    text: str,
+) -> None:
+    extra_tags = csv_field_values(missing)
+    if not extra_tags:
+        return
+    table_backed_tags = set(csv_field_values(nested_field(text, "backed") or ""))
+    known_backed_tags = table_backed_tags | KNOWN_BACKED_DESCRIPTOR_TAGS
+    unbacked = [tag for tag in extra_tags if tag not in known_backed_tags]
+    status = "all_table_backed" if not unbacked else "has_unbacked_columns"
+    key = (
+        f"{table_kind};role={folder_role};view={view_name};status={status};"
+        f"extra={','.join(extra_tags)};unbacked={','.join(unbacked) or 'none'}"
+    )
+    summary["selected_extra_descriptor_columns"][key] += 1
 
 
 DEFAULT_VIEW_IDENTITY_DESCRIPTOR_TAGS = {
@@ -1612,6 +1835,13 @@ def first_field(text: str, key: str) -> str | None:
         if part.startswith(prefix):
             return part[len(prefix) :].split(">", 1)[0]
     return None
+
+
+def nested_field(text: str, key: str) -> str | None:
+    match = re.search(rf"(?:^|[;>]){re.escape(key)}=([^;>]*)", text)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def field_in_semicolon_text(text: str, key: str) -> str | None:
@@ -2018,6 +2248,11 @@ def print_single_summary(
         print_counter("Stale default-view owner states", log["stale_default_view_states"])
         print_counter("Descriptor gap windows", log["descriptor_gap_windows"], limit=12)
         print_counter(
+            "Selected extra columns beyond descriptor",
+            log["selected_extra_descriptor_columns"],
+            limit=12,
+        )
+        print_counter(
             "Default-view descriptor identity columns",
             log["default_view_descriptor_identity_columns"],
             limit=12,
@@ -2054,8 +2289,38 @@ def print_single_summary(
             limit=12,
         )
         print_counter(
+            "Positive default-view QueryPosition without QueryRows",
+            log["positive_default_view_query_position_without_rows"],
+            limit=12,
+        )
+        print_counter(
             "Default-view ID collisions",
             log["default_view_id_collisions"],
+            limit=8,
+        )
+        print_counter(
+            "Inbox default-view advertisements",
+            log["inbox_default_view_advertisements"],
+            limit=8,
+        )
+        print_counter(
+            "Common Views FAI transfer summaries",
+            log["common_views_fai_transfer_summaries"],
+            limit=8,
+        )
+        print_counter(
+            "Common Views FAI item classes",
+            log["common_views_fai_item_classes"],
+            limit=12,
+        )
+        print_counter(
+            "Common Views FAI default named views",
+            log["common_views_fai_named_view_items"],
+            limit=12,
+        )
+        print_counter(
+            "Common Views FAI item states",
+            log["common_views_fai_item_states"],
             limit=8,
         )
         print_counter(
@@ -2122,6 +2387,16 @@ def print_single_summary(
         print_counter(
             "Journal SetColumns+Release response handle classifications",
             log["setcolumns_release_response_handle_classifications"],
+            limit=8,
+        )
+        print_counter(
+            "Mixed release+QueryPosition response handle tables",
+            log["mixed_release_queryposition_handle_tables"],
+            limit=8,
+        )
+        print_counter(
+            "Mixed release+QueryPosition classifications",
+            log["mixed_release_queryposition_classifications"],
             limit=8,
         )
         print_counter(
@@ -2245,6 +2520,7 @@ def print_batch_summary(
     aggregate_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     aggregate_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     aggregate_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
+    aggregate_mixed_release_queryposition_classifications: Counter[str] = Counter()
     aggregate_post_visible_release_followups: Counter[str] = Counter()
     aggregate_post_visible_release_rows_elsewhere_contexts: Counter[str] = Counter()
     aggregate_post_visible_release_terminal_events: Counter[str] = Counter()
@@ -2255,10 +2531,16 @@ def print_batch_summary(
     aggregate_default_view_folder_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_special_folder_bootstrap_open_without_rows: Counter[str] = Counter()
     aggregate_default_view_query_position_without_rows: Counter[str] = Counter()
+    aggregate_positive_default_view_query_position_without_rows: Counter[str] = Counter()
     aggregate_default_view_id_collisions: Counter[str] = Counter()
+    aggregate_common_views_fai_transfer_summaries: Counter[str] = Counter()
+    aggregate_common_views_fai_item_classes: Counter[str] = Counter()
+    aggregate_common_views_fai_named_view_items: Counter[str] = Counter()
+    aggregate_common_views_fai_item_states: Counter[str] = Counter()
     aggregate_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     aggregate_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     aggregate_descriptor_gap_windows: Counter[str] = Counter()
+    aggregate_selected_extra_descriptor_columns: Counter[str] = Counter()
     aggregate_default_view_descriptor_identity_columns: Counter[str] = Counter()
     aggregate_broad_ipm_configuration_row_count_gaps: Counter[str] = Counter()
     aggregate_nonzero_response_codes: Counter[str] = Counter()
@@ -2279,6 +2561,7 @@ def print_batch_summary(
     current_associated_config_optional_defaulted_tags: Counter[str] = Counter()
     current_associated_config_optional_defaulted_contexts: Counter[str] = Counter()
     current_descriptor_gap_windows: Counter[str] = Counter()
+    current_selected_extra_descriptor_columns: Counter[str] = Counter()
     current_visible_release_descriptor_windows: Counter[str] = Counter()
     current_visible_release_descriptor_contract_issues: Counter[str] = Counter()
     current_common_view_descriptor_getprops: Counter[str] = Counter()
@@ -2293,6 +2576,7 @@ def print_batch_summary(
     current_rr_setcolumns_release_response_frames: Counter[str] = Counter()
     current_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
     current_rr_setcolumns_release_response_handle_classifications: Counter[str] = Counter()
+    current_mixed_release_queryposition_classifications: Counter[str] = Counter()
     current_post_visible_release_followups: Counter[str] = Counter()
     current_post_visible_release_rows_elsewhere_contexts: Counter[str] = Counter()
     current_post_visible_release_terminal_events: Counter[str] = Counter()
@@ -2303,7 +2587,12 @@ def print_batch_summary(
     current_default_view_folder_open_without_rows: Counter[str] = Counter()
     current_default_view_special_folder_bootstrap_open_without_rows: Counter[str] = Counter()
     current_default_view_query_position_without_rows: Counter[str] = Counter()
+    current_positive_default_view_query_position_without_rows: Counter[str] = Counter()
     current_default_view_id_collisions: Counter[str] = Counter()
+    current_common_views_fai_transfer_summaries: Counter[str] = Counter()
+    current_common_views_fai_item_classes: Counter[str] = Counter()
+    current_common_views_fai_named_view_items: Counter[str] = Counter()
+    current_common_views_fai_item_states: Counter[str] = Counter()
     current_calendar_zero_duration_timed_query_position_rows: Counter[str] = Counter()
     current_post_calendar_query_position_named_property_probes: Counter[str] = Counter()
     current_nonzero_response_codes: Counter[str] = Counter()
@@ -2368,6 +2657,9 @@ def print_batch_summary(
         )
         aggregate_hierarchy_windows.update(log["hierarchy_query_windows"])
         aggregate_descriptor_gap_windows.update(log["descriptor_gap_windows"])
+        aggregate_selected_extra_descriptor_columns.update(
+            log["selected_extra_descriptor_columns"]
+        )
         aggregate_default_view_descriptor_identity_columns.update(
             log["default_view_descriptor_identity_columns"]
         )
@@ -2397,7 +2689,18 @@ def print_batch_summary(
         aggregate_default_view_query_position_without_rows.update(
             log["default_view_query_position_without_rows"]
         )
+        aggregate_positive_default_view_query_position_without_rows.update(
+            log["positive_default_view_query_position_without_rows"]
+        )
         aggregate_default_view_id_collisions.update(log["default_view_id_collisions"])
+        aggregate_common_views_fai_transfer_summaries.update(
+            log["common_views_fai_transfer_summaries"]
+        )
+        aggregate_common_views_fai_item_classes.update(log["common_views_fai_item_classes"])
+        aggregate_common_views_fai_named_view_items.update(
+            log["common_views_fai_named_view_items"]
+        )
+        aggregate_common_views_fai_item_states.update(log["common_views_fai_item_states"])
         aggregate_calendar_zero_duration_timed_query_position_rows.update(
             log["calendar_zero_duration_timed_query_position_rows"]
         )
@@ -2449,6 +2752,9 @@ def print_batch_summary(
         aggregate_rr_setcolumns_release_response_handle_classifications.update(
             rr["setcolumns_release_response_handle_classifications"]
         )
+        aggregate_mixed_release_queryposition_classifications.update(
+            log["mixed_release_queryposition_classifications"]
+        )
         aggregate_nonzero_response_codes.update(rr["nonzero_response_codes"])
         build_commit = str(log["build"].get("git_commit", "unknown"))
         build_dirty = format_build_dirty(log["build"].get("git_dirty"))
@@ -2491,6 +2797,9 @@ def print_batch_summary(
                 log["associated_config_optional_defaulted_getprops_contexts"]
             )
             current_descriptor_gap_windows.update(log["descriptor_gap_windows"])
+            current_selected_extra_descriptor_columns.update(
+                log["selected_extra_descriptor_columns"]
+            )
             current_default_view_descriptor_identity_columns.update(
                 log["default_view_descriptor_identity_columns"]
             )
@@ -2520,7 +2829,20 @@ def print_batch_summary(
             current_default_view_query_position_without_rows.update(
                 log["default_view_query_position_without_rows"]
             )
+            current_positive_default_view_query_position_without_rows.update(
+                log["positive_default_view_query_position_without_rows"]
+            )
             current_default_view_id_collisions.update(log["default_view_id_collisions"])
+            current_common_views_fai_transfer_summaries.update(
+                log["common_views_fai_transfer_summaries"]
+            )
+            current_common_views_fai_item_classes.update(
+                log["common_views_fai_item_classes"]
+            )
+            current_common_views_fai_named_view_items.update(
+                log["common_views_fai_named_view_items"]
+            )
+            current_common_views_fai_item_states.update(log["common_views_fai_item_states"])
             current_calendar_zero_duration_timed_query_position_rows.update(
                 log["calendar_zero_duration_timed_query_position_rows"]
             )
@@ -2571,6 +2893,9 @@ def print_batch_summary(
             )
             current_rr_setcolumns_release_response_handle_classifications.update(
                 rr["setcolumns_release_response_handle_classifications"]
+            )
+            current_mixed_release_queryposition_classifications.update(
+                log["mixed_release_queryposition_classifications"]
             )
             current_nonzero_response_codes.update(rr["nonzero_response_codes"])
         missing_gate = (
@@ -2689,6 +3014,11 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate selected extra columns beyond descriptor",
+        aggregate_selected_extra_descriptor_columns,
+        limit=20,
+    )
+    print_counter(
         "Aggregate default-view descriptor identity columns",
         aggregate_default_view_descriptor_identity_columns,
         limit=20,
@@ -2745,8 +3075,33 @@ def print_batch_summary(
         limit=20,
     )
     print_counter(
+        "Aggregate positive default-view QueryPosition without QueryRows",
+        aggregate_positive_default_view_query_position_without_rows,
+        limit=20,
+    )
+    print_counter(
         "Aggregate default-view ID collisions",
         aggregate_default_view_id_collisions,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Common Views FAI transfer summaries",
+        aggregate_common_views_fai_transfer_summaries,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Common Views FAI item classes",
+        aggregate_common_views_fai_item_classes,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Common Views FAI default named views",
+        aggregate_common_views_fai_named_view_items,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate Common Views FAI item states",
+        aggregate_common_views_fai_item_states,
         limit=20,
     )
     print_counter(
@@ -2832,6 +3187,11 @@ def print_batch_summary(
     print_counter(
         "Aggregate RR SetColumns+Release response handle classifications",
         aggregate_rr_setcolumns_release_response_handle_classifications,
+        limit=20,
+    )
+    print_counter(
+        "Aggregate mixed release+QueryPosition classifications",
+        aggregate_mixed_release_queryposition_classifications,
         limit=20,
     )
     if current_build:
@@ -2928,6 +3288,11 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build selected extra columns beyond descriptor",
+            current_selected_extra_descriptor_columns,
+            limit=20,
+        )
+        print_counter(
             "Current-build default-view descriptor identity columns",
             current_default_view_descriptor_identity_columns,
             limit=20,
@@ -2983,8 +3348,33 @@ def print_batch_summary(
             limit=20,
         )
         print_counter(
+            "Current-build positive default-view QueryPosition without QueryRows",
+            current_positive_default_view_query_position_without_rows,
+            limit=20,
+        )
+        print_counter(
             "Current-build default-view ID collisions",
             current_default_view_id_collisions,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Common Views FAI transfer summaries",
+            current_common_views_fai_transfer_summaries,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Common Views FAI item classes",
+            current_common_views_fai_item_classes,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Common Views FAI default named views",
+            current_common_views_fai_named_view_items,
+            limit=20,
+        )
+        print_counter(
+            "Current-build Common Views FAI item states",
+            current_common_views_fai_item_states,
             limit=20,
         )
         print_counter(
@@ -3072,6 +3462,11 @@ def print_batch_summary(
             current_rr_setcolumns_release_response_handle_classifications,
             limit=20,
         )
+        print_counter(
+            "Current-build mixed release+QueryPosition classifications",
+            current_mixed_release_queryposition_classifications,
+            limit=20,
+        )
         print_build_issue_counts(current_issue_counts, "Current-build issue buckets")
     print_build_issue_counts(build_issue_counts)
     return 0
@@ -3155,12 +3550,31 @@ def issue_buckets(
     if log.get("default_view_folder_open_without_rows"):
         for name, _count in log["default_view_folder_open_without_rows"].most_common(2):
             issues.append(f"default_view_folder_open_without_rows:{name}")
+    if log.get("positive_default_view_query_position_without_rows"):
+        for name, _count in log[
+            "positive_default_view_query_position_without_rows"
+        ].most_common(2):
+            issues.append(f"positive_default_view_query_position_without_rows:{name}")
     if log.get("default_view_query_position_without_rows"):
         for name, _count in log["default_view_query_position_without_rows"].most_common(2):
             issues.append(f"default_view_query_position_without_rows:{name}")
     if log.get("default_view_id_collisions"):
         for name, _count in log["default_view_id_collisions"].most_common(2):
             issues.append(f"default_view_id_collision:{name}")
+    if any(
+        "status=folder_local" in key
+        for key in log.get("inbox_default_view_advertisements", {})
+    ):
+        issues.append("inbox_default_view_advertised_folder_local")
+    if any(
+        "status=unexpected_folder" in key
+        for key in log.get("inbox_default_view_advertisements", {})
+    ):
+        issues.append("inbox_default_view_advertised_unexpected_folder")
+    if common_views_fai_missing_default_named_view(log, "compact"):
+        issues.append("common_views_fai_missing_default_named_view:compact")
+    if common_views_fai_missing_default_named_view(log, "sent_to"):
+        issues.append("common_views_fai_missing_default_named_view:sent_to")
     if log.get("zero_default_tags"):
         for name, _count in actionable_zero_default_tag_counts(
             log["zero_default_tags"]
@@ -3197,10 +3611,19 @@ def issue_buckets(
             and log.get("visible_inbox_query_rows")
         ):
             issues.append(f"missing_gate:{gate}")
-    issues = suppress_symptom_only_issues(issues)
+    issues = suppress_explained_symptom_issues(suppress_symptom_only_issues(issues))
     if not issues:
         issues.append("no_server_issue_detected")
     return issues
+
+
+def common_views_fai_missing_default_named_view(log: dict[str, Any], name: str) -> bool:
+    if not log.get("common_views_fai_transfer_summaries"):
+        return False
+    return not any(
+        f"name={name};" in key
+        for key in log.get("common_views_fai_named_view_items", {})
+    )
 
 
 def suppress_symptom_only_issues(issues: list[str]) -> list[str]:
@@ -3212,6 +3635,31 @@ def suppress_symptom_only_issues(issues: list[str]) -> list[str]:
     if concrete:
         return concrete
     return issues
+
+
+def suppress_explained_symptom_issues(issues: list[str]) -> list[str]:
+    has_default_view_contract_cause = any(
+        issue
+        in {
+            "inbox_default_view_advertised_folder_local",
+            "inbox_default_view_advertised_unexpected_folder",
+            "common_views_fai_missing_default_named_view:compact",
+            "common_views_fai_missing_default_named_view:sent_to",
+        }
+        for issue in issues
+    )
+    if not has_default_view_contract_cause:
+        return issues
+    return [
+        issue
+        for issue in issues
+        if not (
+            issue == "visible_inbox_release_before_query_rows"
+            or issue.startswith("visible_inbox_release_classification:")
+            or issue.startswith("positive_default_view_query_position_without_rows:")
+            or issue.startswith("default_view_query_position_without_rows:")
+        )
+    ]
 
 
 def stable_counter_items(counter: Counter[str], limit: int) -> list[tuple[str, int]]:

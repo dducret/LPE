@@ -39,6 +39,7 @@ def empty_log_summary() -> dict:
         "resolved_named_getprops_tags": set(),
         "zero_default_tags": Counter(),
         "descriptor_gap_windows": Counter(),
+        "selected_extra_descriptor_columns": Counter(),
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "broad_ipm_configuration_row_count_gaps": Counter(),
@@ -784,6 +785,51 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
             ["problem_getprops:0x120c0102", "problem_getprops:0x90010003"],
+        )
+
+    def test_issue_buckets_suppresses_release_symptoms_for_folder_local_default_view(
+        self,
+    ) -> None:
+        log = empty_log_summary()
+        log["inbox_default_view_advertisements"] = Counter(
+            {
+                "status=folder_local;view_folder=0x0000000000050001;"
+                "view=0x7fffffffffe90001;name=Compact": 1
+            }
+        )
+        log["visible_release_classifications"] = Counter(
+            {"identity_probe_subset_before_query_rows": 1}
+        )
+        log["positive_default_view_query_position_without_rows"] = Counter(
+            {"role=inbox;rows=1;position=0;next=query_rows_on_visible_inbox_contents_table": 1}
+        )
+        log["default_view_query_position_without_rows"] = Counter(
+            {"role=inbox;next=query_rows_on_visible_inbox_contents_table": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            ["inbox_default_view_advertised_folder_local"],
+        )
+
+    def test_issue_buckets_keeps_unexplained_release_symptoms(self) -> None:
+        log = empty_log_summary()
+        log["visible_release_classifications"] = Counter(
+            {"identity_probe_subset_before_query_rows": 1}
+        )
+        log["positive_default_view_query_position_without_rows"] = Counter(
+            {"role=inbox;rows=1;position=0;next=query_rows_on_visible_inbox_contents_table": 1}
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
+            [
+                "visible_inbox_release_classification:identity_probe_subset_before_query_rows",
+                "positive_default_view_query_position_without_rows:"
+                "role=inbox;rows=1;position=0;next=query_rows_on_visible_inbox_contents_table",
+            ],
         )
 
     def test_visible_inbox_query_rows_event_is_tracked(self) -> None:

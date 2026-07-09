@@ -200,7 +200,7 @@ pub(super) fn execute_response_handle_table(
     output_handles: &[u32],
     response_handle_indexes: &[u8],
     echo_input_handle_table: bool,
-    request_has_release: bool,
+    released_handle_indexes: &[u8],
 ) -> Vec<u32> {
     if responses.is_empty() && !echo_input_handle_table {
         return Vec::new();
@@ -209,7 +209,11 @@ pub(super) fn execute_response_handle_table(
         handle_slots,
         output_handles,
         echo_input_handle_table,
-        request_has_release && echo_input_handle_table && !responses.is_empty(),
+        if echo_input_handle_table && !responses.is_empty() {
+            released_handle_indexes
+        } else {
+            &[]
+        },
     );
     if !responses.is_empty() {
         if let Some(max_response_handle_index) = response_handle_indexes.iter().copied().max() {
@@ -300,7 +304,7 @@ pub(super) fn finalize_execute_rop_buffer(
     output_handles: &[u32],
     response_handle_indexes: &[u8],
     echo_input_handle_table: bool,
-    request_has_release: bool,
+    released_handle_indexes: &[u8],
     extended: bool,
 ) -> Vec<u8> {
     let response_handles = execute_response_handle_table(
@@ -309,7 +313,7 @@ pub(super) fn finalize_execute_rop_buffer(
         output_handles,
         response_handle_indexes,
         echo_input_handle_table,
-        request_has_release,
+        released_handle_indexes,
     );
     let response = if extended {
         rop_buffer_with_response_spec(responses, &response_handles)

@@ -1300,14 +1300,22 @@ pub(super) fn append_table_control_response(
                     sort_orders,
                     ..
                 }) if *folder_id == INBOX_FOLDER_ID && !*associated => Some(format!(
-                    "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={}",
+                    "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={};table_compatibility={}",
                     format_optional_debug_handle(input_handle(handle_slots, request)),
                     request.input_handle_index().unwrap_or(0),
                     position,
                     format_debug_property_tags(columns),
                     normal_message_table_column_support_summary(columns),
                     format_debug_sort_orders(sort_orders),
-                    format_debug_restriction_option(restriction.as_ref())
+                    format_debug_restriction_option(restriction.as_ref()),
+                    format_default_view_table_compatibility_contract(
+                        *folder_id,
+                        *associated,
+                        columns,
+                        sort_orders,
+                        restriction.as_ref(),
+                        snapshot,
+                    )
                 )),
                 _ => None,
             };
@@ -1384,14 +1392,22 @@ pub(super) fn append_table_control_response(
                         (
                             debug_role_for_folder_id(*folder_id),
                             format!(
-                                "handle={};input_index={};folder=0x{folder_id:016x};role={};container_class={container_class};position_before={};columns={};sort={};restriction={}",
+                                "handle={};input_index={};folder=0x{folder_id:016x};role={};container_class={container_class};position_before={};columns={};sort={};restriction={};table_compatibility={}",
                                 format_optional_debug_handle(input_handle(handle_slots, request)),
                                 request.input_handle_index().unwrap_or(0),
                                 debug_role_for_folder_id(*folder_id),
                                 position,
                                 format_debug_property_tags(columns),
                                 format_debug_sort_orders(sort_orders),
-                                format_debug_restriction_option(restriction.as_ref())
+                                format_debug_restriction_option(restriction.as_ref()),
+                                format_default_view_table_compatibility_contract(
+                                    *folder_id,
+                                    *associated,
+                                    columns,
+                                    sort_orders,
+                                    restriction.as_ref(),
+                                    snapshot,
+                                )
                             ),
                         )
                     })

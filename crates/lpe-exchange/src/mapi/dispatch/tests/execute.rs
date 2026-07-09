@@ -111,7 +111,7 @@ fn release_only_execute_batch_is_store_independent() {
 
 #[test]
 fn release_only_execute_response_echoes_input_handle_table() {
-    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, true);
+    let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, &[0]);
 
     assert_eq!(response_handles, vec![u32::MAX]);
 }
@@ -124,7 +124,7 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
         &[77],
         &[1],
         true,
-        true,
+        &[0],
     );
 
     assert_eq!(response_handles, vec![0, 77]);
@@ -140,7 +140,7 @@ fn mixed_create_save_batch_preserves_save_response_folder_handle_slot() {
         &[28, 29],
         &[2, 3, 1],
         true,
-        true,
+        &[0],
     );
 
     assert_eq!(response_handles, vec![0, 6, 28, 29]);
@@ -154,7 +154,7 @@ fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
         &[],
         &[0],
         true,
-        true,
+        &[0],
     );
 
     assert_eq!(response_handles, vec![0]);
@@ -168,7 +168,7 @@ fn mixed_setcolumns_release_response_trims_snapshot_to_response_handle_index() {
         &[],
         &[0],
         true,
-        true,
+        &[],
     );
 
     assert_eq!(response_handles, vec![27]);
@@ -182,7 +182,7 @@ fn mixed_setcolumns_trailing_release_returns_invalid_released_handle() {
         &[],
         &[0],
         true,
-        true,
+        &[0],
     );
 
     assert_eq!(response_handles, vec![0]);
@@ -196,7 +196,7 @@ fn outlook_setcolumns_then_release_same_slot_returns_post_release_handle_table()
         &[],
         &[0],
         true,
-        true,
+        &[0],
     );
 
     assert_eq!(response_handles, vec![0]);
@@ -210,10 +210,24 @@ fn non_release_echo_response_keeps_output_placeholders() {
         &[],
         &[1],
         true,
-        false,
+        &[],
     );
 
     assert_eq!(response_handles, vec![25, u32::MAX]);
+}
+
+#[test]
+fn mixed_release_response_keeps_unreleased_sparse_output_holes() {
+    let response_handles = execute_response_handle_table(
+        &[0x07, 0x02, 0, 0, 0, 0, 0],
+        &[u32::MAX, 77, u32::MAX],
+        &[],
+        &[2],
+        true,
+        &[0],
+    );
+
+    assert_eq!(response_handles, vec![0, 77, u32::MAX]);
 }
 
 #[test]
