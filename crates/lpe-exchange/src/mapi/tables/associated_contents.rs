@@ -165,7 +165,12 @@ pub(super) fn associated_table_rows(
     _mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
     let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
-    append_exact_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
+    let inbox_broad_startup_scan = folder_id == INBOX_FOLDER_ID
+        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction));
+    if inbox_broad_startup_scan {
+        config_messages.retain(|message| !is_inbox_broad_startup_config_class(message));
+    }
+    append_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
     let mut rows = config_messages
         .into_iter()
         .filter(|message| {
@@ -208,7 +213,7 @@ fn default_folder_associated_named_view(
     }
 }
 
-fn append_exact_virtual_inbox_associated_config(
+fn append_virtual_inbox_associated_config(
     folder_id: u64,
     restriction: Option<&MapiRestriction>,
     messages: &mut Vec<MapiAssociatedConfigMessage>,
@@ -346,14 +351,13 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     }
     if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         if is_broad_outlook_configuration_restriction(restriction) {
-            return is_inbox_broad_startup_config_class(message)
-                || !is_empty_inbox_configuration_placeholder(message);
+            return is_inbox_broad_startup_config_class(message);
         }
         if is_inbox_broad_startup_config_visible(restriction, message) {
             return true;
         }
         if restriction.is_none() {
-            return !is_empty_inbox_configuration_placeholder(message);
+            return false;
         }
         return restriction.is_some_and(|restriction| {
             message_class_restriction_matches_exact(restriction, &message.message_class)
