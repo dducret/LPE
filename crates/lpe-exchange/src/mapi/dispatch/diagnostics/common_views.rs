@@ -223,6 +223,18 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             columns.len()
         );
     }
+    let default_view_supported = container_class
+        .is_some_and(|container_class| default_view_supported_folder(folder_id, container_class));
+    if !uses_common_views && !default_view_supported {
+        return format!(
+            "default_view_supported=false;\
+             folder_local_default_supported=false;\
+             folder_local_default_visible_in_fai_table=false;\
+             selected_property_tag_count={};\
+             descriptor_summary=",
+            columns.len()
+        );
+    }
     let (view_folder_id, expected_view_message_id, view) = if uses_common_views {
         (
             COMMON_VIEWS_FOLDER_ID,
@@ -239,14 +251,14 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     let folder_local_default_view = if folder_id == COMMON_VIEWS_FOLDER_ID {
         None
     } else {
-        container_class
-            .filter(|container_class| default_view_supported_folder(folder_id, container_class))
-            .and_then(|_| {
+        default_view_supported
+            .then(|| {
                 snapshot.default_folder_named_view_message(
                     folder_id,
                     crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
                 )
             })
+            .flatten()
     };
     let folder_local_default_supported = folder_local_default_view.is_some();
     let exact_named_view_restriction = MapiRestriction::Property {

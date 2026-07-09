@@ -578,6 +578,22 @@ fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
 }
 
 #[test]
+fn quick_step_view_handoff_table_contract_reports_unsupported_default_view() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let contract = format_outlook_view_handoff_table_contract(
+        QUICK_STEP_SETTINGS_FOLDER_ID,
+        true,
+        &default_associated_config_columns(),
+        &snapshot,
+    );
+
+    assert!(contract.contains("default_view_supported=false"));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(!contract.contains("advertised_default_view_folder_id="));
+    assert!(!contract.contains("expected_view_message_id="));
+}
+
+#[test]
 fn contacts_view_handoff_table_contract_reports_contact_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
