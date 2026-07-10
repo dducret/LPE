@@ -266,8 +266,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert!(first_property_id > 0x8000 && first_property_id != 0xffff);
     assert!(second_property_id > 0x8000 && second_property_id != 0xffff);
     assert_ne!(first_property_id, second_property_id);
-    assert_ne!(first_property_id, 0x8580);
-    assert_ne!(second_property_id, 0x8581);
+    assert_eq!(first_property_id, 0x8580);
+    assert_eq!(second_property_id, 0x8581);
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 

@@ -20,6 +20,16 @@ Runs 13:20, 13:50, and 15:45 also falsify the provisional alternate-view,
 WLink-flags, and WLink-identity hypotheses: removing or stabilizing those states
 did not move the terminal boundary.
 
+Run 16:34 on deployed build `aa6508e12e61` validated the code-side
+canonicalization: Appointment `0x8214` and `0x8223`, and all requested Common
+`0x8500..0x85FF` properties, were returned with canonical IDs. It also exposed
+two remaining database occupants in the reserved Appointment range. The
+218-property startup response returned `0x0000` for
+`http://schemas.microsoft.com/outlook/spoofingstamp` and `DRMLicense`, producing
+one duplicate returned-ID collision. Outlook again stopped at
+`RopSetColumns`/`RopQueryPosition` request `:235`. This is a pre-final-database-
+repair validation run, not a successful acceptance run.
+
 The cursor hypothesis is false. The response numerator is zero and denominator
 is one. A working Inbox table and earlier working Calendar captures also begin
 at numerator zero. This is the valid initial position described by
@@ -110,6 +120,13 @@ The repair was applied transactionally to account
 - all 193 Calendar-family rows were moved to their canonical property IDs.
 - the transaction committed with zero canonical mismatches and zero duplicate
   property IDs.
+
+Run 16:34 then proved the first repair's conflict scan was too narrow: it had
+relocated only IDs needed by an existing canonical Calendar row. A complete
+scan of both reserved ranges found another 176 non-Calendar occupants, including
+`spoofingstamp` at `0x822C` and `DRMLicense` at `0x822D`. All 176 were
+transactionally relocated to unused `0xF000+` IDs. The complete post-repair
+reserved-range conflict count is zero.
 
 No `mapi_custom_property_values` rows existed for the account. The stored
 folder-profile and associated-configuration values did not reference any of
