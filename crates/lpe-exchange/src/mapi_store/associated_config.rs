@@ -199,13 +199,7 @@ pub(crate) fn is_outlook_default_folder_named_view_id(item_id: u64) -> bool {
 }
 
 pub(crate) fn outlook_default_folder_named_view_id(folder_id: u64) -> u64 {
-    // Outlook's working Calendar handoff uses the established default-view MID.
-    // The Message EntryID remains folder-local because [MS-OXCDATA] 2.2.4.2
-    // carries both the Calendar FID and this MID.
-    if matches!(
-        folder_id,
-        crate::mapi::identity::INBOX_FOLDER_ID | crate::mapi::identity::CALENDAR_FOLDER_ID
-    ) {
+    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
         return OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID;
     }
     let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
@@ -216,10 +210,7 @@ pub(crate) fn outlook_default_folder_named_view_id(folder_id: u64) -> u64 {
 }
 
 pub(crate) fn outlook_default_folder_named_view_canonical_id(folder_id: u64) -> Uuid {
-    if matches!(
-        folder_id,
-        crate::mapi::identity::INBOX_FOLDER_ID | crate::mapi::identity::CALENDAR_FOLDER_ID
-    ) {
+    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
         return Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001);
     }
     let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
