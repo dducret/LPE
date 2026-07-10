@@ -2258,6 +2258,31 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             "transport is clean; journal diagnostics contain actionable MAPI/view issues.",
         )
 
+    def test_calendar_contract_fingerprint_records_stage_and_invariant_issue(self) -> None:
+        summary = {
+            "calendar_contract_fingerprints": Counter(),
+            "calendar_contract_invariant_issues": Counter(),
+            "calendar_contract_contexts": set(),
+        }
+        fields = {
+            "calendar_contract_stage": "query_position",
+            "calendar_contract_fingerprint": (
+                "version=1;sha256_32=abcd;stage=query_position;"
+                "view_mid=0x0000000000440001;fai_inventory=count=4;"
+                "query_position_numerator=0;query_position_denominator=1;"
+                "invariant_issues=named_property_id_reused"
+            ),
+        }
+
+        rca.record_calendar_contract_fingerprint(summary, fields)
+
+        self.assertEqual(sum(summary["calendar_contract_fingerprints"].values()), 1)
+        self.assertIn(
+            "stage=query_position;named_property_id_reused",
+            summary["calendar_contract_invariant_issues"],
+        )
+        self.assertEqual(len(summary["calendar_contract_contexts"]), 1)
+
     def test_build_scope_identifies_current_clean_and_dirty_builds(self) -> None:
         self.assertEqual(
             rca.build_scope_for("fb8dd0e77a76", "clean", "fb8dd0e7"),

@@ -429,6 +429,9 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "common_views_fai_named_view_items": Counter(),
         "common_views_fai_item_states": Counter(),
         "calendar_zero_duration_timed_query_position_rows": Counter(),
+        "calendar_contract_fingerprints": Counter(),
+        "calendar_contract_invariant_issues": Counter(),
+        "calendar_contract_contexts": set(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
         "selected_extra_descriptor_columns": Counter(),
@@ -549,6 +552,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_broad_ipm_configuration_row_count_gap(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
+            elif message == "rca debug mapi calendar contract fingerprint":
+                record_calendar_contract_fingerprint(summary, fields)
             elif message == "rca debug mapi umolk getprops materialization":
                 request_id = fields.get("mapi_request_id")
                 if request_id:
@@ -1635,6 +1640,34 @@ def record_post_calendar_query_position_named_property_probe(
     summary["post_calendar_query_position_named_property_probes"][key] += 1
 
 
+def record_calendar_contract_fingerprint(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    fingerprint = field_text(fields, "calendar_contract_fingerprint")
+    if not fingerprint:
+        return
+    stage = (
+        field_text(fields, "calendar_contract_stage")
+        or first_field(fingerprint, "stage")
+        or "unknown"
+    )
+    key = (
+        f"stage={stage};"
+        f"sha256_32={first_field(fingerprint, 'sha256_32') or 'missing'};"
+        f"view_mid={first_field(fingerprint, 'view_mid') or 'missing'};"
+        f"fai={first_field(fingerprint, 'fai_inventory') or 'missing'};"
+        f"position={first_field(fingerprint, 'query_position_numerator') or 'not_observed'};"
+        f"rows={first_field(fingerprint, 'query_position_denominator') or 'not_observed'}"
+    )
+    summary["calendar_contract_fingerprints"][key] += 1
+    summary["calendar_contract_contexts"].add(fingerprint)
+    issues = first_field(fingerprint, "invariant_issues") or "missing"
+    if issues != "none":
+        for issue in issues.split("|"):
+            if issue:
+                summary["calendar_contract_invariant_issues"][f"stage={stage};{issue}"] += 1
+
+
 def record_descriptor_gap(
     summary: dict[str, Any], text: str, fields: dict[str, Any] | None = None
 ) -> None:
@@ -2347,6 +2380,16 @@ def print_single_summary(
         print_counter(
             "Calendar zero-duration timed rows at QueryPosition",
             log["calendar_zero_duration_timed_query_position_rows"],
+            limit=12,
+        )
+        print_counter(
+            "Calendar contract fingerprints",
+            log["calendar_contract_fingerprints"],
+            limit=12,
+        )
+        print_counter(
+            "Calendar contract invariant issues",
+            log["calendar_contract_invariant_issues"],
             limit=12,
         )
         print_counter(
@@ -3603,6 +3646,9 @@ def issue_buckets(
             issues.append(f"zero_default:{name}")
     if log.get("calendar_zero_duration_timed_query_position_rows"):
         issues.append("calendar_zero_duration_timed_query_position_row")
+    if log.get("calendar_contract_invariant_issues"):
+        for name, _count in log["calendar_contract_invariant_issues"].most_common(2):
+            issues.append(f"calendar_contract_invariant:{name}")
     if log.get("post_calendar_query_position_named_property_probes"):
         for name, _count in log[
             "post_calendar_query_position_named_property_probes"
