@@ -1097,7 +1097,7 @@ async fn mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows()
         "{response_rops:02x?}"
     );
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x01, 0x01, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x01, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(&response_rops, &utf16z("Project")));
@@ -1106,7 +1106,7 @@ async fn mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows()
         "{response_rops:02x?}"
     );
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x01, 0x02, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x02, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(&response_rops, &utf16z("MS-OXCTABL first")));

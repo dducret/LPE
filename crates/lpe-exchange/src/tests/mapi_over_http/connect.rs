@@ -2391,7 +2391,7 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x14, 0x02, 0, 0, 0, 0]));
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x01, 0x02, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x02, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(

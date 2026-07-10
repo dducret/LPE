@@ -216,3 +216,21 @@ Post-deployment acceptance still requires a new clean Outlook profile to show
 that Outlook proceeds beyond `RopQueryPosition` to `RopQueryRows` or content
 sync, displays the `Test` appointment, and leaves no actionable Calendar/default
 view diagnostic in `tools/rca_outlook_trace_summary.py`.
+
+## Run 19:44 terminal QueryRows-origin regression
+
+Run 19:44 on build `7f45cffc` identified the first wire-semantic regression
+from the working 2026-06-25 sequence. Both runs query the Calendar associated
+table at position 1 of 4 and return the same final three FAI rows. The working
+request `:75` returns `Origin=BOOKMARK_END` (`0x02`), while failing request
+`:91` returned `Origin=BOOKMARK_CURRENT` (`0x01`) even though the cursor had
+advanced to position 4. Outlook consequently issued an extra empty QueryRows
+request before continuing to the visible Calendar table.
+
+`[MS-OXCTABL]` section 2.2.2.1.1 defines `BOOKMARK_END` as the position after
+the last row, and section 3.2.5.5 requires it when no more rows remain after a
+forward `RopQueryRows`. The response field is defined by `[MS-OXCTABL]`
+section 2.2.2.5.2 and `[MS-OXCROPS]` section 2.2.5.4.2. The shared table helper
+now returns the boundary bookmark whenever a non-empty or empty query window
+reaches that boundary. The regression test reproduces the captured Calendar
+FAI state without special-casing Calendar or the trace IDs.

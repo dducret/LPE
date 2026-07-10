@@ -1435,11 +1435,11 @@ fn query_rows_origin_tracks_cursor_boundary() {
         Uuid::nil(),
     );
 
-    assert_eq!(response[6], 0x01);
     assert_eq!(
         u16::from_le_bytes(response[7..9].try_into().unwrap()),
         (total_rows - 11) as u16
     );
+    assert_eq!(response[6], 0x02);
     assert_eq!(table_position(&table), Some(total_rows));
 
     let response = rop_query_rows_response(
@@ -1541,7 +1541,7 @@ fn query_rows_origin_uses_global_position_for_windowed_content_tables() {
     );
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(response[6], 0x01);
+    assert_eq!(response[6], 0x02);
     assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 2);
     assert_eq!(table_position(&table), Some(4));
 }
@@ -4848,7 +4848,7 @@ fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
         u16::from_le_bytes(response[7..9].try_into().unwrap()) as usize,
         full_common_views_count
     );
-    assert_eq!(response[6], 0x01);
+    assert_eq!(response[6], 0x02);
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "Compact").is_some());
 
@@ -6840,10 +6840,93 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
+    assert_eq!(response[6], 0x02);
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
     assert!(utf16_position(&response, "Calendar").is_some());
     assert!(utf16_position(&response, "Compact").is_none());
+}
+
+#[test]
+fn captured_calendar_fai_terminal_window_returns_bookmark_end_with_rows() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let classes = [
+        "IPM.Configuration.AvailabilityOptions",
+        "IPM.Configuration.Calendar",
+        "IPM.Configuration.WorkHours",
+    ];
+    let configs = classes
+        .iter()
+        .enumerate()
+        .map(|(index, message_class)| {
+            let canonical_id =
+                Uuid::from_u128(0x6d617069_6361_6c43_8000_000000000100 + index as u128);
+            crate::mapi::identity::remember_mapi_identity(
+                canonical_id,
+                crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 100 + index as u64,
+                ),
+            );
+            crate::store::MapiAssociatedConfigRecord {
+                id: canonical_id,
+                account_id,
+                folder_id: CALENDAR_FOLDER_ID,
+                message_class: (*message_class).to_string(),
+                subject: (*message_class).to_string(),
+                properties_json: serde_json::json!({}),
+            }
+        })
+        .collect::<Vec<_>>();
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(configs);
+    let mut table = MapiObject::ContentsTable {
+        folder_id: CALENDAR_FOLDER_ID,
+        associated: true,
+        columns: vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_ROAMING_DATATYPES,
+            PID_TAG_MESSAGE_CLASS_W,
+            0x685D_0003,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ],
+        columns_set: true,
+        sort_orders: vec![
+            MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            },
+            MapiSortOrder {
+                property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                order: 0,
+            },
+        ],
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 1,
+    };
+    let request = RopRequest {
+        rop_id: RopId::QueryRows.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: vec![0, 1, 50, 0],
+    };
+
+    let response =
+        rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+    assert_eq!(response[0], RopId::QueryRows.as_u8());
+    assert_eq!(
+        response[6], 0x02,
+        "terminal forward window must use BOOKMARK_END"
+    );
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
+    assert_eq!(table_position(&table), Some(4));
 }
 
 #[test]

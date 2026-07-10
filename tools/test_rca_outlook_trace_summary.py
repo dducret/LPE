@@ -96,6 +96,7 @@ def empty_log_summary() -> dict:
         "calendar_contract_invariant_issues": Counter(),
         "calendar_contract_contexts": set(),
         "calendar_contract_truncated_lines": 0,
+        "query_rows_terminal_origin_mismatches": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "stale_default_view_contexts": set(),
         "stale_default_view_states": Counter(),
@@ -2301,6 +2302,27 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             self.assertEqual(summary["calendar_contract_truncated_lines"], 1)
         finally:
             log_path.unlink(missing_ok=True)
+
+    def test_terminal_query_rows_current_origin_is_actionable(self) -> None:
+        summary = {"query_rows_terminal_origin_mismatches": Counter()}
+        fields = {
+            "requested_forward_read": True,
+            "associated": True,
+            "folder_role": "calendar",
+            "mapi_request_id": "test:91",
+            "response_origin": "0x01",
+            "associated_wire_row_summary": (
+                "total=4;position=1;forward=true;requested=3;returned=3"
+            ),
+        }
+
+        rca.record_query_rows_terminal_origin_mismatch(summary, fields)
+
+        self.assertIn(
+            "role=calendar;associated=true;position=1;returned=3;total=4;"
+            "origin=0x01;request=test:91",
+            summary["query_rows_terminal_origin_mismatches"],
+        )
 
     def test_build_scope_identifies_current_clean_and_dirty_builds(self) -> None:
         self.assertEqual(

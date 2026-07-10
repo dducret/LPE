@@ -433,6 +433,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "calendar_contract_invariant_issues": Counter(),
         "calendar_contract_contexts": set(),
         "calendar_contract_truncated_lines": 0,
+        "query_rows_terminal_origin_mismatches": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
         "selected_extra_descriptor_columns": Counter(),
@@ -553,6 +554,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_visible_inbox_query_rows(summary, fields)
             elif message == "rca debug outlook contents table query rows":
                 record_broad_ipm_configuration_row_count_gap(summary, fields)
+            elif message == "rca debug outlook contents table query rows response":
+                record_query_rows_terminal_origin_mismatch(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi calendar contract fingerprint":
@@ -1671,6 +1674,35 @@ def record_calendar_contract_fingerprint(
                 summary["calendar_contract_invariant_issues"][f"stage={stage};{issue}"] += 1
 
 
+def record_query_rows_terminal_origin_mismatch(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if str(fields.get("requested_forward_read") or "").lower() != "true":
+        return
+    wire = field_text(fields, "associated_wire_row_summary")
+    if not wire:
+        return
+    try:
+        total = int(first_field(wire, "total") or "-1")
+        position = int(first_field(wire, "position") or "-1")
+        returned = int(first_field(wire, "returned") or "-1")
+    except ValueError:
+        return
+    origin = field_text(fields, "response_origin").lower()
+    if returned <= 0 or position < 0 or total < 0 or position + returned < total:
+        return
+    if origin == "0x02":
+        return
+    key = (
+        f"role={field_text(fields, 'folder_role') or 'unknown'};"
+        f"associated={str(fields.get('associated')).lower()};"
+        f"position={position};returned={returned};total={total};"
+        f"origin={origin or 'missing'};"
+        f"request={field_text(fields, 'mapi_request_id') or 'unknown'}"
+    )
+    summary["query_rows_terminal_origin_mismatches"][key] += 1
+
+
 def record_descriptor_gap(
     summary: dict[str, Any], text: str, fields: dict[str, Any] | None = None
 ) -> None:
@@ -2398,6 +2430,11 @@ def print_single_summary(
         print(
             "Calendar contract truncated log lines: "
             f"{log['calendar_contract_truncated_lines']}"
+        )
+        print_counter(
+            "Terminal QueryRows origin mismatches",
+            log["query_rows_terminal_origin_mismatches"],
+            limit=12,
         )
         print_counter(
             "Post-Calendar QueryPosition named-property probes",
@@ -3658,6 +3695,9 @@ def issue_buckets(
             issues.append(f"calendar_contract_invariant:{name}")
     if log.get("calendar_contract_truncated_lines"):
         issues.append("calendar_contract_log_truncated")
+    if log.get("query_rows_terminal_origin_mismatches"):
+        for name, _count in log["query_rows_terminal_origin_mismatches"].most_common(2):
+            issues.append(f"query_rows_terminal_origin:{name}")
     if log.get("post_calendar_query_position_named_property_probes"):
         for name, _count in log[
             "post_calendar_query_position_named_property_probes"
