@@ -1388,17 +1388,21 @@ fn default_folder_named_views_use_folder_family_names() {
 }
 
 #[test]
-fn calendar_default_named_view_uses_folder_local_identity() {
+fn calendar_default_named_view_preserves_working_outlook_identity() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let view_id = outlook_default_folder_named_view_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
 
-    assert_ne!(view_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
+    assert_eq!(view_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
     let view = snapshot
         .default_folder_named_view_message(crate::mapi::identity::CALENDAR_FOLDER_ID, view_id)
         .expect("calendar default view");
     assert_eq!(view.id, view_id);
     assert_eq!(view.folder_id, crate::mapi::identity::CALENDAR_FOLDER_ID);
     assert_eq!(view.name, "Calendar");
+    assert_eq!(
+        view.canonical_id,
+        Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001)
+    );
 
     let legacy_alias = snapshot
         .default_folder_named_view_message(
