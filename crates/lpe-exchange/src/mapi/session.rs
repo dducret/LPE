@@ -1275,19 +1275,22 @@ impl MapiSession {
         property: MapiNamedProperty,
     ) {
         let property = normalize_named_property(property);
-        let canonical_property_id = well_known_named_property_id(&property).unwrap_or(property_id);
-        if canonical_property_id == property_id
-            && is_reserved_named_property_id(property_id)
-            && well_known_named_property_for_id(property_id).as_ref() != Some(&property)
+        if let Some(previous_property_id) =
+            self.named_properties.insert(property.clone(), property_id)
         {
-            return;
+            if previous_property_id != property_id
+                && self.named_property_ids.get(&previous_property_id) == Some(&property)
+            {
+                self.named_property_ids.remove(&previous_property_id);
+            }
         }
-        self.named_properties
-            .insert(property.clone(), canonical_property_id);
-        self.named_property_ids
-            .insert(canonical_property_id, property.clone());
-        if property_id != canonical_property_id && !is_reserved_named_property_id(property_id) {
-            self.named_property_ids.insert(property_id, property);
+        if let Some(previous_property) = self.named_property_ids.insert(property_id, property.clone())
+        {
+            if previous_property != property
+                && self.named_properties.get(&previous_property) == Some(&property_id)
+            {
+                self.named_properties.remove(&previous_property);
+            }
         }
         if property_id >= self.next_named_property_id {
             self.next_named_property_id = property_id.saturating_add(1);

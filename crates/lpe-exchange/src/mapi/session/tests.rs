@@ -474,7 +474,7 @@ fn dynamic_named_property_allocation_starts_at_project_dynamic_range() {
 }
 
 #[test]
-fn cached_well_known_named_property_keeps_dynamic_id_as_alias() {
+fn cached_well_known_named_property_keeps_registered_dynamic_id() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -489,7 +489,7 @@ fn cached_well_known_named_property_keeps_dynamic_id_as_alias() {
 
     assert_eq!(
         session.property_id_for_name(property.clone(), false),
-        Some(0x8010)
+        Some(0x8fff)
     );
     assert_eq!(session.property_name_for_id(0x8010), property);
     assert_eq!(session.property_name_for_id(0x8fff), property);
@@ -497,7 +497,7 @@ fn cached_well_known_named_property_keeps_dynamic_id_as_alias() {
 }
 
 #[test]
-fn cached_well_known_named_property_does_not_alias_reserved_id_collision() {
+fn cached_well_known_named_property_keeps_registered_reserved_range_id() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -509,20 +509,17 @@ fn cached_well_known_named_property_does_not_alias_reserved_id_collision() {
     session.cache_named_property(PID_LID_EMAIL1_EMAIL_ADDRESS as u16, property.clone());
 
     assert_eq!(
-        session.property_id_for_name(property, false),
-        Some(PID_LID_OUTLOOK_CONTACT_EMAIL_ALIAS1_EMAIL_ADDRESS as u16)
+        session.property_id_for_name(property.clone(), false),
+        Some(PID_LID_EMAIL1_EMAIL_ADDRESS as u16)
     );
     assert_eq!(
         session.property_name_for_id(PID_LID_EMAIL1_EMAIL_ADDRESS as u16),
-        MapiNamedProperty {
-            guid: PSETID_ADDRESS_GUID,
-            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_EMAIL_ADDRESS),
-        }
+        property
     );
 }
 
 #[test]
-fn cached_unknown_named_property_does_not_shadow_reserved_id() {
+fn cached_unknown_named_property_keeps_registered_reserved_range_id() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -533,13 +530,13 @@ fn cached_unknown_named_property_does_not_shadow_reserved_id() {
 
     session.cache_named_property(PID_LID_EMAIL1_DISPLAY_NAME as u16, property.clone());
 
-    assert_eq!(session.property_id_for_name(property, false), None);
+    assert_eq!(
+        session.property_id_for_name(property.clone(), false),
+        Some(PID_LID_EMAIL1_DISPLAY_NAME as u16)
+    );
     assert_eq!(
         session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
-        MapiNamedProperty {
-            guid: PSETID_ADDRESS_GUID,
-            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_DISPLAY_NAME),
-        }
+        property
     );
 }
 

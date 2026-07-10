@@ -1200,7 +1200,7 @@ fn calendar_named_property_mapping_returns_registered_ids_without_reuse() {
 }
 
 #[test]
-fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
+fn get_property_ids_from_names_returns_registered_well_known_property_id() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {
         guid: PSETID_SHARING_GUID,
@@ -1212,13 +1212,13 @@ fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mappin
     let property_id =
         cache_named_property_mapping_and_return_property_id(&mut session, 0x8fff, property.clone());
 
-    assert_eq!(property_id, 0x8010);
+    assert_eq!(property_id, 0x8fff);
     assert_eq!(session.property_name_for_id(0x8fff), property);
-    assert_eq!(session.property_id_for_name(property, false), Some(0x8010));
+    assert_eq!(session.property_id_for_name(property, false), Some(0x8fff));
 }
 
 #[test]
-fn get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_mapping() {
+fn get_property_ids_from_names_returns_registered_contact_source_id() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {
         guid: PSETID_ADDRESS_GUID,
@@ -1228,16 +1228,16 @@ fn get_property_ids_from_names_returns_canonical_contact_source_id_from_stale_ma
     let property_id =
         cache_named_property_mapping_and_return_property_id(&mut session, 0x9005, property.clone());
 
-    assert_eq!(property_id, PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16);
+    assert_eq!(property_id, 0x9005);
     assert_eq!(session.property_name_for_id(0x9005), property);
     assert_eq!(
         session.property_id_for_name(property, false),
-        Some(PID_LID_OUTLOOK_CONTACT_SOURCE_80E0 as u16)
+        Some(0x9005)
     );
 }
 
 #[test]
-fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
+fn get_property_ids_from_names_keeps_registered_reserved_range_id() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {
         guid: PS_PUBLIC_STRINGS_GUID,
@@ -1250,8 +1250,7 @@ fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
         property.clone(),
     );
 
-    assert_ne!(property_id, PID_LID_EMAIL1_DISPLAY_NAME as u16);
-    assert!(!is_reserved_named_property_id(property_id));
+    assert_eq!(property_id, PID_LID_EMAIL1_DISPLAY_NAME as u16);
     assert_eq!(
         session.property_id_for_name(property.clone(), false),
         Some(property_id)
@@ -1259,15 +1258,12 @@ fn get_property_ids_from_names_remaps_unknown_reserved_stale_mapping() {
     assert_eq!(session.property_name_for_id(property_id), property);
     assert_eq!(
         session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
-        MapiNamedProperty {
-            guid: PSETID_ADDRESS_GUID,
-            kind: MapiNamedPropertyKind::Lid(PID_LID_EMAIL1_DISPLAY_NAME),
-        }
+        property
     );
 }
 
 #[test]
-fn get_property_ids_from_names_remaps_stale_duplicate_dynamic_mapping() {
+fn store_named_property_mapping_replaces_stale_session_collision() {
     let mut session = test_mapi_session();
     let first = MapiNamedProperty {
         guid: PS_PUBLIC_STRINGS_GUID,
@@ -1279,20 +1275,16 @@ fn get_property_ids_from_names_remaps_stale_duplicate_dynamic_mapping() {
     };
 
     session.cache_named_property(0x9001, first.clone());
-    let remapped_id =
+    let registered_id =
         cache_named_property_mapping_and_return_property_id(&mut session, 0x9001, second.clone());
 
-    assert_ne!(remapped_id, 0x9001);
-    assert_eq!(
-        session.property_id_for_name(first.clone(), false),
-        Some(0x9001)
-    );
-    assert_eq!(session.property_name_for_id(0x9001), first);
+    assert_eq!(registered_id, 0x9001);
+    assert_eq!(session.property_id_for_name(first, false), None);
     assert_eq!(
         session.property_id_for_name(second.clone(), false),
-        Some(remapped_id)
+        Some(registered_id)
     );
-    assert_eq!(session.property_name_for_id(remapped_id), second);
+    assert_eq!(session.property_name_for_id(registered_id), second);
 }
 
 #[test]

@@ -58,32 +58,8 @@ pub(super) fn cache_named_property_mapping_and_return_property_id(
     property_id: u16,
     property: MapiNamedProperty,
 ) -> u16 {
-    let property = normalize_named_property(property);
-    if is_reserved_named_property_id(property_id)
-        && well_known_named_property_id(&property).is_none()
-    {
-        return session
-            .property_id_for_name(property, true)
-            .unwrap_or(property_id);
-    }
-    let existing_property = session
-        .named_property_ids
-        .get(&property_id)
-        .cloned()
-        .or_else(|| well_known_named_property_for_id(property_id));
-    if existing_property
-        .as_ref()
-        .is_some_and(|existing| existing != &property)
-    {
-        return session
-            .property_id_for_name(property, true)
-            .unwrap_or(property_id);
-    }
-    let property_for_lookup = property.clone();
     session.cache_named_property(property_id, property);
-    session
-        .property_id_for_name(property_for_lookup, false)
-        .unwrap_or(property_id)
+    property_id
 }
 
 pub(super) async fn append_get_names_from_property_ids_response<S>(
@@ -186,12 +162,16 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     let mut missing = Vec::new();
     for (index, property) in properties.iter().cloned().enumerate() {
         let normalized = normalize_named_property(property.clone());
-        let well_known = well_known_named_property_id(&normalized);
-        match session.property_id_for_name(normalized, false) {
+        let property_id = if normalized.guid == PS_MAPI_GUID {
+            session.property_id_for_name(normalized.clone(), false)
+        } else {
+            session.named_properties.get(&normalized).copied()
+        };
+        match property_id {
             Some(property_id) => {
                 property_ids.push(property_id);
-                property_id_sources.push(if well_known == Some(property_id) {
-                    "well_known"
+                property_id_sources.push(if normalized.guid == PS_MAPI_GUID {
+                    "ps_mapi"
                 } else {
                     "session_cached"
                 });
@@ -254,19 +234,15 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             .await
         {
             Ok(mappings) => {
-                for (missing_index, (index, property)) in missing.into_iter().enumerate() {
+                for (missing_index, (index, _property)) in missing.into_iter().enumerate() {
                     let mapping = mappings.get(missing_index).cloned().flatten();
-                    let property_id = mapping
-                        .map(|mapping| {
-                            cache_named_property_mapping_and_return_property_id(
-                                session,
-                                mapping.property_id,
-                                mapping.property,
-                            )
-                        })
-                        .or_else(|| {
-                            session.property_id_for_name(property, request.named_property_create())
-                        });
+                    let property_id = mapping.map(|mapping| {
+                        cache_named_property_mapping_and_return_property_id(
+                            session,
+                            mapping.property_id,
+                            mapping.property,
+                        )
+                    });
                     property_ids[index] = property_id.unwrap_or(0);
                     property_id_sources[index] = if property_id.is_some() {
                         if post_calendar_query_position_probe {

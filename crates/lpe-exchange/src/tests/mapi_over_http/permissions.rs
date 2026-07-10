@@ -113,7 +113,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
 }
 
 #[tokio::test]
-async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known() {
+async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_not_registered() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -157,10 +157,6 @@ async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
-        &response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0xA6, 0x8A]
-    ));
-    assert!(!contains_bytes(
         &response_rops,
         &[0x56, 0x00, 0x0f, 0x01, 0x04, 0x80]
     ));

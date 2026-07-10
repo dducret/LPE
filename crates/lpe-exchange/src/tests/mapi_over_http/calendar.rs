@@ -4835,10 +4835,19 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &bootstrap_named_props_rops,
         &[0x56, 0x00, 0, 0, 0, 0]
     ));
-    assert!(contains_bytes(
-        &bootstrap_named_props_rops,
-        &[0x02, 0x00, 0x80, 0x85, 0x81, 0x85]
-    ));
+    assert_eq!(
+        u16::from_le_bytes(bootstrap_named_props_rops[6..8].try_into().unwrap()),
+        2
+    );
+    let first_property_id =
+        u16::from_le_bytes(bootstrap_named_props_rops[8..10].try_into().unwrap());
+    let second_property_id =
+        u16::from_le_bytes(bootstrap_named_props_rops[10..12].try_into().unwrap());
+    assert!(first_property_id > 0x8000 && first_property_id != 0xffff);
+    assert!(second_property_id > 0x8000 && second_property_id != 0xffff);
+    assert_ne!(first_property_id, second_property_id);
+    assert_ne!(first_property_id, 0x8580);
+    assert_ne!(second_property_id, 0x8581);
 
     let mut bootstrap_headers = mapi_headers("Execute");
     bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());

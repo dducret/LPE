@@ -2263,16 +2263,16 @@ fn restricted_associated_query_position_reports_filtered_row_count() {
 }
 
 #[test]
-fn calendar_contents_table_projects_canonical_events() {
+fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
     let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
     let event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
     crate::mapi::identity::remember_mapi_identity(
         event_id,
-        crate::mapi::identity::mapi_store_id(0x42),
+        crate::mapi::identity::mapi_store_id(0x44),
     );
     let event = AccessibleEvent {
         id: event_id,
-        uid: "zero-duration".to_string(),
+        uid: "captured-calendar-event".to_string(),
         collection_id: "default".to_string(),
         owner_account_id: account_id,
         owner_email: "test@l-p-e.ch".to_string(),
@@ -2286,7 +2286,7 @@ fn calendar_contents_table_projects_canonical_events() {
         date: "2026-06-01".to_string(),
         time: "10:00".to_string(),
         time_zone: String::new(),
-        duration_minutes: 0,
+        duration_minutes: 30,
         all_day: false,
         status: "confirmed".to_string(),
         sequence: 0,
@@ -2316,9 +2316,23 @@ fn calendar_contents_table_projects_canonical_events() {
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: false,
-        columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W],
+        columns: vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_MESSAGE_STATUS,
+            PID_LID_OUTLOOK_COMMON_8578_TAG,
+            PID_LID_SIDE_EFFECTS_TAG,
+        ],
         columns_set: true,
-        sort_orders: Vec::new(),
+        sort_orders: vec![MapiSortOrder {
+            property_tag: PID_LID_COMMON_START_TAG,
+            order: 0,
+        }],
         category_count: 0,
         expanded_count: 0,
         collapsed_categories: HashSet::new(),
@@ -2370,7 +2384,20 @@ fn calendar_contents_table_projects_canonical_events() {
         u16::from_le_bytes(rows_response[7..9].try_into().unwrap()),
         1
     );
-    assert_response_contains_utf16(&rows_response, "Test");
+    assert_eq!(rows_response[9], 0, "PropertyRow must not be flagged");
+    let mut expected_values = Vec::new();
+    write_object_id(&mut expected_values, CALENDAR_FOLDER_ID);
+    write_object_id(&mut expected_values, 0x0000_0000_0044_0001);
+    write_u64(&mut expected_values, 0x0000_0000_0044_0001);
+    write_u32(&mut expected_values, 0);
+    write_utf16z(&mut expected_values, "IPM.Appointment");
+    write_utf16z(&mut expected_values, "Test");
+    write_u32(&mut expected_values, 1);
+    write_u32(&mut expected_values, 0);
+    write_u32(&mut expected_values, 0);
+    write_u32(&mut expected_values, 369);
+    assert_eq!(expected_values.len(), 86);
+    assert_eq!(&rows_response[10..], expected_values);
 }
 
 #[test]
