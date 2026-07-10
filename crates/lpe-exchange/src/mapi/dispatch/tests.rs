@@ -1171,6 +1171,35 @@ fn table_columns_normalize_outlook_calendar_common_aliases() {
 }
 
 #[test]
+fn calendar_named_property_mapping_returns_registered_ids_without_reuse() {
+    let mut session = test_mapi_session();
+    let appointment_color = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+    };
+    let side_effects = MapiNamedProperty {
+        guid: PSETID_COMMON_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
+    };
+
+    let appointment_color_id = cache_named_property_mapping_and_return_property_id(
+        &mut session,
+        0x8020,
+        appointment_color.clone(),
+    );
+    let side_effects_id = cache_named_property_mapping_and_return_property_id(
+        &mut session,
+        0x8005,
+        side_effects.clone(),
+    );
+
+    assert_eq!(appointment_color_id, 0x8020);
+    assert_eq!(side_effects_id, 0x8005);
+    assert_eq!(session.property_name_for_id(0x8020), appointment_color);
+    assert_eq!(session.property_name_for_id(0x8005), side_effects);
+}
+
+#[test]
 fn get_property_ids_from_names_returns_canonical_well_known_id_from_stale_mapping() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {

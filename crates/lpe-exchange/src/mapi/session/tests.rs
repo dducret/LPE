@@ -433,6 +433,25 @@ fn cached_named_property_updates_bidirectional_registry() {
 }
 
 #[test]
+fn cached_calendar_named_property_preserves_registered_id() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let property = MapiNamedProperty {
+        guid: PSETID_COMMON_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
+    };
+
+    session.cache_named_property(0x8005, property.clone());
+
+    assert_eq!(
+        session.property_id_for_name(property.clone(), false),
+        Some(0x8005)
+    );
+    assert_eq!(session.property_name_for_id(0x8005), property);
+}
+
+#[test]
 fn dynamic_named_property_allocation_starts_at_project_dynamic_range() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
