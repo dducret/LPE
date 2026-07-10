@@ -92,6 +92,10 @@ def empty_log_summary() -> dict:
         "common_views_fai_named_view_items": Counter(),
         "common_views_fai_item_states": Counter(),
         "calendar_zero_duration_timed_query_position_rows": Counter(),
+        "calendar_contract_fingerprints": Counter(),
+        "calendar_contract_invariant_issues": Counter(),
+        "calendar_contract_contexts": set(),
+        "calendar_contract_truncated_lines": 0,
         "post_calendar_query_position_named_property_probes": Counter(),
         "stale_default_view_contexts": set(),
         "stale_default_view_states": Counter(),
@@ -2282,6 +2286,21 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             summary["calendar_contract_invariant_issues"],
         )
         self.assertEqual(len(summary["calendar_contract_contexts"]), 1)
+
+    def test_summarize_log_reports_truncated_calendar_contract_json(self) -> None:
+        log_path = Path(self._testMethodName)
+        try:
+            log_path.write_text(
+                'prefix {"fields":{"message":"rca debug mapi calendar contract fingerprint",'
+                '"calendar_contract_fingerprint":"unterminated',
+                encoding="utf-8",
+            )
+
+            summary = rca.summarize_log(log_path)
+
+            self.assertEqual(summary["calendar_contract_truncated_lines"], 1)
+        finally:
+            log_path.unlink(missing_ok=True)
 
     def test_build_scope_identifies_current_clean_and_dirty_builds(self) -> None:
         self.assertEqual(

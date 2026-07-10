@@ -432,6 +432,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "calendar_contract_fingerprints": Counter(),
         "calendar_contract_invariant_issues": Counter(),
         "calendar_contract_contexts": set(),
+        "calendar_contract_truncated_lines": 0,
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
         "selected_extra_descriptor_columns": Counter(),
@@ -473,6 +474,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 summary["raw_visible_release_marker_lines"] += 1
             event = load_json_line(raw)
             if not event:
+                if "rca debug mapi calendar contract fingerprint" in raw:
+                    summary["calendar_contract_truncated_lines"] += 1
                 continue
             fields = event.get("fields") or {}
             message = fields.get("message") or ""
@@ -2392,6 +2395,10 @@ def print_single_summary(
             log["calendar_contract_invariant_issues"],
             limit=12,
         )
+        print(
+            "Calendar contract truncated log lines: "
+            f"{log['calendar_contract_truncated_lines']}"
+        )
         print_counter(
             "Post-Calendar QueryPosition named-property probes",
             log["post_calendar_query_position_named_property_probes"],
@@ -3649,6 +3656,8 @@ def issue_buckets(
     if log.get("calendar_contract_invariant_issues"):
         for name, _count in log["calendar_contract_invariant_issues"].most_common(2):
             issues.append(f"calendar_contract_invariant:{name}")
+    if log.get("calendar_contract_truncated_lines"):
+        issues.append("calendar_contract_log_truncated")
     if log.get("post_calendar_query_position_named_property_probes"):
         for name, _count in log[
             "post_calendar_query_position_named_property_probes"

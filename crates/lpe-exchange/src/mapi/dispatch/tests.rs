@@ -257,6 +257,46 @@ fn calendar_contract_fingerprint_covers_exact_selected_table_state() {
 }
 
 #[test]
+fn calendar_contract_fingerprint_bounds_large_named_property_registry() {
+    let mut session = test_mapi_session();
+    for offset in 0..1_000u16 {
+        session.cache_named_property(
+            0x9000 + offset,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Name(format!(
+                    "large-registry-property-{offset:04}-{}",
+                    "x".repeat(128)
+                )),
+            },
+        );
+    }
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let folder = MapiObject::Folder {
+        folder_id: CALENDAR_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+
+    let fingerprint = format_calendar_view_contract_fingerprint(
+        &session,
+        session.account_id,
+        "default_view_advertised",
+        Some(&folder),
+        None,
+        &snapshot,
+    )
+    .expect("Calendar folder should produce a contract fingerprint");
+
+    assert!(fingerprint.contains("named_registry=count=1000;sha256_16="));
+    assert!(fingerprint.contains("calendar_relevant_count=0"));
+    assert!(
+        fingerprint.len() < 16_384,
+        "fingerprint was {} bytes",
+        fingerprint.len()
+    );
+}
+
+#[test]
 fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids() {
     let session = test_mapi_session();
     let snapshot = MapiMailStoreSnapshot::empty();

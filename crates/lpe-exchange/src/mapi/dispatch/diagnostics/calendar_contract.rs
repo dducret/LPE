@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 const CALENDAR_CONTRACT_PROTOCOL_REFERENCES: &str =
     "MS-OXOCFG 2.2.6.1,2.2.6.1.1,2.2.6.2;MS-OXCROPS 2.2.5.1,2.2.5.7;MS-OXCTABL 2.2.2.2,2.2.2.8";
+const CALENDAR_NAMED_REGISTRY_SAMPLE_LIMIT: usize = 64;
+const NAMED_PROPERTY_COLLISION_SAMPLE_LIMIT: usize = 16;
 
 pub(in crate::mapi::dispatch) fn format_calendar_view_contract_fingerprint(
     session: &MapiSession,
@@ -231,23 +233,43 @@ fn format_calendar_fai_inventory(snapshot: &MapiMailStoreSnapshot, account_id: U
 fn format_named_property_registry(session: &MapiSession) -> String {
     let mut entries = session.named_property_ids.iter().collect::<Vec<_>>();
     entries.sort_by_key(|(property_id, _)| **property_id);
-    entries
-        .into_iter()
-        .map(|(property_id, property)| {
-            let kind = match &property.kind {
-                MapiNamedPropertyKind::Lid(lid) => format!("lid=0x{lid:08x}"),
-                MapiNamedPropertyKind::Name(name) => {
-                    format!("name={}", escape_contract_text(name))
-                }
-            };
-            format!(
-                "id=0x{property_id:04x},guid={},{}",
-                hex_preview(&property.guid, 16),
-                kind
-            )
-        })
+    let serialized = entries
+        .iter()
+        .map(|(property_id, property)| format_named_registry_entry(**property_id, property))
         .collect::<Vec<_>>()
-        .join("|")
+        .join("|");
+    let relevant = entries
+        .iter()
+        .filter(|(_property_id, property)| canonical_calendar_named_property_id(property).is_some())
+        .map(|(property_id, property)| format_named_registry_entry(**property_id, property))
+        .collect::<Vec<_>>();
+    let sample = relevant
+        .iter()
+        .take(CALENDAR_NAMED_REGISTRY_SAMPLE_LIMIT)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "count={};sha256_16={};calendar_relevant_count={};calendar_relevant_sample_count={};calendar_relevant_omitted={};calendar_relevant_sample=[{}]",
+        entries.len(),
+        sha256_hex_prefix(serialized.as_bytes(), 16),
+        relevant.len(),
+        relevant.len().min(CALENDAR_NAMED_REGISTRY_SAMPLE_LIMIT),
+        relevant.len().saturating_sub(CALENDAR_NAMED_REGISTRY_SAMPLE_LIMIT),
+        sample
+    )
+}
+
+fn format_named_registry_entry(property_id: u16, property: &MapiNamedProperty) -> String {
+    let kind = match &property.kind {
+        MapiNamedPropertyKind::Lid(lid) => format!("lid=0x{lid:08x}"),
+        MapiNamedPropertyKind::Name(name) => format!("name={}", escape_contract_text(name)),
+    };
+    format!(
+        "id=0x{property_id:04x},guid={},{}",
+        hex_preview(&property.guid, 16),
+        kind
+    )
 }
 
 fn format_named_property_id_reuse(session: &MapiSession) -> String {
@@ -277,7 +299,20 @@ fn format_named_property_id_reuse(session: &MapiSession) -> String {
     if collisions.is_empty() {
         "none".to_string()
     } else {
-        collisions.join("|")
+        let sample = collisions
+            .iter()
+            .take(NAMED_PROPERTY_COLLISION_SAMPLE_LIMIT)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("|");
+        format!(
+            "count={};omitted={};sample=[{}]",
+            collisions.len(),
+            collisions
+                .len()
+                .saturating_sub(NAMED_PROPERTY_COLLISION_SAMPLE_LIMIT),
+            sample
+        )
     }
 }
 
