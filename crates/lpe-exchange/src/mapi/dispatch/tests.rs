@@ -1230,10 +1230,7 @@ fn get_property_ids_from_names_returns_registered_contact_source_id() {
 
     assert_eq!(property_id, 0x9005);
     assert_eq!(session.property_name_for_id(0x9005), property);
-    assert_eq!(
-        session.property_id_for_name(property, false),
-        Some(0x9005)
-    );
+    assert_eq!(session.property_id_for_name(property, false), Some(0x9005));
 }
 
 #[test]

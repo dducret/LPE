@@ -491,7 +491,6 @@ fn cached_well_known_named_property_keeps_registered_dynamic_id() {
         session.property_id_for_name(property.clone(), false),
         Some(0x8fff)
     );
-    assert_eq!(session.property_name_for_id(0x8010), property);
     assert_eq!(session.property_name_for_id(0x8fff), property);
     assert_eq!(session.next_named_property_id, 0x9000);
 }

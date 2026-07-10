@@ -1284,7 +1284,9 @@ impl MapiSession {
                 self.named_property_ids.remove(&previous_property_id);
             }
         }
-        if let Some(previous_property) = self.named_property_ids.insert(property_id, property.clone())
+        if let Some(previous_property) = self
+            .named_property_ids
+            .insert(property_id, property.clone())
         {
             if previous_property != property
                 && self.named_properties.get(&previous_property) == Some(&property_id)
