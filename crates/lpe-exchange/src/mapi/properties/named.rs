@@ -90,6 +90,36 @@ fn well_known_lid_family_property_for_id(property_id: u16) -> Option<MapiNamedPr
     }
 }
 
+pub(in crate::mapi) fn canonical_calendar_named_property_id(
+    property: &MapiNamedProperty,
+) -> Option<u16> {
+    let MapiNamedPropertyKind::Lid(lid) = property.kind else {
+        return None;
+    };
+    let property_id = u16::try_from(lid).ok()?;
+    match property.guid {
+        PSETID_APPOINTMENT_GUID if (0x8200..=0x82ff).contains(&lid) => Some(property_id),
+        PSETID_COMMON_GUID if (0x8500..=0x85ff).contains(&lid) => Some(property_id),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn canonical_calendar_named_property_for_id(
+    property_id: u16,
+) -> Option<MapiNamedProperty> {
+    match property_id {
+        0x8200..=0x82ff => Some(MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        0x8500..=0x85ff => Some(MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        _ => None,
+    }
+}
+
 fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     [
         (

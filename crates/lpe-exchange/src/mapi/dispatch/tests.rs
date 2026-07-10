@@ -1162,7 +1162,7 @@ fn table_columns_normalize_outlook_calendar_common_aliases() {
 }
 
 #[test]
-fn calendar_named_property_mapping_returns_registered_ids_without_reuse() {
+fn calendar_named_property_mapping_canonicalizes_stale_database_ids() {
     let mut session = test_mapi_session();
     let appointment_color = MapiNamedProperty {
         guid: PSETID_APPOINTMENT_GUID,
@@ -1184,10 +1184,26 @@ fn calendar_named_property_mapping_returns_registered_ids_without_reuse() {
         side_effects.clone(),
     );
 
-    assert_eq!(appointment_color_id, 0x8020);
-    assert_eq!(side_effects_id, 0x8005);
-    assert_eq!(session.property_name_for_id(0x8020), appointment_color);
-    assert_eq!(session.property_name_for_id(0x8005), side_effects);
+    assert_eq!(appointment_color_id, PID_LID_APPOINTMENT_COLOR as u16);
+    assert_eq!(side_effects_id, PID_LID_SIDE_EFFECTS as u16);
+    assert_eq!(
+        session.property_name_for_id(PID_LID_APPOINTMENT_COLOR as u16),
+        appointment_color
+    );
+    assert_eq!(
+        session.property_name_for_id(PID_LID_SIDE_EFFECTS as u16),
+        side_effects
+    );
+    let mappings = session.named_properties_for_query(None);
+    assert!(mappings
+        .iter()
+        .any(|(property_id, _property)| *property_id == PID_LID_APPOINTMENT_COLOR as u16));
+    assert!(mappings
+        .iter()
+        .any(|(property_id, _property)| *property_id == PID_LID_SIDE_EFFECTS as u16));
+    assert!(!mappings
+        .iter()
+        .any(|(property_id, _property)| matches!(*property_id, 0x8020 | 0x8005)));
 }
 
 #[test]
@@ -1225,7 +1241,7 @@ fn get_property_ids_from_names_returns_registered_contact_source_id() {
 }
 
 #[test]
-fn get_property_ids_from_names_keeps_registered_reserved_range_id() {
+fn get_property_ids_from_names_rejects_reserved_calendar_collision() {
     let mut session = test_mapi_session();
     let property = MapiNamedProperty {
         guid: PS_PUBLIC_STRINGS_GUID,
@@ -1234,19 +1250,18 @@ fn get_property_ids_from_names_keeps_registered_reserved_range_id() {
 
     let property_id = cache_named_property_mapping_and_return_property_id(
         &mut session,
-        PID_LID_EMAIL1_DISPLAY_NAME as u16,
+        PID_LID_APPOINTMENT_COLOR as u16,
         property.clone(),
     );
 
-    assert_eq!(property_id, PID_LID_EMAIL1_DISPLAY_NAME as u16);
+    assert_eq!(property_id, 0);
+    assert_eq!(session.property_id_for_name(property, false), None);
     assert_eq!(
-        session.property_id_for_name(property.clone(), false),
-        Some(property_id)
-    );
-    assert_eq!(session.property_name_for_id(property_id), property);
-    assert_eq!(
-        session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
-        property
+        session.property_name_for_id(PID_LID_APPOINTMENT_COLOR as u16),
+        MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+        }
     );
 }
 

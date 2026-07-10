@@ -58,8 +58,9 @@ pub(super) fn cache_named_property_mapping_and_return_property_id(
     property_id: u16,
     property: MapiNamedProperty,
 ) -> u16 {
-    session.cache_named_property(property_id, property);
-    property_id
+    session
+        .cache_named_property(property_id, property)
+        .unwrap_or(0)
 }
 
 pub(super) async fn append_get_names_from_property_ids_response<S>(
@@ -162,7 +163,8 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     let mut missing = Vec::new();
     for (index, property) in properties.iter().cloned().enumerate() {
         let normalized = normalize_named_property(property.clone());
-        let property_id = if normalized.guid == PS_MAPI_GUID {
+        let canonical_property_id = canonical_calendar_named_property_id(&normalized);
+        let property_id = if normalized.guid == PS_MAPI_GUID || canonical_property_id.is_some() {
             session.property_id_for_name(normalized.clone(), false)
         } else {
             session.named_properties.get(&normalized).copied()
@@ -172,6 +174,8 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
                 property_ids.push(property_id);
                 property_id_sources.push(if normalized.guid == PS_MAPI_GUID {
                     "ps_mapi"
+                } else if canonical_property_id.is_some() {
+                    "canonical"
                 } else {
                     "session_cached"
                 });
@@ -213,7 +217,10 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
                 let Some(property_id) = db_mapping_by_property.get(&normalized).copied() else {
                     return true;
                 };
-                session.cache_named_property(property_id, normalized);
+                let Some(property_id) = session.cache_named_property(property_id, normalized)
+                else {
+                    return true;
+                };
                 property_ids[*index] = property_id;
                 property_id_sources[*index] = "db_existing";
                 false

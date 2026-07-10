@@ -433,7 +433,7 @@ fn cached_named_property_updates_bidirectional_registry() {
 }
 
 #[test]
-fn cached_calendar_named_property_preserves_registered_id() {
+fn cached_calendar_named_property_uses_canonical_family_id() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -442,13 +442,51 @@ fn cached_calendar_named_property_preserves_registered_id() {
         kind: MapiNamedPropertyKind::Lid(PID_LID_SIDE_EFFECTS),
     };
 
-    session.cache_named_property(0x8005, property.clone());
+    assert_eq!(
+        session.cache_named_property(0x8005, property.clone()),
+        Some(PID_LID_SIDE_EFFECTS as u16)
+    );
 
     assert_eq!(
         session.property_id_for_name(property.clone(), false),
-        Some(0x8005)
+        Some(PID_LID_SIDE_EFFECTS as u16)
     );
-    assert_eq!(session.property_name_for_id(0x8005), property);
+    assert_eq!(
+        session.property_name_for_id(PID_LID_SIDE_EFFECTS as u16),
+        property
+    );
+}
+
+#[test]
+fn cached_calendar_named_property_rejects_cross_family_id_reuse() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let appointment_color = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+    };
+    let conflicting_property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("legacy-0x8214-occupant".to_string()),
+    };
+
+    assert_eq!(
+        session.cache_named_property(0x8214, conflicting_property),
+        None
+    );
+    assert_eq!(
+        session.cache_named_property(0x8020, appointment_color.clone()),
+        Some(PID_LID_APPOINTMENT_COLOR as u16)
+    );
+    assert_eq!(
+        session.property_id_for_name(appointment_color.clone(), false),
+        Some(PID_LID_APPOINTMENT_COLOR as u16)
+    );
+    assert_eq!(
+        session.property_name_for_id(PID_LID_APPOINTMENT_COLOR as u16),
+        appointment_color
+    );
 }
 
 #[test]
@@ -518,7 +556,7 @@ fn cached_well_known_named_property_keeps_registered_reserved_range_id() {
 }
 
 #[test]
-fn cached_unknown_named_property_keeps_registered_reserved_range_id() {
+fn cached_unknown_named_property_cannot_shadow_reserved_calendar_id() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -527,15 +565,18 @@ fn cached_unknown_named_property_keeps_registered_reserved_range_id() {
         kind: MapiNamedPropertyKind::Name("custom-contact-shadow".to_string()),
     };
 
-    session.cache_named_property(PID_LID_EMAIL1_DISPLAY_NAME as u16, property.clone());
-
     assert_eq!(
-        session.property_id_for_name(property.clone(), false),
-        Some(PID_LID_EMAIL1_DISPLAY_NAME as u16)
+        session.cache_named_property(PID_LID_APPOINTMENT_COLOR as u16, property.clone()),
+        None
     );
+
+    assert_eq!(session.property_id_for_name(property, false), None);
     assert_eq!(
-        session.property_name_for_id(PID_LID_EMAIL1_DISPLAY_NAME as u16),
-        property
+        session.property_name_for_id(PID_LID_APPOINTMENT_COLOR as u16),
+        MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+        }
     );
 }
 

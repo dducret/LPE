@@ -1001,7 +1001,19 @@ back to generic-message-only projection. Low-LID Calendar named properties such
 as `PidLidGlobalObjectId` must be exposed through
 `RopGetPropertyIdsFromNames` with assigned named-property IDs in the
 named-property range; the LID itself is the property name, not the wire property
-ID. Outlook's MAPI Calendar property model also requires appointment start time
+ID. LPE's canonical Calendar profile assigns PSETID_Appointment LIDs
+`0x8200..0x82ff` and PSETID_Common LIDs `0x8500..0x85ff` to matching 16-bit
+property IDs because its stored Calendar view/configuration tags use those IDs.
+The durable mapping, `RopGetPropertyIdsFromNames` result, inverse lookup, and
+projected property tags must all agree with that assignment; a stale durable ID
+can be accepted only as a read-side normalization alias, never as a second
+forward mapping. PSETID_Common LIDs outside `0x8500..0x85ff` remain dynamically
+assigned when their numeric LIDs overlap another property-set family. This is
+an LPE canonical-state invariant, not a general rule that permits a client to
+skip named-property registration. It follows [MS-OXCPRPT] sections 2.2.12,
+2.2.12.1, 2.2.12.2, 3.1.4.1, 3.2.5.9, and 3.2.5.10, with the PropertyName
+structure from [MS-OXCDATA] section 2.6. Outlook's MAPI Calendar property model
+also requires appointment start time
 to be strictly earlier than end time, so zero-duration canonical events are
 projected to MAPI with a minimum one-minute appointment window while leaving the
 canonical event unchanged. Bounded MAPI calendar writes update only existing
