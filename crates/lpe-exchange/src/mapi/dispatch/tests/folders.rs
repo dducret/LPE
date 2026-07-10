@@ -1767,7 +1767,7 @@ fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts()
             &MapiMailStoreSnapshot::empty(),
             Uuid::nil(),
         ),
-        Some(17)
+        Some(6)
     );
 }
 
@@ -1777,11 +1777,11 @@ fn contents_table_open_row_count_projects_common_views_full_table() {
 
     assert_eq!(
         associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-        17
+        6
     );
     assert_eq!(
         contents_table_open_row_count(COMMON_VIEWS_FOLDER_ID, true, &[], &[], &snapshot,),
-        17
+        6
     );
 }
 

@@ -305,13 +305,8 @@ impl MapiMailStoreSnapshot {
             .first()
             .map(|shortcut| shortcut.account_id);
         let persisted_shortcut_count = navigation_shortcuts.len();
-        let dropped_synthetic_group_header_count = navigation_shortcuts
-            .iter()
-            .filter(|shortcut| is_synthetic_common_views_group_header(shortcut))
-            .count();
         let persisted_navigation_shortcuts = navigation_shortcuts
             .into_iter()
-            .filter(|shortcut| !is_synthetic_common_views_group_header(shortcut))
             .map(|shortcut| {
                 let group_header_id = Some(
                     shortcut
@@ -368,7 +363,6 @@ impl MapiMailStoreSnapshot {
             deduped_navigation_shortcut_count = deduped_shortcuts.len(),
             common_views_table_shortcut_count = table_shortcut_count,
             common_views_default_table_shortcut_count = default_table_shortcut_count,
-            dropped_synthetic_group_header_count,
             common_views_named_view_count = table_messages.len().saturating_sub(table_shortcut_count),
             persisted_navigation_shortcuts =
                 %persisted_navigation_shortcut_summary,
@@ -1052,10 +1046,10 @@ impl MapiMailStoreSnapshot {
         &self,
     ) -> impl Iterator<Item = MapiCommonViewsMessage> {
         let shortcuts = self.navigation_shortcut_messages();
-        let mut table_shortcuts = shortcuts
-            .into_iter()
-            .filter(common_views_table_projects_navigation_shortcut)
-            .collect::<Vec<_>>();
+        // [MS-OXOCFG] sections 3.1.4.9 and 3.1.4.10.2: navigation
+        // shortcuts are client-owned Common Views FAI messages. Preserve
+        // their canonical stored identity in the associated table.
+        let mut table_shortcuts = shortcuts;
         append_missing_default_common_views_shortcuts(&mut table_shortcuts);
         replace_persisted_default_mail_favorite_shortcuts(&mut table_shortcuts);
         materialize_default_mail_group_header(&mut table_shortcuts);
@@ -1108,11 +1102,10 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> Option<MapiNavigationShortcutMessage> {
         self.navigation_shortcut_message_for_id(item_id)
-            .filter(common_views_table_projects_navigation_shortcut)
             .or_else(|| {
                 outlook_common_views_default_navigation_shortcuts()
                     .into_iter()
-                    .find(|shortcut| shortcut.id == item_id)
+                    .find(|shortcut| shortcut.section == 1 && shortcut.id == item_id)
             })
     }
 

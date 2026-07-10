@@ -36,6 +36,12 @@ seconds after displaying the error without dismissing the dialog, so `:250` is
 the uncontaminated terminal boundary. All 289 HTTP responses are 200, all 288
 MAPI response codes are zero, and there is no ROP parse error.
 
+Run 13:50 deployed the provisional zero-flags experiment on build
+`ac5f6a3d7e05`. Its 568 replay events contain 284 HTTP 200 responses, 283 zero
+MAPI response codes, and no ROP parse error. Outlook again stopped at
+`RopSetColumns` plus `RopQueryPosition` request `:245`, with numerator zero and
+denominator one. This directly falsifies `PidTagWlinkFlags` as the cause.
+
 ## Decoded table, named properties, and rows
 
 The canonical Calendar contains one event: MID `0x0000000000440001`, subject
@@ -100,15 +106,23 @@ The inconsistency is therefore not in the conforming final
 `RopSetColumns`/`RopQueryPosition` response; it is the synthetic alternate-view
 advertisement and its implicit application to a Normal table.
 
-Second, after the alternate-view defect was removed, run 13:20 exposed a
-malformed Common Views navigation-shortcut contract earlier in startup. LPE's
-server-generated Calendar shortcut carried `PidTagWlinkFlags` (`0x684A`,
-`PT_LONG`) value `0x00100000`. [MS-OXOCFG] section 2.2.9.6 defines no such
-flag: the value is reserved, while `sipOverlay` is `0x00001000`. The primary
-Calendar is not an overlay, and the canonical Calendar shortcut example in
-[MS-OXOCFG] section 4.4.2 uses flags zero. The same invented reserved bit was
-present on the other server-generated module shortcuts read in the same Common
-Views FAI table. Persisted client-created flag values are not affected.
+Second, after the alternate-view defect was removed, runs 13:20 and 13:50
+exposed a Common Views identity inconsistency earlier in startup. The database
+contains the client-created `My Calendars` group and `Calendar` shortcut with
+canonical MIDs `0x03580001` and `0x03590001`. LPE discarded the persisted group
+and filtered the persisted shortcut out of the startup table, then substituted
+server-generated rows with MIDs `0x7fffffffffdf0001` and
+`0x7fffffffffde0001`. The substitution also replaced client-owned values such
+as `PidTagWlinkSaveStamp` while claiming to represent the same group and target.
+
+[MS-OXOCFG] sections 3.1.4.9 and 3.1.4.10.2 define navigation shortcuts as
+Common Views FAI messages created and updated by the client. Their stored
+message identity and properties therefore have to remain stable when the table
+is read. `PidTagWlinkFlags` value `0x00100000` is reserved under section
+2.2.9.6, but Outlook wrote it into the persisted June shortcut and the protocol
+requires reserved bits to be preserved. Run 13:50 proved that changing the
+synthetic row's flags to zero did not alter the failure boundary, so flags are
+not the defect.
 
 The cursor hypothesis was also checked explicitly. Both successful Inbox and
 successful Calendar traces return `Numerator=0` before the first row. Under
@@ -126,13 +140,14 @@ does not open the advertised descriptor before creating the Normal contents
 table.
 
 The working June 25 run on server build `db50765d7f3a` exposed six Common Views
-rows and no server-generated Calendar WLink. Run 13:20 exposes 17 rows,
-including the Calendar WLink with reserved flags. The ten-column bootstrap in
-both runs has the same requested property tags, empty sort state, successful
-`RopSetColumns`, and `RopQueryPosition` numerator zero and denominator one. The
-QueryPosition implementation and serialization are unchanged between those
-builds. This makes the malformed pre-table WLink the first remaining semantic
-difference after the Normal-view repair, rather than the cursor value.
+rows and did not substitute a server-generated Calendar WLink. Runs 13:20 and
+13:50 expose 17 rows, including the fabricated Calendar group and shortcut.
+The ten-column bootstrap in all runs has the same requested property tags,
+empty sort state, successful `RopSetColumns`, and `RopQueryPosition` numerator
+zero and denominator one. The QueryPosition implementation and serialization
+are unchanged between those builds. This makes the noncanonical Common Views
+identity substitution the first remaining semantic difference after the
+Normal-view repair, rather than the cursor value or WLink flags.
 
 Changing Calendar to reuse Inbox's legacy NamedView MID was tested and rejected.
 The 11:51 clean profile still stopped before `RopQueryRows`, and the change made
@@ -148,17 +163,19 @@ Calendar now uses the Normal-view fallback:
 - no Calendar `PidTagDefaultViewEntryId` alternate-view advertisement
 - no synthetic Calendar `IPM.Microsoft.FolderDesign.NamedView` FAI row
 - no descriptor-derived initial sort on the Normal Calendar contents table
-- no reserved flag bits on server-generated Common Views shortcuts; the
-  primary Calendar WLink uses `PidTagWlinkFlags = 0`
+- client-created Calendar and module shortcuts retain their canonical MIDs,
+  save stamps, flags (including preserved reserved bits), grouping, and order
+- only the established Mail Favorites bootstrap rows remain server-generated;
+  LPE no longer invents Calendar or other module shortcuts
 - no change to real Calendar configuration FAI rows or canonical events
 - no change to `RopSetColumns`, `RopQueryPosition`, or `RopQueryRows` framing
 
 Regression tests cover all five boundaries: the folder property is absent, the
 associated table does not synthesize a NamedView, the Normal table starts with
-an empty implicit sort, generated Common Views shortcuts contain no reserved
-flag bits, and exact captured-column `RopQueryRows` remains a valid unflagged
-row. The fix is centralized in the `lpe-exchange` view helpers and adds no
-implementation code to `mapi.rs`.
+an empty implicit sort, persisted Common Views Calendar rows retain their
+canonical identity and properties, and exact captured-column `RopQueryRows`
+remains a valid unflagged row. The fix is centralized in the `lpe-exchange`
+view helpers and adds no implementation code to `mapi.rs`.
 
 Protocol sections relied upon are [MS-OXCROPS] sections 2.2.5.1, 2.2.5.4,
 2.2.5.7, 2.2.8.1, and 2.2.8.2; [MS-OXCTABL] sections 2.2.2.2, 2.2.2.5, and

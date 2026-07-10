@@ -1104,33 +1104,13 @@ fn deduplicate_navigation_shortcuts(
         .collect()
 }
 
-fn common_views_table_projects_navigation_shortcut(
-    shortcut: &MapiNavigationShortcutMessage,
-) -> bool {
-    if shortcut.section != 1 || shortcut.group_name != OUTLOOK_MAIL_FAVORITES_GROUP_NAME {
-        return false;
-    }
-    if shortcut.shortcut_type == 4 {
-        return true;
-    }
-    matches!(
-        shortcut.target_folder_id,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID)
-            | Some(crate::mapi::identity::SENT_FOLDER_ID)
-            | Some(crate::mapi::identity::TRASH_FOLDER_ID)
-            | Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
-            | Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
-            | Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
-            | Some(crate::mapi::identity::TASKS_FOLDER_ID)
-            | Some(crate::mapi::identity::NOTES_FOLDER_ID)
-            | Some(crate::mapi::identity::JOURNAL_FOLDER_ID)
-    )
-}
-
 fn append_missing_default_common_views_shortcuts(
     shortcuts: &mut Vec<MapiNavigationShortcutMessage>,
 ) {
-    for default_shortcut in outlook_common_views_default_navigation_shortcuts() {
+    for default_shortcut in outlook_common_views_default_navigation_shortcuts()
+        .into_iter()
+        .filter(|shortcut| shortcut.section == 1)
+    {
         let exists = shortcuts.iter().any(|shortcut| {
             if default_shortcut.shortcut_type == 4 {
                 shortcut.shortcut_type == 4
@@ -1191,16 +1171,6 @@ fn normalize_navigation_shortcut_group_name(
     } else {
         group_name.to_string()
     }
-}
-
-fn is_synthetic_common_views_group_header(shortcut: &MapiNavigationShortcutRecord) -> bool {
-    let outlook_calendar_group_id =
-        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").expect("valid Outlook GUID");
-    shortcut.target_folder_id.is_none()
-        && shortcut.shortcut_type == 4
-        && shortcut.subject == "My Calendars"
-        && shortcut.group_name == "My Calendars"
-        && shortcut.group_header_id == Some(outlook_calendar_group_id)
 }
 
 fn materialize_default_mail_group_header(shortcuts: &mut Vec<MapiNavigationShortcutMessage>) {

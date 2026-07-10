@@ -1309,7 +1309,7 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
     assert_eq!(snapshot.common_views_messages().count(), 0);
     let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-    assert_eq!(messages.len(), 17);
+    assert_eq!(messages.len(), 6);
     let shortcuts = messages
         .iter()
         .filter_map(|message| match message {
@@ -1317,7 +1317,7 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(shortcuts.len(), 15);
+    assert_eq!(shortcuts.len(), 4);
     assert!(shortcuts.iter().all(|shortcut| shortcut.flags == 0));
     let named_views = messages
         .iter()
@@ -1354,70 +1354,9 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
         .is_some());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID
-        )
-        .is_some());
-    let calendar_shortcut = snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID,
-        )
-        .expect("default Calendar navigation shortcut");
-    assert_eq!(
-        calendar_shortcut.target_folder_id,
-        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
-    );
-    assert_eq!(calendar_shortcut.section, 3);
-    assert_eq!(calendar_shortcut.flags, 0);
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_QUICK_CONTACTS_NAVIGATION_SHORTCUT_ID
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID
         )
         .is_none());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_IM_CONTACT_LIST_NAVIGATION_SHORTCUT_ID
-        )
-        .is_none());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID
-        )
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID
-        )
-        .is_some());
     for named_view in named_views {
         assert!(snapshot
             .common_view_named_view_message_for_id(named_view.id)
@@ -1606,7 +1545,7 @@ fn common_views_preserves_persisted_navigation_shortcuts() {
     assert_eq!(shortcut.subject, "Alpha");
     assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
     assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-    assert_eq!(messages.len(), 17);
+    assert_eq!(messages.len(), 6);
     assert_eq!(
         messages
             .iter()
@@ -1623,6 +1562,72 @@ fn common_views_preserves_persisted_navigation_shortcuts() {
         .navigation_shortcut_table_message_for_id(0)
         .is_none());
     assert!(snapshot.common_view_named_view_message_for_id(0).is_none());
+}
+
+#[test]
+fn common_views_preserves_persisted_calendar_group_and_shortcut_identity() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let group_id = Uuid::from_u128(0x020a49e4_7343_4f58_89ee_903f5463c27b);
+    let shortcut_id = Uuid::from_u128(0xd49ca8a0_dc7c_469f_8c82_4ec37f03bdf8);
+    let group_mid = crate::mapi::identity::mapi_store_id(0x358);
+    let shortcut_mid = crate::mapi::identity::mapi_store_id(0x359);
+    crate::mapi::identity::remember_mapi_identity(group_id, group_mid);
+    crate::mapi::identity::remember_mapi_identity(shortcut_id, shortcut_mid);
+    let calendar_group_id = Uuid::from_u128(0xb7f00600_0000_0000_c000_000000000046);
+    let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+        MapiNavigationShortcutRecord {
+            id: group_id,
+            account_id,
+            subject: "My Calendars".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 4_269_340_906,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(calendar_group_id),
+            group_name: "My Calendars".to_string(),
+        },
+        MapiNavigationShortcutRecord {
+            id: shortcut_id,
+            account_id,
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0x0010_0000,
+            save_stamp: 2_095_149_994,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(calendar_group_id),
+            group_name: "My Calendars".to_string(),
+        },
+    ]);
+
+    let calendar_messages = snapshot
+        .common_views_table_messages()
+        .filter_map(|message| match message {
+            MapiCommonViewsMessage::NavigationShortcut(shortcut) if shortcut.section == 3 => {
+                Some(shortcut)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calendar_messages.len(), 2);
+    let group = calendar_messages
+        .iter()
+        .find(|shortcut| shortcut.shortcut_type == 4)
+        .expect("persisted Calendar group header");
+    assert_eq!(group.id, group_mid);
+    assert_eq!(group.canonical_id, group_id);
+    assert_eq!(group.save_stamp, 4_269_340_906);
+    let shortcut = calendar_messages
+        .iter()
+        .find(|shortcut| shortcut.shortcut_type == 0)
+        .expect("persisted Calendar shortcut");
+    assert_eq!(shortcut.id, shortcut_mid);
+    assert_eq!(shortcut.canonical_id, shortcut_id);
+    assert_eq!(shortcut.flags, 0x0010_0000);
+    assert_eq!(shortcut.save_stamp, 2_095_149_994);
 }
 
 #[test]
@@ -1829,13 +1834,13 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
 
     assert_eq!(snapshot.navigation_shortcut_messages().len(), 3);
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    assert_eq!(table_messages.len(), 17);
+    assert_eq!(table_messages.len(), 6);
     assert_eq!(
         table_messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        15
+        4
     );
     assert!(!table_messages.iter().any(|message| matches!(
         message,
@@ -1900,10 +1905,10 @@ fn common_views_projects_supported_module_shortcuts_in_startup_table() {
             shortcut_type: 0,
             flags: 0,
             save_stamp: 0,
-            section: 1,
+            section: 3,
             ordinal: 255,
-            group_header_id: Some(default_wlink_group_uuid()),
-            group_name: "Mail".to_string(),
+            group_header_id: Some(Uuid::from_u128(0xb7f00600_0000_0000_c000_000000000046)),
+            group_name: "My Calendars".to_string(),
         },
         MapiNavigationShortcutRecord {
             id: second_calendar_id,
@@ -1913,7 +1918,7 @@ fn common_views_projects_supported_module_shortcuts_in_startup_table() {
             shortcut_type: 0,
             flags: 0,
             save_stamp: 0,
-            section: 1,
+            section: 3,
             ordinal: 511,
             group_header_id: Some(Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681)),
             group_name: "My Calendars".to_string(),

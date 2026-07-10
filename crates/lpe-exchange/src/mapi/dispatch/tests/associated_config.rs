@@ -967,7 +967,7 @@ fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
         &snapshot,
     );
 
-    assert!(window.contains("total=17"), "{window}");
+    assert!(window.contains("total=6"), "{window}");
     assert!(window.contains("FolderDesign.NamedView"), "{window}");
     assert!(window.contains("Sent To"), "{window}");
     assert!(values.contains("FolderDesign.NamedView"), "{values}");
@@ -1131,8 +1131,8 @@ fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
 
     let summary = format_common_views_wlink_contract_summary(&columns, &snapshot);
 
-    assert!(summary.contains("link_rows=9"));
-    assert!(summary.contains("header_rows=6"));
+    assert!(summary.contains("link_rows=3"));
+    assert!(summary.contains("header_rows=1"));
     assert!(summary.contains("not_selected_required_link_columns="));
     assert!(summary.contains("expected_link_default_columns=0x68530003"));
     assert!(!summary.contains("0x68420102"));
