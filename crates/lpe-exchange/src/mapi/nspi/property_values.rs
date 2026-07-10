@@ -228,7 +228,6 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
     directory_entries: &[ExchangeAddressBookEntry],
 ) -> Vec<u8> {
     let mut values = Vec::new();
-    write_u32(&mut values, 0);
     write_u32(&mut values, tags.len() as u32);
     for property_tag in tags {
         write_address_book_tagged_property_value(
@@ -540,8 +539,8 @@ pub(in crate::mapi) fn write_address_book_tagged_property_value(
     property_tag: u32,
     value: &NspiValue<'_>,
 ) {
+    // MS-OXCMAPIHTTP 2.2.1.2 places the value directly after the 4-byte tag.
     write_u32(body, property_tag);
-    write_u32(body, 0);
     write_address_book_property_value(body, property_tag, value);
 }
 
@@ -622,6 +621,8 @@ fn write_embedded_address_book_table(
 
 fn write_nspi_binary(body: &mut Vec<u8>, value: &[u8]) {
     let len = value.len().min(u32::MAX as usize);
+    // MS-OXCMAPIHTTP 2.2.1.1 requires HasValue for PtypBinary.
+    body.push(0xFF);
     write_u32(body, len as u32);
     body.extend_from_slice(&value[..len]);
 }

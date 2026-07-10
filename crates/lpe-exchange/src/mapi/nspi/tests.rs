@@ -2,6 +2,41 @@ use super::*;
 use crate::mapi::nspi::diagnostics::{nspi_body_contains_ascii, nspi_body_contains_property_tag};
 
 #[test]
+fn address_book_tagged_values_use_mapi_http_layout() {
+    let mut binary = Vec::new();
+    write_address_book_tagged_property_value(
+        &mut binary,
+        0x0FFF_0102,
+        &NspiValue::OwnedBinary(vec![1, 2, 3, 4]),
+    );
+    assert_eq!(
+        binary,
+        [
+            0x02, 0x01, 0xFF, 0x0F, // PropertyType and PropertyId
+            0xFF, // HasValue
+            0x04, 0x00, 0x00, 0x00, // Binary byte count
+            0x01, 0x02, 0x03, 0x04,
+        ]
+    );
+
+    let entry = ExchangeAddressBookEntry {
+        id: Uuid::nil(),
+        display_name: "Test".to_string(),
+        email: "test@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
+    };
+    let values = nspi_entry_property_value_list(Uuid::nil(), &entry, &[0x3900_0003], &[]);
+    assert_eq!(u32::from_le_bytes(values[..4].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(values[4..8].try_into().unwrap()),
+        0x3900_0003
+    );
+}
+
+#[test]
 fn nspi_request_and_property_manifests_cover_implemented_static_values() {
     for request_type in NSPI_SUPPORTED_REQUEST_TYPES {
         assert!(

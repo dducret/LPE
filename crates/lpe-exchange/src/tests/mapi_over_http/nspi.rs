@@ -1081,7 +1081,6 @@ async fn mapi_over_http_nspi_distribution_list_members_are_bounded_to_canonical_
         &body,
         &[
             0x8CE2_0003u32.to_le_bytes().as_slice(),
-            0u32.to_le_bytes().as_slice(),
             1u32.to_le_bytes().as_slice(),
         ]
         .concat()
@@ -1090,7 +1089,6 @@ async fn mapi_over_http_nspi_distribution_list_members_are_bounded_to_canonical_
         &body,
         &[
             0x8CE3_0003u32.to_le_bytes().as_slice(),
-            0u32.to_le_bytes().as_slice(),
             0u32.to_le_bytes().as_slice(),
         ]
         .concat()
@@ -1187,16 +1185,15 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
     assert_eq!(
-        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
         0x8C6D_0102
     );
-    assert_eq!(u32::from_le_bytes(body[25..29].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[29..33].try_into().unwrap()), 16);
+    assert_eq!(body[21], 0xFF);
+    assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 16);
     assert_eq!(
-        &body[33..49],
+        &body[26..42],
         FakeStore::account().account_id.to_bytes_le().as_slice()
     );
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
@@ -1210,15 +1207,13 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
     assert_eq!(
-        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
         0x800F_101F
     );
-    assert_eq!(u32::from_le_bytes(body[25..29].try_into().unwrap()), 0);
-    assert_eq!(body[29], 0xFF);
-    assert_eq!(u32::from_le_bytes(body[30..34].try_into().unwrap()), 1);
+    assert_eq!(body[21], 0xFF);
+    assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 1);
     assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
 
     let mut outlook_account_row_request = Vec::new();
@@ -1240,7 +1235,7 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 8);
     assert!(contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
     assert!(contains_bytes(&body, &0x800F_101Fu32.to_le_bytes()));
@@ -1248,7 +1243,7 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .windows(4)
         .position(|bytes| bytes == 0x800F_101Fu32.to_le_bytes())
         .unwrap();
-    let proxy_value_offset = proxy_tag_offset + 8;
+    let proxy_value_offset = proxy_tag_offset + 4;
     assert_eq!(body[proxy_value_offset], 0xFF);
     assert_eq!(
         u32::from_le_bytes(
@@ -1592,6 +1587,17 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
             "GetProps" | "GetTemplateInfo" => {
                 assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
                 assert_eq!(body[12], 1, "{request_type}");
+                assert_eq!(
+                    u32::from_le_bytes(body[13..17].try_into().unwrap()),
+                    8,
+                    "{request_type}"
+                );
+                assert_eq!(
+                    u32::from_le_bytes(body[17..21].try_into().unwrap()),
+                    0x3001_001F,
+                    "{request_type}"
+                );
+                assert_eq!(body[21], 0xFF, "{request_type}");
                 assert!(contains_bytes(&body, &utf16z("alice@example.test")));
                 assert!(contains_bytes(&body, &utf16z("Alice")));
             }
@@ -1665,12 +1671,6 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 for (name, dn, depth, container_id, flags, is_master) in special_rows {
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        0,
-                        "{request_type}: {name}"
-                    );
-                    offset += 4;
-                    assert_eq!(
-                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         6,
                         "{request_type}: {name}"
                     );
@@ -1681,7 +1681,9 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0x0FFF_0102,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
+                    assert_eq!(body[offset], 0xFF, "{request_type}: {name}");
+                    offset += 1;
                     let entry_id_len =
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
                     offset += 4;
@@ -1703,7 +1705,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0x3600_0003,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         flags,
@@ -1716,7 +1718,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0x3005_0003,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         depth,
@@ -1729,7 +1731,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0xFFFD_0003,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
                     assert_eq!(
                         u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
                         container_id,
@@ -1742,7 +1744,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0x3001_001F,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
                     assert_eq!(body[offset], 0xFF, "{request_type}: {name}");
                     offset += 1 + utf16z(name).len();
 
@@ -1751,7 +1753,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         0xFFFB_000B,
                         "{request_type}: {name}"
                     );
-                    offset += 8;
+                    offset += 4;
                     assert_eq!(body[offset], is_master, "{request_type}: {name}");
                     offset += 1;
                 }

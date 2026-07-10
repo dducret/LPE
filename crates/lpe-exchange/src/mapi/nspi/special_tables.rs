@@ -156,7 +156,8 @@ fn nspi_request_flags(request: &[u8]) -> Option<u32> {
 
 fn nspi_special_table_row(container: &NspiSpecialTableContainer) -> Vec<u8> {
     let mut table_row = Vec::new();
-    write_u32(&mut table_row, 0);
+    // MS-OXCMAPIHTTP 2.2.5.8.2 encodes each row directly as an
+    // AddressBookPropertyValueList (section 2.2.1.3), beginning with its count.
     write_u32(&mut table_row, 6);
     write_address_book_tagged_property_value(
         &mut table_row,
@@ -249,6 +250,19 @@ mod tests {
                 assert_eq!(guid.len(), 32);
                 assert!(guid.bytes().all(|byte| byte.is_ascii_hexdigit()));
             }
+        }
+    }
+
+    #[test]
+    fn hierarchy_rows_begin_with_address_book_property_value_count() {
+        for container in NSPI_SPECIAL_TABLE_CONTAINERS {
+            let row = nspi_special_table_row(container);
+
+            assert_eq!(u32::from_le_bytes(row[..4].try_into().unwrap()), 6);
+            assert_eq!(
+                u32::from_le_bytes(row[4..8].try_into().unwrap()),
+                PID_TAG_ENTRY_ID
+            );
         }
     }
 }
