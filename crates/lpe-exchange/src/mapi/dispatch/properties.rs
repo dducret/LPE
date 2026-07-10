@@ -302,6 +302,16 @@ pub(super) async fn append_get_properties_specific_response<S>(
                         %session.default_view_advertisement_state(),
                     "rca debug mapi default view advertised"
                 );
+                log_calendar_view_contract_fingerprint(
+                    principal,
+                    session,
+                    request_id,
+                    "0x07",
+                    "default_view_advertised",
+                    object,
+                    None,
+                    snapshot,
+                );
             }
         }
     }

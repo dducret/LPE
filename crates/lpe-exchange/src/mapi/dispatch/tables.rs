@@ -1497,6 +1497,22 @@ pub(super) fn append_table_control_response(
                 emails,
                 snapshot,
             );
+            let query_position_numbers = response.get(6..14).and_then(|bytes| {
+                Some((
+                    u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?),
+                    u32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?),
+                ))
+            });
+            log_calendar_view_contract_fingerprint(
+                principal,
+                session,
+                request_id,
+                "0x17",
+                "query_position",
+                input_object(session, handle_slots, request),
+                query_position_numbers,
+                snapshot,
+            );
             if let Some(context) = calendar_normal_query_position_context {
                 let position = response
                     .get(6..10)

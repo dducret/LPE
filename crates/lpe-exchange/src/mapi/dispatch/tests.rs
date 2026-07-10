@@ -191,6 +191,72 @@ fn outlook_view_descriptor_named_property_context_reports_calendar_lids() {
 }
 
 #[test]
+fn calendar_contract_fingerprint_covers_default_view_fai_and_protocol_contract() {
+    let session = test_mapi_session();
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let folder = MapiObject::Folder {
+        folder_id: CALENDAR_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+
+    let fingerprint = format_calendar_view_contract_fingerprint(
+        &session,
+        session.account_id,
+        "default_view_advertised",
+        Some(&folder),
+        None,
+        &snapshot,
+    )
+    .expect("Calendar folder should produce a contract fingerprint");
+
+    assert!(fingerprint.starts_with("version=1;sha256_32="));
+    assert!(fingerprint.contains("MS-OXOCFG 2.2.6.1,2.2.6.1.1,2.2.6.2"));
+    assert!(fingerprint.contains("folder=0x0000000000100001"));
+    assert!(fingerprint.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
+    assert!(fingerprint.contains("entry_id=bytes=70"));
+    assert!(fingerprint.contains("descriptor_summary=version=8"));
+    assert!(fingerprint.contains("named_id_reuse=none"));
+    assert!(fingerprint.contains("invariant_issues=none"));
+}
+
+#[test]
+fn calendar_contract_fingerprint_covers_exact_selected_table_state() {
+    let session = test_mapi_session();
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let table = MapiObject::ContentsTable {
+        folder_id: CALENDAR_FOLDER_ID,
+        associated: false,
+        columns: vec![PID_TAG_MID, PID_TAG_SUBJECT_W, PID_LID_LOCATION_W_TAG],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+
+    let fingerprint = format_calendar_view_contract_fingerprint(
+        &session,
+        session.account_id,
+        "query_position",
+        Some(&table),
+        Some((0, 1)),
+        &snapshot,
+    )
+    .expect("Calendar table should produce a contract fingerprint");
+
+    assert!(fingerprint.contains("selected_columns=0x674a0014,0x0037001f,0x8208001f"));
+    assert!(fingerprint.contains("0x8208001f:id=0x8208:type=0x001f"));
+    assert!(fingerprint.contains("implicit_sort=none"));
+    assert!(fingerprint.contains("query_position_numerator=0"));
+    assert!(fingerprint.contains("query_position_denominator=1"));
+    assert!(fingerprint.contains("selected_row_projection="));
+}
+
+#[test]
 fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids() {
     let session = test_mapi_session();
     let snapshot = MapiMailStoreSnapshot::empty();

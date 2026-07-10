@@ -37,6 +37,7 @@ use super::MAX_ROP_DEBUG_ENTRIES;
 
 mod associated_config;
 mod calendar;
+mod calendar_contract;
 mod common_views;
 mod default_folders;
 mod execute;
@@ -56,6 +57,7 @@ mod values;
 
 pub(super) use associated_config::*;
 pub(super) use calendar::*;
+pub(super) use calendar_contract::*;
 pub(super) use common_views::*;
 pub(super) use default_folders::*;
 pub(super) use execute::*;
