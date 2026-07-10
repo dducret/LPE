@@ -1370,6 +1370,7 @@ fn default_folder_named_views_use_folder_family_names() {
 
     for (folder_id, expected_name) in [
         (crate::mapi::identity::INBOX_FOLDER_ID, "Compact"),
+        (crate::mapi::identity::CALENDAR_FOLDER_ID, "Calendar"),
         (crate::mapi::identity::TASKS_FOLDER_ID, "Tasks"),
         (crate::mapi::identity::NOTES_FOLDER_ID, "Notes"),
         (crate::mapi::identity::JOURNAL_FOLDER_ID, "Journal"),
@@ -1387,20 +1388,25 @@ fn default_folder_named_views_use_folder_family_names() {
 }
 
 #[test]
-fn calendar_normal_view_does_not_materialize_folder_local_named_view() {
+fn calendar_default_named_view_uses_folder_local_identity() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let view_id = outlook_default_folder_named_view_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
 
     assert_ne!(view_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
-    assert!(snapshot
+    let view = snapshot
         .default_folder_named_view_message(crate::mapi::identity::CALENDAR_FOLDER_ID, view_id)
-        .is_none());
-    assert!(snapshot
+        .expect("calendar default view");
+    assert_eq!(view.id, view_id);
+    assert_eq!(view.folder_id, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    assert_eq!(view.name, "Calendar");
+
+    let legacy_alias = snapshot
         .default_folder_named_view_message(
             crate::mapi::identity::CALENDAR_FOLDER_ID,
             OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         )
-        .is_none());
+        .expect("calendar default view legacy alias");
+    assert_eq!(legacy_alias.id, view_id);
 }
 
 #[test]

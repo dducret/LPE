@@ -1133,10 +1133,7 @@ impl MapiMailStoreSnapshot {
         folder_id: u64,
         item_id: u64,
     ) -> Option<MapiCommonViewNamedViewMessage> {
-        if matches!(
-            folder_id,
-            crate::mapi::identity::SENT_FOLDER_ID | crate::mapi::identity::CALENDAR_FOLDER_ID
-        ) {
+        if folder_id == crate::mapi::identity::SENT_FOLDER_ID {
             return None;
         }
         let view_id = outlook_default_folder_named_view_id(folder_id);

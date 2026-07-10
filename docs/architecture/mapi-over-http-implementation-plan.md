@@ -250,11 +250,14 @@ non-canonical LPE state.
   `IPM.Microsoft.FolderDesign.NamedView` objects for startup compatibility.
   Folder-local named-view rows are projected in folder-associated tables only
   for supported folders with type-specific descriptors: Inbox and mail folders,
-  Contacts, Tasks, Notes, Journal, and supported built-in search/reminder views.
-  Calendar uses the Normal-view fallback: it does not advertise a synthetic
-  alternate NamedView and its Normal contents table receives no implicit
-  descriptor sort. Common Views still owns the bounded Common Views
-  `Sent To` row and navigation shortcuts.
+  Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
+  search/reminder views. Calendar advertises a deterministic folder-local
+  `Calendar` NamedView because that is the first semantic difference between
+  the working 2026-06-25 Outlook trace and the failing 2026-07-10 trace after
+  named-property mappings are canonical. Its unopened Normal contents table
+  still receives no implicit descriptor sort; the start-time descriptor sort
+  becomes table state only through an explicit client operation. Common Views
+  still owns the bounded Common Views `Sent To` row and navigation shortcuts.
   Outlook-created or imported associated configuration rows remain durable, but
   Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
   rows or `IPM.ExtendedRule.Message` rows; only the modeled
@@ -264,7 +267,7 @@ non-canonical LPE state.
   deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
   identities. Real Calendar configuration FAI rows remain canonical and are
-  exposed independently of the Calendar Normal-view fallback.
+  exposed independently of the folder-local Calendar NamedView.
   Folder-local named-view descriptor binaries list only real properties used by
   the visible UI columns; they must not include synthetic placeholder tags,
   table identity columns such as FolderId/MID/InstanceId/InstanceNum, or

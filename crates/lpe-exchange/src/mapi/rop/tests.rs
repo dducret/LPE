@@ -3250,6 +3250,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
     assert_eq!(&response[6..], &[0, 0, 0]);
 
     for folder_id in [
+        CALENDAR_FOLDER_ID,
         CONTACTS_FOLDER_ID,
         TASKS_FOLDER_ID,
         NOTES_FOLDER_ID,
@@ -3303,7 +3304,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         payload: default_view_payload,
     };
 
-    for folder_id in [CALENDAR_FOLDER_ID, IPM_SUBTREE_FOLDER_ID] {
+    for folder_id in [IPM_SUBTREE_FOLDER_ID] {
         let normal_view_folder = MapiObject::Folder {
             folder_id,
             properties: HashMap::new(),
