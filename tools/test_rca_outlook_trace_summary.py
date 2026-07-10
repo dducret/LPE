@@ -27,6 +27,8 @@ def empty_log_summary() -> dict:
         "unknown_defaulted_getprops_contexts": Counter(),
         "problem_getprops_tags": Counter(),
         "problem_getprops_contexts": Counter(),
+        "calendar_normal_view_not_found_getprops_tags": Counter(),
+        "calendar_normal_view_not_found_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
         "umolk_not_found_getprops_tags": Counter(),
@@ -167,6 +169,35 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
         self.assertEqual(summary["zero_default_tags"], Counter({"0x55550003": 1}))
+
+    def test_calendar_normal_view_default_entry_id_not_found_is_expected(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=folder;folder=0x0000000000100001;"
+            "role=calendar;tags=0x36160102;names=PidTagDefaultViewEntryId;"
+            "problem_tags=0x36160102:PidTagDefaultViewEntryId:0x8004010f;"
+            "zero_default_tags=;response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:76",
+                "object_kind": "folder",
+            },
+        )
+
+        self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(
+            summary["calendar_normal_view_not_found_getprops_tags"],
+            Counter({"0x36160102": 1}),
+        )
+        self.assertEqual(
+            rca.actionable_issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+            [],
+        )
 
     def test_unknown_getprops_problem_tag_is_not_counted_as_unknown_success(self) -> None:
         summary = empty_log_summary()

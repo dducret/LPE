@@ -443,6 +443,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "unknown_defaulted_getprops_contexts": Counter(),
         "problem_getprops_tags": Counter(),
         "problem_getprops_contexts": Counter(),
+        "calendar_normal_view_not_found_getprops_tags": Counter(),
+        "calendar_normal_view_not_found_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
         "umolk_problem_getprops_contexts": Counter(),
         "umolk_not_found_getprops_tags": Counter(),
@@ -1889,6 +1891,8 @@ def record_getprops_problem_tag(
         contract, "kind"
     )
     associated_config_class = field_text(fields or {}, "associated_config_class")
+    role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
+    folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
     umolk_problem = (
         object_kind == "associated_config"
         and (
@@ -1897,7 +1901,16 @@ def record_getprops_problem_tag(
         )
     )
     problem = problem_detail_for_tag(contract, tag)
-    if umolk_problem and problem_is_not_found(problem):
+    calendar_normal_view_not_found = (
+        tag == "0x36160102"
+        and object_kind == "folder"
+        and role == "calendar"
+        and problem_is_not_found(problem)
+    )
+    if calendar_normal_view_not_found:
+        tag_counter = "calendar_normal_view_not_found_getprops_tags"
+        context_counter = "calendar_normal_view_not_found_getprops_contexts"
+    elif umolk_problem and problem_is_not_found(problem):
         tag_counter = "umolk_not_found_getprops_tags"
         context_counter = "umolk_not_found_getprops_contexts"
     elif umolk_problem:
@@ -1907,8 +1920,6 @@ def record_getprops_problem_tag(
         tag_counter = "problem_getprops_tags"
         context_counter = "problem_getprops_contexts"
     summary[tag_counter][tag] += 1
-    role = first_field(contract, "role") or field_text(fields or {}, "folder_role")
-    folder = first_field(contract, "folder") or field_text(fields or {}, "folder_id")
     context = (
         f"{tag};object={object_kind or 'unknown'};role={role or 'unknown'};"
         f"folder={folder or 'unknown'};request={request_id or 'unknown'}"
@@ -2187,6 +2198,16 @@ def print_single_summary(
         print_counter(
             "Problem GetProps contexts",
             log["problem_getprops_contexts"],
+            limit=20,
+        )
+        print_counter(
+            "Calendar Normal-view expected not-found GetProps tags",
+            log["calendar_normal_view_not_found_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "Calendar Normal-view expected not-found GetProps contexts",
+            log["calendar_normal_view_not_found_getprops_contexts"],
             limit=20,
         )
         print_counter(

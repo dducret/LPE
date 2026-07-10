@@ -1,4 +1,4 @@
-# Outlook Calendar Normal-view contract RCA (2026-07-10)
+# Outlook Calendar view and navigation contract RCA (2026-07-10)
 
 ## Scope and clean-profile reproduction
 
@@ -22,6 +22,19 @@ The 11:51 run is the final pre-fix reproduction:
 All 280 HTTP responses are 200, all 279 MAPI response codes are zero, and the
 trace has no ROP parse error. This reproduces a server/client semantic contract
 failure rather than a transport, framing, or stale-OST failure.
+
+Run 13:20 is the clean terminal reproduction after the Normal-view change:
+
+- server log: `logs/LPE_last_202607101320.log`
+- replay trace: `logs/outlook-traces/202607101320`
+- deployed build: `b6114a2ea547`
+- EMSMDB session: `{69A8E3EC-8A6D-4491-AF07-4A2AFDCC015D}`
+- final Calendar request: `:250`, `RopSetColumns` plus `RopQueryPosition`
+
+Outlook profile `215` has no configured OST path. Outlook was terminated two
+seconds after displaying the error without dismissing the dialog, so `:250` is
+the uncontaminated terminal boundary. All 289 HTTP responses are 200, all 288
+MAPI response codes are zero, and there is no ROP parse error.
 
 ## Decoded table, named properties, and rows
 
@@ -67,10 +80,11 @@ sections 2.2.6, 2.2.6.1, and 2.2.6.1.1.
 
 ## Exact protocol inconsistency
 
-The clean client enumerates the synthetic Calendar alternate view but does not
-open it. It then opens a Normal Calendar contents table. LPE nevertheless
-applied the unopened alternate descriptor's PidLidCommonStart sort to that
-Normal table. The server therefore combined two mutually exclusive states:
+The failure accumulated in two layers. First, the clean client enumerated the
+synthetic Calendar alternate view but did not open it. It then opened a Normal
+Calendar contents table. LPE nevertheless applied the unopened alternate
+descriptor's PidLidCommonStart sort to that Normal table. The server therefore
+combined two mutually exclusive states:
 
 1. `PidTagDefaultViewEntryId` and a folder-associated NamedView claimed an
    alternate view existed.
@@ -85,6 +99,16 @@ requires an advertised alternate view to be opened and read before it is used.
 The inconsistency is therefore not in the conforming final
 `RopSetColumns`/`RopQueryPosition` response; it is the synthetic alternate-view
 advertisement and its implicit application to a Normal table.
+
+Second, after the alternate-view defect was removed, run 13:20 exposed a
+malformed Common Views navigation-shortcut contract earlier in startup. LPE's
+server-generated Calendar shortcut carried `PidTagWlinkFlags` (`0x684A`,
+`PT_LONG`) value `0x00100000`. [MS-OXOCFG] section 2.2.9.6 defines no such
+flag: the value is reserved, while `sipOverlay` is `0x00001000`. The primary
+Calendar is not an overlay, and the canonical Calendar shortcut example in
+[MS-OXOCFG] section 4.4.2 uses flags zero. The same invented reserved bit was
+present on the other server-generated module shortcuts read in the same Common
+Views FAI table. Persisted client-created flag values are not affected.
 
 The cursor hypothesis was also checked explicitly. Both successful Inbox and
 successful Calendar traces return `Numerator=0` before the first row. Under
@@ -101,6 +125,15 @@ clean profile. The first semantic difference in a clean profile is that Outlook
 does not open the advertised descriptor before creating the Normal contents
 table.
 
+The working June 25 run on server build `db50765d7f3a` exposed six Common Views
+rows and no server-generated Calendar WLink. Run 13:20 exposes 17 rows,
+including the Calendar WLink with reserved flags. The ten-column bootstrap in
+both runs has the same requested property tags, empty sort state, successful
+`RopSetColumns`, and `RopQueryPosition` numerator zero and denominator one. The
+QueryPosition implementation and serialization are unchanged between those
+builds. This makes the malformed pre-table WLink the first remaining semantic
+difference after the Normal-view repair, rather than the cursor value.
+
 Changing Calendar to reuse Inbox's legacy NamedView MID was tested and rejected.
 The 11:51 clean profile still stopped before `RopQueryRows`, and the change made
 Inbox and Calendar claim the same MID `0x7fffffffffe90001`. Message EntryIDs
@@ -115,18 +148,22 @@ Calendar now uses the Normal-view fallback:
 - no Calendar `PidTagDefaultViewEntryId` alternate-view advertisement
 - no synthetic Calendar `IPM.Microsoft.FolderDesign.NamedView` FAI row
 - no descriptor-derived initial sort on the Normal Calendar contents table
+- no reserved flag bits on server-generated Common Views shortcuts; the
+  primary Calendar WLink uses `PidTagWlinkFlags = 0`
 - no change to real Calendar configuration FAI rows or canonical events
 - no change to `RopSetColumns`, `RopQueryPosition`, or `RopQueryRows` framing
 
-Regression tests cover all four boundaries: the folder property is absent, the
+Regression tests cover all five boundaries: the folder property is absent, the
 associated table does not synthesize a NamedView, the Normal table starts with
-an empty implicit sort, and exact captured-column `RopQueryRows` remains a valid
-unflagged row. The fix is centralized in the `lpe-exchange` view helpers and
-adds no implementation code to `mapi.rs`.
+an empty implicit sort, generated Common Views shortcuts contain no reserved
+flag bits, and exact captured-column `RopQueryRows` remains a valid unflagged
+row. The fix is centralized in the `lpe-exchange` view helpers and adds no
+implementation code to `mapi.rs`.
 
 Protocol sections relied upon are [MS-OXCROPS] sections 2.2.5.1, 2.2.5.4,
 2.2.5.7, 2.2.8.1, and 2.2.8.2; [MS-OXCTABL] sections 2.2.2.2, 2.2.2.5, and
 2.2.2.8; [MS-OXCPRPT] sections 3.1.4.1, 3.2.5.9, and 3.2.5.10;
-[MS-OXOCFG] sections 2.2.6, 2.2.6.1, 2.2.6.1.1, and 3.1.4.3;
+[MS-OXOCFG] sections 2.2.6, 2.2.6.1, 2.2.6.1.1, 2.2.9.6, 3.1.4.3,
+3.1.4.9, 3.1.4.10.2, and 4.4.2;
 [MS-OXCDATA] sections 2.2.4.2, 2.8.1, 2.8.1.1, and 3.2; and [MS-OXCMSG]
 sections 2.2.3.1 and 3.1.5.1.

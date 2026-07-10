@@ -1310,13 +1310,15 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
     let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
     assert_eq!(messages.len(), 17);
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
-            .count(),
-        15
-    );
+    let shortcuts = messages
+        .iter()
+        .filter_map(|message| match message {
+            MapiCommonViewsMessage::NavigationShortcut(shortcut) => Some(shortcut),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(shortcuts.len(), 15);
+    assert!(shortcuts.iter().all(|shortcut| shortcut.flags == 0));
     let named_views = messages
         .iter()
         .filter_map(|message| match message {
@@ -1355,11 +1357,17 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
             OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID
         )
         .is_some());
-    assert!(snapshot
+    let calendar_shortcut = snapshot
         .navigation_shortcut_table_message_for_id(
-            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID
+            OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID,
         )
-        .is_some());
+        .expect("default Calendar navigation shortcut");
+    assert_eq!(
+        calendar_shortcut.target_folder_id,
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+    assert_eq!(calendar_shortcut.section, 3);
+    assert_eq!(calendar_shortcut.flags, 0);
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID
