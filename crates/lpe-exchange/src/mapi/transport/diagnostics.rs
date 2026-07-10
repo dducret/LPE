@@ -1,4 +1,7 @@
 use super::*;
+use crate::mapi::outlook_startup::{
+    normal_inbox_visible_row_missing_reason, normal_inbox_visible_row_release_request_shape,
+};
 use anyhow::Result;
 
 #[derive(Debug, Default)]
@@ -897,6 +900,9 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
     let final_phase_abandoned_after_inbox_fai_query_rows =
         session.abandoned_after_inbox_fai_query_rows();
     let outlook_startup_gates = outlook_startup_gate_summary(session);
+    let normal_inbox_missing_reason = normal_inbox_visible_row_missing_reason(session);
+    let normal_inbox_release_request_shape =
+        normal_inbox_visible_row_release_request_shape(session);
     let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
     let advertised_default_view_pending_open_is_primary =
         advertised_default_view_pending_open_is_primary(session);
@@ -1004,6 +1010,31 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
             outlook_startup_gates = %outlook_startup_gates.gates,
             outlook_abandoned_immediately_after_fai =
                 outlook_startup_gates.abandoned_immediately_after_fai,
+            normal_inbox_visible_row_missing_reason = normal_inbox_missing_reason,
+            normal_inbox_visible_row_release_request_shape =
+                %normal_inbox_release_request_shape,
+            normal_inbox_table_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed,
+            normal_inbox_setcolumns_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_setcolumns_observed,
+            normal_inbox_query_rows_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_query_rows_observed,
+            normal_inbox_find_row_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_find_row_observed,
+            normal_inbox_setcolumns_handle =
+                %session
+                    .post_hierarchy_actions
+                    .last_inbox_normal_contents_table_setcolumns_handle
+                    .map(|handle| handle.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
             outlook_smart_input_variant = %session.outlook_smart_input_variant,
             outlook_smart_input_variant_scope = "session",
             outlook_smart_input_variant_selected =

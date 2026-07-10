@@ -1,5 +1,6 @@
 use super::*;
 use crate::mapi::outlook_startup::{
+    normal_inbox_visible_row_missing_reason, normal_inbox_visible_row_release_request_shape,
     normalized_rop_sequence_signature, outlook_startup_gate_summary,
 };
 use crate::mapi::session::PostHierarchyExecuteObservation;
@@ -33,6 +34,9 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let post_hierarchy = post_hierarchy_action_summary(session, false);
     let startup_gates = outlook_startup_gate_summary(session);
+    let normal_inbox_missing_reason = normal_inbox_visible_row_missing_reason(session);
+    let normal_inbox_release_request_shape =
+        normal_inbox_visible_row_release_request_shape(session);
     let sequence_signature = normalized_rop_sequence_signature(&request.names_csv);
     let message = "rca debug mapi execute rops";
 
@@ -89,6 +93,37 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         outlook_startup_gates = %startup_gates.gates,
         outlook_abandoned_immediately_after_fai =
             startup_gates.abandoned_immediately_after_fai,
+        normal_inbox_visible_row_missing_reason = normal_inbox_missing_reason,
+        normal_inbox_visible_row_release_request_shape =
+            %normal_inbox_release_request_shape,
+        normal_inbox_table_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed,
+        normal_inbox_setcolumns_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_setcolumns_observed,
+        normal_inbox_query_rows_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed,
+        normal_inbox_find_row_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_find_row_observed,
+        normal_inbox_setcolumns_handle =
+            %session
+                .post_hierarchy_actions
+                .last_inbox_normal_contents_table_setcolumns_handle
+                .map(|handle| handle.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        last_inbox_normal_setcolumns_context =
+            %debug_context_or_none(
+                &session
+                    .post_hierarchy_actions
+                    .last_inbox_normal_contents_table_setcolumns_context
+            ),
         inbox_associated_broad_ipm_configuration_findrow_matched =
             session
                 .post_hierarchy_actions

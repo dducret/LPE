@@ -112,6 +112,48 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
     }
 }
 
+pub(in crate::mapi) fn normal_inbox_visible_row_missing_reason(
+    session: &MapiSession,
+) -> &'static str {
+    let actions = &session.post_hierarchy_actions;
+    if actions.inbox_normal_contents_table_query_rows_observed
+        || actions.inbox_normal_contents_table_find_row_observed
+    {
+        "none"
+    } else if actions
+        .last_inbox_related_release_context
+        .contains("normal_inbox_release_classifier=release_before_query_rows")
+    {
+        "normal_inbox_release_before_query_rows"
+    } else if actions
+        .last_inbox_related_release_context
+        .contains("release_request_shape=mixed_setcolumns_release_batch")
+    {
+        "normal_inbox_mixed_setcolumns_release_batch"
+    } else if actions.inbox_normal_contents_table_setcolumns_observed {
+        "normal_inbox_setcolumns_without_query_rows"
+    } else if actions.inbox_normal_contents_table_observed {
+        "normal_inbox_opened_without_setcolumns"
+    } else {
+        "normal_inbox_not_opened"
+    }
+}
+
+pub(in crate::mapi) fn normal_inbox_visible_row_release_request_shape(
+    session: &MapiSession,
+) -> String {
+    let marker = "release_request_shape=";
+    let context = &session
+        .post_hierarchy_actions
+        .last_inbox_related_release_context;
+    context
+        .split(';')
+        .find_map(|part| part.strip_prefix(marker))
+        .filter(|shape| !shape.is_empty())
+        .unwrap_or("none")
+        .to_string()
+}
+
 pub(in crate::mapi) fn configured_smart_input_variant() -> String {
     let variant = env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT")
         .unwrap_or_default()
@@ -234,6 +276,31 @@ mod tests {
         assert!(summary
             .gates
             .contains("normal_inbox_visible_row_observed=true"));
+    }
+
+    #[test]
+    fn classifier_reports_visible_inbox_release_before_query_rows() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.record_inbox_normal_contents_table();
+        session.record_inbox_normal_contents_table_setcolumns(
+            Some(36),
+            "folder=0x0000000000000006;row_count=1".into(),
+        );
+        session
+            .post_hierarchy_actions
+            .last_inbox_related_release_context = "visible_inbox_release_without_query_rows=true;\
+             release_request_shape=mixed_setcolumns_release_batch;\
+             normal_inbox_release_classifier=release_before_query_rows"
+            .into();
+
+        assert_eq!(
+            normal_inbox_visible_row_missing_reason(&session),
+            "normal_inbox_release_before_query_rows"
+        );
+        assert_eq!(
+            normal_inbox_visible_row_release_request_shape(&session),
+            "mixed_setcolumns_release_batch"
+        );
     }
 
     #[test]

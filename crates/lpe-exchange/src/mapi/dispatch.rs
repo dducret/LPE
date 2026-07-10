@@ -12,6 +12,10 @@ use super::*;
 use crate::mapi::identity::{
     CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,
 };
+use crate::mapi::outlook_startup::{
+    normal_inbox_visible_row_missing_reason, normal_inbox_visible_row_release_request_shape,
+    outlook_startup_gate_summary,
+};
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
@@ -637,6 +641,13 @@ fn log_post_common_views_handoff_execute_response(
         .values()
         .filter(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
         .count();
+    let startup_gates = outlook_startup_gate_summary(session);
+    let normal_inbox_missing_reason = normal_inbox_visible_row_missing_reason(session);
+    let normal_inbox_release_request_shape =
+        normal_inbox_visible_row_release_request_shape(session);
+    let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
+    let default_view_advertisement_state = session.default_view_advertisement_state();
+    let default_view_advertisement_summary = session.default_view_advertisement_summary();
     let post_handoff_context = format_inbox_post_fai_handoff_context(state);
     let live_handle_summaries = format_live_handle_debug_summary(session);
 
@@ -660,6 +671,31 @@ fn log_post_common_views_handoff_execute_response(
         session_id_hash = %session_cookie_debug.hash,
         request_sequence_cookie_matches = request_sequence_cookie_matches,
         notification_subscription_count = notification_subscription_count,
+        outlook_startup_last_successful_gate = startup_gates.last_successful_gate,
+        outlook_startup_first_missing_gate = startup_gates.first_missing_gate,
+        outlook_startup_passed_gate_count = startup_gates.passed_count,
+        normal_inbox_visible_row_missing_reason = normal_inbox_missing_reason,
+        normal_inbox_visible_row_release_request_shape =
+            %normal_inbox_release_request_shape,
+        normal_inbox_table_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed,
+        normal_inbox_setcolumns_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_setcolumns_observed,
+        normal_inbox_query_rows_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed,
+        normal_inbox_find_row_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_find_row_observed,
+        advertised_default_view_pending_open,
+        default_view_advertisement_state = %default_view_advertisement_state,
+        default_view_advertisement_summary = %default_view_advertisement_summary,
         post_handoff_context = %post_handoff_context,
         live_handle_summaries = %live_handle_summaries,
         next_expected_client_step = next_expected_client_step,
@@ -719,6 +755,66 @@ fn log_post_common_views_handoff_execute_response(
             (
                 "notification_subscription_count",
                 notification_subscription_count.to_string(),
+            ),
+            (
+                "outlook_startup_last_successful_gate",
+                startup_gates.last_successful_gate.to_string(),
+            ),
+            (
+                "outlook_startup_first_missing_gate",
+                startup_gates.first_missing_gate.to_string(),
+            ),
+            (
+                "outlook_startup_passed_gate_count",
+                startup_gates.passed_count.to_string(),
+            ),
+            (
+                "normal_inbox_visible_row_missing_reason",
+                normal_inbox_missing_reason.to_string(),
+            ),
+            (
+                "normal_inbox_visible_row_release_request_shape",
+                normal_inbox_release_request_shape,
+            ),
+            (
+                "normal_inbox_table_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_setcolumns_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_setcolumns_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_query_rows_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_query_rows_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_find_row_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_find_row_observed
+                    .to_string(),
+            ),
+            (
+                "advertised_default_view_pending_open",
+                advertised_default_view_pending_open.to_string(),
+            ),
+            (
+                "default_view_advertisement_state",
+                default_view_advertisement_state,
+            ),
+            (
+                "default_view_advertisement_summary",
+                default_view_advertisement_summary,
             ),
             ("post_handoff_context", post_handoff_context),
             ("live_handle_summaries", live_handle_summaries),
