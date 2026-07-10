@@ -605,10 +605,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
             *position = next_position;
         }
     }
-    let no_rows_returned = selected.is_empty();
-    let response_origin = if no_rows_returned && forward_read && next_position >= total_row_count {
+    // [MS-OXCTABL] sections 2.2.2.1.1 and 3.2.5.5 require
+    // BOOKMARK_END/BOOKMARK_BEGINNING when the returned window reaches the
+    // corresponding table boundary, including when that window is non-empty.
+    let response_origin = if forward_read && next_position >= total_row_count {
         0x02
-    } else if no_rows_returned && !forward_read && next_position == 0 {
+    } else if !forward_read && next_position == 0 {
         0x00
     } else {
         0x01
