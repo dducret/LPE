@@ -138,8 +138,8 @@ wide Calendar `RopSetColumns`, `RopQueryPosition`, and repeated `RopQueryRows`
 sequence.
 
 This relies on [MS-OXCDATA] section 2.2.4.2 for the Message EntryID structure
-(which carries both the folder and message identity), [MS-OXCMSG] sections 2.2
-and 3.1.5.1 for opening the view message by FID/MID, and [MS-OXOCFG] sections
+(which carries both the folder and message identity), [MS-OXCMSG] sections
+2.2.3.1 and 3.1.5.1 for opening the view message by FID/MID, and [MS-OXOCFG] sections
 2.2.6 and 3.1.4.3 for the folder-associated view-definition message and client
 selection/open behavior.
 
