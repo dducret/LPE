@@ -250,8 +250,10 @@ non-canonical LPE state.
   `IPM.Microsoft.FolderDesign.NamedView` objects for startup compatibility.
   Folder-local named-view rows are projected in folder-associated tables only
   for supported folders with type-specific descriptors: Inbox and mail folders,
-  Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
-  search/reminder views. Common Views still owns the bounded Common Views
+  Contacts, Tasks, Notes, Journal, and supported built-in search/reminder views.
+  Calendar uses the Normal-view fallback: it does not advertise a synthetic
+  alternate NamedView and its Normal contents table receives no implicit
+  descriptor sort. Common Views still owns the bounded Common Views
   `Sent To` row and navigation shortcuts.
   Outlook-created or imported associated configuration rows remain durable, but
   Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
@@ -260,9 +262,9 @@ non-canonical LPE state.
   table and for Outlook's broad startup prefix probe, and exact, bounded lookups
   expose supported configuration rows. Synthetic folder-local named views use
   deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
-  keys, and descriptor CLSIDs. Calendar preserves the stable Outlook default-view
-  MID used by `PidTagDefaultViewEntryId` and its folder-associated NamedView;
-  other modeled folder families use folder-specific identities.
+  keys, and descriptor CLSIDs. Modeled folder families use folder-specific
+  identities. Real Calendar configuration FAI rows remain canonical and are
+  exposed independently of the Calendar Normal-view fallback.
   Folder-local named-view descriptor binaries list only real properties used by
   the visible UI columns; they must not include synthetic placeholder tags,
   table identity columns such as FolderId/MID/InstanceId/InstanceNum, or

@@ -26,7 +26,10 @@ pub(in crate::mapi) fn default_view_supported_folder(
         return matches!(folder_id, CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID);
     }
     if container_class == "IPF.Appointment" || container_class.starts_with("IPF.Appointment.") {
-        return folder_id == CALENDAR_FOLDER_ID;
+        // PidTagDefaultViewEntryId (0x3616/PT_BINARY) may be absent for the Normal
+        // initial view. Do not apply a synthetic [MS-OXOCFG] 2.2.6 descriptor to
+        // Outlook's unopened Normal Calendar table; see the 2026-07-10 RCA.
+        return false;
     }
     if container_class == "IPF.Task" || container_class.starts_with("IPF.Task.") {
         return folder_id == TASKS_FOLDER_ID;

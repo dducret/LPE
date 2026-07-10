@@ -6803,14 +6803,10 @@ fn contacts_associated_query_rows_expose_contact_default_named_view() {
 }
 
 #[test]
-fn calendar_associated_query_rows_expose_calendar_default_named_view() {
+fn calendar_associated_query_rows_do_not_synthesize_alternate_named_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let rows = associated_table_rows(CALENDAR_FOLDER_ID, &snapshot, None, Uuid::nil());
-    assert!(matches!(
-        rows.as_slice(),
-        [AssociatedTableRow::NamedView(view)]
-            if view.id == crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
-    ));
+    assert!(rows.is_empty());
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: true,
@@ -6839,10 +6835,8 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert_response_contains_utf16(&response, "Calendar");
-    assert!(utf16_position(&response, "Compact").is_none());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
 }
 
 #[test]
@@ -8781,7 +8775,6 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         CONVERSATION_HISTORY_FOLDER_ID,
         CONTACTS_SEARCH_FOLDER_ID,
         CONTACTS_FOLDER_ID,
-        CALENDAR_FOLDER_ID,
         JOURNAL_FOLDER_ID,
         NOTES_FOLDER_ID,
         TASKS_FOLDER_ID,
@@ -8795,6 +8788,7 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         );
     }
     for folder_id in [
+        CALENDAR_FOLDER_ID,
         DEFERRED_ACTION_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
         TRACKED_MAIL_PROCESSING_FOLDER_ID,

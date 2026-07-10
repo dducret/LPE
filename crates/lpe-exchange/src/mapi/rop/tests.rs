@@ -3250,7 +3250,6 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
     assert_eq!(&response[6..], &[0, 0, 0]);
 
     for folder_id in [
-        CALENDAR_FOLDER_ID,
         CONTACTS_FOLDER_ID,
         TASKS_FOLDER_ID,
         NOTES_FOLDER_ID,
@@ -3293,10 +3292,6 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         assert!(response.len() > 7);
     }
 
-    let ipm_subtree = MapiObject::Folder {
-        folder_id: IPM_SUBTREE_FOLDER_ID,
-        properties: HashMap::new(),
-    };
     let mut default_view_payload = Vec::new();
     default_view_payload.extend_from_slice(&4096u16.to_le_bytes());
     default_view_payload.extend_from_slice(&1u16.to_le_bytes());
@@ -3308,30 +3303,36 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         payload: default_view_payload,
     };
 
-    assert!(fallback_default_specific_property(
-        Some(&ipm_subtree),
-        &principal,
-        &[],
-        &[],
-        &MapiMailStoreSnapshot::empty(),
-        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-    ));
+    for folder_id in [CALENDAR_FOLDER_ID, IPM_SUBTREE_FOLDER_ID] {
+        let normal_view_folder = MapiObject::Folder {
+            folder_id,
+            properties: HashMap::new(),
+        };
+        assert!(fallback_default_specific_property(
+            Some(&normal_view_folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        ));
 
-    let response = rop_get_properties_specific_response(
-        &default_view_request,
-        Some(&ipm_subtree),
-        &principal,
-        &[],
-        &[],
-        &MapiMailStoreSnapshot::empty(),
-    );
+        let response = rop_get_properties_specific_response(
+            &default_view_request,
+            Some(&normal_view_folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
-    assert_eq!(response[7], 0x0A);
-    assert_eq!(
-        u32::from_le_bytes(response[8..12].try_into().unwrap()),
-        ROP_ERROR_NOT_FOUND
-    );
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+        assert_eq!(response[7], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response[8..12].try_into().unwrap()),
+            ROP_ERROR_NOT_FOUND
+        );
+    }
 
     let quick_step_settings = MapiObject::Folder {
         folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,

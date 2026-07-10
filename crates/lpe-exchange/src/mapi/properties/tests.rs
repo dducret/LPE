@@ -808,7 +808,7 @@ fn collaboration_folder_projects_default_post_message_class_for_contacts() {
 }
 
 #[test]
-fn collaboration_calendar_advertises_calendar_default_view() {
+fn collaboration_calendar_uses_normal_view_without_advertised_alternative() {
     let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
     let collection = MapiCollaborationFolder {
         id: CALENDAR_FOLDER_ID,
@@ -837,12 +837,7 @@ fn collaboration_calendar_advertises_calendar_default_view() {
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-        crate::mapi::identity::message_entry_id_from_object_ids(
-            account_id,
-            CALENDAR_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-        .map(MapiValue::Binary)
+        None
     );
 }
 
