@@ -6805,10 +6805,16 @@ fn contacts_associated_query_rows_expose_contact_default_named_view() {
 #[test]
 fn calendar_associated_query_rows_expose_calendar_default_named_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
+    let rows = associated_table_rows(CALENDAR_FOLDER_ID, &snapshot, None, Uuid::nil());
+    assert!(matches!(
+        rows.as_slice(),
+        [AssociatedTableRow::NamedView(view)]
+            if view.id == crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+    ));
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: true,
-        columns: vec![PID_TAG_MESSAGE_CLASS_W, PID_TAG_SUBJECT_W],
+        columns: vec![PID_TAG_MID, PID_TAG_MESSAGE_CLASS_W, PID_TAG_SUBJECT_W],
         columns_set: true,
         sort_orders: vec![MapiSortOrder {
             property_tag: PID_TAG_MESSAGE_CLASS_W,

@@ -259,9 +259,10 @@ non-canonical LPE state.
   `IPM.Configuration.MessageListSettings` row is exposed in the Inbox associated
   table and for Outlook's broad startup prefix probe, and exact, bounded lookups
   expose supported configuration rows. Synthetic folder-local named views use
-  deterministic folder-specific virtual message IDs, SourceKeys, RecordKeys,
-  SearchKeys, change keys, and descriptor CLSIDs so Outlook cached-mode state
-  does not collapse default views across folders.
+  deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
+  keys, and descriptor CLSIDs. Calendar preserves the stable Outlook default-view
+  MID used by `PidTagDefaultViewEntryId` and its folder-associated NamedView;
+  other modeled folder families use folder-specific identities.
   Folder-local named-view descriptor binaries list only real properties used by
   the visible UI columns; they must not include synthetic placeholder tags,
   table identity columns such as FolderId/MID/InstanceId/InstanceNum, or

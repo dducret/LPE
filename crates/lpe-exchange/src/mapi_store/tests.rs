@@ -1441,6 +1441,22 @@ fn default_folder_named_views_use_folder_family_names() {
 }
 
 #[test]
+fn calendar_default_named_view_preserves_outlook_view_identity() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let view_id = outlook_default_folder_named_view_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
+
+    assert_eq!(view_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
+    let view = snapshot
+        .default_folder_named_view_message(crate::mapi::identity::CALENDAR_FOLDER_ID, view_id)
+        .expect("calendar default view");
+    assert_eq!(view.id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
+    assert_eq!(
+        view.canonical_id,
+        Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001)
+    );
+}
+
+#[test]
 fn sent_common_views_default_view_does_not_materialize_folder_local_message() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let folder_id = crate::mapi::identity::SENT_FOLDER_ID;

@@ -1,4 +1,4 @@
-# Outlook Calendar view named-property registry RCA (2026-07-10)
+# Outlook Calendar default-view contract RCA (2026-07-10)
 
 ## Scope and reproduction
 
@@ -7,6 +7,8 @@ view` from:
 
 - `logs/outlook-traces/2026070101026`
 - `logs/LPE_last_202607101026.log`
+- `logs/outlook-traces/202607101127`
+- `logs/LPE_last_202607101127.log`
 - account `test@l-p-e.ch` in the supplied PostgreSQL test database
 
 The failing run used Outlook profile `211`. Its startup export is
@@ -98,7 +100,7 @@ Calendar FID, MID, InstID, InstanceNum, `IPM.Appointment`, `Test`, message flags
 after decoding the tenth property. This rules out a malformed or flagged row as
 the pre-QueryRows failure.
 
-## Fix
+## First correction
 
 The durable `mapi_named_properties` row is now authoritative for wire IDs.
 Session caching preserves that registered ID instead of canonicalizing it to a
@@ -107,3 +109,45 @@ for every non-`PS_MAPI` property. LPE's existing table-column normalization
 continues to translate registered wire IDs such as `0x8005` and `0x8013` to the
 canonical internal SideEffects and `0x8578` projections. Canonical Calendar
 state and the FAI descriptor are unchanged.
+
+## Fresh-profile follow-up and final root cause
+
+The named-property correction was deployed as clean build `f314cf1bc75a` and
+retested with fresh Outlook profile `212`, again without an OST. The second run
+proves that the durable mappings are now stable and collision-free, but Outlook
+still stops after Calendar request `:251` (`RopSetColumns` plus
+`RopQueryPosition`). This separates the named-property defect from the remaining
+view-selection failure.
+
+The first semantic difference from the known-good June 25 trace occurs before
+the normal Calendar table is created:
+
+| Contract | Known-good trace | Failing clean profile |
+| --- | --- | --- |
+| `PidTagDefaultViewEntryId` Calendar MID | `0x7fffffffffe90001` | `0x7ffffffe00100001` |
+| Calendar FAI `PidTagMid` | `0x7fffffffffe90001` | `0x7ffffffe00100001` |
+| Outlook action | opens the `Calendar` NamedView with `RopOpenMessage` | never opens the NamedView |
+| Resulting table | 60/62 Calendar columns, then `RopQueryRows` | 10 bootstrap columns, then stops after `RopQueryPosition` |
+
+The July 7 folder-specific virtual-ID change altered the identity of the
+canonical Calendar view. The FAI descriptor remained valid, but Outlook did not
+follow the new EntryID to the descriptor and therefore never reached the
+working Calendar table state. The known-good trace opens the folder-local
+`IPM.Microsoft.FolderDesign.NamedView` with the stable MID before issuing the
+wide Calendar `RopSetColumns`, `RopQueryPosition`, and repeated `RopQueryRows`
+sequence.
+
+This relies on [MS-OXCDATA] section 2.2.4.2 for the Message EntryID structure
+(which carries both the folder and message identity), [MS-OXCMSG] sections 2.2
+and 3.1.5.1 for opening the view message by FID/MID, and [MS-OXOCFG] sections
+2.2.6 and 3.1.4.3 for the folder-associated view-definition message and client
+selection/open behavior.
+
+## Final fix
+
+Calendar once again uses the stable Outlook default-view MID
+`0x7fffffffffe90001` and its matching virtual canonical identity. Other
+folder-specific default-view identities remain unchanged. The folder property,
+associated-table row, and materialized NamedView message now agree on that
+identity. The patch changes no `RopSetColumns`, `RopQueryPosition`, or
+`RopQueryRows` framing and adds no trace/session-specific branch.
