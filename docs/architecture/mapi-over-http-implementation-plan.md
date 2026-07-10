@@ -252,9 +252,11 @@ non-canonical LPE state.
   for supported folders with type-specific descriptors: Inbox and mail folders,
   Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
   search/reminder views. Calendar advertises a deterministic folder-local
-  `Calendar` NamedView because that is the first semantic difference between
-  the working 2026-06-25 Outlook trace and the failing 2026-07-10 trace after
-  named-property mappings are canonical. Its unopened Normal contents table
+  `Calendar` NamedView because that is required by the working 2026-06-25
+  Outlook handoff after named-property mappings are canonical. Calendar
+  preserves the established default-view MID `0x7fffffffffe90001`; Message
+  EntryIDs remain folder-local because they also carry the Calendar FID, as
+  defined by `[MS-OXCDATA]` section 2.2.4.2. Its unopened Normal contents table
   still receives no implicit descriptor sort; the start-time descriptor sort
   becomes table state only through an explicit client operation. Common Views
   still owns the bounded Common Views `Sent To` row and navigation shortcuts.
@@ -266,8 +268,10 @@ non-canonical LPE state.
   expose supported configuration rows. Synthetic folder-local named views use
   deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
-  identities. Real Calendar configuration FAI rows remain canonical and are
-  exposed independently of the folder-local Calendar NamedView.
+  identities except for Calendar's observed Outlook default-view MID; its
+  enclosing FID keeps the object identity folder-local. Real Calendar
+  configuration FAI rows remain canonical and are exposed independently of the
+  folder-local Calendar NamedView.
   Folder-local named-view descriptor binaries list only real properties used by
   the visible UI columns; they must not include synthetic placeholder tags,
   table identity columns such as FolderId/MID/InstanceId/InstanceNum, or

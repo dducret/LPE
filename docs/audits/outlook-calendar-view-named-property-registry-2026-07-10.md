@@ -38,6 +38,15 @@ The Calendar table still stopped after request `:235`, with the same ten
 columns and `RopQueryPosition` result `0/1`. This run separates the repaired
 named-property defect from the remaining default-view interoperability defect.
 
+Run 18:24 on deployed build `a441481d6dda` restored the folder-local Calendar
+NamedView while retaining the repaired named-property registry. Its 550 RR
+events contain 275 HTTP 200 responses, 274 zero MAPI response codes, and no ROP
+parse error. `PidTagDefaultViewEntryId` is present, the Calendar associated
+table returns the NamedView, and the descriptor has no missing table-backed
+column. Outlook nevertheless does not open that view and again stops after
+request `:236`, with the same ten-column `RopSetColumns` and `RopQueryPosition`
+result `0/1`.
+
 The cursor hypothesis is false. The response numerator is zero and denominator
 is one. A working Inbox table and earlier working Calendar captures also begin
 at numerator zero. This is the valid initial position described by
@@ -62,15 +71,16 @@ row wire contracts conform to [MS-OXCROPS] sections 2.2.5.1, 2.2.5.4, and
 [MS-OXCDATA] sections 2.8.1, 2.8.1.1, and 3.2. The conforming
 `RopSetColumns`/`RopQueryPosition` response is not changed by this fix.
 
-The failing folder-associated Calendar table exposes the three canonical
+The earlier failing folder-associated Calendar table exposes the three canonical
 configuration messages `IPM.Configuration.AvailabilityOptions`,
 `IPM.Configuration.Calendar`, and `IPM.Configuration.WorkHours`, but no
 `IPM.Microsoft.FolderDesign.NamedView` row. Folder property
 `PidTagDefaultViewEntryId` (`0x3616`, `PtypBinary`) is returned as not found.
-The earlier working 2026-06-25 trace exposes a folder-local `Calendar`
-NamedView and a DefaultViewEntryId that opens it. Its version 8 descriptor has
-`ulFlags=0`, visible columns for message class, subject, flags/status, Common
-start/end, location, and busy status, and a start-time descriptor sort.
+Run 18:24 additionally exposes a folder-local `Calendar` NamedView and a
+DefaultViewEntryId, but uses MID `0x7ffffffe00100001`. Outlook enumerates this
+row without opening it. The known-good `logs/LPE_last_202606251705.log` uses MID
+`0x7fffffffffe90001`; Outlook opens that exact FID/MID pair at request `:303`,
+then selects 62 Calendar columns and issues repeated `RopQueryRows` calls.
 
 The Microsoft
 [PidTagDefaultViewEntryId canonical-property definition](https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagdefaultviewentryid-canonical-property)
@@ -133,13 +143,22 @@ immediately afterward. Run 16:53 proves that repairing this inconsistency was
 necessary but not sufficient.
 
 After that repair, the first remaining semantic difference is the Calendar
-default-view handoff. The working trace advertises and materializes one
-folder-local Calendar NamedView; the failing trace advertises none. This is an
-Outlook interoperability contract difference, not evidence that the conforming
-`RopSetColumns`/`RopQueryPosition` response should change. The minimal server
-fix restores the canonical folder-local Calendar view with a deterministic
-per-folder MID, while deliberately keeping the Normal table's initial sort
-empty to match the working sequence.
+default-view identity. The working trace advertises and opens Calendar FAI MID
+`0x7fffffffffe90001`; run 18:24 advertises MID `0x7ffffffe00100001`, and Outlook
+never opens it. The folder ID remains Calendar FID `0x0000000000100001` in both
+Message EntryIDs, so the working `(FID, MID)` pair remains folder-local and does
+not collide with the Inbox object that uses the same MID. This follows the
+Message EntryID structure in [MS-OXCDATA] section 2.2.4.2 and the view selection
+and opening sequence in [MS-OXOCFG] section 3.1.4.3 and [MS-OXCMSG] sections
+2.2.3.1 and 3.1.5.1.
+
+The working descriptor has seven packets while the current descriptor has nine,
+but this is later than the first divergence: Outlook has to open the view before
+it can read the descriptor. The minimal fix therefore restores only the stable
+Calendar MID and virtual canonical identity. It deliberately leaves the
+descriptor and the Normal table's empty initial sort unchanged. This is an
+Outlook interoperability identity correction, not evidence that the conforming
+`RopSetColumns`/`RopQueryPosition` response should change.
 
 ## Database repair
 
@@ -186,8 +205,8 @@ the captured `0x8214 -> 0x8020` and `0x8510 -> 0x8005` stale mappings, reserved
 Calendar-ID shadowing, stale-tag normalization, and the exact ten-column
 `RopQueryRows` property row. They also cover `PidTagDefaultViewEntryId`, the
 folder-associated Calendar NamedView row, descriptor columns and property
-types, distinct folder-local identity, and the empty initial Calendar table
-sort.
+types, the working Calendar MID and canonical virtual identity, and the empty
+initial Calendar table sort.
 
 Post-deployment acceptance still requires a new clean Outlook profile to show
 that Outlook proceeds beyond `RopQueryPosition` to `RopQueryRows` or content
