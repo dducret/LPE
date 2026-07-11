@@ -252,9 +252,7 @@ non-canonical LPE state.
   for supported folders with type-specific descriptors: Inbox and mail folders,
   Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
   search/reminder views. Calendar advertises a deterministic folder-local
-  `Calendar` NamedView because that is the first semantic difference between
-  the working 2026-06-25 Outlook trace and the failing 2026-07-10 trace after
-  named-property mappings are canonical. Its unopened Normal contents table
+  `Calendar` NamedView. Its unopened Normal contents table
   still receives no implicit descriptor sort; the start-time descriptor sort
   becomes table state only through an explicit client operation. Common Views
   still owns the bounded Common Views `Sent To` row and navigation shortcuts.
@@ -1004,16 +1002,13 @@ back to generic-message-only projection. Low-LID Calendar named properties such
 as `PidLidGlobalObjectId` must be exposed through
 `RopGetPropertyIdsFromNames` with assigned named-property IDs in the
 named-property range; the LID itself is the property name, not the wire property
-ID. LPE's canonical Calendar profile assigns PSETID_Appointment LIDs
-`0x8200..0x82ff` and PSETID_Common LIDs `0x8500..0x85ff` to matching 16-bit
-property IDs because its stored Calendar view/configuration tags use those IDs.
-The durable mapping, `RopGetPropertyIdsFromNames` result, inverse lookup, and
-projected property tags must all agree with that assignment; a stale durable ID
-can be accepted only as a read-side normalization alias, never as a second
-forward mapping. PSETID_Common LIDs outside `0x8500..0x85ff` remain dynamically
-assigned when their numeric LIDs overlap another property-set family. This is
-an LPE canonical-state invariant, not a general rule that permits a client to
-skip named-property registration. It follows [MS-OXCPRPT] sections 2.2.12,
+ID. Each mailbox's durable GUID/LID-or-name mapping is authoritative: an
+existing mapping must be returned unchanged, its inverse lookup must resolve to
+the same named property, and its property ID must not be reused for another
+named property. Calendar view/configuration and table projections translate
+those registered IDs to their internal property definitions without replacing
+the mailbox mapping or assuming that a numeric LID is its wire property ID.
+This follows [MS-OXCPRPT] sections 2.2.12,
 2.2.12.1, 2.2.12.2, 3.1.4.1, 3.2.5.9, and 3.2.5.10, with the PropertyName
 structure from [MS-OXCDATA] section 2.6. Outlook's MAPI Calendar property model
 also requires appointment start time

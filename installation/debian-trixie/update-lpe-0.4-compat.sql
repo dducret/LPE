@@ -1579,7 +1579,9 @@ CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx
 
 DO $$
 BEGIN
-    IF to_regclass('public.mapi_named_properties') IS NOT NULL THEN
+    -- Existing named-property IDs are mailbox protocol state and MUST NOT be
+    -- renumbered. See [MS-OXCPRPT] sections 3.2.5.9 and 3.2.5.10.
+    IF FALSE AND to_regclass('public.mapi_named_properties') IS NOT NULL THEN
         CREATE TEMP TABLE IF NOT EXISTS mapi_named_property_low_dynamic_renumber (
             tenant_id UUID NOT NULL,
             account_id UUID NOT NULL,

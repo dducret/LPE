@@ -240,7 +240,7 @@ fn format_named_property_registry(session: &MapiSession) -> String {
         .join("|");
     let relevant = entries
         .iter()
-        .filter(|(_property_id, property)| canonical_calendar_named_property_id(property).is_some())
+        .filter(|(_property_id, property)| is_calendar_named_property(property))
         .map(|(property_id, property)| format_named_registry_entry(**property_id, property))
         .collect::<Vec<_>>();
     let sample = relevant

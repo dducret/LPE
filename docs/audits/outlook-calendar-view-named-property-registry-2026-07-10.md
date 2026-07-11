@@ -1,5 +1,33 @@
 # Outlook Calendar view and named-property registry RCA (2026-07-10)
 
+## 2026-07-11 correction: mailbox mappings are authoritative
+
+Run 10:41 proved that the dialog appears before Outlook creates the Calendar
+contents table. Outlook successfully reads the Drafts row and continues its
+background folder enumeration, but the startup named-property registry differs
+from the working 2026-06-25 trace. All 225 properties requested in both runs
+have unique working mappings; 154 had been renumbered. For example,
+PSETID_Common LID `0x85EF`, used by the Drafts table, changed from registered
+property ID `0x8011` to `0x85EF`.
+
+The prior conclusion below that Appointment/Common LIDs require matching wire
+property IDs is therefore superseded. [MS-OXCPRPT] section 3.2.5.10 requires
+the server to find and return the property ID already registered for the
+GUID/LID-or-name. It permits a new unique ID only when no mapping is found and
+the create flag is set. Section 3.2.5.9 defines the inverse operation, and
+[MS-OXCDATA] section 2.6 defines the GUID plus LID/name identity. A numeric LID
+is not a canonical wire property ID outside the PS_MAPI special case.
+
+The test mailbox was repaired transactionally from uniquely evidenced working
+mappings. Ambiguous duplicate-ID groups in the old trace were excluded unless
+the 10:41 startup requested exactly one member; unrelated target occupants were
+relocated to unused IDs. After repair, all 225 startup properties match the
+working trace, including Common `0x85EF -> 0x8011`, with zero reused IDs. The
+session/dispatch helpers now preserve durable mappings in both directions and
+reject collisions. The compatibility update no longer renumbers established
+low-range mappings. The remaining sections document the investigation history
+but their canonical-ID repair conclusions are not current.
+
 ## Reproduction boundary
 
 The failure reproduces with clean Outlook profiles that have no OST. The final

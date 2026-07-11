@@ -163,8 +163,7 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
     let mut missing = Vec::new();
     for (index, property) in properties.iter().cloned().enumerate() {
         let normalized = normalize_named_property(property.clone());
-        let canonical_property_id = canonical_calendar_named_property_id(&normalized);
-        let property_id = if normalized.guid == PS_MAPI_GUID || canonical_property_id.is_some() {
+        let property_id = if normalized.guid == PS_MAPI_GUID {
             session.property_id_for_name(normalized.clone(), false)
         } else {
             session.named_properties.get(&normalized).copied()
@@ -174,8 +173,6 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
                 property_ids.push(property_id);
                 property_id_sources.push(if normalized.guid == PS_MAPI_GUID {
                     "ps_mapi"
-                } else if canonical_property_id.is_some() {
-                    "canonical"
                 } else {
                     "session_cached"
                 });

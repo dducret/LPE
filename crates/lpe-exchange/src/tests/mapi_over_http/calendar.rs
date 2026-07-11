@@ -4846,8 +4846,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     assert!(first_property_id > 0x8000 && first_property_id != 0xffff);
     assert!(second_property_id > 0x8000 && second_property_id != 0xffff);
     assert_ne!(first_property_id, second_property_id);
-    assert_eq!(first_property_id, 0x8580);
-    assert_eq!(second_property_id, 0x8581);
+    assert_eq!(first_property_id, 0x9001);
+    assert_eq!(second_property_id, 0x9002);
 
     let mut bootstrap_headers = mapi_headers("Execute");
     bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());

@@ -13,15 +13,17 @@ impl MapiSession {
                 return u16::try_from(*lid).ok();
             }
         }
-        if let Some(property_id) = canonical_calendar_named_property_id(&property) {
-            self.named_properties.insert(property.clone(), property_id);
-            self.named_property_ids.insert(property_id, property);
-            return Some(property_id);
-        }
         if let Some(property_id) = self.named_properties.get(&property).copied() {
             return Some(property_id);
         }
         if let Some(property_id) = well_known_named_property_id(&property) {
+            if self
+                .named_property_ids
+                .get(&property_id)
+                .is_some_and(|registered_property| *registered_property != property)
+            {
+                return None;
+            }
             self.named_properties.insert(property.clone(), property_id);
             self.named_property_ids.insert(property_id, property);
             return Some(property_id);
@@ -57,31 +59,18 @@ impl MapiSession {
         property: MapiNamedProperty,
     ) -> Option<u16> {
         let property = normalize_named_property(property);
-        let registered_property_id = property_id;
-        let property_id = match canonical_calendar_named_property_id(&property) {
-            Some(canonical_property_id)
-                if registered_property_id != canonical_property_id
-                    && canonical_calendar_named_property_for_id(registered_property_id)
-                        .is_some() =>
-            {
-                return None;
-            }
-            Some(canonical_property_id) => canonical_property_id,
-            None if canonical_calendar_named_property_for_id(property_id).is_some() => return None,
-            None => property_id,
-        };
-        if registered_property_id != property_id {
-            if let Some(previous_property) = self
+        // [MS-OXCPRPT] 3.2.5.9 and 3.2.5.10 require one stable, unique
+        // registered ID for each mailbox named property in both directions.
+        if self
+            .named_properties
+            .get(&property)
+            .is_some_and(|registered_id| *registered_id != property_id)
+            || self
                 .named_property_ids
-                .insert(registered_property_id, property.clone())
-            {
-                if previous_property != property
-                    && self.named_properties.get(&previous_property)
-                        == Some(&registered_property_id)
-                {
-                    self.named_properties.remove(&previous_property);
-                }
-            }
+                .get(&property_id)
+                .is_some_and(|registered_property| *registered_property != property)
+        {
+            return None;
         }
         if let Some(previous_property_id) =
             self.named_properties.insert(property.clone(), property_id)
@@ -102,16 +91,16 @@ impl MapiSession {
                 self.named_properties.remove(&previous_property);
             }
         }
-        let highest_property_id = property_id.max(registered_property_id);
-        if highest_property_id >= self.next_named_property_id {
-            self.next_named_property_id = highest_property_id.saturating_add(1);
+        if property_id >= self.next_named_property_id {
+            self.next_named_property_id = property_id.saturating_add(1);
         }
         Some(property_id)
     }
 
     pub(in crate::mapi) fn property_name_for_id(&self, property_id: u16) -> MapiNamedProperty {
-        canonical_calendar_named_property_for_id(property_id)
-            .or_else(|| self.named_property_ids.get(&property_id).cloned())
+        self.named_property_ids
+            .get(&property_id)
+            .cloned()
             .or_else(|| well_known_named_property_for_id(property_id))
             .unwrap_or(MapiNamedProperty {
                 guid: PS_MAPI_GUID,
