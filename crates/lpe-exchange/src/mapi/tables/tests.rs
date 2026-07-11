@@ -4948,7 +4948,9 @@ fn common_views_query_rows_uses_wlink_sort_order() {
 fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let shortcut_id = Uuid::from_u128(0x359);
+    let contacts_shortcut_id = Uuid::from_u128(0x38d);
     crate::mapi::identity::remember_mapi_identity(shortcut_id, 0x0000_0000_0359_0001);
+    crate::mapi::identity::remember_mapi_identity(contacts_shortcut_id, 0x0000_0000_038d_0001);
     let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
         crate::store::MapiNavigationShortcutRecord {
             id: shortcut_id,
@@ -4962,6 +4964,19 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
             ordinal: 127,
             group_header_id: None,
             group_name: "My Calendars".to_string(),
+        },
+        crate::store::MapiNavigationShortcutRecord {
+            id: contacts_shortcut_id,
+            account_id,
+            subject: "Contacts".to_string(),
+            target_folder_id: Some(CONTACTS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            save_stamp: 0,
+            section: 4,
+            ordinal: 127,
+            group_header_id: None,
+            group_name: "My Contacts".to_string(),
         },
     ]);
     let columns = vec![
@@ -4994,7 +5009,17 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
         },
     ];
     let mut expected = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    sort_common_views_messages(&mut expected, &sort_orders);
+    sort_common_views_messages(&mut expected, &sort_orders, account_id);
+    let display_name_position = |name: &str| {
+        expected
+            .iter()
+            .position(|message| {
+                common_views_message_property_value(message, account_id, PID_TAG_DISPLAY_NAME_W)
+                    == Some(MapiValue::String(name.to_string()))
+            })
+            .unwrap()
+    };
+    assert!(display_name_position("Compact") < display_name_position("Contacts"));
     let calendar_shortcut = expected
         .iter()
         .find(|message| {

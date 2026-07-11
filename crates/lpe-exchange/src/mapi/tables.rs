@@ -182,7 +182,7 @@ pub(in crate::mapi) fn rop_find_row_response(
             };
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
-                sort_common_views_messages(&mut rows, sort_orders);
+                sort_common_views_messages(&mut rows, sort_orders, mailbox_guid);
                 let navigation_shortcut_count = rows
                     .iter()
                     .filter(|message| {

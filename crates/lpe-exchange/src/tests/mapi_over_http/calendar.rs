@@ -4978,8 +4978,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
             0x00, 0x46,
         ]
     ));
-    let public_folders_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
+    let public_folders_entry_id = crate::mapi::identity::public_folder_entry_id_from_object_id(
         crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
     )
     .unwrap();

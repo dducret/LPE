@@ -24,9 +24,11 @@ pub(in crate::mapi) fn logon_property_value(
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
         PID_TAG_ASSOCIATED_SHARING_PROVIDER => Some(MapiValue::Guid(OUTLOOK_SHARING_PROVIDER_GUID)),
-        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(special_folder_entry_id_value(
-            principal.account_id,
-            PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(MapiValue::Binary(
+            crate::mapi::identity::public_folder_entry_id_from_object_id(
+                PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+            )
+            .expect("public-folder root uses a valid MAPI folder ID"),
         )),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
         PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {

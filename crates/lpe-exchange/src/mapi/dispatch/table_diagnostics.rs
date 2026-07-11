@@ -1098,7 +1098,7 @@ pub(super) fn format_common_views_inbox_shortcut_context(
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     let requested_row_count = request.query_row_count().unwrap_or(0);
     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    sort_common_views_messages(&mut rows, sort_orders);
+    sort_common_views_messages(&mut rows, sort_orders, account_id);
     let selected = select_query_window(
         rows.len(),
         *position,

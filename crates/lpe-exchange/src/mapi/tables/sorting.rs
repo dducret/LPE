@@ -16,44 +16,17 @@ pub(in crate::mapi) fn compare_case_insensitive(left: &str, right: &str) -> Orde
 pub(in crate::mapi) fn sort_common_views_messages(
     rows: &mut [MapiCommonViewsMessage],
     sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
 ) {
     if sort_orders.is_empty() {
         return;
     }
     rows.sort_by(|left, right| {
         for sort_order in sort_orders {
-            let ordering = match (left, right) {
-                (
-                    MapiCommonViewsMessage::NavigationShortcut(left),
-                    MapiCommonViewsMessage::NavigationShortcut(right),
-                ) => compare_navigation_shortcuts(left, right, sort_order.property_tag),
-                (
-                    MapiCommonViewsMessage::NamedView(left),
-                    MapiCommonViewsMessage::NamedView(right),
-                ) => compare_common_view_named_views(left, right, sort_order.property_tag),
-                (
-                    MapiCommonViewsMessage::SearchFolderDefinition(left),
-                    MapiCommonViewsMessage::SearchFolderDefinition(right),
-                ) => compare_search_folder_definitions(left, right, sort_order.property_tag),
-                (
-                    MapiCommonViewsMessage::NavigationShortcut(_),
-                    MapiCommonViewsMessage::NamedView(_),
-                ) => Ordering::Less,
-                (
-                    MapiCommonViewsMessage::NamedView(_),
-                    MapiCommonViewsMessage::NavigationShortcut(_),
-                ) => Ordering::Greater,
-                (
-                    MapiCommonViewsMessage::NavigationShortcut(_)
-                    | MapiCommonViewsMessage::NamedView(_),
-                    MapiCommonViewsMessage::SearchFolderDefinition(_),
-                ) => Ordering::Less,
-                (
-                    MapiCommonViewsMessage::SearchFolderDefinition(_),
-                    MapiCommonViewsMessage::NavigationShortcut(_)
-                    | MapiCommonViewsMessage::NamedView(_),
-                ) => Ordering::Greater,
-            };
+            let ordering = compare_optional_mapi_values(
+                common_views_message_property_value(left, mailbox_guid, sort_order.property_tag),
+                common_views_message_property_value(right, mailbox_guid, sort_order.property_tag),
+            );
             let ordering = apply_sort_direction(ordering, sort_order.order);
             if ordering != Ordering::Equal {
                 return ordering;
@@ -420,6 +393,11 @@ fn compare_optional_mapi_values(left: Option<MapiValue>, right: Option<MapiValue
         (Some(MapiValue::I64(left)), Some(MapiValue::I64(right))) => left.cmp(&right),
         (Some(MapiValue::U32(left)), Some(MapiValue::U32(right))) => left.cmp(&right),
         (Some(MapiValue::I32(left)), Some(MapiValue::I32(right))) => left.cmp(&right),
+        (Some(MapiValue::Bool(left)), Some(MapiValue::Bool(right))) => left.cmp(&right),
+        (Some(MapiValue::Guid(left)), Some(MapiValue::Guid(right))) => left.cmp(&right),
+        (Some(MapiValue::Binary(left)), Some(MapiValue::Binary(right))) => left.cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
         _ => Ordering::Equal,
     }
 }
@@ -432,65 +410,6 @@ pub(super) fn common_views_message_id(message: &MapiCommonViewsMessage) -> u64 {
             crate::mapi::identity::mapped_mapi_object_id(&message.id).unwrap_or_default()
         }
     }
-}
-
-fn compare_navigation_shortcuts(
-    left: &MapiNavigationShortcutMessage,
-    right: &MapiNavigationShortcutMessage,
-    property_tag: u32,
-) -> Ordering {
-    match property_tag & 0xFFFF_0000 {
-        0x684F_0000 => Ordering::Equal,
-        0x6850_0000 => wlink_group_guid_bytes(left).cmp(&wlink_group_guid_bytes(right)),
-        0x684B_0000 => {
-            wlink_ordinal_debug_bytes(left.ordinal).cmp(&wlink_ordinal_debug_bytes(right.ordinal))
-        }
-        0x6849_0000 => left.shortcut_type.cmp(&right.shortcut_type),
-        0x6852_0000 => left.section.cmp(&right.section),
-        0x0037_0000 | 0x3001_0000 => compare_case_insensitive(&left.subject, &right.subject),
-        0x674A_0000 => left.id.cmp(&right.id),
-        _ => Ordering::Equal,
-    }
-}
-
-fn compare_common_view_named_views(
-    left: &MapiCommonViewNamedViewMessage,
-    right: &MapiCommonViewNamedViewMessage,
-    property_tag: u32,
-) -> Ordering {
-    match property_tag & 0xFFFF_0000 {
-        0x0037_0000 | 0x3001_0000 => compare_case_insensitive(&left.name, &right.name),
-        0x6834_0000 => left.view_flags.cmp(&right.view_flags),
-        0x683A_0000 => left.view_type.cmp(&right.view_type),
-        0x674A_0000 => left.id.cmp(&right.id),
-        _ => Ordering::Equal,
-    }
-}
-
-fn compare_search_folder_definitions(
-    left: &SearchFolderDefinition,
-    right: &SearchFolderDefinition,
-    property_tag: u32,
-) -> Ordering {
-    match property_tag & 0xFFFF_0000 {
-        0x0037_0000 | 0x3001_0000 => {
-            compare_case_insensitive(&left.display_name, &right.display_name)
-        }
-        0x6841_0000 => left.role.cmp(&right.role),
-        0x674A_0000 => left.id.cmp(&right.id),
-        _ => Ordering::Equal,
-    }
-}
-
-fn wlink_group_guid_bytes(message: &MapiNavigationShortcutMessage) -> [u8; 16] {
-    message
-        .group_header_id
-        .map(|group_id| *group_id.as_bytes())
-        .unwrap_or_else(default_wlink_group_guid)
-}
-
-fn wlink_ordinal_debug_bytes(value: u32) -> Vec<u8> {
-    wlink_ordinal_bytes(value)
 }
 
 pub(in crate::mapi) fn table_view_signature(

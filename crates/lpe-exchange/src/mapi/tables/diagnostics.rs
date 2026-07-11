@@ -75,7 +75,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                     mailbox_guid,
                 )
             });
-            sort_common_views_messages(&mut rows, sort_orders);
+            sort_common_views_messages(&mut rows, sort_orders, mailbox_guid);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
                 .map(|index| {

@@ -394,7 +394,7 @@ pub(super) fn format_common_views_query_row_window(
     rows.retain(|message| {
         restriction_matches_common_views_message(restriction, message, account_id)
     });
-    sort_common_views_messages(&mut rows, sort_orders);
+    sort_common_views_messages(&mut rows, sort_orders, account_id);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
         .iter()
@@ -457,7 +457,7 @@ pub(super) fn format_outlook_query_row_values(
         rows.retain(|message| {
             restriction_matches_common_views_message(restriction, message, account_id)
         });
-        sort_common_views_messages(&mut rows, sort_orders);
+        sort_common_views_messages(&mut rows, sort_orders, account_id);
         return select_query_window(rows.len(), position, forward_read, row_count)
             .iter()
             .map(|index| {

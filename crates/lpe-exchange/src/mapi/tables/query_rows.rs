@@ -190,7 +190,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             mailbox_guid,
                         )
                     });
-                    sort_common_views_messages(&mut rows, sort_orders);
+                    sort_common_views_messages(&mut rows, sort_orders, mailbox_guid);
                     total_row_count = rows.len();
                     rows_are_serialized_property_rows = true;
                     rows.iter()

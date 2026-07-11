@@ -6,6 +6,11 @@ pub(crate) const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
 pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
     0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
 ];
+// [MS-OXCDATA] section 2.2.4.1: Folder EntryIDs in the public message
+// store use this provider UID instead of the private mailbox GUID.
+pub(crate) const PUBLIC_FOLDER_PROVIDER_UID: [u8; 16] = [
+    0x1a, 0x44, 0x73, 0x90, 0xaa, 0x66, 0x11, 0xcd, 0x9b, 0xc8, 0x00, 0xaa, 0x00, 0x2f, 0xc4, 0x5a,
+];
 
 static MAPI_OBJECT_IDS: OnceLock<Mutex<HashMap<Uuid, MapiIdentityMaterial>>> = OnceLock::new();
 
@@ -256,10 +261,18 @@ pub(crate) fn folder_entry_id_from_object_id(
     mailbox_guid: Uuid,
     object_id: u64,
 ) -> Option<Vec<u8>> {
+    folder_entry_id_with_provider(mailbox_guid.to_bytes_le(), object_id)
+}
+
+pub(crate) fn public_folder_entry_id_from_object_id(object_id: u64) -> Option<Vec<u8>> {
+    folder_entry_id_with_provider(PUBLIC_FOLDER_PROVIDER_UID, object_id)
+}
+
+fn folder_entry_id_with_provider(provider_uid: [u8; 16], object_id: u64) -> Option<Vec<u8>> {
     let global_counter = global_counter_from_store_id(object_id)?;
     let mut entry_id = Vec::with_capacity(46);
     entry_id.extend_from_slice(&0u32.to_le_bytes());
-    entry_id.extend_from_slice(&mailbox_guid.to_bytes_le());
+    entry_id.extend_from_slice(&provider_uid);
     entry_id.extend_from_slice(&1u16.to_le_bytes());
     entry_id.extend_from_slice(&STORE_REPLICA_GUID);
     entry_id.extend_from_slice(&globcnt_bytes(global_counter));
@@ -448,6 +461,20 @@ mod tests {
         assert_eq!(
             object_id_from_folder_identifier_bytes(&entry_id),
             Some(object_id)
+        );
+    }
+
+    #[test]
+    fn public_folder_entry_id_uses_public_store_provider_uid() {
+        let entry_id =
+            public_folder_entry_id_from_object_id(PUBLIC_FOLDERS_ROOT_FOLDER_ID).unwrap();
+
+        assert_eq!(entry_id.len(), 46);
+        assert_eq!(&entry_id[4..20], &PUBLIC_FOLDER_PROVIDER_UID);
+        assert_eq!(&entry_id[22..38], &STORE_REPLICA_GUID);
+        assert_eq!(
+            object_id_from_folder_entry_id(&entry_id),
+            Some(PUBLIC_FOLDERS_ROOT_FOLDER_ID)
         );
     }
 
