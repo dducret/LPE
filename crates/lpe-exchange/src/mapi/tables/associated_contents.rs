@@ -24,22 +24,18 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
     row
 }
 
-pub(super) fn serialize_common_views_row_with_mailbox_guid(
+pub(super) fn serialize_common_views_property_row_with_mailbox_guid(
     message: &MapiCommonViewsMessage,
     mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    match message {
-        MapiCommonViewsMessage::NavigationShortcut(message) => {
-            serialize_navigation_shortcut_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-        MapiCommonViewsMessage::NamedView(message) => {
-            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
-            serialize_search_folder_definition_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-    }
+    serialize_optional_property_row(
+        columns,
+        columns
+            .iter()
+            .map(|column| common_views_message_property_value(message, mailbox_guid, *column))
+            .collect(),
+    )
 }
 
 pub(in crate::mapi) fn serialize_search_folder_definition_row_with_mailbox_guid(
@@ -50,21 +46,6 @@ pub(in crate::mapi) fn serialize_search_folder_definition_row_with_mailbox_guid(
     let mut row = Vec::new();
     for column in columns {
         match search_folder_definition_message_property_value(message, mailbox_guid, *column) {
-            Some(value) => write_mapi_value(&mut row, *column, &value),
-            None => write_property_default(&mut row, *column),
-        }
-    }
-    row
-}
-
-fn serialize_navigation_shortcut_row_with_mailbox_guid(
-    message: &MapiNavigationShortcutMessage,
-    mailbox_guid: Uuid,
-    columns: &[u32],
-) -> Vec<u8> {
-    let mut row = Vec::new();
-    for column in columns {
-        match navigation_shortcut_property_value(message, mailbox_guid, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
@@ -217,44 +198,30 @@ pub(super) fn outlook_configuration_prefix_restriction() -> MapiRestriction {
     }
 }
 
-pub(super) fn serialize_associated_table_row(
-    message: &AssociatedTableRow,
-    mailbox_guid: Uuid,
-    columns: &[u32],
-) -> Vec<u8> {
-    match message {
-        AssociatedTableRow::Config(message) => {
-            serialize_associated_config_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-        AssociatedTableRow::NamedView(message) => {
-            serialize_common_view_named_view_row_with_mailbox_guid(message, mailbox_guid, columns)
-        }
-    }
-}
-
 pub(super) fn serialize_associated_table_property_row(
     message: &AssociatedTableRow,
     mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    let values = columns
-        .iter()
-        .map(|column| associated_table_row_property_value(message, mailbox_guid, *column))
-        .collect::<Vec<_>>();
-    if values.iter().all(Option::is_some) {
-        return standard_property_row_bytes(&serialize_associated_table_row(
-            message,
-            mailbox_guid,
-            columns,
-        ));
-    }
+    serialize_optional_property_row(
+        columns,
+        columns
+            .iter()
+            .map(|column| associated_table_row_property_value(message, mailbox_guid, *column))
+            .collect(),
+    )
+}
 
+fn serialize_optional_property_row(columns: &[u32], values: Vec<Option<MapiValue>>) -> Vec<u8> {
     // [MS-OXCDATA] sections 2.8.1.2 and 2.11.5 require a
     // FlaggedPropertyRow when any selected property is absent.
-    let mut row = vec![1];
+    let flagged = values.iter().any(Option::is_none);
+    let mut row = vec![u8::from(flagged)];
     for (column, value) in columns.iter().zip(values) {
         if let Some(value) = value {
-            row.push(0);
+            if flagged {
+                row.push(0);
+            }
             write_mapi_value(&mut row, *column, &value);
         } else {
             row.push(0x0A);

@@ -253,9 +253,8 @@ pub(in crate::mapi) fn rop_find_row_response(
                 ) {
                     *position = index;
                     response.push(1);
-                    write_standard_property_row(
-                        &mut response,
-                        &serialize_common_views_row_with_mailbox_guid(
+                    response.extend_from_slice(
+                        &serialize_common_views_property_row_with_mailbox_guid(
                             message,
                             mailbox_guid,
                             &columns,
@@ -322,10 +321,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                 {
                     *position = index;
                     response.push(1);
-                    write_standard_property_row(
-                        &mut response,
-                        &serialize_associated_table_row(message, mailbox_guid, &columns),
-                    );
+                    response.extend_from_slice(&serialize_associated_table_property_row(
+                        message,
+                        mailbox_guid,
+                        &columns,
+                    ));
                 } else {
                     return rop_find_row_no_match_response(request);
                 }

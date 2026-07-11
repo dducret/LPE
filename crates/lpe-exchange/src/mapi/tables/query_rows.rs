@@ -192,9 +192,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     });
                     sort_common_views_messages(&mut rows, sort_orders);
                     total_row_count = rows.len();
+                    rows_are_serialized_property_rows = true;
                     rows.iter()
                         .map(|message| {
-                            serialize_common_views_row_with_mailbox_guid(
+                            serialize_common_views_property_row_with_mailbox_guid(
                                 message,
                                 mailbox_guid,
                                 &columns,

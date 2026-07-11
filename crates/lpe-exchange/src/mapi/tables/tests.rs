@@ -4945,6 +4945,91 @@ fn common_views_query_rows_uses_wlink_sort_order() {
 }
 
 #[test]
+fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = vec![
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        0x6834_0003,
+        0x683A_0003,
+        0x6841_0003,
+        0x6846_0003,
+        0x6842_0102,
+        0x6843_0102,
+        0x6847_0003,
+        0x6848_0003,
+        0x6853_0003,
+    ];
+    let sort_orders = vec![
+        MapiSortOrder {
+            property_tag: PID_TAG_DISPLAY_NAME_W,
+            order: 0,
+        },
+        MapiSortOrder {
+            property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+            order: 1,
+        },
+    ];
+    let mut expected = snapshot.common_views_table_messages().collect::<Vec<_>>();
+    sort_common_views_messages(&mut expected, &sort_orders);
+    let mut table = MapiObject::ContentsTable {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        associated: true,
+        columns: columns.clone(),
+        columns_set: true,
+        sort_orders,
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+
+    let response = rop_query_rows_response(
+        &RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 0, 0x10],
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(
+        u16::from_le_bytes([response[7], response[8]]) as usize,
+        expected.len()
+    );
+    let mut cursor = Cursor::new(&response[9..]);
+    for message in expected {
+        let missing = columns.iter().any(|column| {
+            common_views_message_property_value(&message, Uuid::nil(), *column).is_none()
+        });
+        assert!(missing);
+        assert_eq!(cursor.read_u8().unwrap(), 1);
+        for column in &columns {
+            if common_views_message_property_value(&message, Uuid::nil(), *column).is_some() {
+                assert_eq!(cursor.read_u8().unwrap(), 0);
+                parse_mapi_property_value(&mut cursor, *column).unwrap();
+            } else {
+                assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+                assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+            }
+        }
+    }
+    assert!(cursor.remaining_is_zero_padding());
+}
+
+#[test]
 fn inbox_associated_find_row_suppresses_outlook_eas_config() {
     assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.EAS");
 }
@@ -4957,6 +5042,68 @@ fn inbox_associated_find_row_returns_not_found_for_unstored_elc_config() {
 #[test]
 fn inbox_associated_find_row_returns_folder_local_default_named_view() {
     assert_inbox_associated_find_row_returns_message_class("IPM.Microsoft.FolderDesign.NamedView");
+}
+
+#[test]
+fn inbox_associated_named_view_find_row_flags_missing_configuration_columns() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let columns = [
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_MESSAGE_CLASS_W,
+        0x685D_0003,
+    ];
+    let mut table = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: true,
+        columns: columns.to_vec(),
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    write_utf16z(&mut restriction, "IPM.Microsoft.FolderDesign.NamedView");
+    let mut payload = vec![0];
+    payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    payload.extend_from_slice(&restriction);
+    payload.push(1);
+    payload.extend_from_slice(&0u16.to_le_bytes());
+
+    let response = rop_find_row_response(
+        &RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        Uuid::nil(),
+    );
+
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+    assert_eq!(&response[6..8], &[0, 1]);
+    let mut cursor = Cursor::new(&response[8..]);
+    assert_eq!(cursor.read_u8().unwrap(), 1);
+    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
+        MapiValue::String("IPM.Microsoft.FolderDesign.NamedView".to_string())
+    );
+    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+    assert!(cursor.remaining_is_zero_padding());
 }
 
 #[test]
