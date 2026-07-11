@@ -735,6 +735,52 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
         .unwrap();
     assert!(changed.changed_navigation_shortcut_ids.contains(&first.id));
 
+    let replacement_calendar_id = Uuid::parse_str("a9236bd3-d179-4ef0-b1d6-19bc925f31a9").unwrap();
+    let replacement_calendar = fixture
+        .storage
+        .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
+            id: Some(replacement_calendar_id),
+            account_id: fixture.account_id,
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            save_stamp: 1,
+            section: 3,
+            ordinal: 127,
+            group_header_id: Some(outlook_calendar_group_id),
+            group_name: "My Calendars".to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(replacement_calendar.id, replacement_calendar_id);
+    assert_ne!(replacement_calendar.id, corrected_calendar.id);
+    let replaced = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            Some(common_views_mailbox_id),
+            MapiCheckpointKind::Content,
+            changed.current_change_sequence,
+        )
+        .await
+        .unwrap();
+    assert!(replaced
+        .deleted_navigation_shortcut_ids
+        .contains(&corrected_calendar.id));
+    assert!(replaced
+        .changed_navigation_shortcut_ids
+        .contains(&replacement_calendar.id));
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_navigation_shortcuts(fixture.account_id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+
     fixture
         .storage
         .delete_mapi_navigation_shortcut(fixture.account_id, first.id)
@@ -5722,7 +5768,26 @@ impl ExchangeStore for FakeStore {
         let shortcuts = self.navigation_shortcuts.clone();
         Box::pin(async move {
             let mut shortcuts = shortcuts.lock().unwrap();
-            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let id = input.id.unwrap_or_else(|| {
+                shortcuts
+                    .iter()
+                    .find(|shortcut| {
+                        if input.target_folder_id.is_some() {
+                            shortcut.target_folder_id == input.target_folder_id
+                                && shortcut.shortcut_type == input.shortcut_type
+                                && shortcut.section == input.section
+                        } else {
+                            shortcut.subject == input.subject
+                                && shortcut.target_folder_id == input.target_folder_id
+                                && shortcut.shortcut_type == input.shortcut_type
+                                && shortcut.section == input.section
+                                && shortcut.group_header_id == input.group_header_id
+                                && shortcut.group_name == input.group_name
+                        }
+                    })
+                    .map(|shortcut| shortcut.id)
+                    .unwrap_or_else(Uuid::new_v4)
+            });
             let record = crate::store::MapiNavigationShortcutRecord {
                 id,
                 account_id: input.account_id,
@@ -5741,6 +5806,21 @@ impl ExchangeStore for FakeStore {
             } else {
                 shortcuts.push(record.clone());
             }
+            shortcuts.retain(|shortcut| {
+                shortcut.id == id
+                    || if record.target_folder_id.is_some() {
+                        shortcut.target_folder_id != record.target_folder_id
+                            || shortcut.shortcut_type != record.shortcut_type
+                            || shortcut.section != record.section
+                    } else {
+                        shortcut.subject != record.subject
+                            || shortcut.target_folder_id != record.target_folder_id
+                            || shortcut.shortcut_type != record.shortcut_type
+                            || shortcut.section != record.section
+                            || shortcut.group_header_id != record.group_header_id
+                            || shortcut.group_name != record.group_name
+                    }
+            });
             Ok(record)
         })
     }

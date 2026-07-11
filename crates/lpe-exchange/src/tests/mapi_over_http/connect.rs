@@ -2578,8 +2578,24 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
 #[tokio::test]
 async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip() {
     let account = FakeStore::account();
+    let superseded_calendar_shortcut_id = Uuid::from_u128(0xd49ca8a0_dc7c_469f_8c82_4ec37f03bdf8);
     let store = FakeStore {
         session: Some(account.clone()),
+        navigation_shortcuts: Arc::new(Mutex::new(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: superseded_calendar_shortcut_id,
+                account_id: account.account_id,
+                subject: "Calendar".to_string(),
+                target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0x0010_0000,
+                save_stamp: 0x4f30_48f7,
+                section: 3,
+                ordinal: 127,
+                group_header_id: Some(Uuid::from_u128(0xb7f00600_0000_0000_c000_000000000046)),
+                group_name: "My Calendars".to_string(),
+            },
+        ])),
         ..Default::default()
     };
     let shortcuts = store.navigation_shortcuts.clone();
@@ -2690,6 +2706,22 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
         .iter()
         .find(|shortcut| shortcut.shortcut_type == 0 && shortcut.subject == "Meetings")
         .expect("MS-OXOCFG navigation shortcut");
+    assert_ne!(
+        link.id, superseded_calendar_shortcut_id,
+        "RopCreateMessage must not return the MID of the Common Views row already read by Outlook"
+    );
+    assert_eq!(
+        stored
+            .iter()
+            .filter(|shortcut| {
+                shortcut.target_folder_id == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    && shortcut.shortcut_type == 0
+                    && shortcut.section == 3
+            })
+            .count(),
+        1,
+        "the new Calendar shortcut supersedes the old logical WLink"
+    );
 
     assert_eq!(group.group_header_id, Some(Uuid::from_bytes(group_id)));
     assert_eq!(group.save_stamp, 0x1234_5678);

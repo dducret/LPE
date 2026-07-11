@@ -186,7 +186,7 @@ macro_rules! store_impl_mailbox_config {
             .fetch_one(&mut *tx)
             .await?;
 
-            sqlx::query(
+            let superseded_ids = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 DELETE FROM mapi_navigation_shortcuts
                 WHERE tenant_id = $1
@@ -209,6 +209,7 @@ macro_rules! store_impl_mailbox_config {
                       AND group_name = $9
                     )
                   )
+                RETURNING id
                 "#,
             )
             .bind(tenant_id)
@@ -221,8 +222,18 @@ macro_rules! store_impl_mailbox_config {
             .bind(row.try_get::<Option<Uuid>, _>("group_header_id")?)
             .bind(&row.try_get::<String, _>("group_name")?)
             .bind(default_group_header_id)
-            .execute(&mut *tx)
+            .fetch_all(&mut *tx)
             .await?;
+            for superseded_id in superseded_ids {
+                insert_mapi_navigation_shortcut_change(
+                    &mut tx,
+                    tenant_id,
+                    input.account_id,
+                    superseded_id,
+                    "destroyed",
+                )
+                .await?;
+            }
             insert_mapi_navigation_shortcut_change(
                 &mut tx,
                 tenant_id,

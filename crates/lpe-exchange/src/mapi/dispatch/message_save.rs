@@ -635,7 +635,10 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 "rca debug mapi common views navigation shortcut save"
             );
             let input = UpsertMapiNavigationShortcutInput {
-                id: None,
+                // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3: a message
+                // created by RopCreateMessage receives a new identity when it
+                // is first saved, even when it replaces a logical WLink.
+                id: Some(Uuid::new_v4()),
                 account_id: principal.account_id,
                 subject: shortcut.subject,
                 target_folder_id: shortcut.target_folder_id,
