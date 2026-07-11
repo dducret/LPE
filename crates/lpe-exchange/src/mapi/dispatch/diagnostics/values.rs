@@ -56,7 +56,7 @@ pub(in crate::mapi::dispatch) fn mapi_value_debug_binary_decode(
 pub(in crate::mapi::dispatch) fn format_optional_folder_id(folder_id: Option<u64>) -> String {
     folder_id
         .map(|folder_id| format!("0x{folder_id:016x}"))
-        .unwrap_or_default()
+        .unwrap_or_else(|| "none".to_string())
 }
 
 pub(in crate::mapi::dispatch) fn mapi_value_debug_shape(value: &MapiValue) -> String {

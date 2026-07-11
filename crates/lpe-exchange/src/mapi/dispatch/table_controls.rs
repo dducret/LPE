@@ -1007,12 +1007,8 @@ pub(super) fn append_query_rows_response(
         principal.account_id,
         snapshot,
     );
-    let common_views_inbox_shortcut_context = format_common_views_inbox_shortcut_context(
-        query_object,
-        request,
-        principal.account_id,
-        snapshot,
-    );
+    let common_views_inbox_shortcut_context =
+        format_common_views_inbox_shortcut_context(query_object, request, principal, snapshot);
     let inbox_hierarchy_query_context =
         format_inbox_hierarchy_query_context(query_object, request, mailboxes, snapshot);
     if let Some(context) = inbox_associated_query_context {
@@ -1067,7 +1063,7 @@ pub(super) fn append_query_rows_response(
         mailboxes,
         emails,
         snapshot,
-        principal.account_id,
+        principal,
     );
     log_outlook_contents_table_query_rows_response(
         principal,

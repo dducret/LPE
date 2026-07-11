@@ -168,7 +168,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     );
     let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
     let all_special_sync_objects =
-        special_sync_objects_for(folder_id, sync_type, snapshot, principal.account_id);
+        special_sync_objects_for(folder_id, sync_type, snapshot, principal);
     log_calendar_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
     log_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
     let available_sync_mailbox_count = all_sync_mailboxes.len();

@@ -149,8 +149,8 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_find_row(
         folder_message_count(*folder_id, mailboxes, emails, snapshot)
     };
     let found_row_value_summary = if response.get(7).copied().unwrap_or(0) == 1 {
-        format_outlook_query_row_values(
-            principal.account_id,
+        format_outlook_query_row_values_for_principal(
+            principal,
             *folder_id,
             *associated,
             *position,
@@ -622,8 +622,8 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_query_rows(
         principal.account_id,
         snapshot,
     );
-    let query_row_value_summary = format_outlook_query_row_values(
-        principal.account_id,
+    let query_row_value_summary = format_outlook_query_row_values_for_principal(
+        principal,
         *folder_id,
         *associated,
         *position,
@@ -721,7 +721,7 @@ pub(in crate::mapi::dispatch) fn log_outlook_contents_table_query_rows(
         normal_message_query_row_summary = %normal_message_query_row_summary,
         inbox_associated_wire_row_summary = %inbox_associated_wire_row_summary,
         common_views_wlink_target_decoding = %if *folder_id == COMMON_VIEWS_FOLDER_ID && *associated {
-            format_common_views_wlink_target_decoding(principal.account_id, snapshot)
+            format_common_views_wlink_target_decoding(principal, snapshot)
         } else {
             String::new()
         },

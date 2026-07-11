@@ -2625,7 +2625,10 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
     .unwrap();
     let calendar_record_key =
         crate::mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
-    let store_entry_id = crate::mapi_mailstore::private_store_entry_id(account.account_id);
+    let store_entry_id = crate::mapi::identity::mailbox_store_object_entry_id(
+        &account.email,
+        &test_account_legacy_dn(&account.email),
+    );
 
     let mut group_values = Vec::new();
     append_mapi_utf16_property(

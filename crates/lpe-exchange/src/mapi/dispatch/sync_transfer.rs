@@ -100,7 +100,7 @@ where
                 session,
                 handle_slots,
                 request,
-                principal.account_id,
+                principal,
                 mailboxes,
                 emails,
                 snapshot,

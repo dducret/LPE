@@ -106,14 +106,6 @@ pub(crate) fn source_key_for_store_id(store_id: u64) -> Vec<u8> {
     crate::mapi::identity::source_key_for_object_id(store_id)
 }
 
-pub(crate) fn private_store_entry_id(account_id: Uuid) -> Vec<u8> {
-    crate::mapi::identity::folder_entry_id_from_object_id(
-        account_id,
-        crate::mapi::identity::ROOT_FOLDER_ID,
-    )
-    .unwrap_or_default()
-}
-
 pub(crate) fn source_key_for_mailbox_folder(mailbox: &JmapMailbox) -> Vec<u8> {
     let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
         .expect("MAPI folder identity mapping missing");

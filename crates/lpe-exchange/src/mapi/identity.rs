@@ -11,6 +11,14 @@ pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
 pub(crate) const PUBLIC_FOLDER_PROVIDER_UID: [u8; 16] = [
     0x1a, 0x44, 0x73, 0x90, 0xaa, 0x66, 0x11, 0xcd, 0x9b, 0xc8, 0x00, 0xaa, 0x00, 0x2f, 0xc4, 0x5a,
 ];
+// [MS-OXCDATA] section 2.2.4.3: Store Object EntryIDs use the
+// MAPI store provider wrapper and the mailbox-store provider UID.
+const STORE_OBJECT_PROVIDER_UID: [u8; 16] = [
+    0x38, 0xa1, 0xbb, 0x10, 0x05, 0xe5, 0x10, 0x1a, 0xa1, 0xbb, 0x08, 0x00, 0x2b, 0x2a, 0x56, 0xc2,
+];
+const MAILBOX_STORE_PROVIDER_UID: [u8; 16] = [
+    0x1b, 0x55, 0xfa, 0x20, 0xaa, 0x66, 0x11, 0xcd, 0x9b, 0xc8, 0x00, 0xaa, 0x00, 0x2f, 0xc4, 0x5a,
+];
 
 static MAPI_OBJECT_IDS: OnceLock<Mutex<HashMap<Uuid, MapiIdentityMaterial>>> = OnceLock::new();
 
@@ -124,6 +132,35 @@ pub(crate) const CONVERSATION_MEMBERS_CONTENTS_TABLE_ID: u64 =
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
+}
+
+pub(crate) fn mailbox_store_object_entry_id(server_shortname: &str, mailbox_dn: &str) -> Vec<u8> {
+    let server_shortname = server_shortname.trim();
+    let mailbox_dn = mailbox_dn.trim();
+    let mut entry_id = Vec::with_capacity(
+        62usize
+            .saturating_add(server_shortname.len())
+            .saturating_add(mailbox_dn.len()),
+    );
+    entry_id.extend_from_slice(&0u32.to_le_bytes());
+    entry_id.extend_from_slice(&STORE_OBJECT_PROVIDER_UID);
+    entry_id.push(0);
+    entry_id.push(0);
+    entry_id.extend_from_slice(b"EMSMDB.DLL\0\0\0\0");
+    entry_id.extend_from_slice(&0u32.to_le_bytes());
+    entry_id.extend_from_slice(&MAILBOX_STORE_PROVIDER_UID);
+    entry_id.extend_from_slice(&0x0000_000Cu32.to_le_bytes());
+    entry_id.extend_from_slice(server_shortname.as_bytes());
+    entry_id.push(0);
+    entry_id.extend_from_slice(mailbox_dn.as_bytes());
+    entry_id.push(0);
+    entry_id
+}
+
+pub(crate) fn principal_mailbox_store_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
+    let entry = super::nspi::principal_address_book_entry(principal);
+    let mailbox_dn = super::nspi::nspi_entry_unprefixed_legacy_dn(&entry);
+    mailbox_store_object_entry_id(&principal.email, &mailbox_dn)
 }
 
 pub(crate) fn global_counter_from_store_id(store_id: u64) -> Option<u64> {
@@ -476,6 +513,24 @@ mod tests {
             object_id_from_folder_entry_id(&entry_id),
             Some(PUBLIC_FOLDERS_ROOT_FOLDER_ID)
         );
+    }
+
+    #[test]
+    fn mailbox_store_object_entry_id_matches_outlook_wlink_shape() {
+        let mailbox_dn = "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch";
+        let entry_id = mailbox_store_object_entry_id("test@l-p-e.ch", mailbox_dn);
+
+        assert_eq!(entry_id.len(), 145);
+        assert_eq!(&entry_id[..4], &0u32.to_le_bytes());
+        assert_eq!(&entry_id[4..20], &STORE_OBJECT_PROVIDER_UID);
+        assert_eq!(&entry_id[20..22], &[0, 0]);
+        assert_eq!(&entry_id[22..36], b"EMSMDB.DLL\0\0\0\0");
+        assert_eq!(&entry_id[36..40], &0u32.to_le_bytes());
+        assert_eq!(&entry_id[40..56], &MAILBOX_STORE_PROVIDER_UID);
+        assert_eq!(&entry_id[56..60], &0x0000_000Cu32.to_le_bytes());
+        assert_eq!(&entry_id[60..74], b"test@l-p-e.ch\0");
+        assert_eq!(&entry_id[74..144], mailbox_dn.as_bytes());
+        assert_eq!(entry_id[144], 0);
     }
 
     #[test]

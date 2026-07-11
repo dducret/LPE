@@ -120,7 +120,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
     folder_id: u64,
     sync_type: u8,
     snapshot: &MapiMailStoreSnapshot,
-    account_id: Uuid,
+    principal: &AccountPrincipal,
 ) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
     if sync_type == 0x02 {
         return Vec::new();
@@ -272,7 +272,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .collect(),
             COMMON_VIEWS_FOLDER_ID => common_views_sync_messages(snapshot)
                 .into_iter()
-                .map(|message| common_views_sync_object(message, account_id))
+                .map(|message| common_views_sync_object(message, principal))
                 .collect(),
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
                 .conversation_action_table_messages()
@@ -289,7 +289,10 @@ pub(in crate::mapi) fn special_sync_objects_for(
     }
     if default_folder_named_view_sync_supported(folder_id) {
         if let Some(message) = default_folder_named_view_sync_message(snapshot, folder_id) {
-            objects.push(common_view_named_view_sync_object(&message, account_id));
+            objects.push(common_view_named_view_sync_object(
+                &message,
+                principal.account_id,
+            ));
         }
     }
     objects.extend(
@@ -619,7 +622,7 @@ fn journal_sync_object(
 
 fn navigation_shortcut_sync_object(
     message: &crate::mapi_store::MapiNavigationShortcutMessage,
-    account_id: Uuid,
+    principal: &AccountPrincipal,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut named_properties = Vec::new();
     for property_tag in [
@@ -636,8 +639,9 @@ fn navigation_shortcut_sync_object(
         PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
     ] {
-        if let Some(value) = navigation_shortcut_property_value(message, account_id, property_tag)
-            .and_then(special_message_property_value)
+        if let Some(value) =
+            navigation_shortcut_property_value_for_principal(message, principal, property_tag)
+                .and_then(special_message_property_value)
         {
             named_properties.push((property_tag, value));
         }
@@ -661,14 +665,14 @@ fn navigation_shortcut_sync_object(
 
 fn common_views_sync_object(
     message: crate::mapi_store::MapiCommonViewsMessage,
-    account_id: Uuid,
+    principal: &AccountPrincipal,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     match message {
         crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
-            navigation_shortcut_sync_object(&message, account_id)
+            navigation_shortcut_sync_object(&message, principal)
         }
         crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => {
-            common_view_named_view_sync_object(&message, account_id)
+            common_view_named_view_sync_object(&message, principal.account_id)
         }
         crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(_) => {
             mapi_mailstore::SpecialMessageSyncFact {
@@ -1068,7 +1072,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     rop_id: u8,
     object: &MapiObject,
-    account_id: Uuid,
+    principal: &AccountPrincipal,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -1196,7 +1200,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
                     *folder_id,
-                    &[navigation_shortcut_sync_object(&message, account_id)],
+                    &[navigation_shortcut_sync_object(&message, principal)],
                 ),
             ))
         }
@@ -1206,7 +1210,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
                     *folder_id,
-                    &[common_view_named_view_sync_object(&message, account_id)],
+                    &[common_view_named_view_sync_object(
+                        &message,
+                        principal.account_id,
+                    )],
                 ),
             ))
         }

@@ -59,7 +59,7 @@ pub(in crate::mapi::dispatch) fn log_special_folder_contract(
             collaboration_folder.map(|folder| folder.collection.display_name.as_str()).unwrap_or(""),
         canonical_item_count = collaboration_folder.map(|folder| folder.item_count).unwrap_or(0),
         projected_special_object_count =
-            special_sync_objects_for(folder_id, 0x01, snapshot, principal.account_id).len(),
+            special_sync_objects_for(folder_id, 0x01, snapshot, principal).len(),
         projected_folder_content_count =
             folder_message_count(folder_id, mailboxes, emails, snapshot),
         mapi_folder_access_mask = %format!("0x{MAPI_FOLDER_ACCESS:08x}"),

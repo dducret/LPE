@@ -876,6 +876,29 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
     account_id: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    navigation_shortcut_property_value_with_store_entry_id(message, account_id, None, property_tag)
+}
+
+pub(in crate::mapi) fn navigation_shortcut_property_value_for_principal(
+    message: &MapiNavigationShortcutMessage,
+    principal: &AccountPrincipal,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let store_entry_id = super::identity::principal_mailbox_store_entry_id(principal);
+    navigation_shortcut_property_value_with_store_entry_id(
+        message,
+        principal.account_id,
+        Some(&store_entry_id),
+        property_tag,
+    )
+}
+
+fn navigation_shortcut_property_value_with_store_entry_id(
+    message: &MapiNavigationShortcutMessage,
+    account_id: Uuid,
+    store_entry_id: Option<&[u8]>,
+    property_tag: u32,
+) -> Option<MapiValue> {
     let requested_property_tag = property_tag;
     let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
@@ -974,9 +997,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
             .target_folder_id
             .map(mapi_mailstore::source_key_for_store_id)
             .map(MapiValue::Binary),
-        PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
-            mapi_mailstore::private_store_entry_id(account_id),
-        )),
+        PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => {
+            store_entry_id.map(|value| MapiValue::Binary(value.to_vec()))
+        }
         PID_TAG_WLINK_CALENDAR_COLOR if navigation_shortcut_targets_calendar(message) => {
             Some(MapiValue::I32(-1))
         }
@@ -988,9 +1011,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         {
             None
         }
-        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => Some(
-            MapiValue::Binary(mapi_mailstore::private_store_entry_id(account_id)),
-        ),
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => {
+            store_entry_id.map(|value| MapiValue::Binary(value.to_vec()))
+        }
         PID_TAG_WLINK_RO_GROUP_TYPE if navigation_shortcut_targets_calendar(message) => {
             Some(MapiValue::I32(-1))
         }

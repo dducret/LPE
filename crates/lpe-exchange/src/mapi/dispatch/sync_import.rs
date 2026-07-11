@@ -328,7 +328,7 @@ pub(super) fn append_fast_transfer_source_copy_response(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
-    principal_account_id: Uuid,
+    principal: &AccountPrincipal,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -346,7 +346,7 @@ pub(super) fn append_fast_transfer_source_copy_response(
     let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
         request.rop_id,
         &object,
-        principal_account_id,
+        principal,
         mailboxes,
         emails,
         snapshot,

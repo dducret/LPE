@@ -5103,6 +5103,59 @@ fn inbox_associated_find_row_suppresses_outlook_eas_config() {
 }
 
 #[test]
+fn common_views_query_rows_projects_mailbox_store_object_entry_id() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id,
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let mut table = MapiObject::ContentsTable {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        associated: true,
+        columns: vec![PID_TAG_WLINK_STORE_ENTRY_ID],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let expected = crate::mapi::identity::principal_mailbox_store_entry_id(&principal);
+
+    let response = rop_query_rows_response_for_principal(
+        &RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 0, 0x10],
+        },
+        Some(&mut table),
+        &[],
+        &[],
+        &snapshot,
+        &principal,
+    );
+
+    assert_eq!(expected.len(), 145);
+    assert!(response
+        .windows(expected.len())
+        .any(|window| window == expected.as_slice()));
+    let obsolete_root_folder_entry_id =
+        crate::mapi::identity::folder_entry_id_from_object_id(account_id, ROOT_FOLDER_ID).unwrap();
+    assert!(!response
+        .windows(obsolete_root_folder_entry_id.len())
+        .any(|window| window == obsolete_root_folder_entry_id.as_slice()));
+}
+
+#[test]
 fn inbox_associated_find_row_returns_not_found_for_unstored_elc_config() {
     assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
 }

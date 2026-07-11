@@ -33,6 +33,17 @@ fn utf16z(value: &str) -> Vec<u8> {
         .collect()
 }
 
+fn store_test_principal(account_id: Uuid) -> AccountPrincipal {
+    AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id,
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    }
+}
+
 fn valid_swapped_todo_data() -> Vec<u8> {
     let mut value = vec![0; SWAPPED_TODO_DATA_LEN];
     value[0..4].copy_from_slice(&SWAPPED_TODO_DATA_VERSION.to_le_bytes());
@@ -4685,10 +4696,16 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
         "a server-created shortcut must not fabricate the folder owner's NSPI EntryID"
     );
     assert_eq!(
-        navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,),
-        Some(MapiValue::Binary(mapi_mailstore::private_store_entry_id(
-            account_id
-        )))
+        navigation_shortcut_property_value_for_principal(
+            &link,
+            &store_test_principal(account_id),
+            PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+        ),
+        Some(MapiValue::Binary(
+            crate::mapi::identity::principal_mailbox_store_entry_id(&store_test_principal(
+                account_id,
+            ))
+        ))
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CLIENT_ID),
@@ -6175,14 +6192,55 @@ fn navigation_shortcut_projects_address_book_store_entry_id() {
     };
 
     assert_eq!(
-        navigation_shortcut_property_value(
+        navigation_shortcut_property_value_for_principal(
             &shortcut,
-            account_id,
+            &store_test_principal(account_id),
             PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
         ),
-        Some(MapiValue::Binary(mapi_mailstore::private_store_entry_id(
-            account_id
-        )))
+        Some(MapiValue::Binary(
+            crate::mapi::identity::principal_mailbox_store_entry_id(&store_test_principal(
+                account_id,
+            ))
+        ))
+    );
+}
+
+#[test]
+fn navigation_shortcut_projects_outlook_mailbox_store_object_entry_id() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let principal = store_test_principal(account_id);
+    let shortcut = MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapi_store_id(901),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x2222),
+        subject: "Calendar".to_string(),
+        target_folder_id: Some(CALENDAR_FOLDER_ID),
+        shortcut_type: 0,
+        flags: 0,
+        save_stamp: 0,
+        section: 3,
+        ordinal: 0x7f,
+        group_header_id: None,
+        group_name: "My Calendars".to_string(),
+    };
+    let expected = crate::mapi::identity::principal_mailbox_store_entry_id(&principal);
+
+    assert_eq!(expected.len(), 145);
+    assert_eq!(
+        navigation_shortcut_property_value_for_principal(
+            &shortcut,
+            &principal,
+            PID_TAG_WLINK_STORE_ENTRY_ID,
+        ),
+        Some(MapiValue::Binary(expected.clone()))
+    );
+    assert_eq!(
+        navigation_shortcut_property_value_for_principal(
+            &shortcut,
+            &principal,
+            PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+        ),
+        Some(MapiValue::Binary(expected))
     );
 }
 

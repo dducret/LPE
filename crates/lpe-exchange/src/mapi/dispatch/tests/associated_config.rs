@@ -944,8 +944,11 @@ fn common_views_query_row_values_report_selected_wlink_columns() {
         },
     ]);
 
-    let summary = format_outlook_query_row_values(
-        account_id,
+    let mut principal = test_principal();
+    principal.account_id = account_id;
+    principal.email = "test@l-p-e.ch".to_string();
+    let summary = format_outlook_query_row_values_for_principal(
+        &principal,
         COMMON_VIEWS_FOLDER_ID,
         true,
         0,
@@ -1080,7 +1083,10 @@ fn common_views_wlink_target_decoding_reports_inbox_match() {
         },
     ]);
 
-    let summary = format_common_views_wlink_target_decoding(account_id, &snapshot);
+    let mut principal = test_principal();
+    principal.account_id = account_id;
+    principal.email = "test@l-p-e.ch".to_string();
+    let summary = format_common_views_wlink_target_decoding(&principal, &snapshot);
 
     assert!(summary.contains("subject=Pinned Inbox"));
     assert!(summary.contains(&format!("target_folder=0x{INBOX_FOLDER_ID:016x}")));
@@ -1088,11 +1094,11 @@ fn common_views_wlink_target_decoding_reports_inbox_match() {
     assert!(summary.contains("entry_id_matches_inbox=true"));
     assert!(summary.contains(&format!("source_key_decoded=0x{INBOX_FOLDER_ID:016x}")));
     assert!(summary.contains("source_key_matches_inbox=true"));
-    assert!(summary.contains("store_entry_id=binary:bytes=46"));
-    assert!(summary.contains("store_entry_id_decoded=0x0000000000010001"));
+    assert!(summary.contains("store_entry_id=binary:bytes=145"));
+    assert!(summary.contains("store_entry_id_decoded=none"));
     assert!(summary.contains("store_entry_id_matches_private_store=true"));
-    assert!(summary.contains("address_book_store_entry_id=binary:bytes=46"));
-    assert!(summary.contains("address_book_store_entry_id_decoded=0x0000000000010001"));
+    assert!(summary.contains("address_book_store_entry_id=binary:bytes=145"));
+    assert!(summary.contains("address_book_store_entry_id_decoded=none"));
     assert!(summary.contains("address_book_store_entry_id_matches_private_store=true"));
     assert!(summary.contains(&format!(
         "sharing_local_folder_id_decoded=0x{INBOX_FOLDER_ID:016x}"

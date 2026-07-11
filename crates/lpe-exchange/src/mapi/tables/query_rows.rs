@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(in crate::mapi) fn rop_query_rows_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
@@ -7,6 +8,45 @@ pub(in crate::mapi) fn rop_query_rows_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     mailbox_guid: Uuid,
+) -> Vec<u8> {
+    rop_query_rows_response_inner(
+        request,
+        object,
+        mailboxes,
+        emails,
+        snapshot,
+        mailbox_guid,
+        None,
+    )
+}
+
+pub(in crate::mapi) fn rop_query_rows_response_for_principal(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    rop_query_rows_response_inner(
+        request,
+        object,
+        mailboxes,
+        emails,
+        snapshot,
+        principal.account_id,
+        Some(principal),
+    )
+}
+
+fn rop_query_rows_response_inner(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     if !object.as_deref().is_some_and(is_table_object) {
         return rop_error_response(0x15, request.response_handle_index(), 0x8004_0102);
@@ -194,12 +234,15 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     total_row_count = rows.len();
                     rows_are_serialized_property_rows = true;
                     rows.iter()
-                        .map(|message| {
-                            serialize_common_views_property_row_with_mailbox_guid(
+                        .map(|message| match principal {
+                            Some(principal) => serialize_common_views_property_row_for_principal(
+                                message, principal, &columns,
+                            ),
+                            None => serialize_common_views_property_row_with_mailbox_guid(
                                 message,
                                 mailbox_guid,
                                 &columns,
-                            )
+                            ),
                         })
                         .collect::<Vec<_>>()
                 } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {

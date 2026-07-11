@@ -16,7 +16,12 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
         .unwrap_or_default();
     let mut row = Vec::new();
     for column in columns {
-        match navigation_shortcut_property_value(message, account_id, *column) {
+        let value = principal
+            .and_then(|principal| {
+                navigation_shortcut_property_value_for_principal(message, principal, *column)
+            })
+            .or_else(|| navigation_shortcut_property_value(message, account_id, *column));
+        match value {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
@@ -34,6 +39,22 @@ pub(super) fn serialize_common_views_property_row_with_mailbox_guid(
         columns
             .iter()
             .map(|column| common_views_message_property_value(message, mailbox_guid, *column))
+            .collect(),
+    )
+}
+
+pub(super) fn serialize_common_views_property_row_for_principal(
+    message: &MapiCommonViewsMessage,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> Vec<u8> {
+    serialize_optional_property_row(
+        columns,
+        columns
+            .iter()
+            .map(|column| {
+                common_views_message_property_value_for_principal(message, principal, *column)
+            })
             .collect(),
     )
 }
@@ -315,6 +336,28 @@ pub(super) fn common_views_message_property_value(
         }
         MapiCommonViewsMessage::SearchFolderDefinition(message) => {
             search_folder_definition_message_property_value(message, mailbox_guid, property_tag)
+        }
+    }
+}
+
+fn common_views_message_property_value_for_principal(
+    message: &MapiCommonViewsMessage,
+    principal: &AccountPrincipal,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(message) => {
+            navigation_shortcut_property_value_for_principal(message, principal, property_tag)
+        }
+        MapiCommonViewsMessage::NamedView(message) => {
+            common_view_named_view_property_value(message, principal.account_id, property_tag)
+        }
+        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            search_folder_definition_message_property_value(
+                message,
+                principal.account_id,
+                property_tag,
+            )
         }
     }
 }

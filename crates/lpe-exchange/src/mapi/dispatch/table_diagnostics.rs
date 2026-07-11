@@ -1078,7 +1078,7 @@ mod broad_ipm_configuration_restriction_tests {
 pub(super) fn format_common_views_inbox_shortcut_context(
     object: Option<&MapiObject>,
     request: &RopRequest,
-    account_id: Uuid,
+    principal: &AccountPrincipal,
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<String> {
     let Some(MapiObject::ContentsTable {
@@ -1098,7 +1098,7 @@ pub(super) fn format_common_views_inbox_shortcut_context(
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     let requested_row_count = request.query_row_count().unwrap_or(0);
     let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    sort_common_views_messages(&mut rows, sort_orders, account_id);
+    sort_common_views_messages(&mut rows, sort_orders, principal.account_id);
     let selected = select_query_window(
         rows.len(),
         *position,
@@ -1129,14 +1129,16 @@ pub(super) fn format_common_views_inbox_shortcut_context(
         } else {
             selected_inbox_indexes
         },
-        format_common_views_wlink_target_decoding(account_id, snapshot)
+        format_common_views_wlink_target_decoding(principal, snapshot)
     ))
 }
 
 pub(super) fn format_common_views_wlink_target_decoding(
-    account_id: Uuid,
+    principal: &AccountPrincipal,
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
+    let account_id = principal.account_id;
+    let private_store_entry_id = crate::mapi::identity::principal_mailbox_store_entry_id(principal);
     snapshot
         .common_views_table_messages()
         .filter_map(|message| match message {
@@ -1169,10 +1171,9 @@ pub(super) fn format_common_views_wlink_target_decoding(
                     }
                     _ => None,
                 };
-                let private_store_entry_id = mapi_mailstore::private_store_entry_id(account_id);
-                let store_entry_id = navigation_shortcut_property_value(
+                let store_entry_id = navigation_shortcut_property_value_for_principal(
                     &shortcut,
-                    account_id,
+                    principal,
                     PID_TAG_WLINK_STORE_ENTRY_ID,
                 );
                 let store_entry_id_decoded = match &store_entry_id {
@@ -1185,9 +1186,9 @@ pub(super) fn format_common_views_wlink_target_decoding(
                     &store_entry_id,
                     Some(MapiValue::Binary(bytes)) if bytes == &private_store_entry_id
                 );
-                let address_book_store_entry_id = navigation_shortcut_property_value(
+                let address_book_store_entry_id = navigation_shortcut_property_value_for_principal(
                     &shortcut,
-                    account_id,
+                    principal,
                     PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
                 );
                 let address_book_store_entry_id_decoded = match &address_book_store_entry_id {

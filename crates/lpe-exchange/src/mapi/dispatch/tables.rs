@@ -449,6 +449,61 @@ pub(super) fn format_outlook_query_row_values(
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
+    format_outlook_query_row_values_inner(
+        account_id,
+        None,
+        folder_id,
+        associated,
+        position,
+        forward_read,
+        row_count,
+        sort_orders,
+        restriction,
+        columns,
+        snapshot,
+    )
+}
+
+pub(super) fn format_outlook_query_row_values_for_principal(
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    format_outlook_query_row_values_inner(
+        principal.account_id,
+        Some(principal),
+        folder_id,
+        associated,
+        position,
+        forward_read,
+        row_count,
+        sort_orders,
+        restriction,
+        columns,
+        snapshot,
+    )
+}
+
+fn format_outlook_query_row_values_inner(
+    account_id: Uuid,
+    principal: Option<&AccountPrincipal>,
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
     if !associated || row_count == 0 || columns.is_empty() {
         return String::new();
     }
@@ -467,10 +522,19 @@ pub(super) fn format_outlook_query_row_values(
                         let values = columns
                             .iter()
                             .map(|tag| {
-                                let value =
-                                    navigation_shortcut_property_value(shortcut, account_id, *tag)
-                                        .map(|value| format_debug_mapi_value(&value))
-                                        .unwrap_or_else(|| "default".to_string());
+                                let value = principal
+                                    .and_then(|principal| {
+                                        navigation_shortcut_property_value_for_principal(
+                                            shortcut, principal, *tag,
+                                        )
+                                    })
+                                    .or_else(|| {
+                                        navigation_shortcut_property_value(
+                                            shortcut, account_id, *tag,
+                                        )
+                                    })
+                                    .map(|value| format_debug_mapi_value(&value))
+                                    .unwrap_or_else(|| "default".to_string());
                                 format!("0x{tag:08x}={value}")
                             })
                             .collect::<Vec<_>>()
@@ -1879,9 +1943,9 @@ pub(super) fn query_rows_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
-    mailbox_guid: Uuid,
+    principal: &AccountPrincipal,
 ) -> Vec<u8> {
-    rop_query_rows_response(request, object, mailboxes, emails, snapshot, mailbox_guid)
+    rop_query_rows_response_for_principal(request, object, mailboxes, emails, snapshot, principal)
 }
 
 pub(super) fn find_row_response(

@@ -1,6 +1,17 @@
 use super::*;
 use crate::mapi::rop::RopRequest;
 
+fn sync_principal(account_id: Uuid) -> AccountPrincipal {
+    AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id,
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    }
+}
+
 fn mailbox(id: u128, role: &str, name: &str) -> JmapMailbox {
     JmapMailbox {
         id: Uuid::from_u128(id),
@@ -229,7 +240,12 @@ fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
-    let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        COMMON_VIEWS_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     let buffer = associated_content_sync_buffer(account_id, COMMON_VIEWS_FOLDER_ID, &objects);
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
@@ -279,7 +295,12 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_associated_configs(persisted_inbox_associated_configs(account_id));
-    let objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        INBOX_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     let buffer = associated_content_sync_buffer(account_id, INBOX_FOLDER_ID, &objects);
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
@@ -503,7 +524,12 @@ fn calendar_special_content_sync_advertises_appointment_objects() {
         Vec::new(),
     );
 
-    let objects = special_sync_objects_for(CALENDAR_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        CALENDAR_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
 
     assert_eq!(objects.len(), 1);
     assert_eq!(objects[0].message_class, "IPM.Appointment");
@@ -521,7 +547,8 @@ fn collaboration_default_views_are_not_synthetic_fai_sync_objects() {
         NOTES_FOLDER_ID,
         JOURNAL_FOLDER_ID,
     ] {
-        let objects = special_sync_objects_for(folder_id, 0x01, &snapshot, account_id);
+        let objects =
+            special_sync_objects_for(folder_id, 0x01, &snapshot, &sync_principal(account_id));
 
         assert!(
             objects
@@ -675,7 +702,12 @@ fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
         },
     ]);
 
-    let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        COMMON_VIEWS_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     let inbox_shortcut = objects
         .iter()
         .find(|object| object.subject == "Inbox")
@@ -698,7 +730,7 @@ fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
     assert_eq!(
         property(PID_TAG_WLINK_STORE_ENTRY_ID),
         &crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(
-            crate::mapi_mailstore::private_store_entry_id(account_id)
+            crate::mapi::identity::principal_mailbox_store_entry_id(&sync_principal(account_id))
         )
     );
     assert_eq!(
@@ -736,7 +768,12 @@ fn common_views_shortcut_sync_does_not_emit_materialized_mail_header() {
         },
     ]);
 
-    let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        COMMON_VIEWS_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
 
     assert_eq!(
         objects
@@ -778,7 +815,12 @@ fn common_views_group_header_sync_includes_group_identity_without_target() {
         },
     ]);
 
-    let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        COMMON_VIEWS_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     let group_header = objects
         .iter()
         .find(|object| object.subject == "My Calendars")
@@ -906,7 +948,12 @@ fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
     })
     .collect::<Vec<_>>();
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(persisted);
-    let objects = special_sync_objects_for(INBOX_FOLDER_ID, 0x01, &snapshot, account_id);
+    let objects = special_sync_objects_for(
+        INBOX_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     let buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
         account_id,
         0x01,
@@ -1034,7 +1081,12 @@ fn common_views_associated_content_sync_payload_emits_view_and_wunderbar_propert
             group_name: "Mail".to_string(),
         },
     ]);
-    let mut objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+    let mut objects = special_sync_objects_for(
+        COMMON_VIEWS_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
     objects.push(common_view_named_view_sync_object(
         &crate::mapi_store::MapiCommonViewNamedViewMessage {
             id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7),
@@ -1125,7 +1177,7 @@ fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
     assert!(fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1145,7 +1197,7 @@ fn fast_transfer_manifest_exports_default_common_views_named_view() {
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1234,7 +1286,7 @@ fn fast_transfer_manifest_rejects_associated_config_default_from_wrong_folder() 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1254,7 +1306,7 @@ fn fast_transfer_manifest_rejects_common_views_shortcut_from_wrong_folder() {
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1274,7 +1326,7 @@ fn fast_transfer_manifest_rejects_common_views_named_view_from_wrong_folder() {
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1294,7 +1346,7 @@ fn fast_transfer_manifest_rejects_conversation_action_default_from_wrong_folder(
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
@@ -1335,7 +1387,7 @@ fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
-        account_id,
+        &sync_principal(account_id),
         &[],
         &[],
         &snapshot,
