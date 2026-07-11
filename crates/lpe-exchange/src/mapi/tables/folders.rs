@@ -671,7 +671,7 @@ pub(in crate::mapi) fn write_logon_property_row(
             }
             None => {
                 response.push(0x0A);
-                write_u32(response, ROP_ERROR_NOT_SUPPORTED);
+                write_u32(response, ROP_ERROR_NOT_FOUND);
             }
         }
     }

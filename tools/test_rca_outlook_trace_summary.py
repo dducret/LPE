@@ -27,6 +27,8 @@ def empty_log_summary() -> dict:
         "unknown_defaulted_getprops_contexts": Counter(),
         "problem_getprops_tags": Counter(),
         "problem_getprops_contexts": Counter(),
+        "logon_expected_not_found_getprops_tags": Counter(),
+        "logon_expected_not_found_getprops_contexts": Counter(),
         "calendar_normal_view_not_found_getprops_tags": Counter(),
         "calendar_normal_view_not_found_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
@@ -225,6 +227,35 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
         self.assertEqual(
             summary["calendar_normal_view_not_found_getprops_tags"],
             Counter({"0x36160102": 1}),
+        )
+        self.assertEqual(
+            rca.actionable_issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+            [],
+        )
+
+    def test_logon_associated_sharing_provider_not_found_is_expected(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=logon;folder=0x0000000000010001;"
+            "role=root;tags=0x0ea00048;names=PidTagAssociatedSharingProvider;"
+            "problem_tags=0x0ea00048:PidTagAssociatedSharingProvider:0x8004010f;"
+            "zero_default_tags=;response=0x00000000)",
+            {
+                "mapi_request_id": "{REQ}:18",
+                "object_kind": "logon",
+            },
+        )
+
+        self.assertEqual(summary["problem_getprops_tags"], Counter())
+        self.assertEqual(
+            summary["logon_expected_not_found_getprops_tags"],
+            Counter({"0x0ea00048": 1}),
         )
         self.assertEqual(
             rca.actionable_issue_buckets(

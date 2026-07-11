@@ -4973,7 +4973,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         response_rops_from_execute_response(trace_store_props_response).await;
     assert!(contains_bytes(
         &trace_store_props_rops,
-        &[0x0A, 0x02, 0x01, 0x04, 0x80]
+        &[0x0A, 0x0F, 0x01, 0x04, 0x80]
     ));
     let public_folders_entry_id = crate::mapi::identity::public_folder_entry_id_from_object_id(
         crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,

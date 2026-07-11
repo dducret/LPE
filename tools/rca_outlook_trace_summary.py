@@ -455,6 +455,8 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "unknown_defaulted_getprops_contexts": Counter(),
         "problem_getprops_tags": Counter(),
         "problem_getprops_contexts": Counter(),
+        "logon_expected_not_found_getprops_tags": Counter(),
+        "logon_expected_not_found_getprops_contexts": Counter(),
         "calendar_normal_view_not_found_getprops_tags": Counter(),
         "calendar_normal_view_not_found_getprops_contexts": Counter(),
         "umolk_problem_getprops_tags": Counter(),
@@ -2033,7 +2035,15 @@ def record_getprops_problem_tag(
         and role == "calendar"
         and problem_is_not_found(problem)
     )
-    if calendar_normal_view_not_found:
+    logon_expected_not_found = (
+        tag == "0x0ea00048"
+        and object_kind == "logon"
+        and problem_is_not_found(problem)
+    )
+    if logon_expected_not_found:
+        tag_counter = "logon_expected_not_found_getprops_tags"
+        context_counter = "logon_expected_not_found_getprops_contexts"
+    elif calendar_normal_view_not_found:
         tag_counter = "calendar_normal_view_not_found_getprops_tags"
         context_counter = "calendar_normal_view_not_found_getprops_contexts"
     elif umolk_problem and problem_is_not_found(problem):
@@ -2350,6 +2360,16 @@ def print_single_summary(
         print_counter(
             "Problem GetProps contexts",
             log["problem_getprops_contexts"],
+            limit=20,
+        )
+        print_counter(
+            "Logon expected not-found GetProps tags",
+            log["logon_expected_not_found_getprops_tags"],
+            limit=20,
+        )
+        print_counter(
+            "Logon expected not-found GetProps contexts",
+            log["logon_expected_not_found_getprops_contexts"],
             limit=20,
         )
         print_counter(
