@@ -447,6 +447,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "broad_ipm_configuration_row_count_gaps": Counter(),
+        "associated_findrow_rowset_violations": Counter(),
         "stale_default_view_contexts": set(),
         "unknown_getprops_tags": Counter(),
         "unknown_getprops_contexts": Counter(),
@@ -567,6 +568,13 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_draft_message_flag_issue(summary, fields)
             elif message == "rca debug outlook contents table query rows response":
                 record_query_rows_terminal_origin_mismatch(summary, fields)
+            elif message in {
+                "rca debug outlook associated config exact virtual elc find row row shape",
+                "rca debug outlook associated exact find row followup query restricted",
+                "rca debug outlook associated config broad find row followup query restricted",
+                "rca debug outlook associated config broad find row no match followup query restricted",
+            }:
+                summary["associated_findrow_rowset_violations"][message] += 1
             elif message == "rca debug mapi post calendar query position named property probe":
                 record_post_calendar_query_position_named_property_probe(summary, fields)
             elif message == "rca debug mapi calendar contract fingerprint":
@@ -2438,6 +2446,11 @@ def print_single_summary(
             limit=12,
         )
         print_counter(
+            "Associated FindRow rowset violations",
+            log["associated_findrow_rowset_violations"],
+            limit=12,
+        )
+        print_counter(
             "Draft message-flag contract issues",
             log["draft_message_flag_issues"],
             limit=12,
@@ -3793,6 +3806,8 @@ def issue_buckets(
     if log.get("broad_ipm_configuration_row_count_gaps"):
         for name, _count in log["broad_ipm_configuration_row_count_gaps"].most_common(2):
             issues.append(f"broad_ipm_configuration_row_count_gap:{name}")
+    if log.get("associated_findrow_rowset_violations"):
+        issues.append("associated_findrow_changed_open_table_rowset")
     if log["raw_umolk_placeholder"]:
         issues.append("raw_umolk_placeholder")
     if log["stale_default_view_states"]:

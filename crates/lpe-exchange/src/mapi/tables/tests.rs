@@ -314,7 +314,7 @@ fn inbox_associated_invariant_uses_mailbox_guid_entry_id() {
         Some(&object),
         &[],
         &[],
-        &MapiMailStoreSnapshot::empty(),
+        &inbox_associated_sort_snapshot(),
         mailbox_guid,
         true,
         1,
@@ -4950,46 +4950,8 @@ fn inbox_associated_find_row_suppresses_outlook_eas_config() {
 }
 
 #[test]
-fn inbox_associated_find_row_returns_outlook_elc_config() {
-    let _guard = outlook_smart_input_variant_test_lock();
-    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
-    std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT");
-
-    assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
-
-    if let Some(value) = previous {
-        std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value);
-    }
-}
-
-#[test]
-fn inbox_associated_find_row_variant_returns_not_found_for_synthetic_elc_config() {
-    let _guard = outlook_smart_input_variant_test_lock();
-    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
-    std::env::set_var(
-        "LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT",
-        "synthetic_elc_findrow_not_found",
-    );
-
-    let response = inbox_associated_find_row_response_for_message_class("IPM.Configuration.ELC");
-
-    match previous {
-        Some(value) => std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value),
-        None => std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT"),
-    }
-    assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(response[2..6].try_into().unwrap()),
-        0x8004_010F
-    );
-    assert_eq!(response.len(), 6);
-}
-
-fn outlook_smart_input_variant_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("Outlook smart input variant test lock poisoned")
+fn inbox_associated_find_row_returns_not_found_for_unstored_elc_config() {
+    assert_inbox_associated_find_row_no_match_for_message_class("IPM.Configuration.ELC");
 }
 
 #[test]
@@ -4998,12 +4960,12 @@ fn inbox_associated_find_row_returns_folder_local_default_named_view() {
 }
 
 #[test]
-fn inbox_associated_find_row_returns_outlook_sharing_configuration() {
-    assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Configuration");
+fn inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration() {
+    assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Configuration");
 }
 
 #[test]
-fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
+fn inbox_associated_exact_virtual_find_row_does_not_inject_a_row() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5046,30 +5008,19 @@ fn inbox_associated_exact_virtual_find_row_filters_followup_query_rows() {
     );
 
     assert_eq!(find_response[0], RopId::FindRow.as_u8());
-    assert_eq!(find_response[7], 1);
-    assert_response_contains_utf16(&find_response, "IPM.Sharing.Configuration");
-
-    let query_request = RopRequest {
-        rop_id: RopId::QueryRows.as_u8(),
-        input_handle_index: Some(0),
-        output_handle_index: None,
-        payload: vec![0, 1, 10, 0],
-    };
-    let query_response = rop_query_rows_response(
-        &query_request,
-        Some(&mut table),
-        &[],
-        &[],
-        &snapshot,
-        Uuid::nil(),
-    );
-
-    assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
-        u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
+        0x8004_010F
     );
-    assert_response_contains_utf16(&query_response, "IPM.Sharing.Configuration");
+    assert_eq!(find_response.len(), 6);
+    assert!(matches!(
+        table,
+        MapiObject::ContentsTable {
+            restriction: None,
+            position: 0,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -5078,12 +5029,12 @@ fn inbox_associated_find_row_does_not_return_empty_virtual_rule_organizer() {
 }
 
 #[test]
-fn inbox_associated_find_row_returns_outlook_sharing_index() {
-    assert_inbox_associated_find_row_returns_message_class("IPM.Sharing.Index");
+fn inbox_associated_find_row_returns_not_found_for_unstored_sharing_index() {
+    assert_inbox_associated_find_row_no_match_for_message_class("IPM.Sharing.Index");
 }
 
 #[test]
-fn inbox_associated_find_row_returns_outlook_aggregation_config() {
+fn inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5140,14 +5091,15 @@ fn inbox_associated_find_row_returns_outlook_aggregation_config() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_eq!(response[6], 0);
-    assert_eq!(response[7], 1);
-    assert_response_contains_utf16(&response, "IPM.Aggregation");
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
 }
 
 #[test]
-fn inbox_associated_find_row_returns_sharing_index_private_defaults() {
+fn empty_snapshot_does_not_contain_virtual_sharing_index() {
     let snapshot = MapiMailStoreSnapshot::empty();
     assert!(snapshot
         .associated_config_messages_for_folder(INBOX_FOLDER_ID)
@@ -5156,7 +5108,7 @@ fn inbox_associated_find_row_returns_sharing_index_private_defaults() {
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_ignores_virtual_defaults() {
+fn inbox_associated_find_row_does_not_create_a_broad_startup_default() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5211,10 +5163,7 @@ fn inbox_associated_broad_configuration_find_row_ignores_virtual_defaults() {
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
     assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
-    assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
-    assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
+    assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
     assert_eq!(table_position(&table), Some(0));
 }
 
@@ -5825,10 +5774,6 @@ fn inbox_associated_exact_configuration_find_row_uses_sort_order() {
 
 #[test]
 fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() {
-    let _guard = outlook_smart_input_variant_test_lock();
-    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
-    std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT");
-
     let snapshot = inbox_associated_sort_snapshot();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -5872,16 +5817,19 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
         Uuid::nil(),
     );
 
-    if let Some(value) = previous {
-        std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value);
-    }
-
     assert_eq!(find_response[0], RopId::FindRow.as_u8());
     assert_eq!(
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.AccountPrefs");
+    assert!(matches!(
+        table,
+        MapiObject::ContentsTable {
+            restriction: None,
+            ..
+        }
+    ));
 
     let query_request = RopRequest {
         rop_id: RopId::QueryRows.as_u8(),
@@ -5901,176 +5849,18 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
+        2
     );
-    assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
-    assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
+    assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
     assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
-    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert_response_contains_utf16(&query_response, "IPM.Microsoft.FolderDesign.NamedView");
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_variant_restricts_followup_rows() {
-    let _guard = outlook_smart_input_variant_test_lock();
-    let previous = std::env::var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT").ok();
-    std::env::set_var(
-        "LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT",
-        "broad_findrow_no_handoff",
-    );
-
-    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-    let account_prefs_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000001);
-    let message_list_settings_id = Uuid::from_u128(0x6d617069_6d6c_5374_8000_000000000101);
-    crate::mapi::identity::remember_mapi_identity(
-        account_prefs_id,
-        crate::mapi::identity::mapi_store_id(
-            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 81,
-        ),
-    );
-    crate::mapi::identity::remember_mapi_identity(
-        message_list_settings_id,
-        crate::mapi::identity::mapi_store_id(
-            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 801,
-        ),
-    );
-    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
-        crate::store::MapiAssociatedConfigRecord {
-            id: account_prefs_id,
-            account_id,
-            folder_id: INBOX_FOLDER_ID,
-            message_class: "IPM.Configuration.AccountPrefs".to_string(),
-            subject: "Account prefs".to_string(),
-            properties_json: serde_json::json!({
-                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
-            }),
-        },
-        crate::store::MapiAssociatedConfigRecord {
-            id: message_list_settings_id,
-            account_id,
-            folder_id: INBOX_FOLDER_ID,
-            message_class: "IPM.Configuration.MessageListSettings".to_string(),
-            subject: "IPM.Configuration.MessageListSettings".to_string(),
-            properties_json: serde_json::json!({
-                "0x001a001f": {
-                    "type": "string",
-                    "value": "IPM.Configuration.MessageListSettings"
-                },
-                "0x7c070102": {
-                    "type": "binary",
-                    "value": "3c786d6c2f3e"
-                }
-            }),
-        },
-    ]);
-    let mut table = MapiObject::ContentsTable {
-        folder_id: INBOX_FOLDER_ID,
-        associated: true,
-        columns: vec![PID_TAG_MESSAGE_CLASS_W],
-        columns_set: true,
-        sort_orders: vec![MapiSortOrder {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            order: 0,
-        }],
-        category_count: 0,
-        expanded_count: 0,
-        collapsed_categories: HashSet::new(),
-        restriction: None,
-        bookmarks: HashMap::new(),
-        next_bookmark: 1,
-        position: 0,
-    };
-    let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
-    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-    restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-    write_utf16z(&mut restriction, "IPM.Configuration.");
-    let mut payload = vec![0];
-    payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
-    payload.extend_from_slice(&restriction);
-    payload.push(1);
-    payload.extend_from_slice(&0u16.to_le_bytes());
-
-    let find_response = rop_find_row_response(
-        &RopRequest {
-            rop_id: RopId::FindRow.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload,
-        },
-        Some(&mut table),
-        &[],
-        &[],
-        &snapshot,
-        Uuid::nil(),
-    );
-
-    match previous {
-        Some(value) => std::env::set_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT", value),
-        None => std::env::remove_var("LPE_MAPI_OUTLOOK_SMART_INPUT_VARIANT"),
-    }
-
-    assert_eq!(find_response[0], RopId::FindRow.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
-        0
-    );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
-    assert_eq!(table_position(&table), Some(0));
-    assert!(matches!(
-        table,
-        MapiObject::ContentsTable {
-            restriction: Some(MapiRestriction::Content { .. }),
-            ..
-        }
-    ));
-
-    let seek_response = rop_seek_row_response(
-        &RopRequest {
-            rop_id: RopId::SeekRow.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload: vec![1, 1, 0, 0, 0, 1],
-        },
-        Some(&mut table),
-        &[],
-        &[],
-        &snapshot,
-        Uuid::nil(),
-    );
-
-    assert_eq!(seek_response[0], RopId::SeekRow.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(seek_response[2..6].try_into().unwrap()),
-        0
-    );
-    assert_eq!(table_position(&table), Some(1));
-
-    let query_response = rop_query_rows_response(
-        &RopRequest {
-            rop_id: RopId::QueryRows.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload: vec![0, 1, 50, 0],
-        },
-        Some(&mut table),
-        &[],
-        &[],
-        &snapshot,
-        Uuid::nil(),
-    );
-
-    assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(
-        u16::from_le_bytes([query_response[7], query_response[8]]),
-        0
-    );
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
-}
-
-#[test]
-fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
+fn inbox_associated_exact_named_view_find_row_respects_existing_table_restriction() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let broad_restriction = outlook_configuration_prefix_restriction();
     let broad_row_count = associated_table_rows(
@@ -6124,35 +5914,13 @@ fn inbox_associated_exact_named_view_find_row_restricts_followup_handoff() {
     assert_eq!(find_response[0], RopId::FindRow.as_u8());
     assert_eq!(
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
-        0
+        0x8004_010F
     );
-    assert_response_contains_utf16(&find_response, "IPM.Microsoft.FolderDesign.NamedView");
-    assert_eq!(table_position(&table), Some(0));
-
-    let query_response = rop_query_rows_response(
-        &RopRequest {
-            rop_id: RopId::QueryRows.as_u8(),
-            input_handle_index: Some(0),
-            output_handle_index: None,
-            payload: vec![0, 1, 50, 0],
-        },
-        Some(&mut table),
-        &[],
-        &[],
-        &snapshot,
-        Uuid::nil(),
-    );
-
-    assert_eq!(query_response[0], RopId::QueryRows.as_u8());
-    assert_eq!(
-        u16::from_le_bytes([query_response[7], query_response[8]]),
-        1
-    );
-    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert_eq!(find_response.len(), 6);
 }
 
 #[test]
-fn inbox_associated_broad_find_row_followup_returns_only_startup_rows() {
+fn inbox_associated_find_row_followup_uses_the_original_rowset() {
     let account_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1608);
     let earlier_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1609);
     let persisted_id = Uuid::from_u128(0x73a6_121f_9c0d_423b_8fcb_7174f28e1610);
@@ -6240,7 +6008,7 @@ fn inbox_associated_broad_find_row_followup_returns_only_startup_rows() {
         u32::from_le_bytes(find_response[2..6].try_into().unwrap()),
         0
     );
-    assert_response_contains_utf16(&find_response, "IPM.Configuration.MessageListSettings");
+    assert_response_contains_utf16(&find_response, "IPM.Configuration.ClientOptions");
     assert_eq!(table_position(&table), Some(0));
 
     let seek_response = rop_seek_row_response(
@@ -6281,15 +6049,16 @@ fn inbox_associated_broad_find_row_followup_returns_only_startup_rows() {
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        0
+        2
     );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
-    assert!(utf16_position(&query_response, "IPM.Configuration.MessageListSettings").is_none());
+    assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
+    assert_response_contains_utf16(&query_response, "IPM.Microsoft.FolderDesign.NamedView");
     assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
+fn inbox_associated_greater_than_restriction_uses_normal_property_semantics() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let restriction = MapiRestriction::Property {
         relop: 0x02,
@@ -6298,11 +6067,8 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
     };
 
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
-    assert!(
-        rows.iter()
-            .all(|row| matches!(row, AssociatedTableRow::Config(_))),
-        "broad IPM.Configuration startup scans must not return FolderDesign views"
-    );
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(rows[0], AssociatedTableRow::NamedView(_)));
     let mut classes = rows
         .iter()
         .filter_map(associated_table_row_config)
@@ -6310,11 +6076,11 @@ fn inbox_associated_broad_configuration_restriction_projects_startup_configs() {
         .collect::<Vec<_>>();
     classes.sort_unstable();
 
-    assert_eq!(classes, vec!["IPM.Configuration.MessageListSettings"]);
+    assert!(classes.is_empty());
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_suppresses_persisted_configs() {
+fn inbox_associated_content_restriction_projects_persisted_configs() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let autocomplete_id = Uuid::from_u128(0x6d617069_6175_746f_8000_000000000101);
     let conversation_id = Uuid::from_u128(0x6d617069_636f_6e76_8000_000000000101);
@@ -6385,7 +6151,14 @@ fn inbox_associated_broad_configuration_restriction_suppresses_persisted_configs
         .collect::<Vec<_>>();
     classes.sort_unstable();
 
-    assert_eq!(classes, vec!["IPM.Configuration.MessageListSettings"]);
+    assert_eq!(
+        classes,
+        vec![
+            "IPM.Configuration.Autocomplete",
+            "IPM.Configuration.ConversationPrefs",
+            "IPM.Configuration.TableViewPreviewPrefs",
+        ]
+    );
 
     let unrestricted_rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, None, Uuid::nil());
     let mut unrestricted_classes = unrestricted_rows
@@ -6397,7 +6170,11 @@ fn inbox_associated_broad_configuration_restriction_suppresses_persisted_configs
 
     assert_eq!(
         unrestricted_classes,
-        vec!["IPM.Configuration.MessageListSettings"]
+        vec![
+            "IPM.Configuration.Autocomplete",
+            "IPM.Configuration.ConversationPrefs",
+            "IPM.Configuration.TableViewPreviewPrefs",
+        ]
     );
 
     let exact_autocomplete = MapiRestriction::Property {
@@ -6421,7 +6198,7 @@ fn inbox_associated_broad_configuration_restriction_suppresses_persisted_configs
 }
 
 #[test]
-fn inbox_associated_broad_configuration_restriction_dedupes_modeled_startup_class() {
+fn inbox_associated_restriction_does_not_add_a_modeled_startup_class() {
     let snapshot = inbox_associated_sort_snapshot();
     let restriction = MapiRestriction::Property {
         relop: 0x02,
@@ -6436,11 +6213,11 @@ fn inbox_associated_broad_configuration_restriction_dedupes_modeled_startup_clas
         .filter(|message| message.message_class == "IPM.Configuration.MessageListSettings")
         .count();
 
-    assert_eq!(message_list_settings_count, 1);
+    assert_eq!(message_list_settings_count, 0);
 }
 
 #[test]
-fn inbox_associated_broad_configuration_find_row_ignores_extended_rule_message() {
+fn inbox_associated_find_row_can_return_a_persisted_extended_rule_message() {
     let snapshot = inbox_associated_extended_rule_snapshot();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -6480,8 +6257,7 @@ fn inbox_associated_broad_configuration_find_row_ignores_extended_rule_message()
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
     assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Configuration.MessageListSettings");
-    assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
+    assert_response_contains_utf16(&response, "IPM.ExtendedRule.Message");
 }
 
 #[test]
@@ -6516,17 +6292,17 @@ fn inbox_associated_query_rows_uses_sort_order() {
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Sharing.Configuration").is_none());
 }
 
 #[test]
-fn inbox_associated_open_count_suppresses_unrestricted_persisted_configuration_rows() {
+fn inbox_associated_open_count_includes_unrestricted_persisted_configuration_rows() {
     let snapshot = inbox_associated_sort_snapshot();
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, None, Uuid::nil());
 
@@ -6535,7 +6311,7 @@ fn inbox_associated_open_count_suppresses_unrestricted_persisted_configuration_r
         rows.len()
     );
     assert_eq!(rows.len(), 2);
-    assert!(!rows.iter().any(|row| matches!(
+    assert!(rows.iter().any(|row| matches!(
         row,
         AssociatedTableRow::Config(message)
             if message.message_class == "IPM.Configuration.AccountPrefs"
@@ -6543,7 +6319,7 @@ fn inbox_associated_open_count_suppresses_unrestricted_persisted_configuration_r
 }
 
 #[test]
-fn inbox_associated_query_rows_suppresses_extended_rule_message() {
+fn inbox_associated_query_rows_includes_persisted_extended_rule_message() {
     let snapshot = inbox_associated_extended_rule_snapshot();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -6574,12 +6350,12 @@ fn inbox_associated_query_rows_suppresses_extended_rule_message() {
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-    assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_none());
+    assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -6646,14 +6422,14 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert_eq!(
         utf16_occurrences(&response, "IPM.Microsoft.FolderDesign.NamedView"),
         1
     );
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -6722,14 +6498,14 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
-    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
+    assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
     assert_eq!(
         utf16_occurrences(&response, "IPM.Microsoft.FolderDesign.NamedView"),
         1
     );
-    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_some());
+    assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
 #[test]
@@ -6996,9 +6772,9 @@ fn calendar_associated_query_rows_prefix_configuration_returns_calendar_config()
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
     assert!(utf16_position(&response, "IPM.Configuration.Calendar").is_some());
-    assert!(utf16_position(&response, "IPM.Configuration.AvailabilityOptions").is_none());
+    assert!(utf16_position(&response, "IPM.Configuration.AvailabilityOptions").is_some());
 }
 
 #[test]
@@ -7148,7 +6924,7 @@ fn inbox_associated_query_rows_uses_standard_property_rows_for_complete_rows() {
 }
 
 #[test]
-fn inbox_associated_query_rows_returns_exact_virtual_umolk_user_options() {
+fn inbox_associated_query_rows_does_not_create_virtual_umolk_user_options() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -7182,8 +6958,8 @@ fn inbox_associated_query_rows_returns_exact_virtual_umolk_user_options() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
 }
 
 #[test]
@@ -7222,7 +6998,7 @@ fn virtual_umolk_user_options_reports_optional_properties_absent() {
 }
 
 #[test]
-fn microsoft_oxocfg_inbox_mrm_configuration_uses_xml_stream() {
+fn inbox_associated_query_rows_does_not_create_virtual_mrm_configuration() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -7260,14 +7036,8 @@ fn microsoft_oxocfg_inbox_mrm_configuration_uses_xml_stream() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Configuration.MRM").is_some());
-    assert!(response
-        .windows(4)
-        .any(|window| window == 2u32.to_le_bytes()));
-    assert!(response
-        .windows(b"RetentionHold".len())
-        .any(|window| window == b"RetentionHold"));
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Configuration.MRM").is_none());
 }
 
 #[test]

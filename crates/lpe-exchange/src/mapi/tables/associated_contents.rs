@@ -140,22 +140,9 @@ pub(super) fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStore
 pub(super) fn should_use_associated_config_table(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
-    restriction: Option<&MapiRestriction>,
+    _restriction: Option<&MapiRestriction>,
 ) -> bool {
-    if has_associated_table_rows(folder_id, snapshot) {
-        return true;
-    }
-    if folder_id == INBOX_FOLDER_ID
-        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction))
-    {
-        return true;
-    }
-    folder_id == INBOX_FOLDER_ID
-        && exact_message_class_restriction_value(restriction)
-            .and_then(
-                crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class,
-            )
-            .is_some()
+    has_associated_table_rows(folder_id, snapshot)
 }
 
 pub(super) fn associated_table_rows(
@@ -164,14 +151,8 @@ pub(super) fn associated_table_rows(
     restriction: Option<&MapiRestriction>,
     _mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
-    let mut config_messages = snapshot.associated_config_messages_for_folder(folder_id);
-    let inbox_broad_startup_scan = folder_id == INBOX_FOLDER_ID
-        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction));
-    if inbox_broad_startup_scan {
-        config_messages.retain(|message| !is_inbox_broad_startup_config_class(message));
-    }
-    append_virtual_inbox_associated_config(folder_id, restriction, &mut config_messages);
-    let mut rows = config_messages
+    let mut rows = snapshot
+        .associated_config_messages_for_folder(folder_id)
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
@@ -180,10 +161,7 @@ pub(super) fn associated_table_rows(
         .map(AssociatedTableRow::Config)
         .collect::<Vec<_>>();
     if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
-        if !(folder_id == INBOX_FOLDER_ID
-            && is_broad_outlook_configuration_restriction(restriction))
-            && restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid)
-        {
+        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
             rows.push(AssociatedTableRow::NamedView(message));
         }
     }
@@ -213,189 +191,13 @@ fn default_folder_associated_named_view(
     }
 }
 
-fn append_virtual_inbox_associated_config(
-    folder_id: u64,
-    restriction: Option<&MapiRestriction>,
-    messages: &mut Vec<MapiAssociatedConfigMessage>,
-) {
-    if folder_id != INBOX_FOLDER_ID {
-        return;
-    }
-    if restriction.is_none() || is_broad_outlook_configuration_restriction(restriction) {
-        append_modeled_inbox_broad_startup_configs(messages);
-    }
-    let Some(message_class) = exact_message_class_restriction_value(restriction) else {
-        return;
-    };
-    append_modeled_inbox_exact_startup_config(
-        messages,
-        crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
-            message_class,
-        ),
-    );
-}
-
-fn append_modeled_inbox_exact_startup_config(
-    messages: &mut Vec<MapiAssociatedConfigMessage>,
-    message: Option<MapiAssociatedConfigMessage>,
-) {
-    if let Some(message) = message {
-        if !messages.iter().any(|existing| {
-            existing
-                .message_class
-                .eq_ignore_ascii_case(&message.message_class)
-        }) {
-            messages.push(message);
-        }
-    }
-}
-
-fn append_modeled_inbox_broad_startup_configs(messages: &mut Vec<MapiAssociatedConfigMessage>) {
-    for message in crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults() {
-        if !messages.iter().any(|existing| {
-            existing
-                .message_class
-                .eq_ignore_ascii_case(&message.message_class)
-        }) {
-            messages.push(message);
-        }
-    }
-}
-
-fn exact_message_class_restriction_value(restriction: Option<&MapiRestriction>) -> Option<&str> {
-    match restriction? {
-        MapiRestriction::Property {
-            relop: 0x04,
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value: MapiValue::String(value),
-        }
-        | MapiRestriction::Content {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value,
-            ..
-        } => Some(value.as_str()),
-        _ => None,
-    }
-}
-
-pub(super) fn is_broad_outlook_configuration_restriction(
-    restriction: Option<&MapiRestriction>,
-) -> bool {
-    restriction.is_some_and(is_broad_outlook_configuration_find_row)
-}
-
-pub(super) fn is_broad_outlook_configuration_find_row(restriction: &MapiRestriction) -> bool {
-    matches!(
-        restriction,
-        MapiRestriction::Property {
-            relop: 0x02,
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value: MapiValue::String(value),
-        } | MapiRestriction::Content {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value,
-            ..
-        } if value.eq_ignore_ascii_case("IPM.Configuration.")
-    )
-}
-
 pub(in crate::mapi) fn associated_config_visible_in_table(
     folder_id: u64,
-    restriction: Option<&MapiRestriction>,
+    _restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    if folder_id == CALENDAR_FOLDER_ID
-        && crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
-        && is_broad_outlook_configuration_restriction(restriction)
-    {
-        return crate::mapi_store::is_outlook_configuration_message_class_name(
-            &message.message_class,
-            "IPM.Configuration.Calendar",
-        );
-    }
-    if folder_id != INBOX_FOLDER_ID {
-        return true;
-    }
-    if is_inbox_folder_design_default_named_view(message) {
-        return false;
-    }
-    if message.message_class == "IPM.ExtendedRule.Message" {
-        return false;
-    }
-    if is_inbox_broad_startup_config_class(message)
-        && (restriction.is_none() || is_broad_outlook_configuration_restriction(restriction))
-    {
-        return true;
-    }
-    if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id) {
-        return (crate::mapi_store::is_outlook_configuration_message_class_name(
-            &message.message_class,
-            "IPM.Configuration.ELC",
-        ) || crate::mapi_store::is_outlook_configuration_message_class_name(
-            &message.message_class,
-            "IPM.Configuration.MRM",
-        ) || crate::mapi_store::is_outlook_umolk_user_options_message_class(
-            &message.message_class,
-        ) || message
-            .message_class
-            .eq_ignore_ascii_case("IPM.Sharing.Configuration")
-            || message
-                .message_class
-                .eq_ignore_ascii_case("IPM.Sharing.Index")
-            || message
-                .message_class
-                .eq_ignore_ascii_case("IPM.Aggregation"))
-            && restriction.is_some_and(|restriction| {
-                message_class_restriction_matches_exact(restriction, &message.message_class)
-            });
-    }
-    if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
-        if is_broad_outlook_configuration_restriction(restriction) {
-            return is_inbox_broad_startup_config_class(message);
-        }
-        if is_inbox_broad_startup_config_visible(restriction, message) {
-            return true;
-        }
-        if restriction.is_none() {
-            return false;
-        }
-        return restriction.is_some_and(|restriction| {
-            message_class_restriction_matches_exact(restriction, &message.message_class)
-        }) && !is_empty_inbox_configuration_placeholder(message);
-    }
-    !is_empty_inbox_configuration_placeholder(message)
-}
-
-fn is_inbox_broad_startup_config_visible(
-    restriction: Option<&MapiRestriction>,
-    message: &MapiAssociatedConfigMessage,
-) -> bool {
-    if !crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
-        return false;
-    }
-    let exact = restriction.is_some_and(|restriction| {
-        message_class_restriction_matches_exact(restriction, &message.message_class)
-    });
-    if exact {
-        return !is_empty_inbox_configuration_placeholder(message);
-    }
-    if is_broad_outlook_configuration_restriction(restriction) {
-        return is_inbox_broad_startup_config_class(message);
-    }
-    if restriction.is_none() {
-        return is_inbox_broad_startup_config_class(message);
-    }
-    false
-}
-
-fn is_inbox_broad_startup_config_class(message: &MapiAssociatedConfigMessage) -> bool {
-    crate::mapi_store::outlook_inbox_broad_startup_associated_config_defaults()
-        .into_iter()
-        .any(|modeled| {
-            message
-                .message_class
-                .eq_ignore_ascii_case(&modeled.message_class)
-        })
+    !(folder_id == INBOX_FOLDER_ID && is_inbox_folder_design_default_named_view(message))
+        && !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
 }
 
 fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
@@ -405,45 +207,7 @@ fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessa
         && message.subject.eq_ignore_ascii_case("Compact")
 }
 
-pub(super) fn message_class_restriction_matches_exact(
-    restriction: &MapiRestriction,
-    message_class: &str,
-) -> bool {
-    matches!(
-        restriction,
-        MapiRestriction::Property {
-            relop: 0x04,
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value: MapiValue::String(value),
-        } | MapiRestriction::Content {
-            property_tag: PID_TAG_MESSAGE_CLASS_W,
-            value,
-            ..
-        } if value.eq_ignore_ascii_case(message_class)
-    )
-}
-
-fn is_empty_inbox_configuration_placeholder(message: &MapiAssociatedConfigMessage) -> bool {
-    if message
-        .message_class
-        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-        && message.subject == "Compact"
-    {
-        return message
-            .properties_json
-            .as_object()
-            .is_some_and(|object| object.is_empty());
-    }
-    if !crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
-        return false;
-    }
-    let properties = mapi_properties_from_json(&message.properties_json);
-    !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
-        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
-        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
-        && !properties.contains_key(&0x7C09_0102)
-}
-
+#[cfg(test)]
 pub(super) fn outlook_configuration_prefix_restriction() -> MapiRestriction {
     MapiRestriction::Content {
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -511,13 +275,6 @@ pub(super) fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
     match message {
         AssociatedTableRow::Config(message) => message.id,
         AssociatedTableRow::NamedView(message) => message.id,
-    }
-}
-
-pub(super) fn associated_table_row_message_class(message: &AssociatedTableRow) -> &str {
-    match message {
-        AssociatedTableRow::Config(message) => &message.message_class,
-        AssociatedTableRow::NamedView(_) => "IPM.Microsoft.FolderDesign.NamedView",
     }
 }
 

@@ -45,6 +45,7 @@ def empty_log_summary() -> dict:
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "broad_ipm_configuration_row_count_gaps": Counter(),
+        "associated_findrow_rowset_violations": Counter(),
         "draft_message_flag_issues": Counter(),
         "visible_release_without_query_rows": 0,
         "visible_inbox_query_rows": Counter(),
@@ -108,6 +109,21 @@ def empty_log_summary() -> dict:
 
 
 class RcaOutlookTraceSummaryTests(unittest.TestCase):
+    def test_associated_findrow_rowset_violation_is_actionable(self) -> None:
+        summary = empty_log_summary()
+        summary["associated_findrow_rowset_violations"][
+            "rca debug outlook associated config exact virtual elc find row row shape"
+        ] = 1
+
+        self.assertIn(
+            "associated_findrow_changed_open_table_rowset",
+            rca.actionable_issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+        )
+
     def test_verdict_rejects_disjoint_rr_and_journal_mapi_sessions(self) -> None:
         rr = {
             "nonzero_response_codes": Counter(),

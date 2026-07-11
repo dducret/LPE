@@ -619,7 +619,7 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
     let summary = format_inbox_associated_config_summary(INBOX_FOLDER_ID, true, &snapshot);
 
     assert!(
-        !summary.contains("class=IPM.Configuration.AccountPrefs"),
+        summary.contains("class=IPM.Configuration.AccountPrefs"),
         "{summary}"
     );
     assert!(
@@ -790,7 +790,7 @@ fn associated_config_debug_summaries_honor_table_restriction() {
             subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
             properties_json: serde_json::json!({
                 "0x7c060003": {"type": "u32", "value": 4},
-                "0x7c070102": {"type": "binary", "value": "3c786d6c2f3e"}
+                "0x0e0b0102": {"type": "binary", "value": "0102"}
             }),
         },
     ]);
