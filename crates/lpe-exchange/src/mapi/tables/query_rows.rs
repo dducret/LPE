@@ -29,6 +29,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
     write_u32(&mut response, 0);
     let mut start_position = 0usize;
     let mut position_base = 0usize;
+    let mut rows_are_serialized_property_rows = false;
     let rows = match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
@@ -223,9 +224,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         mailbox_guid,
                     );
                     sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
+                    rows_are_serialized_property_rows = true;
                     rows.iter()
                         .map(|message| {
-                            serialize_associated_table_row(message, mailbox_guid, &columns)
+                            serialize_associated_table_property_row(message, mailbox_guid, &columns)
                         })
                         .collect::<Vec<_>>()
                 } else if *folder_id == CALENDAR_FOLDER_ID
@@ -618,7 +620,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
     response.push(response_origin);
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
-        write_query_rows_property_row(&mut response, &response_columns, &row);
+        if rows_are_serialized_property_rows {
+            response.extend_from_slice(&row);
+        } else {
+            write_query_rows_property_row(&mut response, &response_columns, &row);
+        }
     }
     response
 }

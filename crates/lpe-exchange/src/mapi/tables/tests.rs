@@ -6624,7 +6624,7 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
 }
 
 #[test]
-fn captured_calendar_fai_terminal_window_returns_bookmark_end_with_rows() {
+fn captured_calendar_fai_terminal_window_flags_missing_named_view_columns() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let classes = [
         "IPM.Configuration.AvailabilityOptions",
@@ -6654,19 +6654,20 @@ fn captured_calendar_fai_terminal_window_returns_bookmark_end_with_rows() {
         })
         .collect::<Vec<_>>();
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(configs);
+    let columns = vec![
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_MESSAGE_CLASS_W,
+        0x685D_0003,
+        PID_TAG_LAST_MODIFICATION_TIME,
+    ];
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: true,
-        columns: vec![
-            PID_TAG_FOLDER_ID,
-            PID_TAG_MID,
-            PID_TAG_INST_ID,
-            PID_TAG_INSTANCE_NUM,
-            PID_TAG_ROAMING_DATATYPES,
-            PID_TAG_MESSAGE_CLASS_W,
-            0x685D_0003,
-            PID_TAG_LAST_MODIFICATION_TIME,
-        ],
+        columns: columns.clone(),
         columns_set: true,
         sort_orders: vec![
             MapiSortOrder {
@@ -6703,6 +6704,27 @@ fn captured_calendar_fai_terminal_window_returns_bookmark_end_with_rows() {
     );
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
     assert_eq!(table_position(&table), Some(4));
+    let mut cursor = Cursor::new(&response[9..]);
+    for _ in 0..2 {
+        assert_eq!(cursor.read_u8().unwrap(), 0);
+        for column in &columns {
+            parse_mapi_property_value(&mut cursor, *column).unwrap();
+        }
+    }
+
+    // [MS-OXCDATA] sections 2.8.1.2 and 2.11.5 require a flagged row
+    // because FolderDesign.NamedView has neither of these configuration fields.
+    assert_eq!(cursor.read_u8().unwrap(), 1);
+    for column in &columns {
+        if matches!(*column, PID_TAG_ROAMING_DATATYPES | 0x685D_0003) {
+            assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+            assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+        } else {
+            assert_eq!(cursor.read_u8().unwrap(), 0);
+            parse_mapi_property_value(&mut cursor, *column).unwrap();
+        }
+    }
+    assert!(cursor.remaining_is_zero_padding());
 }
 
 #[test]
@@ -7196,10 +7218,29 @@ fn inbox_associated_query_rows_default_columns_cover_required_configuration_cont
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    let row = associated_table_rows(
+        INBOX_FOLDER_ID,
+        &snapshot,
+        Some(&MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: MapiValue::String("IPM.Configuration.AccountPrefs".to_string()),
+        }),
+        Uuid::nil(),
+    )
+    .into_iter()
+    .next()
+    .unwrap();
     let mut cursor = Cursor::new(&response[9..]);
-    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(cursor.read_u8().unwrap(), 1);
     for column in columns {
-        parse_mapi_property_value(&mut cursor, column).unwrap();
+        if associated_table_row_property_value(&row, Uuid::nil(), column).is_some() {
+            assert_eq!(cursor.read_u8().unwrap(), 0);
+            parse_mapi_property_value(&mut cursor, column).unwrap();
+        } else {
+            assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+            assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+        }
     }
     assert!(cursor.remaining_is_zero_padding());
 }

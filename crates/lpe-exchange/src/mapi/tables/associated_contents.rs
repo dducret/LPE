@@ -232,6 +232,38 @@ pub(super) fn serialize_associated_table_row(
     }
 }
 
+pub(super) fn serialize_associated_table_property_row(
+    message: &AssociatedTableRow,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let values = columns
+        .iter()
+        .map(|column| associated_table_row_property_value(message, mailbox_guid, *column))
+        .collect::<Vec<_>>();
+    if values.iter().all(Option::is_some) {
+        return standard_property_row_bytes(&serialize_associated_table_row(
+            message,
+            mailbox_guid,
+            columns,
+        ));
+    }
+
+    // [MS-OXCDATA] sections 2.8.1.2 and 2.11.5 require a
+    // FlaggedPropertyRow when any selected property is absent.
+    let mut row = vec![1];
+    for (column, value) in columns.iter().zip(values) {
+        if let Some(value) = value {
+            row.push(0);
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            row.push(0x0A);
+            write_u32(&mut row, 0x8004_010F);
+        }
+    }
+    row
+}
+
 pub(super) fn associated_table_row_property_value(
     message: &AssociatedTableRow,
     mailbox_guid: Uuid,
