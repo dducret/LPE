@@ -409,6 +409,45 @@ fn associated_config_mutation_uses_saved_handle_when_snapshot_misses_row() {
 }
 
 #[test]
+fn associated_config_mutation_prefers_cumulative_saved_handle_over_stale_snapshot() {
+    let config_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 220,
+    );
+    let canonical_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000220);
+    let stale = crate::mapi_store::MapiAssociatedConfigMessage {
+        id: config_id,
+        folder_id: INBOX_FOLDER_ID,
+        canonical_id,
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        subject: "IPM.Configuration.MessageListSettings".to_string(),
+        properties_json: serde_json::json!({}),
+    };
+    let saved = crate::mapi_store::MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x7c060003": {"type": "i32", "value": 4}
+        }),
+        ..stale.clone()
+    };
+    crate::mapi::identity::remember_mapi_identity(canonical_id, config_id);
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: stale.canonical_id,
+            account_id: Uuid::nil(),
+            folder_id: stale.folder_id,
+            message_class: stale.message_class,
+            subject: stale.subject,
+            properties_json: stale.properties_json,
+        },
+    ]);
+
+    let resolved =
+        associated_config_message_for_mutation(&snapshot, INBOX_FOLDER_ID, config_id, Some(&saved))
+            .expect("cumulative saved handle");
+
+    assert_eq!(resolved.properties_json, saved.properties_json);
+}
+
+#[test]
 fn associated_config_persist_normalizes_stale_configuration_roaming_dictionary() {
     let properties = HashMap::from([
         (

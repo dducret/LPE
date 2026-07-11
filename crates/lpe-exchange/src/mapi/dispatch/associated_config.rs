@@ -6,15 +6,21 @@ pub(super) async fn delete_associated_config_properties<S>(
     folder_id: u64,
     config_id: u64,
     snapshot: &MapiMailStoreSnapshot,
+    saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
     property_tags: &[u32],
-) -> Result<usize>
+) -> Result<(usize, crate::mapi_store::MapiAssociatedConfigMessage)>
 where
     S: ExchangeStore,
 {
     if property_tags.is_empty() {
-        return Ok(0);
+        let existing =
+            associated_config_message_for_mutation(snapshot, folder_id, config_id, saved_message)
+                .ok_or_else(|| anyhow!("MAPI associated config message was not found"))?;
+        return Ok((0, existing));
     }
-    let Some(existing) = snapshot.associated_config_message_for_id(config_id) else {
+    let Some(existing) =
+        associated_config_message_for_mutation(snapshot, folder_id, config_id, saved_message)
+    else {
         return Err(anyhow!("MAPI associated config message was not found"));
     };
     if existing.folder_id != folder_id {
@@ -32,7 +38,7 @@ where
     }
     let (message_class, subject) = associated_config_class_and_subject(&properties);
     let properties = normalized_associated_config_persisted_properties(&message_class, &properties);
-    store
+    let saved = store
         .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
             id: Some(existing.canonical_id),
             account_id: principal.account_id,
@@ -42,7 +48,17 @@ where
             properties_json: mapi_properties_to_json(&properties),
         })
         .await?;
-    Ok(deleted)
+    Ok((
+        deleted,
+        crate::mapi_store::MapiAssociatedConfigMessage {
+            id: config_id,
+            folder_id,
+            canonical_id: saved.id,
+            message_class: saved.message_class,
+            subject: saved.subject,
+            properties_json: saved.properties_json,
+        },
+    ))
 }
 
 pub(super) fn associated_config_message_for_mutation(
@@ -51,10 +67,45 @@ pub(super) fn associated_config_message_for_mutation(
     config_id: u64,
     saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
 ) -> Option<crate::mapi_store::MapiAssociatedConfigMessage> {
-    snapshot
-        .associated_config_message_for_id(config_id)
-        .or_else(|| saved_message.cloned())
+    // MS-OXOCFG 3.1.4.2 and MS-OXCROPS 2.2.8.6, 2.2.8.9, and 2.2.6.3:
+    // mutations on one open configuration message are cumulative until save.
+    saved_message
+        .cloned()
+        .or_else(|| snapshot.associated_config_message_for_id(config_id))
         .filter(|message| message.folder_id == folder_id)
+}
+
+pub(super) async fn set_associated_config_properties<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    existing: &crate::mapi_store::MapiAssociatedConfigMessage,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<crate::mapi_store::MapiAssociatedConfigMessage>
+where
+    S: ExchangeStore,
+{
+    let mut properties = associated_config_mutation_base_properties(existing);
+    apply_mapi_property_values_to_map(&mut properties, values);
+    let (message_class, subject) = associated_config_class_and_subject(&properties);
+    let properties = normalized_associated_config_persisted_properties(&message_class, &properties);
+    let saved = store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(existing.canonical_id),
+            account_id: principal.account_id,
+            folder_id: existing.folder_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(&properties),
+        })
+        .await?;
+    Ok(crate::mapi_store::MapiAssociatedConfigMessage {
+        id: existing.id,
+        folder_id: existing.folder_id,
+        canonical_id: saved.id,
+        message_class: saved.message_class,
+        subject: saved.subject,
+        properties_json: saved.properties_json,
+    })
 }
 
 pub(super) fn delegate_freebusy_message_for_open<'a>(

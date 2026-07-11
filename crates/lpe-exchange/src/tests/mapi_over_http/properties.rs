@@ -4378,6 +4378,89 @@ async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream()
 }
 
 #[tokio::test]
+async fn mapi_over_http_associated_config_mutations_are_cumulative_until_save() {
+    let associated_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 68,
+    );
+    let associated_source_key =
+        crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+        id: Uuid::parse_str("4f3d59dd-2918-4ec6-86f5-f8ca0db18dc2").unwrap(),
+        account_id: account.account_id,
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        subject: "IPM.Configuration.MessageListSettings".to_string(),
+        properties_json: serde_json::json!({
+            "0x001a001f": {
+                "type": "string",
+                "value": "IPM.Configuration.MessageListSettings"
+            },
+            "0x65e00102": {
+                "type": "binary",
+                "value": associated_source_key.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            },
+            "0x7c070102": {"type": "binary", "value": "0102"}
+        }),
+    }]));
+    let store = FakeStore {
+        session: Some(account),
+        associated_configs: associated_configs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        associated_object_id,
+    );
+    for _ in 0..2 {
+        rops.extend_from_slice(&[0x0A, 0x00, 0x02]); // RopSetProperties.
+        rops.extend_from_slice(&12u16.to_le_bytes());
+        rops.extend_from_slice(&1u16.to_le_bytes());
+        rops.extend_from_slice(&0x7C06_0003u32.to_le_bytes());
+        rops.extend_from_slice(&4i32.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x7A, 0x00, 0x02]); // RopDeletePropertiesNoReplicate.
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x7C08_0102u32.to_le_bytes());
+    append_rop_save_changes_message(&mut rops, 2, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let configs = associated_configs.lock().unwrap();
+    let config = configs
+        .iter()
+        .find(|config| config.message_class == "IPM.Configuration.MessageListSettings")
+        .expect("updated associated config");
+    assert_eq!(config.properties_json["0x7c060003"]["value"], 4);
+    assert_eq!(config.properties_json["0x7c070102"]["value"], "0102");
+    assert!(config.properties_json.get("0x7c080102").is_none());
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_properties_specific_returns_folder_properties() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;

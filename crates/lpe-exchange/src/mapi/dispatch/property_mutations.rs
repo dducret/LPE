@@ -110,6 +110,36 @@ where
             Some(MapiObject::Message { .. }) => {
                 stage_message_property_values(session, handle_slots, request, values)
             }
+            Some(MapiObject::AssociatedConfig {
+                folder_id,
+                config_id,
+                saved_message,
+            }) => {
+                match associated_config_message_for_mutation(
+                    snapshot,
+                    folder_id,
+                    config_id,
+                    saved_message.as_ref(),
+                ) {
+                    Some(existing) => {
+                        match set_associated_config_properties(store, principal, &existing, values)
+                            .await
+                        {
+                            Ok(saved) => {
+                                if let Some(MapiObject::AssociatedConfig {
+                                    saved_message, ..
+                                }) = input_object_mut(session, handle_slots, request)
+                                {
+                                    *saved_message = Some(saved);
+                                }
+                                Ok(())
+                            }
+                            Err(error) => Err(error),
+                        }
+                    }
+                    None => Err(anyhow!("MAPI associated config message was not found")),
+                }
+            }
             Some(
                 object @ (MapiObject::Contact { .. }
                 | MapiObject::Event { .. }
@@ -118,7 +148,6 @@ where
                 | MapiObject::JournalEntry { .. }
                 | MapiObject::ConversationAction { .. }
                 | MapiObject::NavigationShortcut { .. }
-                | MapiObject::AssociatedConfig { .. }
                 | MapiObject::DelegateFreeBusyMessage { .. }
                 | MapiObject::PublicFolderItem { .. }
                 | MapiObject::Attachment { .. }),
@@ -284,7 +313,7 @@ pub(super) async fn append_delete_properties_response<S>(
     } else if let Some(MapiObject::AssociatedConfig {
         folder_id,
         config_id,
-        ..
+        saved_message,
     }) = object
     {
         let result = delete_associated_config_properties(
@@ -293,10 +322,16 @@ pub(super) async fn append_delete_properties_response<S>(
             folder_id,
             config_id,
             snapshot,
+            saved_message.as_ref(),
             &property_tags,
         )
         .await;
-        if let Ok(deleted_property_count) = result {
+        if let Ok((deleted_property_count, saved)) = &result {
+            if let Some(MapiObject::AssociatedConfig { saved_message, .. }) =
+                input_object_mut(session, handle_slots, request)
+            {
+                *saved_message = Some(saved.clone());
+            }
             tracing::info!(
                 adapter = "mapi",
                 endpoint = "emsmdb",

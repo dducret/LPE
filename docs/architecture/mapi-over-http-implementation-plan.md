@@ -266,6 +266,12 @@ non-canonical LPE state.
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
   identities. Real Calendar configuration FAI rows remain canonical and are
   exposed independently of the folder-local Calendar NamedView.
+  Mutations to one open associated-configuration message are cumulative on that
+  message handle through `RopSaveChangesMessage`; a later `RopSetProperties` or
+  `RopDeletePropertiesNoReplicate` in the same batch must use the updated handle
+  state rather than an older mailbox snapshot. This follows `[MS-OXOCFG]`
+  section 3.1.4.2 and the property/message ROP contracts in `[MS-OXCROPS]`
+  sections 2.2.8.6, 2.2.8.9, and 2.2.6.3.
   Folder-local named-view descriptor binaries list only real properties used by
   the visible UI columns; they must not include synthetic placeholder tags,
   table identity columns such as FolderId/MID/InstanceId/InstanceNum, or
