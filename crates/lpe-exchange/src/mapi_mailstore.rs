@@ -228,10 +228,6 @@ fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
     }
 }
 
-fn hierarchy_sync_emits_root_folder(folder_id: u64) -> bool {
-    folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-}
-
 fn local_commit_time_max(
     folder_id: u64,
     mailboxes: &[JmapMailbox],
@@ -262,9 +258,7 @@ fn sync_state_object_ids(
         mailboxes
             .iter()
             .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
-            .filter(|object_id| {
-                *object_id != folder_id || hierarchy_sync_emits_root_folder(folder_id)
-            })
+            .filter(|object_id| *object_id != folder_id)
             .collect()
     } else {
         emails
@@ -285,8 +279,7 @@ fn sync_state_change_numbers(
         let mut change_numbers = BTreeSet::new();
         change_numbers.extend(mailboxes.iter().filter_map(|mailbox| {
             let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            (object_id != folder_id || hierarchy_sync_emits_root_folder(folder_id))
-                .then(|| canonical_hierarchy_change_number(folder_id, mailbox))
+            (object_id != folder_id).then(|| canonical_hierarchy_change_number(folder_id, mailbox))
         }));
         change_numbers.into_iter().collect()
     } else {

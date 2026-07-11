@@ -936,6 +936,40 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
 }
 
 #[test]
+fn ipm_hierarchy_transfer_excludes_sync_root_and_zeros_direct_child_parent_key() {
+    let sync_root = virtual_special_mailbox(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        .expect("virtual IPM subtree folder");
+    let inbox = virtual_special_mailbox(crate::mapi::identity::INBOX_FOLDER_ID)
+        .expect("virtual Inbox folder");
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &[sync_root, inbox],
+        &[],
+        &[],
+        &[],
+        1,
+    );
+
+    let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+    // [MS-OXCFXICS] 2.2.4.3.9: only descendants are folderChange
+    // elements, and a zero-length parent source key identifies a direct child.
+    assert_eq!(summary.folder_change_count, 1);
+    assert_eq!(summary.first_folder_name(), "Inbox");
+    assert!(summary
+        .rows
+        .iter()
+        .all(|row| { row.folder_id != Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID) }));
+    assert_eq!(summary.rows[0].parent_source_key_len, 0);
+    assert_eq!(summary.final_state_idset_given_counters, vec![5]);
+    assert_eq!(summary.final_state_cnset_seen_counters, vec![5]);
+}
+
+#[test]
 fn hierarchy_parent_source_key_role_matches_microsoft_ics_root_child_rule() {
     assert_eq!(
         hierarchy_parent_source_key_role(

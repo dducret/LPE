@@ -418,28 +418,18 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             .then(left.name.cmp(&right.name))
             .then(left.id.cmp(&right.id))
         });
-        let stream_emits_sync_root_folder = hierarchy_sync_emits_root_folder(sync_root_folder_id)
-            && folders.iter().any(|mailbox| {
-                mapi_folder_id_for_mailbox(mailbox, folder_id) == sync_root_folder_id
-            });
         for mailbox in folders {
             let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            if folder_id == sync_root_folder_id
-                && !hierarchy_sync_emits_root_folder(sync_root_folder_id)
-            {
+            // [MS-OXCFXICS] 2.2.4.3.9: hierarchySync contains descendant
+            // folderChange elements, never the synchronization root itself.
+            if folder_id == sync_root_folder_id {
                 continue;
             }
             let parent_folder_id =
                 mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
             let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
             let source_key = source_key_for_store_id(folder_id);
-            let parent_source_key = if folder_id == sync_root_folder_id
-                && hierarchy_sync_emits_root_folder(sync_root_folder_id)
-            {
-                source_key_for_store_id(parent_folder_id)
-            } else if parent_folder_id == sync_root_folder_id && stream_emits_sync_root_folder {
-                source_key_for_store_id(parent_folder_id)
-            } else if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
+            let parent_source_key = if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
                 || parent_folder_id == sync_root_folder_id
             {
                 Vec::new()
