@@ -45,6 +45,7 @@ def empty_log_summary() -> dict:
         "folder_local_default_view_visibility": Counter(),
         "folder_local_default_view_visibility_contexts": Counter(),
         "broad_ipm_configuration_row_count_gaps": Counter(),
+        "draft_message_flag_issues": Counter(),
         "visible_release_without_query_rows": 0,
         "visible_inbox_query_rows": Counter(),
         "visible_inbox_query_rows_contexts": Counter(),
@@ -2382,6 +2383,40 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             "origin=0x01;request=test:91",
             summary["query_rows_terminal_origin_mismatches"],
         )
+
+    def test_draft_query_row_without_mf_unsent_is_actionable(self) -> None:
+        summary = {"draft_message_flag_issues": Counter()}
+        fields = {
+            "folder_role": "drafts",
+            "mapi_request_id": "test:98",
+            "normal_message_query_row_summary": (
+                "total=1;position=0;index=0;mid=0x0000000001a40001;"
+                "values=0x67480014=917505,0x0e070003=3,0x001a001f=IPM.Note"
+            ),
+        }
+
+        rca.record_draft_message_flag_issue(summary, fields)
+
+        self.assertIn(
+            "request=test:98;mid=0x0000000001a40001;flags=0x00000003;"
+            "missing=mfUnsent;protocol=MS-OXCMSG_2.2.1.6",
+            summary["draft_message_flag_issues"],
+        )
+
+    def test_draft_query_row_with_mf_unsent_is_not_actionable(self) -> None:
+        summary = {"draft_message_flag_issues": Counter()}
+        fields = {
+            "folder_role": "drafts",
+            "mapi_request_id": "test:98",
+            "normal_message_query_row_summary": (
+                "total=1;position=0;index=0;mid=0x0000000001a40001;"
+                "values=0x67480014=917505,0x0e070003=11,0x001a001f=IPM.Note"
+            ),
+        }
+
+        rca.record_draft_message_flag_issue(summary, fields)
+
+        self.assertFalse(summary["draft_message_flag_issues"])
 
     def test_build_scope_identifies_current_clean_and_dirty_builds(self) -> None:
         self.assertEqual(

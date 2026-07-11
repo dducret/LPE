@@ -630,7 +630,7 @@ fn write_view_column_packet(
     kind: ViewColumnKind,
 ) {
     let property_id = match kind {
-        ViewColumnKind::NamedString { .. } => property_tag >> 16,
+        ViewColumnKind::NamedString { .. } => 0,
         ViewColumnKind::NamedId { id, .. } => id,
         ViewColumnKind::Id => property_tag >> 16,
     };
@@ -657,7 +657,7 @@ fn write_view_column_packet(
         }
         ViewColumnKind::NamedString { guid, name } => {
             value.extend_from_slice(&1u32.to_le_bytes());
-            value.extend_from_slice(&property_id.to_le_bytes());
+            value.extend_from_slice(&0x0022_A764u32.to_le_bytes());
             value.extend_from_slice(&guid);
             let mut buffer = Vec::new();
             for unit in name.encode_utf16() {

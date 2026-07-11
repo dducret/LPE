@@ -291,7 +291,7 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             view.as_ref().map(|message| {
                 let definition = outlook_folder_view_definition(message.folder_id, &message.name);
                 let descriptor = view_descriptor_binary(&definition);
-                let descriptor_columns = view_descriptor_property_tags(&descriptor);
+                let descriptor_columns = view_descriptor_runtime_property_tags(&descriptor);
                 let comparable_columns = view_descriptor_comparable_selected_columns(columns);
                 missing_debug_property_tags(&comparable_columns, &descriptor_columns)
             })
@@ -325,7 +325,7 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_descriptor_named_property_c
     };
     let definition = outlook_folder_view_definition(view.folder_id, &view.name);
     let descriptor = view_descriptor_binary(&definition);
-    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let descriptor_columns = view_descriptor_runtime_property_tags(&descriptor);
     format_debug_named_property_context(session, &descriptor_columns)
 }
 
@@ -338,7 +338,7 @@ pub(in crate::mapi::dispatch) fn outlook_view_descriptor_visible_property_tags(
     };
     let definition = outlook_folder_view_definition(view.folder_id, &view.name);
     let descriptor = view_descriptor_binary(&definition);
-    view_descriptor_property_tags(&descriptor)
+    view_descriptor_runtime_property_tags(&descriptor)
 }
 
 pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
@@ -362,7 +362,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_behavior_contract(
     };
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
-    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let descriptor_columns = view_descriptor_runtime_property_tags(&descriptor);
     let mut rows = emails_for_folder(folder_id, mailboxes, emails);
     rows.retain(|email| restriction_matches_email(restriction, email));
     sort_emails(&mut rows, sort_orders);
@@ -438,7 +438,7 @@ pub(in crate::mapi::dispatch) fn format_inbox_view_descriptor_set_columns_behavi
     };
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
-    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let descriptor_columns = view_descriptor_runtime_property_tags(&descriptor);
     let comparable_columns = view_descriptor_comparable_selected_columns(columns);
     let selected_missing_descriptor_columns =
         missing_debug_property_tags(&comparable_columns, &descriptor_columns);
@@ -504,7 +504,7 @@ pub(in crate::mapi::dispatch) fn format_default_view_table_compatibility_contrac
     };
     let definition = outlook_folder_view_definition(message.folder_id, &message.name);
     let descriptor = view_descriptor_binary(&definition);
-    let descriptor_columns = view_descriptor_property_tags(&descriptor);
+    let descriptor_columns = view_descriptor_runtime_property_tags(&descriptor);
     let all_descriptor_columns = view_descriptor_all_property_tags(&descriptor);
     let descriptor_sort_column = descriptor
         .get(24..28)
@@ -737,6 +737,21 @@ fn view_descriptor_property_tags(descriptor: &[u8]) -> Vec<u32> {
     crate::mapi::properties::view_descriptor_property_tags(descriptor)
 }
 
+fn view_descriptor_runtime_property_tags(descriptor: &[u8]) -> Vec<u32> {
+    view_descriptor_property_tags(descriptor)
+        .into_iter()
+        .map(|tag| {
+            // [MS-OXOCFG] 4.2.1.11 identifies the named-string Categories
+            // column by PS_PUBLIC_STRINGS/"Keywords", with PropertyID zero.
+            if tag == 0x0000_101E {
+                (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | (tag & 0xFFFF)
+            } else {
+                tag
+            }
+        })
+        .collect()
+}
+
 pub(in crate::mapi::dispatch) fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
     matches!(
         folder_id,
@@ -774,7 +789,7 @@ mod tests {
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
-            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
+            "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
     }

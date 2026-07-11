@@ -8548,6 +8548,44 @@ fn message_row_projects_containing_folder_ids() {
 }
 
 #[test]
+fn draft_message_row_projects_mf_unsent_from_canonical_mailbox_state() {
+    let mailbox_id = Uuid::from_u128(0x8182);
+    let mut email = test_table_email(Uuid::from_u128(0x7172), mailbox_id, "Test Draft");
+    email.mailbox_role = "drafts".to_string();
+    email.mailbox_name = "Drafts".to_string();
+    email.mailbox_states[0].role = "drafts".to_string();
+    email.mailbox_states[0].name = "Drafts".to_string();
+    email.mailbox_states[0].draft = true;
+    email.sent_at = None;
+
+    let columns = [
+        PID_TAG_FOLDER_ID,
+        PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
+        PID_TAG_CONVERSATION_ID,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        OUTLOOK_MESSAGES_VIEW_BINARY_0F03_TAG,
+        PID_LID_OUTLOOK_COMMON_85EF_TAG,
+    ];
+    let row = serialize_message_row(&email, &columns);
+    let mut cursor = Cursor::new(row.as_slice());
+    let values = columns
+        .iter()
+        .map(|tag| parse_mapi_property_value(&mut cursor, *tag).unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        values[5],
+        MapiValue::U32(0x0000_0001 | 0x0000_0002 | 0x0000_0008),
+        "[MS-OXCMSG] 2.2.1.6 requires mfUnsent for a Draft Message object"
+    );
+    assert_eq!(cursor.position() as usize, row.len());
+}
+
+#[test]
 fn message_row_client_submit_time_falls_back_to_received_time() {
     let email_id = Uuid::from_u128(0x7173);
     crate::mapi::identity::remember_mapi_identity(

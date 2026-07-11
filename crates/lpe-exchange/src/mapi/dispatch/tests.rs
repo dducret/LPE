@@ -890,7 +890,7 @@ fn messages_view_handoff_descriptor_matches_observed_drafts_projection() {
         "0x0037001e",
         "0x0e060040",
         "0x0e080003",
-        "0x9000101e",
+        "0x0000101e",
     ] {
         assert!(contract.contains(tag), "{contract}");
     }

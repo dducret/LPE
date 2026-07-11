@@ -119,6 +119,7 @@ const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
     | MAPI_ACCESS_CREATE_ASSOCIATED;
 const MSGFLAG_READ: u32 = 0x0000_0001;
 const MSGFLAG_UNMODIFIED: u32 = 0x0000_0002;
+const MSGFLAG_UNSENT: u32 = 0x0000_0008;
 const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
 const ATTACH_BY_VALUE: i32 = 1;
 const ATTACH_EMBEDDED_MESSAGE: i32 = 5;
@@ -811,6 +812,16 @@ pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = MSGFLAG_UNMODIFIED;
     if !email.unread {
         flags |= MSGFLAG_READ;
+    }
+    if email
+        .mailbox_states
+        .iter()
+        .find(|state| state.mailbox_id == email.mailbox_id)
+        .is_some_and(|state| state.draft)
+    {
+        // [MS-OXCMSG] 2.2.1.6: mfUnsent identifies a message that is still
+        // being composed and is treated as a Draft Message object.
+        flags |= MSGFLAG_UNSENT;
     }
     if email.has_attachments {
         flags |= MSGFLAG_HASATTACH;

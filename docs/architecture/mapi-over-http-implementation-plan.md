@@ -158,6 +158,9 @@ non-canonical LPE state.
   `failed` rows return a parseable cannot-abort ROP error without side effects.
 - Draft save, send, move, copy, delete, read/unread, flag, attachment, and
   protected-recipient behavior must map to canonical mailbox state.
+  `PidTagMessageFlags` (`0x0E070003`) projects `mfUnsent` (`0x00000008`)
+  whenever the current canonical mailbox membership is a draft, as required by
+  `[MS-OXCMSG]` section 2.2.1.6; a Drafts table row must never claim sent state.
 - `Bcc` is protected metadata. It must not leak through MAPI search, AI-facing
   indexing, non-owner projections, or protocol shortcuts.
 - NSPI resolves the authenticated mailbox and visible contacts from canonical
@@ -284,9 +287,10 @@ non-canonical LPE state.
   The descriptor column packets follow `[MS-OXOCFG]` section 4.2 by using
   `PtypString8` / `PtypMultipleString8` for text view columns, while the
   message table projection accepts and serializes both those ANSI tags and the
-  Unicode tags Outlook also asks for in live traces. Every ColumnPacket also
-  keeps `PropertyID` equal to the low 16 bits of `ID`, including KindString
-  named-property columns, as required by `[MS-OXOCFG]` section 2.2.6.1.1.
+  Unicode tags Outlook also asks for in live traces. KindString named-property
+  columns use the portable `PropertyID = 0`, arbitrary `ID = 0x0022A764`, and
+  GUID/name encoding from the `[MS-OXOCFG]` section 4.2.1.11 Categories example;
+  Outlook resolves the mailbox property ID from the GUID and name.
   Sync Issues remains an exact-ID Outlook special folder, but startup hierarchy
   tables advertise it as a leaf until LPE backs its Conflicts, Local Failures,
   and Server Failures child folders with real canonical or compatibility

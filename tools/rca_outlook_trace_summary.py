@@ -439,6 +439,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "calendar_contract_contexts": set(),
         "calendar_contract_truncated_lines": 0,
         "query_rows_terminal_origin_mismatches": Counter(),
+        "draft_message_flag_issues": Counter(),
         "post_calendar_query_position_named_property_probes": Counter(),
         "descriptor_gap_windows": Counter(),
         "selected_extra_descriptor_columns": Counter(),
@@ -563,6 +564,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                 record_visible_inbox_query_rows(summary, fields)
             elif message == "rca debug outlook contents table query rows":
                 record_broad_ipm_configuration_row_count_gap(summary, fields)
+                record_draft_message_flag_issue(summary, fields)
             elif message == "rca debug outlook contents table query rows response":
                 record_query_rows_terminal_origin_mismatch(summary, fields)
             elif message == "rca debug mapi post calendar query position named property probe":
@@ -1712,6 +1714,29 @@ def record_query_rows_terminal_origin_mismatch(
     summary["query_rows_terminal_origin_mismatches"][key] += 1
 
 
+def record_draft_message_flag_issue(
+    summary: dict[str, Any], fields: dict[str, Any]
+) -> None:
+    if field_text(fields, "folder_role").lower() != "drafts":
+        return
+    row_summary = field_text(fields, "normal_message_query_row_summary")
+    for row in row_summary.split(";index="):
+        flags_match = re.search(r"(?:^|,)0x0e070003=(\d+)(?:,|$)", row)
+        if not flags_match:
+            continue
+        flags = int(flags_match.group(1))
+        if flags & 0x0000_0008:
+            continue
+        mid_match = re.search(r"(?:^|;)mid=(0x[0-9a-fA-F]+)", row)
+        key = (
+            f"request={field_text(fields, 'mapi_request_id') or 'unknown'};"
+            f"mid={mid_match.group(1).lower() if mid_match else 'unknown'};"
+            f"flags=0x{flags:08x};missing=mfUnsent;"
+            "protocol=MS-OXCMSG_2.2.1.6"
+        )
+        summary["draft_message_flag_issues"][key] += 1
+
+
 def record_descriptor_gap(
     summary: dict[str, Any], text: str, fields: dict[str, Any] | None = None
 ) -> None:
@@ -2412,6 +2437,11 @@ def print_single_summary(
             log["broad_ipm_configuration_row_count_gaps"],
             limit=12,
         )
+        print_counter(
+            "Draft message-flag contract issues",
+            log["draft_message_flag_issues"],
+            limit=12,
+        )
         print_counter("Hierarchy QueryRows windows", log["hierarchy_query_windows"], limit=12)
         print_counter(
             "Default-view folder open without QueryRows",
@@ -2631,12 +2661,19 @@ def verdict_for_summary(
         return "RR trace is stale or mispaired; exclude it from this journal run."
     if rr["nonzero_response_codes"] or rr["parse_errors"]:
         return "RR trace shows protocol/parse errors before client stoppage."
-    if log_path and actionable_issue_buckets(rr, log, log_path):
-        return "transport is clean; journal diagnostics contain actionable MAPI/view issues."
-    if log_path and log["stall_warnings"]:
-        return "transport is clean; startup stall diagnostics identify a server-side MAPI bootstrap stop."
-    if log_path and log["startup_missing_gates"]:
-        return "transport is clean; startup gate diagnostics identify the next missing Outlook bootstrap step."
+    if log_path:
+        issues = issue_buckets(rr, log, log_path)
+        if any(
+            issue != "no_server_issue_detected"
+            and not (issue.startswith("stall:") or issue.startswith("missing_gate:"))
+            for issue in issues
+        ):
+            return "transport is clean; journal diagnostics contain actionable MAPI/view issues."
+        if any(
+            issue.startswith("stall:") or issue.startswith("missing_gate:")
+            for issue in issues
+        ):
+            return "transport is clean; startup stall diagnostics identify a server-side MAPI bootstrap stop."
     return "transport is clean; if Outlook still crashes, ETL/client crash data may be useful."
 
 
@@ -3746,6 +3783,8 @@ def issue_buckets(
     if log.get("query_rows_terminal_origin_mismatches"):
         for name, _count in log["query_rows_terminal_origin_mismatches"].most_common(2):
             issues.append(f"query_rows_terminal_origin:{name}")
+    if log.get("draft_message_flag_issues"):
+        issues.append("draft_message_flags_missing_mfUnsent")
     if log.get("post_calendar_query_position_named_property_probes"):
         for name, _count in log[
             "post_calendar_query_position_named_property_probes"

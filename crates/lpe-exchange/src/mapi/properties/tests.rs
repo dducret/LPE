@@ -4867,7 +4867,7 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
             (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_MESSAGE_SIZE,
-            (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E,
+            0x0000_101E,
         ]
     );
     assert_eq!(
@@ -4937,11 +4937,10 @@ fn messages_view_definition_matches_outlook_visible_inbox_projection() {
             (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_MESSAGE_SIZE,
-            (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E,
+            0x0000_101E,
         ]
     );
-    assert!(descriptor_column_property_tags(&descriptor)
-        .contains(&((PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E)));
+    assert!(descriptor_column_property_tags(&descriptor).contains(&0x0000_101E));
 }
 
 #[test]
@@ -4953,10 +4952,11 @@ fn outlook_compact_view_definition_binary_matches_visible_trace_contract() {
 }
 
 #[test]
-fn view_descriptor_column_property_id_matches_id_low_word() {
+fn view_descriptor_named_string_column_matches_microsoft_example() {
     let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
     let column_count = u32::from_le_bytes(descriptor[20..24].try_into().unwrap()) as usize;
     let mut offset = 60usize;
+    let mut named_string_found = false;
 
     for column in 0..column_count {
         let property_id =
@@ -4964,10 +4964,16 @@ fn view_descriptor_column_property_id_matches_id_low_word() {
         let flags = u32::from_le_bytes(descriptor[offset + 12..offset + 16].try_into().unwrap());
         let kind = u32::from_le_bytes(descriptor[offset + 28..offset + 32].try_into().unwrap());
         let id = u32::from_le_bytes(descriptor[offset + 32..offset + 36].try_into().unwrap());
-        assert_eq!(
-            property_id, id as u16,
-            "[MS-OXOCFG] 2.2.6.1.1 column {column}"
-        );
+        if kind == 1 {
+            assert_eq!(property_id, 0, "[MS-OXOCFG] 4.2.1.11 column {column}");
+            assert_eq!(id, 0x0022_A764, "[MS-OXOCFG] 4.2.1.11 column {column}");
+            named_string_found = true;
+        } else {
+            assert_eq!(
+                property_id, id as u16,
+                "[MS-OXOCFG] 2.2.6.1.1 column {column}"
+            );
+        }
 
         offset += 36;
         if flags & 0x0000_1000 != 0 {
@@ -4979,6 +4985,7 @@ fn view_descriptor_column_property_id_matches_id_low_word() {
             }
         }
     }
+    assert!(named_string_found);
     assert_eq!(offset, descriptor.len());
 }
 
@@ -5086,7 +5093,7 @@ fn common_view_sent_to_descriptor_uses_recipient_columns() {
             (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E,
             PID_TAG_CLIENT_SUBMIT_TIME,
             PID_TAG_MESSAGE_SIZE,
-            (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E,
+            0x0000_101E,
         ]
     );
     assert_eq!(
@@ -5209,7 +5216,7 @@ fn folder_default_view_definitions_use_type_specific_columns() {
             (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x001E,
             PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_MESSAGE_SIZE,
-            (PID_NAME_KEYWORDS_TAG & 0xFFFF_0000) | 0x101E,
+            0x0000_101E,
         ]
     );
     assert_eq!(
