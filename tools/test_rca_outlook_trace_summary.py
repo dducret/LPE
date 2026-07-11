@@ -566,7 +566,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             "descriptor_summary=version=8;column_count=11;"
             "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,"
             "0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,"
-            "0x9000101e;"
+            "0x0000101e;"
             "descriptor_query_window=total_rows=1;position=0;requested=40;"
             "selected_missing_descriptor_columns=",
         )

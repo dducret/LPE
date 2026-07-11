@@ -8550,7 +8550,12 @@ fn message_row_projects_containing_folder_ids() {
 #[test]
 fn draft_message_row_projects_mf_unsent_from_canonical_mailbox_state() {
     let mailbox_id = Uuid::from_u128(0x8182);
-    let mut email = test_table_email(Uuid::from_u128(0x7172), mailbox_id, "Test Draft");
+    let email_id = Uuid::from_u128(0x7172);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x82),
+    );
+    let mut email = test_table_email(email_id, mailbox_id, "Test Draft");
     email.mailbox_role = "drafts".to_string();
     email.mailbox_name = "Drafts".to_string();
     email.mailbox_states[0].role = "drafts".to_string();
@@ -8579,7 +8584,7 @@ fn draft_message_row_projects_mf_unsent_from_canonical_mailbox_state() {
 
     assert_eq!(
         values[5],
-        MapiValue::U32(0x0000_0001 | 0x0000_0002 | 0x0000_0008),
+        MapiValue::I32(0x0000_0001 | 0x0000_0002 | 0x0000_0008),
         "[MS-OXCMSG] 2.2.1.6 requires mfUnsent for a Draft Message object"
     );
     assert_eq!(cursor.position() as usize, row.len());
