@@ -365,6 +365,9 @@ fn format_calendar_contract_invariant_issues(
     if descriptor_strings.is_empty() {
         issues.push("descriptor_strings_missing");
     }
+    if view_descriptor_sort_direction_matches_column_flags(descriptor) == Some(false) {
+        issues.push("descriptor_sort_direction_conflict");
+    }
     if named_id_reuse != "none" {
         issues.push("named_property_id_reused");
     }

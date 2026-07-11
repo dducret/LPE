@@ -5131,8 +5131,9 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     );
 
     assert_eq!(calendar.kind, ViewDefinitionKind::CalendarCompact);
+    let calendar_descriptor = view_descriptor_binary(&calendar);
     assert_eq!(
-        descriptor_column_property_tags(&view_descriptor_binary(&calendar)),
+        descriptor_column_property_tags(&calendar_descriptor),
         vec![
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
@@ -5147,6 +5148,16 @@ fn folder_default_view_definitions_use_type_specific_columns() {
     assert_eq!(
         view_descriptor_strings(&calendar),
         "\nIcon\nSubject\nMessage Flags\nMessage Status\nStart\nEnd\nLocation\nBusy\n"
+    );
+    assert_eq!(
+        u32::from_le_bytes(calendar_descriptor[12..16].try_into().unwrap()),
+        0,
+        "[MS-OXOCFG] 2.2.6.1 declares the Calendar view ascending"
+    );
+    assert_eq!(
+        u32::from_le_bytes(calendar_descriptor[252..256].try_into().unwrap()) & 0x0000_0040,
+        0,
+        "[MS-OXOCFG] 2.2.6.1.1 sorted Start column cannot declare VCDF_SORTDESCENDING"
     );
 
     assert_eq!(task.kind, ViewDefinitionKind::TaskList);

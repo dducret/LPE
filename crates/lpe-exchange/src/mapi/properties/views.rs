@@ -589,6 +589,8 @@ fn view_named_string_column(
 }
 
 pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Vec<u8> {
+    const VCDF_SORTDESCENDING: u32 = 0x0000_0040;
+
     let column_count = definition.columns.len() + 1;
     let mut value = Vec::with_capacity(60 + column_count * 36);
     value.extend_from_slice(&[0; 8]);
@@ -609,12 +611,21 @@ pub(in crate::mapi) fn view_descriptor_binary(definition: &ViewDefinition) -> Ve
     value.extend_from_slice(&[0; 24]);
 
     write_view_column_packet(&mut value, 0x0004_0001, 7, 0x0000_0028, ViewColumnKind::Id);
-    for column in &definition.columns {
+    for (index, column) in definition.columns.iter().enumerate() {
+        let flags = if index == definition.sort_column {
+            if definition.sort_descending {
+                column.flags | VCDF_SORTDESCENDING
+            } else {
+                column.flags & !VCDF_SORTDESCENDING
+            }
+        } else {
+            column.flags
+        };
         write_view_column_packet(
             &mut value,
             column.property_tag,
             column.width,
-            column.flags,
+            flags,
             column.kind,
         );
     }

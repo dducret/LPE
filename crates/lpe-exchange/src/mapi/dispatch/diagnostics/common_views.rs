@@ -661,6 +661,15 @@ pub(in crate::mapi::dispatch) fn format_view_descriptor_binary_summary(
         .get(24..28)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u32::from_le_bytes);
+    let sort_column_flags =
+        sort_column.and_then(|index| view_descriptor_column_flags(descriptor, index));
+    let sort_direction_matches_column_flags =
+        flags
+            .zip(sort_column_flags)
+            .map(|(view_flags, column_flags)| {
+                matches!(view_flags, 0x0000_0000 | 0x0000_0002)
+                    && (view_flags == 0x0000_0002) == (column_flags & 0x0000_0040 != 0)
+            });
     let group_count = descriptor
         .get(28..32)
         .and_then(|bytes| bytes.try_into().ok())
@@ -675,7 +684,7 @@ pub(in crate::mapi::dispatch) fn format_view_descriptor_binary_summary(
     let restriction_bytes = descriptor.len().saturating_sub(expected_column_bytes);
 
     format!(
-        "version={};ul_flags={};column_count={};sort_column={};group_count={};ul_cat_sort={};restriction_bytes={restriction_bytes};column_tags={};visible_column_tags={}",
+        "version={};ul_flags={};column_count={};sort_column={};sort_column_flags={};sort_direction_matches_column_flags={};group_count={};ul_cat_sort={};restriction_bytes={restriction_bytes};column_tags={};visible_column_tags={}",
         version
             .map(|value| value.to_string())
             .unwrap_or_else(|| "missing".to_string()),
@@ -688,6 +697,12 @@ pub(in crate::mapi::dispatch) fn format_view_descriptor_binary_summary(
         sort_column
             .map(|value| value.to_string())
             .unwrap_or_else(|| "missing".to_string()),
+        sort_column_flags
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        sort_direction_matches_column_flags
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
         group_count
             .map(|value| value.to_string())
             .unwrap_or_else(|| "missing".to_string()),
@@ -697,6 +712,51 @@ pub(in crate::mapi::dispatch) fn format_view_descriptor_binary_summary(
         format_debug_property_tags(&all_column_tags),
         format_debug_property_tags(&visible_column_tags)
     )
+}
+
+pub(in crate::mapi::dispatch) fn view_descriptor_sort_direction_matches_column_flags(
+    descriptor: &[u8],
+) -> Option<bool> {
+    let view_flags = descriptor
+        .get(12..16)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)?;
+    let sort_column = descriptor
+        .get(24..28)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)?;
+    let column_flags = view_descriptor_column_flags(descriptor, sort_column)?;
+    matches!(view_flags, 0x0000_0000 | 0x0000_0002)
+        .then_some((view_flags == 0x0000_0002) == (column_flags & 0x0000_0040 != 0))
+}
+
+fn view_descriptor_column_flags(descriptor: &[u8], target: u32) -> Option<u32> {
+    let column_count = view_descriptor_column_count(descriptor)?;
+    if target >= column_count {
+        return None;
+    }
+    let mut offset = 60usize;
+    for index in 0..column_count {
+        let packet = descriptor.get(offset..offset + 36)?;
+        let flags = u32::from_le_bytes(packet[12..16].try_into().ok()?);
+        let kind = u32::from_le_bytes(packet[28..32].try_into().ok()?);
+        if index == target {
+            return Some(flags);
+        }
+        offset = offset.checked_add(36)?;
+        if flags & 0x0000_1000 == 0 {
+            continue;
+        }
+        offset = offset.checked_add(16)?;
+        if kind == 1 {
+            let buffer_length = descriptor
+                .get(offset..offset + 4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u32::from_le_bytes)? as usize;
+            offset = offset.checked_add(4)?.checked_add(buffer_length)?;
+        }
+    }
+    None
 }
 
 fn view_descriptor_column_count(descriptor: &[u8]) -> Option<u32> {
@@ -786,12 +846,29 @@ mod tests {
         assert!(summary.contains("version=8"));
         assert!(summary.contains("column_count=11"));
         assert!(summary.contains("sort_column=8"));
+        assert!(summary.contains("sort_direction_matches_column_flags=true"));
         assert!(summary.contains("restriction_bytes=0"));
         assert!(summary.contains("column_tags=0x00040001"));
         assert!(summary.contains(
             "visible_column_tags=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x0000101e"
         ));
         assert!(summary.contains("0x0e060040"));
+    }
+
+    #[test]
+    fn calendar_descriptor_diagnostic_detects_conflicting_descending_column_flag() {
+        let definition = outlook_folder_view_definition(CALENDAR_FOLDER_ID, "Calendar");
+        let mut descriptor = view_descriptor_binary(&definition);
+
+        assert_eq!(
+            view_descriptor_sort_direction_matches_column_flags(&descriptor),
+            Some(true)
+        );
+        descriptor[252] |= 0x40;
+        assert_eq!(
+            view_descriptor_sort_direction_matches_column_flags(&descriptor),
+            Some(false)
+        );
     }
 
     #[test]
