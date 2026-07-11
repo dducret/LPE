@@ -3043,6 +3043,85 @@ fn umolk_associated_config_property_burst_reports_absent_values_not_found() {
 }
 
 #[test]
+fn umolk_trace_property_burst_does_not_fabricate_optional_standard_values() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let config_id = crate::mapi::identity::mapi_store_id(0x4325);
+    let object = MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        config_id,
+        saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+            id: config_id,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555557").unwrap(),
+            message_class: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+            subject: "IPM.Configuration.UMOLK.UserOptions".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "0102"}
+            }),
+        }),
+    };
+    // This is the optional-standard-property portion of Outlook 16 request :109
+    // from the 202607111201 startup trace. Missing values require a flagged row;
+    // see [MS-OXCROPS] 2.2.8.3.2 and [MS-OXCDATA] 2.8.1.2.
+    let absent_tags = [
+        PID_TAG_RTF_IN_SYNC,
+        PID_TAG_RTF_COMPRESSED,
+        PID_TAG_DISPLAY_TO_W,
+        PID_TAG_REPLY_TIME,
+        PID_TAG_PRIORITY,
+        PID_TAG_NATIVE_BODY,
+    ];
+    let mut tags = absent_tags.to_vec();
+    tags.extend([PID_TAG_MESSAGE_CLASS_W, PID_TAG_ROAMING_DATATYPES]);
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+    for tag in &tags {
+        payload.extend_from_slice(&tag.to_le_bytes());
+    }
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific as u8,
+        input_handle_index: Some(3),
+        output_handle_index: None,
+        payload,
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
+    let mut cursor = Cursor::new(&response[7..]);
+    for tag in absent_tags {
+        assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
+        assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F, "tag {tag:#010x}");
+    }
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
+        MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string())
+    );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
+        MapiValue::I32(4)
+    );
+}
+
+#[test]
 fn contacts_helper_associated_getprops_projects_empty_modeled_values() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),

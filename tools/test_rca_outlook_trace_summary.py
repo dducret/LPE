@@ -413,6 +413,33 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             rca.issue_buckets({"nonzero_response_codes": Counter(), "parse_errors": Counter()}, summary, None),
         )
 
+    def test_umolk_known_standard_defaulted_tags_are_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x0e1f000b;names=PidTagRtfInSync;"
+            "problem_tags=;zero_default_tags=0x0e1f000b;response=0x00000000)",
+            {
+                "object_kind": "associated_config",
+                "associated_config_class": "IPM.Configuration.UMOLK.UserOptions",
+            },
+        )
+
+        self.assertEqual(
+            summary["umolk_optional_defaulted_getprops_tags"],
+            Counter({"0x0e1f000b": 1}),
+        )
+        self.assertIn(
+            "umolk_optional_defaulted_getprops_type:0x000b",
+            rca.issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+        )
+
     def test_non_config_unknown_getprops_defaulted_tags_remain_actionable(self) -> None:
         summary = empty_log_summary()
 

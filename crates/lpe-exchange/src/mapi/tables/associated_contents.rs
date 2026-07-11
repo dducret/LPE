@@ -624,6 +624,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
         .or_else(|| {
+            if crate::mapi_store::is_outlook_umolk_user_options_message_class(
+                &message.message_class,
+            ) && !is_umolk_computed_property(lookup_tag)
+            {
+                return None;
+            }
             let change_number = mapi_mailstore::change_number_for_store_id(message.id);
             match lookup_tag {
                 PID_TAG_MID => Some(MapiValue::U64(message.id)),
@@ -994,6 +1000,49 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 _ => None,
             }
         })
+}
+
+fn is_umolk_computed_property(property_tag: u32) -> bool {
+    matches!(
+        property_tag,
+        PID_TAG_MID
+            | PID_TAG_INST_ID
+            | PID_TAG_INSTANCE_NUM
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_INSTANCE_KEY
+            | PID_TAG_SUBJECT_W
+            | PID_TAG_NORMALIZED_SUBJECT_W
+            | PID_TAG_CONVERSATION_TOPIC_W
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_ORIGINAL_MESSAGE_CLASS_W
+            | PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_MESSAGE_STATUS
+            | PID_TAG_ACCESS_LEVEL
+            | PID_TAG_ACCESS
+            | PID_TAG_CLIENT_SUBMIT_TIME
+            | PID_TAG_CREATION_TIME
+            | PID_TAG_ASSOCIATED
+            | PID_TAG_MESSAGE_SIZE
+            | PID_TAG_MESSAGE_SIZE_EXTENDED
+            | PID_TAG_FOLDER_ID
+            | PID_TAG_PARENT_FOLDER_ID
+            | PID_TAG_SOURCE_KEY
+            | PID_TAG_RECORD_KEY
+            | PID_TAG_SEARCH_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_PARENT_ENTRY_ID
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+            | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_ROAMING_DATATYPES
+            | PID_TAG_ROAMING_DICTIONARY
+            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+            | PID_NAME_CONTENT_CLASS_W_TAG
+            | PID_NAME_CONTENT_TYPE_W_TAG
+    )
 }
 
 fn associated_config_last_modified_filetime(message: &MapiAssociatedConfigMessage) -> Option<u64> {

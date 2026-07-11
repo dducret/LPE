@@ -342,9 +342,12 @@ non-canonical LPE state.
   real modeled or persisted properties such as `PidTagRoamingDatatypes` and
   `PidTagRoamingDictionary`, but absent optional properties are reported as
   `ecNotFound` in `RopGetPropertiesSpecific` instead of being fabricated as
-  typed zero values. This follows `[MS-OXOCFG]` configuration-data storage and
-  `[MS-OXCDATA]` property error semantics while leaving Outlook free to use or
-  persist its own defaults.
+  typed zero values. This applies to optional standard message properties as
+  well as named properties; computed identity, change-tracking, and required
+  configuration-stream properties remain available. This follows
+  `[MS-OXCROPS]` section 2.2.8.3.2, `[MS-OXCDATA]` sections 2.8.1 and 2.8.1.2,
+  and `[MS-OXOCFG]` configuration-data storage while leaving Outlook free to
+  use or persist its own defaults.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`

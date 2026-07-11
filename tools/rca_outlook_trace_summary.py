@@ -1937,7 +1937,8 @@ def inspect_contract(
         tag for key in ("zero_default_tags=", "zero_defaults=") for tag in tags_after(contract, key)
     }
     problem_tags = set(problem_tags_after(contract, "problem_tags="))
-    for tag in unknown_named_tags(contract):
+    unknown_tags = set(unknown_named_tags(contract))
+    for tag in unknown_tags:
         if tag in resolved_named_tags:
             continue
         if tag in problem_tags:
@@ -1953,6 +1954,12 @@ def inspect_contract(
             record_getprops_problem_tag(summary, tag, contract, fields)
     for tag in zero_default_tags:
         summary["zero_default_tags"][tag] += 1
+        if tag not in unknown_tags and (
+            field_text(fields or {}, "object_kind") or first_field(contract, "kind")
+        ) == "associated_config":
+            record_unknown_getprops_tag(
+                summary, tag, contract, fields, "optional-standard-defaulted"
+            )
 
 
 def record_getprops_problem_tag(
