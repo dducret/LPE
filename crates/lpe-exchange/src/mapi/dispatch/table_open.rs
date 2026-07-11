@@ -436,12 +436,7 @@ pub(super) fn default_view_contents_table_initial_sort(
     associated: bool,
     container_class: &str,
 ) -> Vec<MapiSortOrder> {
-    // The working Calendar trace advertises its folder-local view but opens the
-    // Normal contents table without applying the descriptor sort implicitly.
-    if associated
-        || folder_id == CALENDAR_FOLDER_ID
-        || !default_view_supported_folder(folder_id, container_class)
-    {
+    if associated || !default_view_supported_folder(folder_id, container_class) {
         return Vec::new();
     }
     let view_name = if folder_id == SENT_FOLDER_ID {
