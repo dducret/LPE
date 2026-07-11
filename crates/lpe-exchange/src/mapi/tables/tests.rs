@@ -4946,7 +4946,24 @@ fn common_views_query_rows_uses_wlink_sort_order() {
 
 #[test]
 fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
-    let snapshot = MapiMailStoreSnapshot::empty();
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let shortcut_id = Uuid::from_u128(0x359);
+    crate::mapi::identity::remember_mapi_identity(shortcut_id, 0x0000_0000_0359_0001);
+    let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+        crate::store::MapiNavigationShortcutRecord {
+            id: shortcut_id,
+            account_id,
+            subject: "Calendar".to_string(),
+            target_folder_id: Some(CALENDAR_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0x0010_0000,
+            save_stamp: 0x4f30_48f7,
+            section: 3,
+            ordinal: 127,
+            group_header_id: None,
+            group_name: "My Calendars".to_string(),
+        },
+    ]);
     let columns = vec![
         PID_TAG_FOLDER_ID,
         PID_TAG_MID,
@@ -4963,6 +4980,8 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
         0x6847_0003,
         0x6848_0003,
         0x6853_0003,
+        PID_TAG_WLINK_ADDRESS_BOOK_EID,
+        PID_TAG_WLINK_CLIENT_ID,
     ];
     let sort_orders = vec![
         MapiSortOrder {
@@ -4976,6 +4995,30 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
     ];
     let mut expected = snapshot.common_views_table_messages().collect::<Vec<_>>();
     sort_common_views_messages(&mut expected, &sort_orders);
+    let calendar_shortcut = expected
+        .iter()
+        .find(|message| {
+            matches!(
+                message,
+                MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                    if shortcut.target_folder_id == Some(CALENDAR_FOLDER_ID)
+            )
+        })
+        .expect("canonical Common Views rows include the Calendar shortcut");
+    assert_eq!(
+        common_views_message_property_value(
+            calendar_shortcut,
+            account_id,
+            PID_TAG_WLINK_ADDRESS_BOOK_EID,
+        ),
+        None,
+        "the server must not advertise an unresolvable owner NSPI EntryID"
+    );
+    assert_eq!(
+        common_views_message_property_value(calendar_shortcut, account_id, PID_TAG_WLINK_CLIENT_ID,),
+        None,
+        "the server must not advertise a fabricated Outlook Client ID"
+    );
     let mut table = MapiObject::ContentsTable {
         folder_id: COMMON_VIEWS_FOLDER_ID,
         associated: true,
@@ -5002,7 +5045,7 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
         &[],
         &[],
         &snapshot,
-        Uuid::nil(),
+        account_id,
     );
 
     assert_eq!(
@@ -5012,12 +5055,12 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
     let mut cursor = Cursor::new(&response[9..]);
     for message in expected {
         let missing = columns.iter().any(|column| {
-            common_views_message_property_value(&message, Uuid::nil(), *column).is_none()
+            common_views_message_property_value(&message, account_id, *column).is_none()
         });
         assert!(missing);
         assert_eq!(cursor.read_u8().unwrap(), 1);
         for column in &columns {
-            if common_views_message_property_value(&message, Uuid::nil(), *column).is_some() {
+            if common_views_message_property_value(&message, account_id, *column).is_some() {
                 assert_eq!(cursor.read_u8().unwrap(), 0);
                 parse_mapi_property_value(&mut cursor, *column).unwrap();
             } else {

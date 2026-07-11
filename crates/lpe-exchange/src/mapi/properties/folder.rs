@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::ExchangeAddressBookEntryDetails;
 
 const FOLDER_IPM_SUBTREE_VALID: u32 = 0x0000_0001;
 const FOLDER_IPM_INBOX_VALID: u32 = 0x0000_0002;

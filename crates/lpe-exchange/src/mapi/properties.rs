@@ -12,7 +12,6 @@ use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiAttachment, MapiCommonViewNamedViewMessage,
     MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
-use crate::store::ExchangeAddressBookEntryDetails;
 use anyhow::bail;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_domain::{civil_from_days, days_from_civil};
@@ -981,14 +980,16 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_WLINK_CALENDAR_COLOR if navigation_shortcut_targets_calendar(message) => {
             Some(MapiValue::I32(-1))
         }
-        PID_TAG_WLINK_ADDRESS_BOOK_EID if navigation_shortcut_targets_calendar(message) => Some(
-            MapiValue::Binary(navigation_shortcut_owner_entry_id(account_id)),
-        ),
+        // [MS-OXOCFG] sections 2.2.9.16, 2.2.9.18, and 3.1.3.1 make
+        // these optional values client-owned. A server-created shortcut cannot
+        // synthesize either the owner's NSPI EntryID or an Outlook Client ID.
+        PID_TAG_WLINK_ADDRESS_BOOK_EID | PID_TAG_WLINK_CLIENT_ID
+            if navigation_shortcut_targets_calendar(message) =>
+        {
+            None
+        }
         PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => Some(
             MapiValue::Binary(mapi_mailstore::private_store_entry_id(account_id)),
-        ),
-        PID_TAG_WLINK_CLIENT_ID if navigation_shortcut_targets_calendar(message) => Some(
-            MapiValue::Binary(wlink_save_stamp(message).to_le_bytes().to_vec()),
         ),
         PID_TAG_WLINK_RO_GROUP_TYPE if navigation_shortcut_targets_calendar(message) => {
             Some(MapiValue::I32(-1))
@@ -1008,19 +1009,6 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
 fn navigation_shortcut_targets_calendar(message: &MapiNavigationShortcutMessage) -> bool {
     message.shortcut_type != 4
         && (message.section == 3 || message.target_folder_id == Some(CALENDAR_FOLDER_ID))
-}
-
-fn navigation_shortcut_owner_entry_id(account_id: Uuid) -> Vec<u8> {
-    let entry = ExchangeAddressBookEntry {
-        id: account_id,
-        display_name: String::new(),
-        email: String::new(),
-        entry_kind: ExchangeAddressBookEntryKind::Account,
-        directory_kind: ExchangeAddressBookDirectoryKind::Person,
-        member_emails: Vec::new(),
-        details: ExchangeAddressBookEntryDetails::default(),
-    };
-    super::nspi::nspi_entry_permanent_entry_id(&entry)
 }
 
 fn is_sharing_local_folder_id_property_tag(property_tag: u32) -> bool {

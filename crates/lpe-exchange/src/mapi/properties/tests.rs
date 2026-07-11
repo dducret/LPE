@@ -4681,9 +4681,8 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_ADDRESS_BOOK_EID),
-        Some(MapiValue::Binary(navigation_shortcut_owner_entry_id(
-            account_id
-        )))
+        None,
+        "a server-created shortcut must not fabricate the folder owner's NSPI EntryID"
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,),
@@ -4693,7 +4692,8 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CLIENT_ID),
-        Some(MapiValue::Binary(0x1234_5678u32.to_le_bytes().to_vec()))
+        None,
+        "PidTagWlinkClientID belongs to the Outlook installation that created the shortcut"
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_RO_GROUP_TYPE),
