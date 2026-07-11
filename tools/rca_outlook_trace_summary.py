@@ -20,6 +20,7 @@ from typing import Any
 HEX_TAG_RE = re.compile(r"0x[0-9a-fA-F]{8}")
 RUN_STAMP_RE = re.compile(r"(\d{12})")
 FRAME_PREVIEW_RE = re.compile(r"preview=([0-9a-fA-F]+)")
+MAPI_REQUEST_SESSION_RE = re.compile(r"^(\{[^}]+\}):\d+$")
 UMOLK_USER_OPTIONS_CLASS = "IPM.Configuration.UMOLK.UserOptions"
 UMOLK_MANDATORY_DICTIONARY_TAGS = {
     "0x7c060003": "PidTagRoamingDatatypes",
@@ -252,6 +253,7 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
         "setcolumns_release_response_frames": Counter(),
         "setcolumns_release_response_previews": Counter(),
         "setcolumns_release_response_handle_classifications": Counter(),
+        "mapi_request_sessions": set(),
     }
     for path in trace_jsonl_paths(trace_dir):
         summary["files"] += 1
@@ -262,6 +264,9 @@ def summarize_rr(trace_dir: Path) -> dict[str, Any]:
                     continue
                 summary["events"] += 1
                 metadata = event.get("metadata") or {}
+                record_mapi_request_session(
+                    summary["mapi_request_sessions"], metadata.get("mapi_request_id")
+                )
                 session_id = event.get("session_id") or "unknown"
                 summary["session_event_tails"][session_id].append(
                     rr_event_tail_summary(event, metadata)
@@ -463,6 +468,7 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
         "zero_default_tags": Counter(),
         "hierarchy_query_windows": Counter(),
         "hierarchy_query_samples": deque(maxlen=8),
+        "mapi_request_sessions": set(),
     }
     if not log_path:
         return summary
@@ -479,6 +485,9 @@ def summarize_log(log_path: Path | None) -> dict[str, Any]:
                     summary["calendar_contract_truncated_lines"] += 1
                 continue
             fields = event.get("fields") or {}
+            record_mapi_request_session(
+                summary["mapi_request_sessions"], fields.get("mapi_request_id")
+            )
             message = fields.get("message") or ""
             record_default_view_folder_open_without_rows(summary, fields)
             record_query_position_wire_fields(summary, fields)
@@ -2175,6 +2184,24 @@ def classify_unknown_getprops_tag(tag: str) -> str:
     return "unconfirmed-standard-range"
 
 
+def record_mapi_request_session(sessions: set[str], request_id: Any) -> None:
+    match = MAPI_REQUEST_SESSION_RE.match(str(request_id or ""))
+    if match:
+        sessions.add(match.group(1).upper())
+
+
+def mismatched_capture_sessions(
+    rr: dict[str, Any], log: dict[str, Any], log_path: Path | None
+) -> tuple[set[str], set[str]] | None:
+    if not log_path:
+        return None
+    rr_sessions = set(rr.get("mapi_request_sessions") or ())
+    log_sessions = set(log.get("mapi_request_sessions") or ())
+    if rr_sessions and log_sessions and rr_sessions.isdisjoint(log_sessions):
+        return rr_sessions, log_sessions
+    return None
+
+
 def print_single_summary(
     trace_dir: Path, log_path: Path | None
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
@@ -2239,6 +2266,14 @@ def print_single_summary(
                 f"dirty={format_build_dirty(log['build'].get('git_dirty'))}"
             )
         print(f"Journal lines/execute events: {log['lines']}/{log['execute_events']}")
+        capture_mismatch = mismatched_capture_sessions(rr, log, log_path)
+        if capture_mismatch:
+            rr_sessions, log_sessions = capture_mismatch
+            print(
+                "Capture/journal EMSMDB session mismatch: "
+                f"rr={','.join(sorted(rr_sessions))};"
+                f"journal={','.join(sorted(log_sessions))}"
+            )
         print_counter("Startup first missing gates", log["startup_missing_gates"])
         print_counter("Execute stall names", log["stall_warnings"])
         print_counter("Journal ROP sequence signatures", log["sequence_counts"], limit=20)
@@ -2576,6 +2611,8 @@ def print_single_summary(
 def verdict_for_summary(
     rr: dict[str, Any], log: dict[str, Any], log_path: Path | None
 ) -> str:
+    if mismatched_capture_sessions(rr, log, log_path):
+        return "RR trace is stale or mispaired; exclude it from this journal run."
     if rr["nonzero_response_codes"] or rr["parse_errors"]:
         return "RR trace shows protocol/parse errors before client stoppage."
     if log_path and actionable_issue_buckets(rr, log, log_path):

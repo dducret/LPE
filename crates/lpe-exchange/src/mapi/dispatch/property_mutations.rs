@@ -29,6 +29,47 @@ where
         set_properties_object.as_ref(),
         &set_properties_probe,
     );
+    if let Some(MapiObject::AssociatedConfig {
+        folder_id,
+        config_id,
+        saved_message,
+    }) = set_properties_object.as_ref()
+    {
+        let existing = associated_config_message_for_mutation(
+            snapshot,
+            *folder_id,
+            *config_id,
+            saved_message.as_ref(),
+        );
+        let existing_property_tags = existing
+            .as_ref()
+            .map(|message| {
+                let mut tags = mapi_properties_from_json(&message.properties_json)
+                    .into_keys()
+                    .collect::<Vec<_>>();
+                tags.sort_unstable();
+                format_debug_property_tags(&tags)
+            })
+            .unwrap_or_default();
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = %rop_id_hex(request.rop_id),
+            input_handle_index = request.input_handle_index().unwrap_or(0),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            config_id = format_args!("0x{config_id:016x}"),
+            existing_property_tags = %existing_property_tags,
+            property_tags = %format_debug_property_tags(&set_properties_probe.property_tags),
+            property_value_shapes = %set_properties_probe.property_value_shapes,
+            associated_config_stream_summary = %set_properties_probe.associated_config_stream_summary,
+            parse_error = %set_properties_probe.parse_error,
+            "rca debug mapi set associated config properties"
+        );
+    }
     session.record_recent_probe_action(format!(
         "{}(in={},kind={},folder={},tags={})",
         rop_id_hex(request.rop_id),

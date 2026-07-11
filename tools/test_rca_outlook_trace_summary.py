@@ -107,6 +107,20 @@ def empty_log_summary() -> dict:
 
 
 class RcaOutlookTraceSummaryTests(unittest.TestCase):
+    def test_verdict_rejects_disjoint_rr_and_journal_mapi_sessions(self) -> None:
+        rr = {
+            "nonzero_response_codes": Counter(),
+            "parse_errors": Counter(),
+            "mapi_request_sessions": {"{OLD}"},
+        }
+        log = empty_log_summary()
+        log["mapi_request_sessions"] = {"{CURRENT}"}
+
+        self.assertEqual(
+            rca.verdict_for_summary(rr, log, Path("LPE_last.log")),
+            "RR trace is stale or mispaired; exclude it from this journal run.",
+        )
+
     def test_selected_batch_runs_filters_newest_runs(self) -> None:
         trace_root = Path(self._testMethodName)
         try:
