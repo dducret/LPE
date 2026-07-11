@@ -6410,7 +6410,8 @@ fn logon_projects_outlook_bootstrap_identity_metadata() {
     );
     assert_eq!(
         logon_property_value(&principal, PID_TAG_ASSOCIATED_SHARING_PROVIDER),
-        Some(MapiValue::Guid(OUTLOOK_SHARING_PROVIDER_GUID))
+        None,
+        "PidTagAssociatedSharingProvider is a SharePoint PST marker, not Exchange mailbox metadata"
     );
     assert_eq!(
         logon_property_value(&principal, PID_TAG_USER_GUID),

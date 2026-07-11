@@ -4973,10 +4973,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         response_rops_from_execute_response(trace_store_props_response).await;
     assert!(contains_bytes(
         &trace_store_props_rops,
-        &[
-            0xAE, 0xF0, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x46,
-        ]
+        &[0x0A, 0x02, 0x01, 0x04, 0x80]
     ));
     let public_folders_entry_id = crate::mapi::identity::public_folder_entry_id_from_object_id(
         crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
@@ -4986,11 +4983,6 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &trace_store_props_rops,
         &public_folders_entry_id
     ));
-    assert!(!contains_bytes(
-        &trace_store_props_rops,
-        &[0x02, 0x01, 0x04, 0x80]
-    ));
-
     let mut cookie = bootstrap_cookie;
 
     let mut execute_headers = mapi_headers("Execute");

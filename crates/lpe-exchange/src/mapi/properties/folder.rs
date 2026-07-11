@@ -23,7 +23,6 @@ pub(in crate::mapi) fn logon_property_value(
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
-        PID_TAG_ASSOCIATED_SHARING_PROVIDER => Some(MapiValue::Guid(OUTLOOK_SHARING_PROVIDER_GUID)),
         PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(MapiValue::Binary(
             crate::mapi::identity::public_folder_entry_id_from_object_id(
                 PUBLIC_FOLDERS_ROOT_FOLDER_ID,
