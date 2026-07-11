@@ -4953,6 +4953,36 @@ fn outlook_compact_view_definition_binary_matches_visible_trace_contract() {
 }
 
 #[test]
+fn view_descriptor_column_property_id_matches_id_low_word() {
+    let descriptor = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
+    let column_count = u32::from_le_bytes(descriptor[20..24].try_into().unwrap()) as usize;
+    let mut offset = 60usize;
+
+    for column in 0..column_count {
+        let property_id =
+            u16::from_le_bytes(descriptor[offset + 2..offset + 4].try_into().unwrap());
+        let flags = u32::from_le_bytes(descriptor[offset + 12..offset + 16].try_into().unwrap());
+        let kind = u32::from_le_bytes(descriptor[offset + 28..offset + 32].try_into().unwrap());
+        let id = u32::from_le_bytes(descriptor[offset + 32..offset + 36].try_into().unwrap());
+        assert_eq!(
+            property_id, id as u16,
+            "[MS-OXOCFG] 2.2.6.1.1 column {column}"
+        );
+
+        offset += 36;
+        if flags & 0x0000_1000 != 0 {
+            offset += 16;
+            if kind == 1 {
+                let buffer_len =
+                    u32::from_le_bytes(descriptor[offset..offset + 4].try_into().unwrap()) as usize;
+                offset += 4 + buffer_len;
+            }
+        }
+    }
+    assert_eq!(offset, descriptor.len());
+}
+
+#[test]
 fn client_submit_time_falls_back_to_received_time_for_imported_mail() {
     let mailbox_id = Uuid::from_u128(0x3333);
     crate::mapi::identity::remember_mapi_identity(

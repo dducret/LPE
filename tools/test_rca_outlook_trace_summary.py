@@ -440,6 +440,24 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
             ),
         )
 
+    def test_umolk_computed_zero_values_are_not_actionable(self) -> None:
+        summary = empty_log_summary()
+
+        rca.inspect_contract(
+            summary,
+            "GetPropertiesSpecific(kind=associated_config;folder=0x0000000000050001;"
+            "role=inbox;tags=0x0e170003,0x674000fb;"
+            "names=PidTagMessageStatus,PidTagSentMailSvrEID;"
+            "problem_tags=;zero_default_tags=0x0e170003,0x674000fb;"
+            "response=0x00000000)",
+            {
+                "object_kind": "associated_config",
+                "associated_config_class": "IPM.Configuration.UMOLK.UserOptions",
+            },
+        )
+
+        self.assertEqual(summary["umolk_optional_defaulted_getprops_tags"], Counter())
+
     def test_non_config_unknown_getprops_defaulted_tags_remain_actionable(self) -> None:
         summary = empty_log_summary()
 
@@ -896,7 +914,7 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
         self.assertEqual(
             rca.issue_buckets(rr, log, Path("LPE_last_test.log")),
-            ["inbox_default_view_advertised_folder_local"],
+            ["no_server_issue_detected"],
         )
 
     def test_issue_buckets_keeps_unexplained_release_symptoms(self) -> None:

@@ -284,7 +284,9 @@ non-canonical LPE state.
   The descriptor column packets follow `[MS-OXOCFG]` section 4.2 by using
   `PtypString8` / `PtypMultipleString8` for text view columns, while the
   message table projection accepts and serializes both those ANSI tags and the
-  Unicode tags Outlook also asks for in live traces.
+  Unicode tags Outlook also asks for in live traces. Every ColumnPacket also
+  keeps `PropertyID` equal to the low 16 bits of `ID`, including KindString
+  named-property columns, as required by `[MS-OXOCFG]` section 2.2.6.1.1.
   Sync Issues remains an exact-ID Outlook special folder, but startup hierarchy
   tables advertise it as a leaf until LPE backs its Conflicts, Local Failures,
   and Server Failures child folders with real canonical or compatibility

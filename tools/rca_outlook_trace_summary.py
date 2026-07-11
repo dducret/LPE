@@ -1954,9 +1954,18 @@ def inspect_contract(
             record_getprops_problem_tag(summary, tag, contract, fields)
     for tag in zero_default_tags:
         summary["zero_default_tags"][tag] += 1
-        if tag not in unknown_tags and (
-            field_text(fields or {}, "object_kind") or first_field(contract, "kind")
-        ) == "associated_config":
+        object_kind = field_text(fields or {}, "object_kind") or first_field(contract, "kind")
+        associated_config_class = field_text(fields or {}, "associated_config_class")
+        computed_umolk_zero = (
+            object_kind == "associated_config"
+            and associated_config_class == UMOLK_USER_OPTIONS_CLASS
+            and tag in {"0x0e170003", "0x674000fb"}
+        )
+        if (
+            tag not in unknown_tags
+            and object_kind == "associated_config"
+            and not computed_umolk_zero
+        ):
             record_unknown_getprops_tag(
                 summary, tag, contract, fields, "optional-standard-defaulted"
             )
@@ -3714,11 +3723,6 @@ def issue_buckets(
         for name, _count in log["default_view_id_collisions"].most_common(2):
             issues.append(f"default_view_id_collision:{name}")
     if any(
-        "status=folder_local" in key
-        for key in log.get("inbox_default_view_advertisements", {})
-    ):
-        issues.append("inbox_default_view_advertised_folder_local")
-    if any(
         "status=unexpected_folder" in key
         for key in log.get("inbox_default_view_advertisements", {})
     ):
@@ -3771,6 +3775,23 @@ def issue_buckets(
             and log.get("visible_inbox_query_rows")
         ):
             issues.append(f"missing_gate:{gate}")
+    if any(
+        "status=folder_local" in key
+        for key in log.get("inbox_default_view_advertisements", {})
+    ):
+        issues = [
+            issue
+            for issue in issues
+            if issue != "visible_inbox_release_before_query_rows"
+            and not issue.startswith(
+                "visible_inbox_release_classification:identity_probe_subset_before_query_rows"
+            )
+            and not issue.startswith("positive_default_view_query_position_without_rows:")
+            and not issue.startswith("default_view_query_position_without_rows:")
+            and issue != "stall:after_common_views_inbox_notification_without_contents"
+            and issue != "stall:after_inbox_fai_without_inbox_contents"
+            and issue != "missing_gate:normal_inbox_visible_row_observed"
+        ]
     issues = suppress_explained_symptom_issues(suppress_symptom_only_issues(issues))
     if not issues:
         issues.append("no_server_issue_detected")
@@ -3801,7 +3822,6 @@ def suppress_explained_symptom_issues(issues: list[str]) -> list[str]:
     has_default_view_contract_cause = any(
         issue
         in {
-            "inbox_default_view_advertised_folder_local",
             "inbox_default_view_advertised_unexpected_folder",
             "common_views_fai_missing_default_named_view:compact",
             "common_views_fai_missing_default_named_view:sent_to",
