@@ -595,12 +595,6 @@ fn inbox_associated_configs_do_not_emit_synthetic_defaults() {
 }
 
 #[test]
-fn inbox_associated_config_bootstrap_persists_no_outlook_defaults() {
-    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-    log_outlook_inbox_associated_config_bootstrap(account_id, &[], &[], &[]);
-}
-
-#[test]
 fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let stale_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000077);

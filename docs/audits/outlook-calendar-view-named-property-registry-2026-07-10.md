@@ -1,14 +1,13 @@
 # Outlook Calendar view and named-property registry RCA (2026-07-10)
 
-## 2026-07-11 correction: mailbox mappings are authoritative
+## 2026-07-12 correction: June trace withdrawn
 
 Run 10:41 proved that the dialog appears before Outlook creates the Calendar
 contents table. Outlook successfully reads the Drafts row and continues its
-background folder enumeration, but the startup named-property registry differs
-from the working 2026-06-25 trace. All 225 properties requested in both runs
-have unique working mappings; 154 had been renumbered. For example,
-PSETID_Common LID `0x85EF`, used by the Drafts table, changed from registered
-property ID `0x8011` to `0x85EF`.
+background folder enumeration. The June 25 capture previously used as a
+working control is withdrawn: Outlook did not start successfully in that run,
+so differences from its named-property registry, view identities, cursor
+origins, or table state do not establish correctness.
 
 The prior conclusion below that Appointment/Common LIDs require matching wire
 property IDs is therefore superseded. [MS-OXCPRPT] section 3.2.5.10 requires
@@ -18,15 +17,13 @@ the create flag is set. Section 3.2.5.9 defines the inverse operation, and
 [MS-OXCDATA] section 2.6 defines the GUID plus LID/name identity. A numeric LID
 is not a canonical wire property ID outside the PS_MAPI special case.
 
-The test mailbox was repaired transactionally from uniquely evidenced working
-mappings. Ambiguous duplicate-ID groups in the old trace were excluded unless
-the 10:41 startup requested exactly one member; unrelated target occupants were
-relocated to unused IDs. After repair, all 225 startup properties match the
-working trace, including Common `0x85EF -> 0x8011`, with zero reused IDs. The
-session/dispatch helpers now preserve durable mappings in both directions and
-reject collisions. The compatibility update no longer renumbers established
-low-range mappings. The remaining sections document the investigation history
-but their canonical-ID repair conclusions are not current.
+Mappings copied from that June capture are not authoritative and must not be
+used as an acceptance oracle. The valid contract is mailbox-local stability,
+one GUID/LID-or-name per registered property ID, and consistent forward and
+inverse resolution. Later July traces establish zero reused IDs and stable
+resolution within their own sessions, but not correctness by equality with the
+withdrawn capture. The remaining sections document investigation history;
+claims that depend on a working June control are superseded by this correction.
 
 ## Reproduction boundary
 
@@ -84,8 +81,7 @@ The shared-MID hypothesis is therefore falsified and the canonical per-folder
 Calendar identity is retained.
 
 The cursor hypothesis is false. The response numerator is zero and denominator
-is one. A working Inbox table and earlier working Calendar captures also begin
-at numerator zero. This is the valid initial position described by
+is one. This is a valid initial position described by
 [MS-OXCTABL] sections 2.2.2.8, 2.2.2.8.1, and 2.2.2.8.2.
 
 ## Table and row contract
@@ -113,18 +109,15 @@ configuration messages `IPM.Configuration.AvailabilityOptions`,
 `IPM.Microsoft.FolderDesign.NamedView` row. Folder property
 `PidTagDefaultViewEntryId` (`0x3616`, `PtypBinary`) is returned as not found.
 Run 18:24 additionally exposes a folder-local `Calendar` NamedView and a
-DefaultViewEntryId, but uses MID `0x7ffffffe00100001`. Outlook enumerates this
-row without opening it. The known-good `logs/LPE_last_202606251705.log` uses MID
-`0x7fffffffffe90001`; Outlook opens that exact FID/MID pair at request `:303`,
-then selects 62 Calendar columns and issues repeated `RopQueryRows` calls.
+DefaultViewEntryId using MID `0x7ffffffe00100001`. Outlook enumerates this row
+without opening it. There is currently no accepted successful control trace
+that establishes a different required MID or handoff sequence.
 
 The Microsoft
 [PidTagDefaultViewEntryId canonical-property definition](https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/pidtagdefaultviewentryid-canonical-property)
 permits the property to be absent when Normal is the initial view, so absence
-alone is not a wire-protocol violation. It is nevertheless the first remaining
-semantic difference from the known-good Outlook sequence after the
-named-property registry is clean. The implemented compatibility contract uses
-the equally valid advertised-default-view path observed in that working trace.
+alone is not a wire-protocol violation. No conclusion about the required
+default-view handoff can be drawn from the withdrawn June capture.
 The unopened Calendar contents table retains an empty implicit sort; the view
 descriptor's sort becomes table state only after an explicit client operation.
 The FAI message class and descriptor fields follow [MS-OXOCFG] sections 2.2.6,
@@ -172,25 +165,20 @@ by [MS-OXCDATA] section 2.6. [MS-OXPROPS] sections 2.9, 2.47, 2.159, 2.216,
 and 2.299 identify the exact Appointment/Common GUIDs, LIDs, and property types
 used above.
 
-The first proven inconsistency was therefore before `RopSetColumns`: the
-working path's named-property state and embedded view/table tags agreed, while
-run 15:45 returned database IDs that disagreed with the tags selected
-immediately afterward. Run 16:53 proves that repairing this inconsistency was
-necessary but not sufficient.
+The first proven inconsistency was therefore before `RopSetColumns`: run 15:45
+returned database IDs that disagreed with the tags selected immediately
+afterward. Run 16:53 proves that removing collisions and restoring internally
+consistent mappings was necessary but not sufficient. Numeric equality with a
+mapping from the withdrawn June capture is not part of this conclusion.
 
 After that repair, the Calendar default-view handoff remains the first visible
 difference, but neither its presence nor its MID is sufficient. Run 18:24
 restored the view with a per-folder MID; run 19:00 repeated the test with the
 legacy shared MID. Both stop at the identical point without opening the view.
-The working 17:05 trace had cached client view state and therefore does not
-establish which server response creates that state for a clean profile.
-
-The working descriptor has seven packets while the current descriptor has nine,
-but Outlook does not open the current view and therefore cannot read either
-descriptor property. Changing the descriptor before the open would not address
-the first observed divergence. The conforming `RopSetColumns` and
-`RopQueryPosition` response remains unchanged pending a clean-profile validation
-of this combined server state or a known-good Exchange clean-profile trace.
+The withdrawn 17:05 trace does not establish which server response creates
+valid view state for a clean profile. The conforming `RopSetColumns` and
+`RopQueryPosition` response remains unchanged pending a successful clean-profile
+validation or a known-good Exchange clean-profile trace.
 
 ## Database repair
 
@@ -247,13 +235,11 @@ view diagnostic in `tools/rca_outlook_trace_summary.py`.
 
 ## Run 19:44 terminal QueryRows-origin regression
 
-Run 19:44 on build `7f45cffc` identified the first wire-semantic regression
-from the working 2026-06-25 sequence. Both runs query the Calendar associated
-table at position 1 of 4 and return the same final three FAI rows. The working
-request `:75` returns `Origin=BOOKMARK_END` (`0x02`), while failing request
-`:91` returned `Origin=BOOKMARK_CURRENT` (`0x01`) even though the cursor had
-advanced to position 4. Outlook consequently issued an extra empty QueryRows
-request before continuing to the visible Calendar table.
+Run 19:44 on build `7f45cffc` returned `Origin=BOOKMARK_CURRENT` (`0x01`)
+even though the Calendar associated-table cursor had advanced to position 4 of
+4. Outlook consequently issued an extra empty QueryRows request before
+continuing to the visible Calendar table. This is evaluated directly against
+the protocol boundary rule, without using the withdrawn June capture.
 
 `[MS-OXCTABL]` section 2.2.2.1.1 defines `BOOKMARK_END` as the position after
 the last row, and section 3.2.5.5 requires it when no more rows remain after a

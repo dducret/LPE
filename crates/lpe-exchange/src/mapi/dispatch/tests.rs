@@ -115,7 +115,7 @@ fn associated_contents_table_does_not_start_with_default_view_sort() {
 }
 
 #[test]
-fn calendar_normal_contents_table_waits_for_client_sort_table() {
+fn calendar_normal_contents_table_starts_with_descriptor_sort() {
     let initial_sort =
         default_view_contents_table_initial_sort(CALENDAR_FOLDER_ID, false, "IPF.Appointment");
     let table = contents_table_object_with_default_view_sort(
@@ -128,8 +128,14 @@ fn calendar_normal_contents_table_waits_for_client_sort_table() {
         panic!("expected contents table");
     };
 
-    assert!(initial_sort.is_empty());
-    assert!(sort_orders.is_empty());
+    assert_eq!(
+        initial_sort,
+        vec![MapiSortOrder {
+            property_tag: PID_LID_COMMON_START_TAG,
+            order: 0x00,
+        }]
+    );
+    assert_eq!(sort_orders, initial_sort);
 }
 
 #[test]

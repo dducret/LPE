@@ -2588,7 +2588,7 @@ async fn mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_delet
 
 #[tokio::test]
 async fn mapi_over_http_microsoft_empty_folder_rops_accept_nonzero_boolean_fields() {
-    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let trash_id = Uuid::parse_str("77777777-7777-4777-8777-000000002590").unwrap();
     for (rop_id, message_id) in [
         (
             0x58,

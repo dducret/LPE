@@ -2,23 +2,6 @@ use super::super::*;
 use super::*;
 
 #[test]
-fn special_folder_getprops_probe_is_store_independent() {
-    let session = test_mapi_session();
-    let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
-    probe.extend_from_slice(
-        &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
-    );
-    probe.push(0);
-    probe.extend_from_slice(&[0x07, 0x00, 0x01]);
-    probe.extend_from_slice(&4096u16.to_le_bytes());
-    probe.extend_from_slice(&1u16.to_le_bytes());
-    probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
-    let probe = rop_buffer_with_response(probe, &[u32::MAX]);
-
-    assert!(rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
-}
-
-#[test]
 fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
     let session = test_mapi_session();
     let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];

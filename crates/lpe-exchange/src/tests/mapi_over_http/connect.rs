@@ -2003,67 +2003,87 @@ async fn mapi_over_http_microsoft_stale_message_handle_requires_force_save() {
     let mut second_property_values = Vec::new();
     append_mapi_i32_property(&mut second_property_values, 0x1090_0003, 2);
 
-    let mut rops = vec![
+    let mut open_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
-    rops.extend_from_slice(&[
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    open_rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage, first handle
     ]);
-    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
-    rops.extend_from_slice(&[
+    open_rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_message_id(message_id));
+    open_rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x03, // RopOpenMessage, second handle
     ]);
-    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
-    append_rop_set_properties(&mut rops, 2, 1, &first_property_values);
-    append_rop_save_changes_message(&mut rops, 2, 2);
-    append_rop_set_properties(&mut rops, 3, 1, &second_property_values);
-    append_rop_save_changes_message(&mut rops, 3, 3);
+    open_rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_message_id(message_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let response = service
+    let open_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_bytes(response).await;
-    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let response_rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size =
-        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
+    assert_eq!(open_response.status(), StatusCode::OK);
+    let open_cookie = mapi_cookie_header(&open_response);
+    let open_body = response_bytes(open_response).await;
+    let (_, open_handles) = response_rops_and_handles_from_execute_body(&open_body);
+    let folder_handle = open_handles[1];
+    let first_message_handle = open_handles[2];
+    let second_message_handle = open_handles[3];
+
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 2, 1, &first_property_values);
+    append_rop_save_changes_message(&mut save_rops, 2, 2);
+    append_rop_set_properties(&mut save_rops, 3, 1, &second_property_values);
+    append_rop_save_changes_message(&mut save_rops, 3, 3);
+    renew_mapi_request_id(&mut execute_headers);
+    execute_headers.insert("cookie", HeaderValue::from_str(&open_cookie).unwrap());
+    let save_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &save_rops,
+                &[
+                    1,
+                    folder_handle,
+                    first_message_handle,
+                    second_message_handle,
+                ],
+            )),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(save_response.status(), StatusCode::OK);
+    let save_cookie = mapi_cookie_header(&save_response);
+    let response_rops = response_rops_from_execute_response(save_response).await;
     assert!(contains_bytes(
-        response_rops,
+        &response_rops,
         &[0x0C, 0x02, 0, 0, 0, 0, 0x02]
     ));
     assert!(contains_bytes(
-        response_rops,
+        &response_rops,
         &[0x0C, 0x03, 0x09, 0x01, 0x04, 0x80]
     ));
     let staged = emails.lock().unwrap()[0].clone();
     assert!(!staged.unread);
     assert!(!staged.flagged);
 
-    let handle_table = &response_rop_buffer[2 + response_rop_size..];
-    let folder_handle = u32::from_le_bytes(handle_table[4..8].try_into().unwrap());
-    let first_message_handle = u32::from_le_bytes(handle_table[8..12].try_into().unwrap());
-    let second_message_handle = u32::from_le_bytes(handle_table[12..16].try_into().unwrap());
     let force_save_rops = vec![0x0C, 0x00, 0x03, 0x03, 0x04];
     let mut force_save_headers = mapi_headers("Execute");
-    force_save_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    force_save_headers.insert("cookie", HeaderValue::from_str(&save_cookie).unwrap());
     let force_save_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -2083,10 +2103,10 @@ async fn mapi_over_http_microsoft_stale_message_handle_requires_force_save() {
 
     assert_eq!(force_save_response.status(), StatusCode::OK);
     let force_save_response_rops = response_rops_from_execute_response(force_save_response).await;
-    assert!(contains_bytes(
-        &force_save_response_rops,
-        &[0x0C, 0x03, 0, 0, 0, 0, 0x03]
-    ));
+    assert!(
+        contains_bytes(&force_save_response_rops, &[0x0C, 0x03, 0, 0, 0, 0, 0x03]),
+        "force-save response ROPs: {force_save_response_rops:02x?}; handles: folder={folder_handle}, first={first_message_handle}, second={second_message_handle}"
+    );
     let updated = emails.lock().unwrap()[0].clone();
     assert!(!updated.unread);
     assert!(updated.flagged);
