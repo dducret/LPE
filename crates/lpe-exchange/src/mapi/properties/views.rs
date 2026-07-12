@@ -22,13 +22,6 @@ pub(in crate::mapi) fn default_view_supported_folder(
     if !default_view_supported_container_class(container_class) {
         return false;
     }
-    if folder_id == INBOX_FOLDER_ID {
-        // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 require a named view to be
-        // real FAI state in the folder where it is used. Do not advertise the
-        // virtual Compact descriptor as canonical Inbox state; absence of
-        // PidTagDefaultViewEntryId selects Outlook's built-in Normal view.
-        return false;
-    }
     if container_class == "IPF.Contact" || container_class.starts_with("IPF.Contact.") {
         return matches!(folder_id, CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID);
     }

@@ -673,7 +673,7 @@ fn mailbox_properties_report_persisted_search_folder_type() {
 }
 
 #[test]
-fn inbox_mailbox_properties_use_client_normal_view() {
+fn inbox_mailbox_properties_advertise_folder_local_compact_default_view() {
     let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
     let mailbox = mailbox(
         "56565656-5656-4656-9656-565656565656",
@@ -683,6 +683,13 @@ fn inbox_mailbox_properties_use_client_normal_view() {
     );
     crate::mapi::identity::remember_mapi_identity(mailbox.id, INBOX_FOLDER_ID);
 
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        INBOX_FOLDER_ID,
+        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID),
+    )
+    .unwrap();
+
     assert_eq!(
         mailbox_property_value_with_context_for_account(
             &mailbox,
@@ -690,7 +697,7 @@ fn inbox_mailbox_properties_use_client_normal_view() {
             PID_TAG_DEFAULT_VIEW_ENTRY_ID,
             account_id,
         ),
-        None
+        Some(MapiValue::Binary(expected_entry_id))
     );
 }
 

@@ -194,11 +194,19 @@ fn default_folder_associated_named_view(
 }
 
 pub(in crate::mapi) fn associated_config_visible_in_table(
-    _folder_id: u64,
+    folder_id: u64,
     _restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+    !(folder_id == INBOX_FOLDER_ID && is_inbox_folder_design_default_named_view(message))
+        && !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+}
+
+fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
+    message
+        .message_class
+        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        && message.subject.eq_ignore_ascii_case("Compact")
 }
 
 #[cfg(test)]

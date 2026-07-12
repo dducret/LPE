@@ -436,15 +436,7 @@ pub(super) fn default_view_contents_table_initial_sort(
     associated: bool,
     container_class: &str,
 ) -> Vec<MapiSortOrder> {
-    if associated {
-        return Vec::new();
-    }
-    if folder_id == INBOX_FOLDER_ID {
-        // Keep the built-in Normal Inbox ordering independent from whether a
-        // server named-view FAI message is advertised.
-        return outlook_folder_view_sort_orders(folder_id, "Compact");
-    }
-    if !default_view_supported_folder(folder_id, container_class) {
+    if associated || !default_view_supported_folder(folder_id, container_class) {
         return Vec::new();
     }
     let view_name = if folder_id == SENT_FOLDER_ID {
