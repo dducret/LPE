@@ -56,7 +56,6 @@ pub(in crate::mapi) fn email_property_value(
         | PID_TAG_LAST_VERB_EXECUTION_TIME
         | PID_TAG_ORIGINAL_SUBMIT_TIME
         | PID_TAG_RETENTION_DATE
-        | PID_TAG_REPLY_TIME
         | PID_TAG_REPORT_TIME => Some(MapiValue::U64(0)),
         PID_TAG_START_DATE => Some(MapiValue::U64(0)),
         PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID

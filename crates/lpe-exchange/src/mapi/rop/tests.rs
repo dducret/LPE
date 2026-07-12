@@ -853,7 +853,7 @@ fn backoff_response_matches_microsoft_targeted_rop_example() {
 }
 
 #[test]
-fn get_properties_specific_preserves_values_and_flags_absent_message_lifecycle_times() {
+fn get_properties_specific_preserves_values_and_flags_absent_message_deadlines() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
@@ -926,9 +926,10 @@ fn get_properties_specific_preserves_values_and_flags_absent_message_lifecycle_t
     }];
     let mut payload = Vec::new();
     write_u16(&mut payload, 4096);
-    write_u16(&mut payload, 4);
+    write_u16(&mut payload, 5);
     write_u32(&mut payload, PID_TAG_MESSAGE_FLAGS);
     write_u32(&mut payload, 0x0037_0001);
+    write_u32(&mut payload, PID_TAG_REPLY_TIME);
     write_u32(&mut payload, PID_TAG_EXPIRY_TIME);
     // PidLidRecallTime is PSETID_Common LID 0x8549, PT_SYSTIME. The fixture
     // uses the stable named-property mapping observed in the 202607121904 run.
@@ -963,7 +964,7 @@ fn get_properties_specific_preserves_values_and_flags_absent_message_lifecycle_t
     let mut cursor = Cursor::new(&response[15 + subject.len()..]);
     // [MS-OXCROPS] 2.2.8.3.2 and [MS-OXCDATA] 2.8.1.2: absent
     // properties occupy their requested positions as flagged ecNotFound cells.
-    for tag in [PID_TAG_EXPIRY_TIME, 0x8549_0040] {
+    for tag in [PID_TAG_REPLY_TIME, PID_TAG_EXPIRY_TIME, 0x8549_0040] {
         assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
         assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F, "tag {tag:#010x}");
     }

@@ -145,11 +145,11 @@ fn mapi_notification_event_from_change_row(
 ) -> Option<MapiNotificationEvent> {
     let object_kind = row.get::<String, _>("object_kind");
     let change_kind = row.get::<String, _>("change_kind");
-    let event_mask = mapi_notification_event_mask_for_change(&change_kind);
     let cursor = row.get::<i64, _>("cursor");
     let modseq = row.get::<i64, _>("modseq").max(0) as u64;
     match object_kind.as_str() {
         "mailbox" => {
+            let event_mask = mapi_notification_event_mask_for_change(&change_kind, false);
             let changed_folder_id = mapi_folder_id_from_role_or_identity(
                 row.try_get::<String, _>("object_role").ok().as_deref(),
                 row.try_get::<i64, _>("object_mapi_object_id").ok(),
@@ -189,8 +189,15 @@ fn mapi_notification_event_from_change_row(
             })
         }
         "mailbox_message" | "attachment" => {
+            let scope_role = row.try_get::<String, _>("scope_role").ok();
+            // [MS-OXCNOTIF] 2.2.1.1 and section 4 distinguish a delivered
+            // new message (0x0002) from an object created by a client (0x0004).
+            let is_new_mail = object_kind == "mailbox_message"
+                && change_kind == "created"
+                && scope_role.as_deref() == Some("inbox");
+            let event_mask = mapi_notification_event_mask_for_change(&change_kind, is_new_mail);
             let folder_id = mapi_folder_id_from_role_or_identity(
-                row.try_get::<String, _>("scope_role").ok().as_deref(),
+                scope_role.as_deref(),
                 row.try_get::<i64, _>("scope_mapi_object_id").ok(),
             )?;
             Some(MapiNotificationEvent::canonical(
@@ -229,12 +236,24 @@ fn mapi_folder_id_from_role_or_identity(role: Option<&str>, identity: Option<i64
         .or_else(|| identity.map(|value| value as u64))
 }
 
-fn mapi_notification_event_mask_for_change(change_kind: &str) -> u16 {
+fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool) -> u16 {
     match change_kind {
+        "created" if is_new_mail => 0x0002,
         "created" => 0x0004,
         "destroyed" | "deleted" | "expunged" => 0x0008,
         "moved" => 0x0020,
         _ => 0x0010,
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::mapi_notification_event_mask_for_change;
+
+    #[test]
+    fn inbox_delivery_uses_new_mail_notification_mask() {
+        assert_eq!(mapi_notification_event_mask_for_change("created", true), 0x0002);
+        assert_eq!(mapi_notification_event_mask_for_change("created", false), 0x0004);
     }
 }
 

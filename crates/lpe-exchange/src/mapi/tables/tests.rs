@@ -8523,9 +8523,14 @@ fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
 }
 
 #[test]
-fn message_table_row_flags_absent_expiry_and_recall_times() {
+fn message_table_row_flags_absent_deadline_expiry_and_recall_times() {
     let email = test_table_email(Uuid::from_u128(0x1904), Uuid::from_u128(0x1001), "Test");
-    let columns = [PID_TAG_SUBJECT_W, PID_TAG_EXPIRY_TIME, 0x8549_0040];
+    let columns = [
+        PID_TAG_SUBJECT_W,
+        PID_TAG_REPLY_TIME,
+        PID_TAG_EXPIRY_TIME,
+        0x8549_0040,
+    ];
 
     let row = serialize_message_property_row(&email, &columns);
 
