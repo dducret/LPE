@@ -631,6 +631,14 @@ fn fallback_default_specific_property(
     snapshot: &MapiMailStoreSnapshot,
     tag: u32,
 ) -> bool {
+    if let Some(MapiObject::PendingAssociatedMessage { properties, .. }) = object {
+        let storage_tag = canonical_property_storage_tag(tag);
+        // [MS-OXCMSG] 3.2.5.2 and [MS-OXCDATA] 2.8.1.2: an unwritten
+        // client-owned configuration stream is absent, not an empty value.
+        if storage_tag == PID_TAG_ROAMING_DICTIONARY && !properties.contains_key(&storage_tag) {
+            return true;
+        }
+    }
     if !matches!(
         object,
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon)

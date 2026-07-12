@@ -3279,6 +3279,66 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
 }
 
 #[test]
+fn newly_created_associated_message_getprops_uses_new_message_contract() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let change_key = vec![0x11, 0x22, 0x33];
+    let object = MapiObject::PendingAssociatedMessage {
+        folder_id: INBOX_FOLDER_ID,
+        properties: HashMap::from([(PID_TAG_CHANGE_KEY, MapiValue::Binary(change_key.clone()))]),
+    };
+    let columns = [
+        PID_TAG_ROAMING_DICTIONARY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_MESSAGE_CLASS_W,
+    ];
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for column in columns {
+        payload.extend_from_slice(&column.to_le_bytes());
+    }
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific as u8,
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload,
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    // [MS-OXCMSG] 3.2.5.2 initializes a new message as IPM.Note. The
+    // client-owned roaming dictionary remains absent until the client sets it.
+    assert_eq!(
+        &response[..12],
+        &[0x07, 0x02, 0, 0, 0, 0, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80]
+    );
+    assert_eq!(response[12], 0);
+    assert_eq!(u16::from_le_bytes(response[13..15].try_into().unwrap()), 3);
+    assert_eq!(&response[15..18], change_key.as_slice());
+    assert_eq!(response[18], 0);
+    let message_class = response[19..]
+        .chunks_exact(2)
+        .take_while(|unit| *unit != [0, 0])
+        .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+        .collect::<Vec<_>>();
+    assert_eq!(String::from_utf16(&message_class).unwrap(), "IPM.Note");
+}
+
+#[test]
 fn undocumented_folder_binary_120c_returns_empty_binary() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
@@ -3350,14 +3410,17 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             payload: default_view_payload,
         };
 
-        assert!(!fallback_default_specific_property(
-            Some(&folder),
-            &principal,
-            &[],
-            &[],
-            &MapiMailStoreSnapshot::empty(),
-            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-        ));
+        assert_eq!(
+            fallback_default_specific_property(
+                Some(&folder),
+                &principal,
+                &[],
+                &[],
+                &MapiMailStoreSnapshot::empty(),
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+            ),
+            folder_id == CALENDAR_FOLDER_ID
+        );
 
         let response = rop_get_properties_specific_response(
             &default_view_request,
@@ -3368,8 +3431,13 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
-        assert!(response.len() > 7);
+        if folder_id == CALENDAR_FOLDER_ID {
+            assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+            assert_eq!(&response[7..], &[0x0a, 0x0f, 0x01, 0x04, 0x80]);
+        } else {
+            assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+            assert!(response.len() > 7);
+        }
     }
 
     let mut default_view_payload = Vec::new();

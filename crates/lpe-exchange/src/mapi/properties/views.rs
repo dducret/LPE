@@ -26,10 +26,12 @@ pub(in crate::mapi) fn default_view_supported_folder(
         return matches!(folder_id, CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID);
     }
     if container_class == "IPF.Appointment" || container_class.starts_with("IPF.Appointment.") {
-        // The Calendar default view is a folder-local
-        // IPM.Microsoft.FolderDesign.NamedView whose descriptor follows
-        // [MS-OXOCFG] sections 2.2.6, 2.2.6.1, and 2.2.6.1.1.
-        return folder_id == CALENDAR_FOLDER_ID;
+        // PidTagDefaultViewEntryId can be absent when the client is to use its
+        // built-in Normal view. Do not advertise a synthesized Calendar named
+        // view until LPE has a captured Exchange Calendar view definition to
+        // reproduce. See [MS-OXCFOLD] section 2.2.2.2, [MS-OXOCFG] sections
+        // 2.2.6 and 3.1.4.1, and Microsoft's PidTagDefaultViewEntryId remarks.
+        return false;
     }
     if container_class == "IPF.Task" || container_class.starts_with("IPF.Task.") {
         return folder_id == TASKS_FOLDER_ID;

@@ -1,7 +1,7 @@
 use super::*;
 use crate::mapi::wire::MapiRestrictionType;
 use crate::mapi::wire::RopId;
-use crate::mapi_store::{outlook_default_folder_named_view_id, MapiJournalEntry};
+use crate::mapi_store::MapiJournalEntry;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ClientTask, CollaborationCollection, CollaborationRights,
@@ -537,7 +537,7 @@ fn pending_message_projects_non_empty_change_identity() {
 }
 
 #[test]
-fn pending_associated_message_projects_configuration_defaults() {
+fn pending_associated_message_projects_new_message_defaults_until_client_sets_configuration() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::nil(),
@@ -554,21 +554,42 @@ fn pending_associated_message_projects_configuration_defaults() {
 
     assert_eq!(
         pending_associated_message_property_value(&principal, &properties, PID_TAG_MESSAGE_CLASS_W),
-        Some(MapiValue::String("IPM.Configuration".to_string()))
+        Some(MapiValue::String("IPM.Note".to_string()))
     );
-    assert!(matches!(
+    assert_eq!(
         pending_associated_message_property_value(
             &principal,
             &properties,
             PID_TAG_ROAMING_DICTIONARY
         ),
-        Some(MapiValue::Binary(value))
-            if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
-                && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
-    ));
+        None
+    );
     assert_eq!(
         pending_associated_message_property_value(&principal, &properties, PID_TAG_CHANGE_KEY),
         Some(MapiValue::Binary(vec![0x11, 0x22, 0x33]))
+    );
+
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string()),
+    );
+    properties.insert(
+        PID_TAG_ROAMING_DICTIONARY,
+        MapiValue::Binary(vec![0x44, 0x55]),
+    );
+    assert_eq!(
+        pending_associated_message_property_value(&principal, &properties, PID_TAG_MESSAGE_CLASS_W),
+        Some(MapiValue::String(
+            "IPM.Configuration.UMOLK.UserOptions".to_string()
+        ))
+    );
+    assert_eq!(
+        pending_associated_message_property_value(
+            &principal,
+            &properties,
+            PID_TAG_ROAMING_DICTIONARY
+        ),
+        Some(MapiValue::Binary(vec![0x44, 0x55]))
     );
 }
 
@@ -6849,15 +6870,10 @@ fn contacts_associated_query_rows_expose_contact_default_named_view() {
 }
 
 #[test]
-fn calendar_associated_query_rows_expose_calendar_default_named_view() {
+fn calendar_associated_query_rows_do_not_inject_synthetic_default_named_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let rows = associated_table_rows(CALENDAR_FOLDER_ID, &snapshot, None, Uuid::nil());
-    assert!(matches!(
-        rows.as_slice(),
-        [AssociatedTableRow::NamedView(view)]
-            if view.id == outlook_default_folder_named_view_id(CALENDAR_FOLDER_ID)
-                && view.name == "Calendar"
-    ));
+    assert!(rows.is_empty());
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: true,
@@ -6887,14 +6903,14 @@ fn calendar_associated_query_rows_expose_calendar_default_named_view() {
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
     assert_eq!(response[6], 0x02);
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "Calendar").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&response, "Calendar").is_none());
     assert!(utf16_position(&response, "Compact").is_none());
 }
 
 #[test]
-fn captured_calendar_fai_terminal_window_flags_missing_named_view_columns() {
+fn captured_calendar_fai_terminal_window_contains_only_canonical_configs() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let classes = [
         "IPM.Configuration.AvailabilityOptions",
@@ -6972,8 +6988,8 @@ fn captured_calendar_fai_terminal_window_flags_missing_named_view_columns() {
         response[6], 0x02,
         "terminal forward window must use BOOKMARK_END"
     );
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
-    assert_eq!(table_position(&table), Some(4));
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert_eq!(table_position(&table), Some(3));
     let mut cursor = Cursor::new(&response[9..]);
     for _ in 0..2 {
         assert_eq!(cursor.read_u8().unwrap(), 0);
@@ -6982,18 +6998,6 @@ fn captured_calendar_fai_terminal_window_flags_missing_named_view_columns() {
         }
     }
 
-    // [MS-OXCDATA] sections 2.8.1.2 and 2.11.5 require a flagged row
-    // because FolderDesign.NamedView has neither of these configuration fields.
-    assert_eq!(cursor.read_u8().unwrap(), 1);
-    for column in &columns {
-        if matches!(*column, PID_TAG_ROAMING_DATATYPES | 0x685D_0003) {
-            assert_eq!(cursor.read_u8().unwrap(), 0x0A);
-            assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
-        } else {
-            assert_eq!(cursor.read_u8().unwrap(), 0);
-            parse_mapi_property_value(&mut cursor, *column).unwrap();
-        }
-    }
     assert!(cursor.remaining_is_zero_padding());
 }
 
@@ -8985,7 +8989,6 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         TRASH_FOLDER_ID,
         DRAFTS_FOLDER_ID,
         JUNK_FOLDER_ID,
-        CALENDAR_FOLDER_ID,
         ARCHIVE_FOLDER_ID,
         CONVERSATION_HISTORY_FOLDER_ID,
         CONTACTS_SEARCH_FOLDER_ID,
@@ -9006,6 +9009,7 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         DEFERRED_ACTION_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
         TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        CALENDAR_FOLDER_ID,
         SUGGESTED_CONTACTS_FOLDER_ID,
         QUICK_CONTACTS_FOLDER_ID,
         IM_CONTACT_LIST_FOLDER_ID,

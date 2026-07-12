@@ -1,10 +1,6 @@
 use super::*;
-use crate::mapi::identity::message_entry_id_from_object_ids;
 use crate::mapi::wire::MapiRestrictionType;
-use crate::mapi_store::{
-    outlook_default_folder_named_view_id, MapiCollaborationFolder, MapiCollaborationFolderKind,
-    MapiPublicFolder,
-};
+use crate::mapi_store::{MapiCollaborationFolder, MapiCollaborationFolderKind, MapiPublicFolder};
 use lpe_storage::{
     CollaborationCollection, CollaborationRights, ContactSourceFields, PublicFolder,
     PublicFolderRights,
@@ -823,7 +819,7 @@ fn collaboration_folder_projects_default_post_message_class_for_contacts() {
 }
 
 #[test]
-fn collaboration_calendar_advertises_calendar_default_view() {
+fn collaboration_calendar_uses_client_normal_view() {
     let account_id = Uuid::from_u128(0xdddddddd_dddd_4ddd_8ddd_dddddddddddd);
     let collection = MapiCollaborationFolder {
         id: CALENDAR_FOLDER_ID,
@@ -852,12 +848,7 @@ fn collaboration_calendar_advertises_calendar_default_view() {
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-        message_entry_id_from_object_ids(
-            account_id,
-            CALENDAR_FOLDER_ID,
-            outlook_default_folder_named_view_id(CALENDAR_FOLDER_ID),
-        )
-        .map(MapiValue::Binary)
+        None
     );
 }
 

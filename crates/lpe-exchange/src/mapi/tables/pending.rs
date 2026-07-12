@@ -377,16 +377,12 @@ pub(in crate::mapi) fn pending_associated_message_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let lookup_tag = canonical_property_storage_tag(property_tag);
+    // [MS-OXCMSG] 3.2.5.2 gives a newly created message the normal
+    // IPM.Note defaults. Configuration properties begin when the client sets them.
     properties
         .get(&lookup_tag)
         .cloned()
-        .or_else(|| match lookup_tag {
-            PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Configuration".to_string())),
-            PID_TAG_ROAMING_DICTIONARY => {
-                Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
-            }
-            _ => pending_message_property_value(principal, properties, property_tag),
-        })
+        .or_else(|| pending_message_property_value(principal, properties, property_tag))
 }
 
 fn pending_message_search_key(properties: &HashMap<u32, MapiValue>) -> Vec<u8> {

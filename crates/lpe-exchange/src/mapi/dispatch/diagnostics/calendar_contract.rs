@@ -3,7 +3,7 @@ use lpe_domain::crypto::sha256_hex_prefix;
 use std::collections::BTreeMap;
 
 const CALENDAR_CONTRACT_PROTOCOL_REFERENCES: &str =
-    "MS-OXOCFG 2.2.6.1,2.2.6.1.1,2.2.6.2;MS-OXCROPS 2.2.5.1,2.2.5.7;MS-OXCTABL 2.2.2.2,2.2.2.8";
+    "MS-OXCFOLD 2.2.2.2;MS-OXOCFG 2.2.6.1,2.2.6.1.1,2.2.6.2;MS-OXCROPS 2.2.5.1,2.2.5.7;MS-OXCTABL 2.2.2.2,2.2.2.8";
 const CALENDAR_NAMED_REGISTRY_SAMPLE_LIMIT: usize = 64;
 const NAMED_PROPERTY_COLLISION_SAMPLE_LIMIT: usize = 16;
 
@@ -340,7 +340,9 @@ fn format_calendar_contract_invariant_issues(
 ) -> String {
     let mut issues = Vec::new();
     let Some(view) = view else {
-        return "missing_default_view".to_string();
+        // Microsoft's PidTagDefaultViewEntryId canonical-property remarks
+        // permit absence when the client is to use its Normal view.
+        return "none".to_string();
     };
     if view.folder_id != CALENDAR_FOLDER_ID {
         issues.push("default_view_not_folder_local");

@@ -115,7 +115,7 @@ fn associated_contents_table_does_not_start_with_default_view_sort() {
 }
 
 #[test]
-fn calendar_normal_contents_table_starts_with_descriptor_sort() {
+fn calendar_normal_contents_table_does_not_inherit_synthetic_view_sort() {
     let initial_sort =
         default_view_contents_table_initial_sort(CALENDAR_FOLDER_ID, false, "IPF.Appointment");
     let table = contents_table_object_with_default_view_sort(
@@ -128,13 +128,7 @@ fn calendar_normal_contents_table_starts_with_descriptor_sort() {
         panic!("expected contents table");
     };
 
-    assert_eq!(
-        initial_sort,
-        vec![MapiSortOrder {
-            property_tag: PID_LID_COMMON_START_TAG,
-            order: 0x00,
-        }]
-    );
+    assert!(initial_sort.is_empty());
     assert_eq!(sort_orders, initial_sort);
 }
 
@@ -197,7 +191,7 @@ fn outlook_view_descriptor_named_property_context_reports_calendar_lids() {
 }
 
 #[test]
-fn calendar_contract_fingerprint_covers_default_view_fai_and_protocol_contract() {
+fn calendar_contract_fingerprint_covers_client_normal_view_contract() {
     let session = test_mapi_session();
     let snapshot = MapiMailStoreSnapshot::empty();
     let folder = MapiObject::Folder {
@@ -218,9 +212,9 @@ fn calendar_contract_fingerprint_covers_default_view_fai_and_protocol_contract()
     assert!(fingerprint.starts_with("version=1;sha256_32="));
     assert!(fingerprint.contains("MS-OXOCFG 2.2.6.1,2.2.6.1.1,2.2.6.2"));
     assert!(fingerprint.contains("folder=0x0000000000100001"));
-    assert!(fingerprint.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
-    assert!(fingerprint.contains("entry_id=bytes=70"));
-    assert!(fingerprint.contains("descriptor_summary=version=8"));
+    assert!(!fingerprint.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
+    assert!(!fingerprint.contains("entry_id=bytes=70"));
+    assert!(!fingerprint.contains("descriptor_summary=version=8"));
     assert!(fingerprint.contains("named_id_reuse=none"));
     assert!(fingerprint.contains("invariant_issues=none"));
 }
@@ -333,23 +327,11 @@ fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids(
 }
 
 #[test]
-fn outlook_view_descriptor_visible_property_tags_cover_calendar_default_view() {
+fn outlook_view_descriptor_visible_property_tags_are_empty_for_calendar_normal_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let tags = outlook_view_descriptor_visible_property_tags(CALENDAR_FOLDER_ID, &snapshot);
 
-    assert_eq!(
-        tags,
-        vec![
-            PID_TAG_MESSAGE_CLASS_W,
-            PID_TAG_SUBJECT_W,
-            PID_TAG_MESSAGE_FLAGS,
-            PID_TAG_MESSAGE_STATUS,
-            PID_LID_COMMON_START_TAG,
-            PID_LID_COMMON_END_TAG,
-            PID_LID_LOCATION_W_TAG,
-            PID_LID_BUSY_STATUS_TAG,
-        ]
-    );
+    assert!(tags.is_empty());
 }
 
 #[test]
@@ -443,7 +425,6 @@ fn folder_local_default_view_visibility_contract_reports_present_for_special_fol
         JUNK_FOLDER_ID,
         OUTBOX_FOLDER_ID,
         DRAFTS_FOLDER_ID,
-        CALENDAR_FOLDER_ID,
         CONTACTS_FOLDER_ID,
         JOURNAL_FOLDER_ID,
         NOTES_FOLDER_ID,
@@ -754,7 +735,7 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
 }
 
 #[test]
-fn calendar_view_handoff_table_contract_reports_folder_local_default_view() {
+fn calendar_view_handoff_table_contract_reports_client_normal_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         CALENDAR_FOLDER_ID,
@@ -763,16 +744,10 @@ fn calendar_view_handoff_table_contract_reports_folder_local_default_view() {
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-    assert!(contract.contains("selected_view_name=Calendar"));
-    assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003"
-    ));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(CALENDAR_FOLDER_ID)
-    )));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(!contract.contains("selected_view_name="));
+    assert!(!contract.contains("expected_view_message_id="));
 }
 
 #[test]
@@ -811,7 +786,7 @@ fn task_note_journal_handoff_contracts_report_standard_visible_columns() {
 }
 
 #[test]
-fn calendar_associated_view_handoff_uses_folder_local_descriptor() {
+fn calendar_associated_view_handoff_uses_client_normal_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = [
         PID_TAG_FOLDER_ID,
@@ -826,16 +801,14 @@ fn calendar_associated_view_handoff_uses_folder_local_descriptor() {
     let contract =
         format_outlook_view_handoff_table_contract(CALENDAR_FOLDER_ID, true, &columns, &snapshot);
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("selected_view_name=Calendar"));
-    assert!(
-        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
-        "{contract}"
-    );
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(!contract.contains("selected_view_name="));
+    assert!(contract.ends_with("descriptor_summary="));
 }
 
 #[test]
-fn calendar_normal_view_handoff_exposes_folder_local_descriptor() {
+fn calendar_normal_view_handoff_does_not_claim_server_descriptor() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = [
         PID_TAG_FOLDER_ID,
@@ -852,15 +825,10 @@ fn calendar_normal_view_handoff_exposes_folder_local_descriptor() {
     let contract =
         format_outlook_view_handoff_table_contract(CALENDAR_FOLDER_ID, false, &columns, &snapshot);
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("selected_view_name=Calendar"));
-    assert!(contract.contains(
-        "visible_column_tags=0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85160040,0x85170040,0x8208001f,0x82050003"
-    ));
-    assert!(
-        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
-        "{contract}"
-    );
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(!contract.contains("selected_view_name="));
+    assert!(!contract.contains("visible_column_tags="));
+    assert!(contract.ends_with("descriptor_summary="));
 }
 
 #[test]
@@ -993,7 +961,7 @@ fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_s
 }
 
 #[test]
-fn calendar_table_compatibility_validates_calendar_descriptor_support() {
+fn calendar_table_compatibility_does_not_claim_synthetic_descriptor() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_default_view_table_compatibility_contract(
         CALENDAR_FOLDER_ID,
@@ -1018,13 +986,7 @@ fn calendar_table_compatibility_validates_calendar_descriptor_support() {
         &snapshot,
     );
 
-    assert!(
-        contract.contains("descriptor_columns_missing_from_table=;"),
-        "{contract}"
-    );
-    assert!(contract
-        .contains("descriptor_columns_not_selected=0x85160040,0x85170040,0x8208001f,0x82050003"));
-    assert!(contract.contains("table_sort_matches_descriptor=true"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
