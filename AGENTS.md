@@ -169,6 +169,7 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 ## Working Method
 
 - verify the documentation context before modifying code
+- for Outlook interoperability work, do not build a local release binary for deployment; the user recompiles and deploys LPE from source on the server at `192.168.1.28`
 - do not contradict documented architecture choices without updating the documentation explicitly
 - if a change affects behavior, prerequisites, installation, release framing, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, update `AGENTS.md`

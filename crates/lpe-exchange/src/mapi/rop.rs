@@ -639,6 +639,22 @@ fn fallback_default_specific_property(
             return true;
         }
     }
+    if let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+        saved_email,
+        ..
+    }) = object
+    {
+        let value_tag = get_properties_specific_value_tag(object, tag);
+        return message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .or_else(|| {
+                search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                    .map(|message| &message.email)
+            })
+            .or(saved_email.as_ref().map(|saved| &saved.email))
+            .is_some_and(|email| email_property_value(email, value_tag).is_none());
+    }
     if !matches!(
         object,
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon)

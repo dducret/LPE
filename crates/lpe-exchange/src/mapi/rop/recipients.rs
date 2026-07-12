@@ -187,17 +187,38 @@ fn parse_wrapped_pending_recipient_row(
             "recipient column count exceeds request column count"
         ));
     }
-    let row_kind = cursor.read_u8()?;
-    if row_kind != 0 {
-        return Err(anyhow!("unsupported flagged recipient property row"));
-    }
-
     let mut values = HashMap::new();
+    let row_kind = cursor.read_u8()?;
     for column in columns.iter().take(recipient_column_count) {
-        values.insert(
-            canonical_property_storage_tag(*column),
-            parse_property_value_for_tag(&mut cursor, *column)?,
-        );
+        let present = match row_kind {
+            0x00 => true,
+            // [MS-OXCDATA] 2.8.1.2 and 2.11.5: a FlaggedPropertyRow
+            // prefixes each requested value with 0x00, 0x01, or 0x0A.
+            0x01 => match cursor.read_u8()? {
+                0x00 => true,
+                0x01 => false,
+                0x0A => {
+                    let _property_error = cursor.read_u32()?;
+                    false
+                }
+                flag => {
+                    return Err(anyhow!(
+                        "invalid flagged recipient property value {flag:#04x}"
+                    ))
+                }
+            },
+            _ => {
+                return Err(anyhow!(
+                    "invalid recipient property row kind {row_kind:#04x}"
+                ))
+            }
+        };
+        if present {
+            values.insert(
+                canonical_property_storage_tag(*column),
+                parse_property_value_for_tag(&mut cursor, *column)?,
+            );
+        }
     }
 
     let recipient_type = values

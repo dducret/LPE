@@ -1118,7 +1118,6 @@ fn normal_message_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_AUTO_FORWARDED
             | PID_TAG_DEFERRED_DELIVERY_TIME
             | PID_TAG_DELETE_AFTER_SUBMIT
-            | PID_TAG_EXPIRY_TIME
             | PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID
             | PID_TAG_ORIGINAL_AUTHOR_NAME_W
             | PID_TAG_ORIGINAL_DISPLAY_BCC_W

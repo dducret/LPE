@@ -1394,13 +1394,13 @@ fn unresolved_mapi_identity_summary_classifies_expected_special_and_invalid_ids(
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:virtual_quick_step_associated_config,{contact_sync_config_id:#018x}:virtual_contact_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:unallocated_store_object,{contact_sync_config_id:#018x}:virtual_contact_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
 }
 
 #[test]
-fn expected_unbacked_mapi_objects_include_virtual_outlook_config_messages() {
+fn expected_unbacked_mapi_objects_exclude_non_virtual_quick_step_config() {
     let dynamic_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
     );
@@ -1413,7 +1413,7 @@ fn expected_unbacked_mapi_objects_include_virtual_outlook_config_messages() {
 
     assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
     assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
-    assert!(is_expected_unbacked_mapi_object(quick_step_config_id));
+    assert!(!is_expected_unbacked_mapi_object(quick_step_config_id));
     assert!(is_expected_unbacked_mapi_object(contact_sync_config_id));
     assert!(is_expected_unbacked_mapi_object(common_view_named_view_id));
     assert!(is_expected_unbacked_mapi_object(common_view_shortcut_id));

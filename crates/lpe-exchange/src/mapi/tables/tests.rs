@@ -8522,6 +8522,27 @@ fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
     ])
 }
 
+#[test]
+fn message_table_row_flags_absent_expiry_and_recall_times() {
+    let email = test_table_email(Uuid::from_u128(0x1904), Uuid::from_u128(0x1001), "Test");
+    let columns = [PID_TAG_SUBJECT_W, PID_TAG_EXPIRY_TIME, 0x8549_0040];
+
+    let row = serialize_message_property_row(&email, &columns);
+
+    assert_eq!(row[0], 1);
+    let mut cursor = Cursor::new(&row[1..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_property_value_for_tag(&mut cursor, PID_TAG_SUBJECT_W).unwrap(),
+        MapiValue::String("Test".to_string())
+    );
+    for tag in columns.iter().skip(1) {
+        assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
+        assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
+    }
+    assert_eq!(cursor.remaining(), 0);
+}
+
 fn test_table_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
     JmapEmail {
         id,

@@ -2365,7 +2365,14 @@ fn normal_message_column_support_covers_observed_inbox_compact_projection() {
     assert!(!summary.contains("defaulted=0x0005000b"));
     assert!(!summary.contains("defaulted=0x000f0040"));
     assert!(!summary.contains("defaulted=0x0e01000b"));
-    assert!(!summary.contains("defaulted=0x00150040"));
+    let defaulted = summary
+        .split(";defaulted=")
+        .nth(1)
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    assert!(defaulted.contains("0x00150040"));
     assert!(!summary.contains("defaulted=0x10800003"));
     assert!(!summary.contains("defaulted=0x59020003"));
     assert!(!summary.contains("defaulted=0x1042001f"));

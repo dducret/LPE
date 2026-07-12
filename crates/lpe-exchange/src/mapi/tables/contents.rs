@@ -98,6 +98,44 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     serialize_message_row_with_table_instance(email, columns, 0, 0, None)
 }
 
+pub(in crate::mapi) fn serialize_message_property_row(
+    email: &JmapEmail,
+    columns: &[u32],
+) -> Vec<u8> {
+    let present = columns
+        .iter()
+        .map(|column| message_table_property_is_present(email, *column))
+        .collect::<Vec<_>>();
+    if present.iter().all(|present| *present) {
+        let values = serialize_message_row(email, columns);
+        let mut row = Vec::new();
+        write_query_rows_property_row(&mut row, columns, &values);
+        return row;
+    }
+
+    let mut row = vec![1];
+    for (column, present) in columns.iter().zip(present) {
+        if present {
+            row.push(0);
+            let value = serialize_message_row(email, &[*column]);
+            let mut standard = Vec::new();
+            write_query_rows_property_row(&mut standard, &[*column], &value);
+            row.extend_from_slice(&standard[1..]);
+        } else {
+            row.push(0x0A);
+            write_u32(&mut row, ROP_ERROR_NOT_FOUND);
+        }
+    }
+    row
+}
+
+fn message_table_property_is_present(email: &JmapEmail, property_tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(property_tag),
+        PID_TAG_INST_ID | PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE | PID_TAG_DEPTH
+    ) || email_property_value(email, property_tag).is_some()
+}
+
 fn serialize_categorized_message_row(
     email: &JmapEmail,
     columns: &[u32],

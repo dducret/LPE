@@ -288,6 +288,45 @@ fn microsoft_oxcmsg_modify_recipients_example_parses_wrapped_recipient_row() {
 }
 
 #[test]
+fn modify_recipients_parses_outlook_flagged_recipient_property_row() {
+    let columns = [
+        PID_TAG_OBJECT_TYPE,
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+        PID_TAG_RECIPIENT_TYPE,
+    ];
+    let mut row = Vec::new();
+    // Unicode EmailAddress and DisplayName are present in RecipientFlags.
+    write_u16(&mut row, 0x0218);
+    write_utf16z(&mut row, "sandra.ducret@sdic.ch");
+    write_utf16z(&mut row, "Sandra Ducret");
+    write_u16(&mut row, columns.len() as u16);
+    row.push(1); // FlaggedPropertyRow, as observed in run 202607121904.
+    row.push(0);
+    write_u32(&mut row, 6);
+    row.push(0x0A);
+    write_u32(&mut row, ROP_ERROR_NOT_FOUND);
+    row.push(1);
+    row.push(0);
+    write_u32(&mut row, 2);
+
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let recipient = parse_pending_recipient_row(3, 2, &columns, &row, &principal, &[]).unwrap();
+
+    assert_eq!(recipient.row_id, 3);
+    assert_eq!(recipient.recipient_type, 2);
+    assert_eq!(recipient.address, "sandra.ducret@sdic.ch");
+    assert_eq!(recipient.display_name.as_deref(), Some("Sandra Ducret"));
+}
+
+#[test]
 fn folder_create_and_hierarchy_table_responses_match_microsoft_folder_examples() {
     let create = RopRequest {
         rop_id: RopId::CreateFolder.as_u8(),
@@ -814,7 +853,7 @@ fn backoff_response_matches_microsoft_targeted_rop_example() {
 }
 
 #[test]
-fn get_properties_specific_returns_typed_value_for_unspecified_subject() {
+fn get_properties_specific_preserves_values_and_flags_absent_message_lifecycle_times() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
@@ -887,9 +926,13 @@ fn get_properties_specific_returns_typed_value_for_unspecified_subject() {
     }];
     let mut payload = Vec::new();
     write_u16(&mut payload, 4096);
-    write_u16(&mut payload, 2);
+    write_u16(&mut payload, 4);
     write_u32(&mut payload, PID_TAG_MESSAGE_FLAGS);
     write_u32(&mut payload, 0x0037_0001);
+    write_u32(&mut payload, PID_TAG_EXPIRY_TIME);
+    // PidLidRecallTime is PSETID_Common LID 0x8549, PT_SYSTIME. The fixture
+    // uses the stable named-property mapping observed in the 202607121904 run.
+    write_u32(&mut payload, 0x8549_0040);
     let request = RopRequest {
         rop_id: RopId::GetPropertiesSpecific.as_u8(),
         input_handle_index: Some(3),
@@ -915,7 +958,16 @@ fn get_properties_specific_returns_typed_value_for_unspecified_subject() {
     assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0x01]);
     assert_eq!(response[7], 0);
     assert_eq!(&response[12..15], &[0x1F, 0x00, 0]);
-    assert_eq!(&response[15..], utf16z_bytes("Hello").as_slice());
+    let subject = utf16z_bytes("Hello");
+    assert_eq!(&response[15..15 + subject.len()], subject.as_slice());
+    let mut cursor = Cursor::new(&response[15 + subject.len()..]);
+    // [MS-OXCROPS] 2.2.8.3.2 and [MS-OXCDATA] 2.8.1.2: absent
+    // properties occupy their requested positions as flagged ecNotFound cells.
+    for tag in [PID_TAG_EXPIRY_TIME, 0x8549_0040] {
+        assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
+        assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F, "tag {tag:#010x}");
+    }
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]

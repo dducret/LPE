@@ -294,6 +294,7 @@ fn rop_query_rows_response_inner(
                     .map(|item| serialize_public_folder_item_row(item, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == CONVERSATION_MEMBERS_CONTENTS_TABLE_ID {
+                rows_are_serialized_property_rows = true;
                 let mut rows = emails.iter().collect::<Vec<_>>();
                 retain_rows_by_restriction(
                     &mut rows,
@@ -308,7 +309,7 @@ fn rop_query_rows_response_inner(
                 );
                 sort_emails(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|email| serialize_message_row(email, &columns))
+                    .map(|email| serialize_message_property_row(email, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows = calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
@@ -416,6 +417,7 @@ fn rop_query_rows_response_inner(
                     .map(|row| serialize_search_content_row(row, snapshot, &columns, false))
                     .collect::<Vec<_>>()
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
+                rows_are_serialized_property_rows = true;
                 let mut rows = snapshot.tracked_mail_processing_messages();
                 retain_rows_by_restriction(
                     &mut rows,
@@ -431,7 +433,7 @@ fn rop_query_rows_response_inner(
                 );
                 sort_mapi_messages(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|message| serialize_message_row(&message.email, &columns))
+                    .map(|message| serialize_message_property_row(&message.email, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 let mut rows = reminder_search_content_rows(snapshot, restriction.as_ref());
@@ -469,6 +471,7 @@ fn rop_query_rows_response_inner(
                     .map(|item| serialize_recoverable_item_row(item, &columns))
                     .collect::<Vec<_>>()
             } else {
+                rows_are_serialized_property_rows = *category_count == 0;
                 let window_offset = if request.query_forward_read() {
                     start_position
                 } else {
@@ -507,7 +510,7 @@ fn rop_query_rows_response_inner(
                     } else {
                         window_emails
                             .into_iter()
-                            .map(|email| serialize_message_row(email, &columns))
+                            .map(|email| serialize_message_property_row(email, &columns))
                             .collect::<Vec<_>>()
                     }
                 } else {
@@ -539,7 +542,7 @@ fn rop_query_rows_response_inner(
                         .collect::<Vec<_>>()
                     } else {
                         rows.into_iter()
-                            .map(|email| serialize_message_row(email, &columns))
+                            .map(|email| serialize_message_property_row(email, &columns))
                             .collect::<Vec<_>>()
                     }
                 }

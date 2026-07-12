@@ -2764,7 +2764,6 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
         PID_TAG_DEFERRED_DELIVERY_TIME,
         PID_TAG_DEFERRED_SEND_TIME,
         PID_TAG_END_DATE,
-        PID_TAG_EXPIRY_TIME,
         PID_TAG_LAST_VERB_EXECUTION_TIME,
         PID_TAG_ORIGINAL_SUBMIT_TIME,
         PID_TAG_REPLY_TIME,
@@ -2773,6 +2772,7 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     ] {
         assert_eq!(email_property_value(&email, tag), Some(MapiValue::U64(0)));
     }
+    assert_eq!(email_property_value(&email, PID_TAG_EXPIRY_TIME), None);
     for tag in [
         PID_TAG_ORIGINAL_AUTHOR_ENTRY_ID,
         PID_TAG_PARENT_KEY,

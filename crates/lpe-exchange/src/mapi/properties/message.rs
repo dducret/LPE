@@ -52,7 +52,6 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_DEFERRED_DELIVERY_TIME
         | PID_TAG_DEFERRED_SEND_TIME
         | PID_TAG_END_DATE
-        | PID_TAG_EXPIRY_TIME
         | PID_TAG_ARCHIVE_DATE
         | PID_TAG_LAST_VERB_EXECUTION_TIME
         | PID_TAG_ORIGINAL_SUBMIT_TIME
