@@ -979,6 +979,42 @@ async fn mapi_over_http_microsoft_create_message_initializes_documented_properti
 }
 
 #[tokio::test]
+async fn mapi_over_http_pending_message_display_recipients_follow_modify_recipients() {
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(14));
+    let to_row = mapi_wrapped_recipient_row("Denis Ducret", "denis.ducret@sdic.ch", 0x01);
+    let cc_row = mapi_wrapped_recipient_row("Sandra Ducret", "sandra.ducret@sdic.ch", 0x02);
+    append_rop_modify_recipients(
+        &mut rops,
+        2,
+        &[(1, 0x01, to_row.as_slice()), (2, 0x02, cc_row.as_slice())],
+    );
+    append_rop_get_properties_specific(
+        &mut rops,
+        2,
+        &[
+            0x0E04_001F, // PidTagDisplayTo.
+            0x0E03_001F, // PidTagDisplayCc.
+        ],
+    );
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX]).await;
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 2)
+        .expect("pending message GetProps should return a standard row");
+    assert_eq!(response_rops[row_offset], 0);
+    let mut offset = row_offset + 1;
+    assert_eq!(
+        read_rop_utf16z(&response_rops, &mut offset).unwrap(),
+        "Denis Ducret"
+    );
+    assert_eq!(
+        read_rop_utf16z(&response_rops, &mut offset).unwrap(),
+        "Sandra Ducret"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_delete_properties_no_replicate_clears_pending_message_properties() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

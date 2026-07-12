@@ -281,17 +281,49 @@ pub(in crate::mapi) fn conversation_action_from_mapi_properties(
 pub(in crate::mapi) fn serialize_pending_message_row(
     principal: &AccountPrincipal,
     properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        if let Some(value) = pending_message_property_value(principal, properties, *column) {
+        let lookup_tag = canonical_property_storage_tag(*column);
+        let value = match lookup_tag {
+            PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(pending_display_recipients(
+                recipients, 0x01,
+            ))),
+            PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(pending_display_recipients(
+                recipients, 0x02,
+            ))),
+            PID_TAG_DISPLAY_BCC_W => Some(MapiValue::String(pending_display_recipients(
+                recipients, 0x03,
+            ))),
+            _ => pending_message_property_value(principal, properties, *column),
+        };
+        if let Some(value) = value {
             write_mapi_value(&mut row, *column, &value);
         } else {
             write_property_default(&mut row, *column);
         }
     }
     row
+}
+
+fn pending_display_recipients(recipients: &[PendingRecipient], recipient_type: u8) -> String {
+    // [MS-OXOMSG] 2.2.1.7-2.2.1.9 and [MS-OXPROPS] 2.675, 2.676,
+    // and 2.679 define the Bcc, Cc, and To display properties as semicolon-
+    // separated PtypString recipient display names.
+    recipients
+        .iter()
+        .filter(|recipient| recipient.recipient_type & 0x0F == recipient_type)
+        .map(|recipient| {
+            recipient
+                .display_name
+                .as_deref()
+                .filter(|name| !name.is_empty())
+                .unwrap_or(&recipient.address)
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 pub(in crate::mapi) fn serialize_pending_associated_message_row(

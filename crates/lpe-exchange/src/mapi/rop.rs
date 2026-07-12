@@ -142,9 +142,11 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 custom_values,
             )
         }
-        Some(MapiObject::PendingMessage { properties, .. }) => {
-            serialize_pending_message_row(principal, properties, &columns)
-        }
+        Some(MapiObject::PendingMessage {
+            properties,
+            recipients,
+            ..
+        }) => serialize_pending_message_row(principal, properties, recipients, &columns),
         Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
             serialize_pending_associated_message_row(principal, properties, &columns)
         }
@@ -1140,9 +1142,11 @@ pub(in crate::mapi) fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::PendingMessage { properties, .. }) => {
-            serialize_pending_message_row(principal, properties, &[tag])
-        }
+        Some(MapiObject::PendingMessage {
+            properties,
+            recipients,
+            ..
+        }) => serialize_pending_message_row(principal, properties, recipients, &[tag]),
         Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
             serialize_pending_associated_message_row(principal, properties, &[tag])
         }
