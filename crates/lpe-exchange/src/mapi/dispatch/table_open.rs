@@ -436,7 +436,14 @@ pub(super) fn default_view_contents_table_initial_sort(
     associated: bool,
     container_class: &str,
 ) -> Vec<MapiSortOrder> {
-    if associated || !default_view_supported_folder(folder_id, container_class) {
+    // [MS-OXCTABL] sections 2.2.2.3 and 3.2.5.3 make RopSortTable the
+    // operation that changes a table's sort order. Outlook opens Calendar's
+    // normal contents table without that ROP during startup, so do not apply
+    // the folder-local view descriptor's sort to this independent table.
+    if associated
+        || folder_id == CALENDAR_FOLDER_ID
+        || !default_view_supported_folder(folder_id, container_class)
+    {
         return Vec::new();
     }
     let view_name = if folder_id == SENT_FOLDER_ID {

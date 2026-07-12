@@ -2403,8 +2403,10 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
 #[test]
 fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
     let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
-    let zero_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
-    let one_minute_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d727);
+    // Keep these identities distinct from the captured Calendar row fixture;
+    // the process-wide identity registry is shared by parallel tests.
+    let zero_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d728);
+    let one_minute_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d729);
     crate::mapi::identity::remember_mapi_identity(
         zero_id,
         crate::mapi::identity::mapi_store_id(0x4270),
