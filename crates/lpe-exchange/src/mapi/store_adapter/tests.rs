@@ -1130,7 +1130,7 @@ fn access_plan_does_not_fetch_virtual_inbox_associated_config_identity() {
 }
 
 #[test]
-fn access_plan_does_not_fetch_virtual_quick_step_associated_config_identity() {
+fn access_plan_fetches_non_virtual_quick_step_associated_config_identity() {
     let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
     let folder_id = crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
     let mut session = empty_session();
@@ -1145,7 +1145,7 @@ fn access_plan_does_not_fetch_virtual_quick_step_associated_config_identity() {
 
     let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
-    assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
+    assert_eq!(plan.object_ids, vec![folder_id, config_id], "plan={plan:?}");
 }
 
 #[test]

@@ -4071,7 +4071,7 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary() {
+async fn mapi_over_http_does_not_open_unbacked_quick_step_config() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -4118,19 +4118,11 @@ async fn mapi_over_http_quick_step_config_0e0b_defaults_to_empty_binary() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
-    let marker = [0x07, 0x02, 0, 0, 0, 0];
-    let offset = response_rops
-        .windows(marker.len())
-        .position(|window| window == marker)
-        .unwrap_or_else(|| panic!("missing GetPropertiesSpecific: {response_rops:02x?}"));
-    assert_eq!(response_rops[offset + marker.len()], 0);
-    assert!(!contains_bytes(
-        &response_rops[offset..],
-        &[0x0A, 0x0F, 0x01, 0x04, 0x80]
-    ));
-    assert!(contains_bytes(&response_rops[offset..], &[0x00, 0x00]));
     assert!(contains_bytes(
+        &response_rops,
+        &[0x03, 0x02, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.CustomAction")
     ));

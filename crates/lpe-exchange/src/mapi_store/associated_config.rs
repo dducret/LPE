@@ -95,8 +95,6 @@ pub(super) const OUTLOOK_INBOX_AGGREGATION_CLASS: &str = "IPM.Aggregation";
 pub(super) const OUTLOOK_INBOX_AGGREGATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE3);
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
-pub(super) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4);
 pub(super) const OUTLOOK_CONTACT_SYNC_CONFIG_CLASS: &str = "IPM.Microsoft.OSC.ContactSync";
 pub(super) const OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF1);
@@ -152,10 +150,6 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
             | OUTLOOK_INBOX_SHARING_INDEX_ID
             | OUTLOOK_INBOX_AGGREGATION_ID
     )
-}
-
-pub(crate) fn is_outlook_quick_step_default_associated_config_id(item_id: u64) -> bool {
-    item_id == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
 }
 
 pub(crate) fn is_outlook_contact_default_associated_config_id(item_id: u64) -> bool {
@@ -425,9 +419,6 @@ pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
 ) -> Option<MapiAssociatedConfigMessage> {
     outlook_inbox_associated_config_sync_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
         .into_iter()
-        .chain(outlook_quick_step_associated_config_defaults(
-            crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-        ))
         .chain(
             [
                 crate::mapi::identity::CONTACTS_FOLDER_ID,
@@ -581,19 +572,6 @@ pub(crate) fn is_outlook_configuration_message_class_name(
 
 pub(crate) fn is_outlook_umolk_user_options_message_class(message_class: &str) -> bool {
     message_class.eq_ignore_ascii_case(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS)
-}
-
-pub(super) fn outlook_quick_step_associated_config_defaults(
-    folder_id: u64,
-) -> Vec<MapiAssociatedConfigMessage> {
-    vec![MapiAssociatedConfigMessage {
-        id: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID,
-        folder_id,
-        canonical_id: Uuid::from_u128(0x6d617069_7173_4361_8000_000000000001),
-        message_class: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
-        subject: OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string(),
-        properties_json: serde_json::json!({}),
-    }]
 }
 
 pub(super) fn outlook_common_views_default_named_views() -> Vec<MapiCommonViewNamedViewMessage> {

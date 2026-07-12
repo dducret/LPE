@@ -880,7 +880,6 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id)
-                && !mapi_store::is_outlook_quick_step_default_associated_config_id(*config_id)
                 && !mapi_store::is_outlook_contact_default_associated_config_id(*config_id)
             {
                 push_unique(&mut plan.object_ids, *config_id);

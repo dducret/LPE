@@ -224,7 +224,6 @@ pub(crate) use associated_config::{
     is_outlook_default_conversation_action_id, is_outlook_default_folder_named_view_id,
     is_outlook_inbox_default_associated_config_id,
     is_outlook_inbox_virtual_only_associated_config_id, is_outlook_local_freebusy_message_id,
-    is_outlook_quick_step_default_associated_config_id,
     is_outlook_umolk_user_options_message_class,
     modeled_virtual_associated_config_message_for_canonical_id,
     outlook_default_folder_named_view_id, outlook_default_folder_named_view_name,

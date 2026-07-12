@@ -1039,9 +1039,6 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_inbox_default_associated_config_id(object_id) {
         return "virtual_inbox_associated_config";
     }
-    if mapi_store::is_outlook_quick_step_default_associated_config_id(object_id) {
-        return "virtual_quick_step_associated_config";
-    }
     if mapi_store::is_outlook_contact_default_associated_config_id(object_id) {
         return "virtual_contact_associated_config";
     }
@@ -1070,7 +1067,6 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
 fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
-        || mapi_store::is_outlook_quick_step_default_associated_config_id(object_id)
         || mapi_store::is_outlook_contact_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
         || mapi_store::is_outlook_default_folder_named_view_id(object_id)

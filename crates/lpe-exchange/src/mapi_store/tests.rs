@@ -870,45 +870,13 @@ fn associated_configs_keep_outlook_migration_markers_visible() {
 }
 
 #[test]
-fn quick_step_settings_include_default_custom_action_without_duplicate() {
+fn quick_step_settings_do_not_invent_custom_action_state() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let messages = snapshot.associated_config_messages_for_folder(
         crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
     );
 
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS)
-            .count(),
-        1
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID)
-            .map(|message| message.message_class),
-        Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_folder_and_source_key_id(
-                crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-                OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID,
-            )
-            .map(|message| message.message_class),
-        Some(OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS.to_string())
-    );
-    assert!(snapshot.associated_config_identity_matches_folder(
-        crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-        OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
-    ));
-    assert!(!snapshot.associated_config_identity_matches_folder(
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
-    ));
-    assert!(is_outlook_quick_step_default_associated_config_id(
-        OUTLOOK_QUICK_STEP_CUSTOM_ACTION_ID
-    ));
+    assert!(messages.is_empty());
 
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let persisted_id = Uuid::from_u128(0x6d617069_7173_4361_8000_000000000002);

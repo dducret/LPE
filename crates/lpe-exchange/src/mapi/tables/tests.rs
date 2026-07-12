@@ -941,7 +941,10 @@ fn quick_step_settings_normal_contents_stays_empty_when_folder_row_has_count() {
         folder_message_count(QUICK_STEP_SETTINGS_FOLDER_ID, &mailboxes, &[], &snapshot),
         0
     );
-    assert!(associated_folder_message_count(QUICK_STEP_SETTINGS_FOLDER_ID, &snapshot) > 0);
+    assert_eq!(
+        associated_folder_message_count(QUICK_STEP_SETTINGS_FOLDER_ID, &snapshot),
+        0
+    );
 }
 
 #[test]
@@ -5459,7 +5462,7 @@ fn inbox_associated_find_row_does_not_create_a_broad_startup_default() {
 }
 
 #[test]
-fn quick_step_associated_find_row_returns_custom_action_config() {
+fn quick_step_associated_find_row_does_not_return_synthetic_custom_action() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -5498,13 +5501,16 @@ fn quick_step_associated_find_row_returns_custom_action_config() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(response[7], 1);
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
     let mut encoded_message_class = Vec::new();
     write_utf16z(&mut encoded_message_class, "IPM.Microsoft.CustomAction");
-    assert!(response
+    assert!(!response
         .windows(encoded_message_class.len())
         .any(|window| window == encoded_message_class.as_slice()));
-    assert!(response
+    assert!(!response
         .windows(b"<?xml version=\"1.0\" encoding=\"utf-8\"?>".len())
         .any(|window| window == b"<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
 }

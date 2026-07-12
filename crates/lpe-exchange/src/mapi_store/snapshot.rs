@@ -1168,15 +1168,6 @@ impl MapiMailStoreSnapshot {
                     messages.push(default_message);
                 }
             }
-        } else if folder_id == crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID {
-            for default_message in outlook_quick_step_associated_config_defaults(folder_id) {
-                if !messages
-                    .iter()
-                    .any(|message| message.message_class == default_message.message_class)
-                {
-                    messages.push(default_message);
-                }
-            }
         } else if self.contact_sync_default_supported_folder(folder_id) {
             for default_message in outlook_contact_associated_config_defaults(folder_id) {
                 if !messages
@@ -1211,13 +1202,6 @@ impl MapiMailStoreSnapshot {
                     .find(|message| message.id == item_id)
             })
             .or_else(|| outlook_inbox_exact_virtual_associated_config_for_id(item_id))
-            .or_else(|| {
-                outlook_quick_step_associated_config_defaults(
-                    crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-                )
-                .into_iter()
-                .find(|message| message.id == item_id)
-            })
             .or_else(|| {
                 [
                     crate::mapi::identity::CONTACTS_FOLDER_ID,
@@ -1256,9 +1240,6 @@ impl MapiMailStoreSnapshot {
             .map(|identity| identity.canonical_id)?;
         self.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
             .into_iter()
-            .chain(outlook_quick_step_associated_config_defaults(
-                crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-            ))
             .chain(
                 [
                     crate::mapi::identity::CONTACTS_FOLDER_ID,

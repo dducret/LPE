@@ -1016,7 +1016,7 @@ fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
 }
 
 #[test]
-fn quick_step_associated_debug_summaries_report_custom_action_row() {
+fn quick_step_associated_debug_summaries_do_not_report_synthetic_custom_action_row() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = [PID_TAG_MESSAGE_CLASS_W, PID_TAG_ROAMING_XML_STREAM];
@@ -1051,10 +1051,9 @@ fn quick_step_associated_debug_summaries_report_custom_action_row() {
         &snapshot,
     );
 
-    assert!(values.contains("IPM.Microsoft.CustomAction"), "{values}");
-    assert!(values.contains("0x7c080102=binary:bytes="), "{values}");
-    assert!(wire.contains("class=IPM.Microsoft.CustomAction"), "{wire}");
-    assert!(wire.contains("query_rows_len="), "{wire}");
+    assert!(!values.contains("IPM.Microsoft.CustomAction"), "{values}");
+    assert!(!values.contains("0x7c080102=binary:bytes="), "{values}");
+    assert!(!wire.contains("class=IPM.Microsoft.CustomAction"), "{wire}");
 }
 
 #[test]
