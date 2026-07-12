@@ -487,12 +487,8 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags_for_folder(
             folder_id,
         ))),
-        PID_TAG_ARCHIVE_TAG | PID_TAG_POLICY_TAG => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
             Some(MapiValue::U32(0))
-        }
-        PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
-            Some(MapiValue::Binary(Vec::new()))
         }
         PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
             Some(MapiValue::U32(0))
@@ -503,7 +499,6 @@ pub(in crate::mapi) fn special_folder_property_value(
         {
             default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
-        tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(
             has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID,

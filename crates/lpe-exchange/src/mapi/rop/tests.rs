@@ -3532,15 +3532,13 @@ fn logon_empty_pst_path_is_modeled_not_fallback() {
 }
 
 #[test]
-fn folder_archive_policy_empty_defaults_are_modeled_not_fallback() {
+fn folder_retention_defaults_distinguish_absent_policy_identities() {
     let folder = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
         properties: HashMap::new(),
     };
 
     for property_tag in [
-        PID_TAG_ARCHIVE_TAG,
-        PID_TAG_POLICY_TAG,
         PID_TAG_RETENTION_PERIOD,
         PID_TAG_RETENTION_FLAGS,
         PID_TAG_ARCHIVE_PERIOD,
@@ -3550,10 +3548,17 @@ fn folder_archive_policy_empty_defaults_are_modeled_not_fallback() {
             property_tag
         ));
     }
+
+    for property_tag in [PID_TAG_ARCHIVE_TAG, PID_TAG_POLICY_TAG] {
+        assert!(!modeled_zero_or_default_property(
+            Some(&folder),
+            property_tag
+        ));
+    }
 }
 
 #[test]
-fn folder_view_empty_defaults_are_modeled_not_fallback() {
+fn folder_view_defaults_distinguish_absent_structured_streams() {
     let folder = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
         properties: HashMap::new(),
@@ -3561,16 +3566,26 @@ fn folder_view_empty_defaults_are_modeled_not_fallback() {
 
     for property_tag in [
         PID_TAG_FOLDER_FORM_FLAGS,
-        PID_TAG_FOLDER_WEBVIEWINFO,
-        PID_TAG_FOLDER_XVIEWINFO_E,
         PID_TAG_FOLDER_VIEWS_ONLY,
         PID_TAG_DEFAULT_FORM_NAME_W,
         PID_TAG_FOLDER_FORM_STORAGE,
-        PID_TAG_ACL_MEMBER_NAME_W,
-        0x6672_0102,
         PID_TAG_FOLDER_VIEWLIST_FLAGS,
     ] {
         assert!(modeled_zero_or_default_property(
+            Some(&folder),
+            property_tag
+        ));
+    }
+
+    for property_tag in [PID_TAG_FOLDER_WEBVIEWINFO, PID_TAG_FOLDER_XVIEWINFO_E] {
+        assert!(!modeled_zero_or_default_property(
+            Some(&folder),
+            property_tag
+        ));
+    }
+
+    for property_tag in [PID_TAG_ACL_MEMBER_NAME_W, 0x6672_0102] {
+        assert!(!modeled_zero_or_default_property(
             Some(&folder),
             property_tag
         ));

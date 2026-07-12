@@ -851,10 +851,43 @@ class RcaOutlookTraceSummaryTests(unittest.TestCase):
 
     def test_issue_buckets_ignores_nonactionable_zero_default_tag(self) -> None:
         log = empty_log_summary()
-        log["zero_default_tags"] = Counter({"0x120c0102": 3, "0x36df0102": 4})
+        log["zero_default_tags"] = Counter({"0x120c0102": 3})
         rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
 
         self.assertEqual(rca.issue_buckets(rr, log, None), ["no_server_issue_detected"])
+
+    def test_issue_buckets_flags_empty_structured_folder_view_streams(self) -> None:
+        log = empty_log_summary()
+        log["zero_default_tags"] = Counter(
+            {
+                "0x30180102": 4,
+                "0x30190102": 4,
+                "0x36df0102": 4,
+                "0x36e00102": 4,
+                "0x66720102": 4,
+            }
+        )
+        rr = {"nonzero_response_codes": Counter(), "parse_errors": Counter()}
+
+        self.assertEqual(
+            rca.actionable_zero_default_tag_counts(log["zero_default_tags"]),
+            Counter(
+                {
+                    "PidTagArchiveTag": 4,
+                    "PidTagPolicyTag": 4,
+                    "PidTagFolderWebViewInfo": 4,
+                    "PidTagFolderXViewInfoE": 4,
+                    "InvalidBinaryPidTagMemberName": 4,
+                }
+            ),
+        )
+        self.assertEqual(
+            rca.issue_buckets(rr, log, None),
+            [
+                "zero_default:PidTagArchiveTag",
+                "zero_default:PidTagPolicyTag",
+            ],
+        )
 
     def test_issue_buckets_keeps_stall_symptoms_for_zero_default_noise(self) -> None:
         log = empty_log_summary()

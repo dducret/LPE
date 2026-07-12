@@ -285,14 +285,8 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
         Some(&MapiValue::U32(0))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_XVIEWINFO_E),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_WEBVIEWINFO));
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_XVIEWINFO_E));
     assert_eq!(
         properties.get(&PID_TAG_FOLDER_VIEWS_ONLY),
         Some(&MapiValue::U32(0))
@@ -305,22 +299,13 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_FOLDER_FORM_STORAGE),
         Some(&MapiValue::Binary(Vec::new()))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_ACL_MEMBER_NAME_W),
-        Some(&MapiValue::String(String::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_ACL_MEMBER_NAME_W));
     assert_eq!(
         properties.get(&PID_TAG_FOLDER_VIEWLIST_FLAGS),
         Some(&MapiValue::U32(0))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_ARCHIVE_TAG),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
-    assert_eq!(
-        properties.get(&PID_TAG_POLICY_TAG),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
+    assert!(!properties.contains_key(&PID_TAG_POLICY_TAG));
     assert_eq!(
         properties.get(&PID_TAG_RETENTION_PERIOD),
         Some(&MapiValue::U32(0))
@@ -498,21 +483,153 @@ fn folder_properties_for_open_projects_collaboration_folder_contract() {
         properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
         Some(&MapiValue::U32(0))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_WEBVIEWINFO));
     assert_eq!(
         properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
         Some(&MapiValue::String(String::new()))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_ARCHIVE_TAG),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
     assert_eq!(
         properties.get(&PID_TAG_RETENTION_PERIOD),
         Some(&MapiValue::U32(0))
+    );
+}
+
+#[test]
+fn journal_getprops_flags_absent_web_view_properties() {
+    let principal = test_principal();
+    let properties = folder_properties_for_open_from_mailboxes(
+        &principal,
+        JOURNAL_FOLDER_ID,
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    let object = MapiObject::Folder {
+        folder_id: JOURNAL_FOLDER_ID,
+        properties,
+    };
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&4096u16.to_le_bytes());
+            payload.extend_from_slice(&2u16.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_FOLDER_WEBVIEWINFO.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_FOLDER_XVIEWINFO_E.to_le_bytes());
+            payload
+        },
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    // [MS-OXCDATA] sections 2.8.1.2 and 2.11.5: absent selected
+    // properties use a FlaggedPropertyRow and ecNotFound (0x8004010F).
+    assert_eq!(
+        response,
+        vec![
+            0x07, 0x02, 0, 0, 0, 0, 0x01, 0x0A, 0x0F, 0x01, 0x04, 0x80, 0x0A, 0x0F, 0x01, 0x04,
+            0x80,
+        ]
+    );
+}
+
+#[test]
+fn inbox_getprops_flags_absent_retention_identity_properties() {
+    let principal = test_principal();
+    let properties = folder_properties_for_open_from_mailboxes(
+        &principal,
+        INBOX_FOLDER_ID,
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    let object = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties,
+    };
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&4096u16.to_le_bytes());
+            payload.extend_from_slice(&2u16.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_POLICY_TAG.to_le_bytes());
+            payload.extend_from_slice(&PID_TAG_ARCHIVE_TAG.to_le_bytes());
+            payload
+        },
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    // [MS-OXCMSG] sections 2.2.1.60.1 and 2.2.1.60.2 define these
+    // binary properties as GUID identifiers. Without configured tags they
+    // are absent, using [MS-OXCDATA] sections 2.8.1.2 and 2.11.5.
+    assert_eq!(
+        response,
+        vec![
+            0x07, 0x02, 0, 0, 0, 0, 0x01, 0x0A, 0x0F, 0x01, 0x04, 0x80, 0x0A, 0x0F, 0x01, 0x04,
+            0x80,
+        ]
+    );
+}
+
+#[test]
+fn inbox_getprops_flags_binary_acl_member_name_as_absent() {
+    let principal = test_principal();
+    let properties = folder_properties_for_open_from_mailboxes(
+        &principal,
+        INBOX_FOLDER_ID,
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    let object = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties,
+    };
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: {
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&4096u16.to_le_bytes());
+            payload.extend_from_slice(&1u16.to_le_bytes());
+            payload.extend_from_slice(&0x6672_0102u32.to_le_bytes());
+            payload
+        },
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    // [MS-OXCPERM] section 2.2.6 defines PidTagMemberName
+    // as an ACL-table string column, not a PT_BINARY folder property.
+    assert_eq!(
+        response,
+        vec![0x07, 0x02, 0, 0, 0, 0, 0x01, 0x0A, 0x0F, 0x01, 0x04, 0x80]
     );
 }
 
@@ -574,14 +691,8 @@ fn folder_properties_for_open_projects_public_folder_contract() {
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
         Some(&MapiValue::Binary(extended_folder_flags()))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
-    assert_eq!(
-        properties.get(&PID_TAG_ARCHIVE_TAG),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_WEBVIEWINFO));
+    assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
     assert_eq!(
         properties.get(&PID_TAG_RETENTION_PERIOD),
         Some(&MapiValue::U32(0))
@@ -1385,7 +1496,7 @@ fn set_property_debug_names_cover_folder_special_properties() {
         "PidTagFolderViewListFlags"
     );
     assert_eq!(set_property_debug_name(PID_TAG_ACCESS), "PidTagAccess");
-    assert_eq!(set_property_debug_name(0x6672_0102), "PidTagMemberName");
+    assert_eq!(set_property_debug_name(0x6672_0102), "unknown");
     assert_eq!(
         set_property_debug_name(OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C),
         "OutlookUndocumentedFolderBinary120C"

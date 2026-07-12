@@ -113,8 +113,7 @@ pub(in crate::mapi) const PID_TAG_ACL_MEMBER_NAME_W: u32 = 0x6672_001F;
 pub(in crate::mapi) const PID_TAG_FOLDER_VIEWLIST_FLAGS: u32 = 0x672D_0003;
 
 pub(in crate::mapi) fn is_acl_member_name_property_tag(property_tag: u32) -> bool {
-    MapiPropertyTag::new(property_tag).property_id()
-        == MapiPropertyTag::new(PID_TAG_ACL_MEMBER_NAME_W).property_id()
+    property_tag == PID_TAG_ACL_MEMBER_NAME_W
 }
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;

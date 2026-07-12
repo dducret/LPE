@@ -186,7 +186,13 @@ KNOWN_BACKED_DESCRIPTOR_TAGS = {
     "0x8f07000b",  # Outlook internal default-view flag
     "0x801f001f",  # PidNameContentClass
 }
-ACTIONABLE_ZERO_DEFAULT_TAGS = {}
+ACTIONABLE_ZERO_DEFAULT_TAGS = {
+    "0x30180102": "PidTagArchiveTag",
+    "0x30190102": "PidTagPolicyTag",
+    "0x36df0102": "PidTagFolderWebViewInfo",
+    "0x36e00102": "PidTagFolderXViewInfoE",
+    "0x66720102": "InvalidBinaryPidTagMemberName",
+}
 
 
 def parse_args() -> argparse.Namespace:

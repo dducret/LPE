@@ -892,8 +892,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | 0x6872_001F
         ),
         Some(MapiObject::Folder { folder_id, .. }) => {
-            is_acl_member_name_property_tag(tag)
-                || is_modeled_empty_special_folder_class_property(*folder_id, storage_tag)
+            is_modeled_empty_special_folder_class_property(*folder_id, storage_tag)
                 || matches!(
                     storage_tag,
                     PID_TAG_CONTENT_COUNT
@@ -903,14 +902,10 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_PARENT_FOLDER_ID
                         | PID_TAG_PARENT_SOURCE_KEY
                         | PID_TAG_FOLDER_TYPE
-                        | PID_TAG_ARCHIVE_TAG
-                        | PID_TAG_POLICY_TAG
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
                         | PID_TAG_ARCHIVE_PERIOD
                         | PID_TAG_FOLDER_FORM_FLAGS
-                        | PID_TAG_FOLDER_WEBVIEWINFO
-                        | PID_TAG_FOLDER_XVIEWINFO_E
                         | PID_TAG_FOLDER_VIEWS_ONLY
                         | PID_TAG_DEFAULT_FORM_NAME_W
                         | PID_TAG_FOLDER_FORM_STORAGE
@@ -919,29 +914,24 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 )
         }
         None => {
-            is_acl_member_name_property_tag(tag)
-                || matches!(
-                    storage_tag,
-                    PID_TAG_CONTENT_COUNT
-                        | PID_TAG_CONTENT_UNREAD_COUNT
-                        | PID_TAG_DELETED_COUNT_TOTAL
-                        | PID_TAG_SUBFOLDERS
-                        | PID_TAG_PARENT_FOLDER_ID
-                        | PID_TAG_PARENT_SOURCE_KEY
-                        | PID_TAG_FOLDER_TYPE
-                        | PID_TAG_ARCHIVE_TAG
-                        | PID_TAG_POLICY_TAG
-                        | PID_TAG_RETENTION_PERIOD
-                        | PID_TAG_RETENTION_FLAGS
-                        | PID_TAG_ARCHIVE_PERIOD
-                        | PID_TAG_FOLDER_FORM_FLAGS
-                        | PID_TAG_FOLDER_WEBVIEWINFO
-                        | PID_TAG_FOLDER_XVIEWINFO_E
-                        | PID_TAG_FOLDER_VIEWS_ONLY
-                        | PID_TAG_DEFAULT_FORM_NAME_W
-                        | PID_TAG_FOLDER_FORM_STORAGE
-                        | PID_TAG_FOLDER_VIEWLIST_FLAGS
-                )
+            matches!(
+                storage_tag,
+                PID_TAG_CONTENT_COUNT
+                    | PID_TAG_CONTENT_UNREAD_COUNT
+                    | PID_TAG_DELETED_COUNT_TOTAL
+                    | PID_TAG_SUBFOLDERS
+                    | PID_TAG_PARENT_FOLDER_ID
+                    | PID_TAG_PARENT_SOURCE_KEY
+                    | PID_TAG_FOLDER_TYPE
+                    | PID_TAG_RETENTION_PERIOD
+                    | PID_TAG_RETENTION_FLAGS
+                    | PID_TAG_ARCHIVE_PERIOD
+                    | PID_TAG_FOLDER_FORM_FLAGS
+                    | PID_TAG_FOLDER_VIEWS_ONLY
+                    | PID_TAG_DEFAULT_FORM_NAME_W
+                    | PID_TAG_FOLDER_FORM_STORAGE
+                    | PID_TAG_FOLDER_VIEWLIST_FLAGS
+            )
         }
         _ => false,
     }

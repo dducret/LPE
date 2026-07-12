@@ -8952,14 +8952,14 @@ fn special_folder_property_projects_record_key() {
 }
 
 #[test]
-fn special_folder_property_projects_empty_archive_policy_defaults() {
+fn special_folder_property_omits_unconfigured_archive_policy_identities() {
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ARCHIVE_TAG, Uuid::nil()),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_POLICY_TAG, Uuid::nil()),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_RETENTION_PERIOD, Uuid::nil()),
@@ -9029,11 +9029,11 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_WEBVIEWINFO, Uuid::nil()),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_XVIEWINFO_E, Uuid::nil()),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_VIEWS_ONLY, Uuid::nil()),
@@ -9049,7 +9049,7 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ACL_MEMBER_NAME_W, Uuid::nil()),
-        Some(MapiValue::String(String::new()))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_VIEWLIST_FLAGS, Uuid::nil()),
