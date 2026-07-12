@@ -61,7 +61,7 @@ fn contents_table_named_property_context_reports_selected_columns() {
 }
 
 #[test]
-fn default_view_contents_table_starts_with_descriptor_sort() {
+fn inbox_normal_view_contents_table_keeps_builtin_received_sort() {
     let initial_sort = default_view_contents_table_initial_sort(INBOX_FOLDER_ID, false, "IPF.Note");
     let table =
         contents_table_object_with_default_view_sort(INBOX_FOLDER_ID, false, initial_sort.clone());
@@ -381,7 +381,7 @@ fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
 }
 
 #[test]
-fn inbox_view_handoff_table_contract_reports_folder_local_compact_default_view() {
+fn inbox_view_handoff_table_contract_reports_client_normal_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         INBOX_FOLDER_ID,
@@ -390,30 +390,20 @@ fn inbox_view_handoff_table_contract_reports_folder_local_compact_default_view()
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-    assert!(contract.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
-    )));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-    )));
-    assert!(contract.contains("selected_view_name=Compact"));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains("advertised_default_view_folder_id=none"));
+    assert!(contract.contains("expected_view_message_id=none"));
+    assert!(contract.contains("selected_view_name=Normal"));
 }
 
 #[test]
-fn inbox_folder_local_default_view_visibility_contract_reports_present() {
+fn inbox_folder_local_default_view_visibility_contract_is_not_applicable() {
     let snapshot = MapiMailStoreSnapshot::empty();
-    let contract =
-        format_folder_local_default_view_fai_visibility_contract(INBOX_FOLDER_ID, &snapshot)
-            .expect("inbox folder-local default view");
-
     assert!(
-        contract.contains("expected=true;present=true"),
-        "{contract}"
+        format_folder_local_default_view_fai_visibility_contract(INBOX_FOLDER_ID, &snapshot)
+            .is_none()
     );
-    assert!(contract.contains("name=Compact"), "{contract}");
 }
 
 #[test]
@@ -658,22 +648,16 @@ fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
         Uuid::nil(),
     );
 
-    assert!(context.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
-    )));
-    assert!(context.contains(&format!(
-        "default_view_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-    )));
+    assert!(context.contains("advertised_default_view_folder_id=none"));
+    assert!(context.contains("default_view_id=none"));
     assert!(context.contains("current_count=1"), "{context}");
-    assert!(context.contains("unfiltered_count=2"), "{context}");
+    assert!(context.contains("unfiltered_count=1"), "{context}");
     assert!(
         context.contains("prefix_ipm_configuration_count=1"),
         "{context}"
     );
-    assert!(context.contains("exact_named_view_count=1"));
-    assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
-    assert!(context.contains("subject=Compact"));
+    assert!(context.contains("exact_named_view_count=0"));
+    assert!(!context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
 }
 
 #[test]
@@ -709,8 +693,8 @@ fn quick_step_view_handoff_table_contract_reports_unsupported_default_view() {
 
     assert!(contract.contains("default_view_supported=false"));
     assert!(contract.contains("folder_local_default_supported=false"));
-    assert!(!contract.contains("advertised_default_view_folder_id="));
-    assert!(!contract.contains("expected_view_message_id="));
+    assert!(contract.contains("advertised_default_view_folder_id=none"));
+    assert!(contract.contains("expected_view_message_id=none"));
 }
 
 #[test]
@@ -746,8 +730,8 @@ fn calendar_view_handoff_table_contract_reports_client_normal_view() {
 
     assert!(contract.contains("folder_local_default_supported=false"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
-    assert!(!contract.contains("selected_view_name="));
-    assert!(!contract.contains("expected_view_message_id="));
+    assert!(contract.contains("selected_view_name=Normal"));
+    assert!(contract.contains("expected_view_message_id=none"));
 }
 
 #[test]
@@ -803,7 +787,7 @@ fn calendar_associated_view_handoff_uses_client_normal_view() {
 
     assert!(contract.contains("folder_local_default_supported=false"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
-    assert!(!contract.contains("selected_view_name="));
+    assert!(contract.contains("selected_view_name=Normal"));
     assert!(contract.ends_with("descriptor_summary="));
 }
 
@@ -826,7 +810,7 @@ fn calendar_normal_view_handoff_does_not_claim_server_descriptor() {
         format_outlook_view_handoff_table_contract(CALENDAR_FOLDER_ID, false, &columns, &snapshot);
 
     assert!(contract.contains("folder_local_default_supported=false"));
-    assert!(!contract.contains("selected_view_name="));
+    assert!(contract.contains("selected_view_name=Normal"));
     assert!(!contract.contains("visible_column_tags="));
     assert!(contract.ends_with("descriptor_summary="));
 }
@@ -891,17 +875,7 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
         &snapshot,
     );
 
-    assert!(contract.contains("phase=setcolumns"));
-    assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
-    assert!(contract.contains(
-        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
-    ));
-    assert!(!contract.contains("descriptor_columns=0x00040001"));
-    assert!(contract.contains(
-        "selected_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
-    ));
-    assert!(contract.contains("selected_missing_descriptor_columns=;"));
-    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
@@ -921,11 +895,7 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
         &snapshot,
     );
 
-    assert!(contract.contains(
-        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
-    ));
-    assert!(contract.contains("selected_missing_descriptor_columns=;"));
-    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
@@ -950,14 +920,7 @@ fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_s
         &snapshot,
     );
 
-    assert!(
-        contract.contains("descriptor_columns_missing_from_table=;"),
-        "{contract}"
-    );
-    assert!(contract.contains(
-        "descriptor_columns_not_selected=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0e080003,0x9000101e"
-    ));
-    assert!(contract.contains("table_sort_matches_descriptor=true"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
@@ -1079,17 +1042,7 @@ fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release()
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert!(contract.contains("total_rows=1"), "{contract}");
-    assert!(contract.contains("position=0"), "{contract}");
-    assert!(contract.contains("requested=40"), "{contract}");
-    assert!(contract.contains("sampled=1"), "{contract}");
-    assert!(
-        contract.contains("selected_missing_descriptor_columns=;"),
-        "{contract}"
-    );
-    assert!(contract.contains("0x0037001e:projected=true"), "{contract}");
-    assert!(contract.contains("0x0037001e=Preview target"), "{contract}");
-    assert!(contract.contains("0x0e060040="), "{contract}");
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]

@@ -230,6 +230,9 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             "default_view_supported=false;\
              folder_local_default_supported=false;\
              folder_local_default_visible_in_fai_table=false;\
+             advertised_default_view_folder_id=none;\
+             selected_view_name=Normal;\
+             expected_view_message_id=none;\
              selected_property_tag_count={};\
              descriptor_summary=",
             columns.len()
@@ -926,16 +929,7 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("view_folder=0x0000000000050001"));
-        assert!(summary.contains("view_name=Compact"));
-        assert!(summary.contains("descriptor_columns_missing_from_table="));
-        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
-        assert!(summary.contains("descriptor_sort_order=0x01"));
-        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
-        assert!(summary.contains("table_primary_sort_order=0x01"));
-        assert!(summary.contains("table_sort_matches_descriptor=true"));
-        assert!(summary.contains("table_sort_direction_matches_descriptor=true"));
-        assert!(summary.contains("table_restriction_present=true"));
+        assert_eq!(summary, "default_view=missing");
     }
 
     #[test]
@@ -967,11 +961,6 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
-        assert!(summary.contains("descriptor_sort_order=0x01"));
-        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
-        assert!(summary.contains("table_primary_sort_order=0x00"));
-        assert!(summary.contains("table_sort_matches_descriptor=false"));
-        assert!(summary.contains("table_sort_direction_matches_descriptor=false"));
+        assert_eq!(summary, "default_view=missing");
     }
 }

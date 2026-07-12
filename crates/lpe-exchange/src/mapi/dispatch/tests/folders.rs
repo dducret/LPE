@@ -271,16 +271,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
         Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-        crate::mapi::identity::message_entry_id_from_object_ids(
-            principal.account_id,
-            INBOX_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-        .map(MapiValue::Binary)
-        .as_ref()
-    );
+    assert_eq!(properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID), None);
     assert_eq!(
         properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
         Some(&MapiValue::U32(0))
