@@ -1135,9 +1135,12 @@ pub(in crate::mapi) fn common_view_named_view_property_value(
             );
             Some(MapiValue::Binary(view_descriptor_binary(&definition)))
         }
-        tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => Some(
-            wlink_guid_property_value(requested_property_tag, *message.canonical_id.as_bytes()),
-        ),
+        tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_CLSID) => {
+            Some(wlink_guid_property_value(
+                requested_property_tag,
+                outlook_view_descriptor_clsid(message.folder_id),
+            ))
+        }
         tag if property_tag_id(tag) == property_tag_id(PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) => {
             Some(wlink_guid_property_value(
                 requested_property_tag,

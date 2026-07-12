@@ -8158,11 +8158,17 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_CLSID),
-        Some(MapiValue::Guid(*message.canonical_id.as_bytes()))
+        Some(MapiValue::Guid([
+            0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]))
     );
     assert_eq!(
         associated_config_property_value(&message, 0x6833_0102),
-        Some(MapiValue::Binary(message.canonical_id.as_bytes().to_vec()))
+        Some(MapiValue::Binary(vec![
+            0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]))
     );
     assert_eq!(
         associated_config_property_value(&message, 0x6842_0102),

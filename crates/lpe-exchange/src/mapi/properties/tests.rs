@@ -4829,7 +4829,7 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
     let view = MapiCommonViewNamedViewMessage {
         id: crate::mapi::identity::mapi_store_id(0x7fff_ffff_fff7),
         folder_id: COMMON_VIEWS_FOLDER_ID,
-        canonical_id: Uuid::from_u128(0x11111111111111111111111111111111),
+        canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
         name: "Messages".to_string(),
         view_flags: 0,
         view_type: 8,
@@ -4887,6 +4887,17 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
         Some(MapiValue::U32(8))
     );
     assert_eq!(
+        common_view_named_view_property_value(&view, account_id, PID_TAG_VIEW_DESCRIPTOR_CLSID,),
+        Some(MapiValue::Guid([
+            0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]))
+    );
+    assert_ne!(
+        common_view_named_view_property_value(&view, account_id, PID_TAG_VIEW_DESCRIPTOR_CLSID,),
+        Some(MapiValue::Guid(*view.canonical_id.as_bytes()))
+    );
+    assert_eq!(
         common_view_named_view_property_value(&view, account_id, PID_TAG_MESSAGE_FLAGS),
         Some(MapiValue::U32(MSGFLAG_FAI))
     );
@@ -4916,6 +4927,26 @@ fn common_view_named_view_projects_descriptor_properties_for_outlook() {
         common_view_named_view_property_value(&view, account_id, PID_TAG_PARENT_ENTRY_ID),
         crate::mapi::identity::folder_entry_id_from_object_id(account_id, COMMON_VIEWS_FOLDER_ID)
             .map(MapiValue::Binary)
+    );
+}
+
+#[test]
+fn calendar_named_view_projects_registered_calendar_view_clsid() {
+    let view = MapiCommonViewNamedViewMessage {
+        id: crate::mapi::identity::mapi_store_id(0x7fff_fffe_0010),
+        folder_id: CALENDAR_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000010),
+        name: "Calendar".to_string(),
+        view_flags: 0,
+        view_type: 8,
+    };
+
+    assert_eq!(
+        common_view_named_view_property_value(&view, Uuid::nil(), PID_TAG_VIEW_DESCRIPTOR_CLSID,),
+        Some(MapiValue::Guid([
+            0x03, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]))
     );
 }
 

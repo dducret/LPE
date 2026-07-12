@@ -68,6 +68,9 @@ pub(in crate::mapi::dispatch) fn log_outlook_view_handoff(
     let descriptor_summary = format_view_descriptor_binary_summary(&descriptor_binary);
     let descriptor_strings_chars = descriptor_strings.chars().count();
     let descriptor_strings_utf16_bytes = descriptor_strings.encode_utf16().count() * 2;
+    let view_descriptor_clsid = outlook_view_descriptor_clsid(message.folder_id);
+    let view_descriptor_clsid_is_message_identity =
+        view_descriptor_clsid == *message.canonical_id.as_bytes();
     let source = if folder_id == COMMON_VIEWS_FOLDER_ID {
         "common_views"
     } else {
@@ -100,6 +103,8 @@ pub(in crate::mapi::dispatch) fn log_outlook_view_handoff(
         view_message_id = %format!("0x{message_id:016x}"),
         opened_view_id = %format!("0x{:016x}", message.id),
         view_canonical_id = %format!("0x{:032x}", message.canonical_id),
+        view_descriptor_clsid = %bytes_to_hex(&view_descriptor_clsid),
+        view_descriptor_clsid_is_message_identity,
         view_name = %message.name,
         view_message_class = "IPM.Microsoft.FolderDesign.NamedView",
         view_version = 8u32,

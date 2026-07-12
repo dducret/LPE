@@ -737,7 +737,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(guid_property_value(
                         property_tag,
-                        *message.canonical_id.as_bytes(),
+                        outlook_view_descriptor_clsid(message.folder_id),
                     ))
                 }
                 tag if message.message_class

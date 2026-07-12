@@ -1249,6 +1249,13 @@ fn common_view_named_view_sync_projects_canonical_descriptor_properties() {
         property(PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
         &mapi_mailstore::SpecialMessagePropertyValue::U32(8)
     );
+    assert_eq!(
+        property(PID_TAG_VIEW_DESCRIPTOR_CLSID),
+        &mapi_mailstore::SpecialMessagePropertyValue::Guid([
+            0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ])
+    );
     let expected_descriptor = view_descriptor_binary(&outlook_mail_view_definition("Compact"));
     assert_eq!(
         property(PID_TAG_VIEW_DESCRIPTOR_BINARY),

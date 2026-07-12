@@ -132,6 +132,25 @@ pub(in crate::mapi) enum ViewDefinitionKind {
     TaskList,
 }
 
+const OUTLOOK_TABLE_VIEW_CLSID: [u8; 16] = [
+    0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+const OUTLOOK_CALENDAR_VIEW_CLSID: [u8; 16] = [
+    0x03, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+
+pub(in crate::mapi) fn outlook_view_descriptor_clsid(folder_id: u64) -> [u8; 16] {
+    // MS-OXOCFG 2.2.6 and 3.1.4.3 define the named-view FAI contract.
+    // Classic Outlook additionally consumes PidTagViewDescriptorCLSID
+    // (0x68330048) as the registered view implementation class, not as the
+    // FAI message identity. An unknown CLSID makes HrCreateViewDataObject fail.
+    if folder_id == CALENDAR_FOLDER_ID {
+        OUTLOOK_CALENDAR_VIEW_CLSID
+    } else {
+        OUTLOOK_TABLE_VIEW_CLSID
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(in crate::mapi) struct ViewColumn {
     pub(in crate::mapi) property_tag: u32,
