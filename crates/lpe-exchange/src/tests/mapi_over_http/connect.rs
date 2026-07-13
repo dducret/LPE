@@ -3690,10 +3690,9 @@ async fn mapi_over_http_notification_wait_polls_canonical_change_cursor() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_notification_wait_serializes_canonical_change_details() {
+async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
     let folder_id = test_mapi_folder_id(5);
     let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
-    let source_folder_id = test_mapi_folder_id(14);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -3708,17 +3707,17 @@ async fn mapi_over_http_notification_wait_serializes_canonical_change_details() 
             events: vec![
                 crate::mapi::notifications::MapiNotificationEvent::canonical(
                     crate::mapi::notifications::MapiNotificationKind::Content,
-                    0x0020,
+                    0x0010,
                     folder_id,
                     Some(message_id),
-                    Some(source_folder_id),
+                    None,
                     8,
                     44,
-                    Some(12),
                     Some(3),
-                    "moved".to_string(),
-                    Some("Archive".to_string()),
+                    Some(0),
+                    "updated".to_string(),
                     Some("Inbox".to_string()),
+                    None,
                     Some("quarterly report".to_string()),
                 ),
             ],
@@ -3738,7 +3737,7 @@ async fn mapi_over_http_notification_wait_serializes_canonical_change_details() 
     append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
-    rops.extend_from_slice(&0x0020u16.to_le_bytes());
+    rops.extend_from_slice(&0x0010u16.to_le_bytes());
     rops.push(1);
     let response = service
         .handle_mapi(
@@ -3757,29 +3756,29 @@ async fn mapi_over_http_notification_wait_serializes_canonical_change_details() 
         .await
         .unwrap();
     let body = response_bytes(response).await;
+    assert_eq!(body.len(), 16);
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
-    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0020);
-    assert_eq!(body[18], 1);
-    assert_eq!(body[19], 0b0000_1111);
-    assert_eq!(&body[20..28], &mapi_wire_id_bytes(folder_id));
-    assert_eq!(&body[28..36], &mapi_wire_id_bytes(message_id));
-    assert_eq!(&body[36..44], &mapi_wire_id_bytes(source_folder_id));
-    assert_eq!(u64::from_le_bytes(body[44..52].try_into().unwrap()), 8);
-    assert_eq!(u64::from_le_bytes(body[52..60].try_into().unwrap()), 44);
-    assert_eq!(u32::from_le_bytes(body[60..64].try_into().unwrap()), 12);
-    assert_eq!(u32::from_le_bytes(body[64..68].try_into().unwrap()), 3);
-    let details = notification_detail_strings(&body[68..]);
-    assert_eq!(
-        details,
-        vec![
-            "mailbox_message",
-            "moved",
-            "Archive",
-            "Inbox",
-            "quarterly report"
-        ]
-    );
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected = vec![0x2A];
+    expected.extend_from_slice(&3u32.to_le_bytes());
+    expected.push(0);
+    expected.extend_from_slice(&0xB010u16.to_le_bytes());
+    expected.extend_from_slice(&mapi_wire_id_bytes(folder_id));
+    expected.extend_from_slice(&mapi_wire_id_bytes(message_id));
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&3u32.to_le_bytes());
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    assert_eq!(response_rops, expected);
 }
 
 #[tokio::test]
