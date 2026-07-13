@@ -3304,7 +3304,7 @@ async fn mapi_over_http_copy_to_stream_saves_canonical_attachment() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_set_read_flags_updates_canonical_message_state() {
+async fn mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table() {
     let message_id = "36363636-3636-3636-3636-363636363636";
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 1;
@@ -3344,15 +3344,22 @@ async fn mapi_over_http_set_read_flags_updates_canonical_message_state() {
     ];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x02]); // RopRegisterNotification
+    rops.extend_from_slice(&0x0078u16.to_le_bytes());
+    rops.push(0);
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.extend_from_slice(&0u64.to_le_bytes());
     rops.extend_from_slice(&[
-        0x66, 0x00, 0x01, 0x00, 0x01, // RopSetReadFlags, sync, rfSuppressReceipt
+        // Outlook 16 trace 202607131640 request :264: asynchronous and
+        // rfReserved (0x0A), whose ignored bits leave rfDefault behavior.
+        0x66, 0x00, 0x01, 0x01, 0x0A,
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
     append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -3368,6 +3375,22 @@ async fn mapi_over_http_set_read_flags_updates_canonical_message_state() {
 
     assert!(contains_bytes(response_rops, &[0x66, 0x01, 0, 0, 0, 0, 0]));
     assert!(!emails.lock().unwrap()[0].unread);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
+    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0100);
+    assert_eq!(body[18], 1);
+    assert!(contains_bytes(
+        &body,
+        &mapi_wire_id_bytes(test_mapi_folder_id(5))
+    ));
 }
 
 #[tokio::test]

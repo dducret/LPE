@@ -794,7 +794,7 @@ pub(super) async fn append_set_message_read_flag_response<S>(
 pub(super) async fn append_set_read_flags_response<S>(
     store: &S,
     principal: &AccountPrincipal,
-    session: &MapiSession,
+    session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
@@ -825,6 +825,7 @@ pub(super) async fn append_set_read_flags_response<S>(
     }
     let unread = unread_from_read_flags(request.read_flags());
     let mut partial_completion = false;
+    let mut changed = false;
     let message_ids = request.message_ids();
     if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
         if let Some(unread) = unread {
@@ -834,6 +835,7 @@ pub(super) async fn append_set_read_flags_response<S>(
                     partial_completion = true;
                     continue;
                 };
+                changed |= unread == item.item.is_read;
                 patches.push(lpe_storage::PublicFolderPerUserStatePatch {
                     item_id: item.item.id,
                     is_read: !unread,
@@ -854,6 +856,9 @@ pub(super) async fn append_set_read_flags_response<S>(
                 partial_completion = true;
             }
         }
+        if changed && !partial_completion {
+            session.record_notification(MapiNotificationEvent::content(folder_id, None));
+        }
         responses.extend_from_slice(&rop_set_read_flags_response(request, partial_completion));
         return;
     }
@@ -867,6 +872,7 @@ pub(super) async fn append_set_read_flags_response<S>(
             continue;
         };
         if let Some(unread) = unread {
+            let message_changed = unread != email.unread;
             if store
                 .update_jmap_email_flags(
                     principal.account_id,
@@ -883,8 +889,15 @@ pub(super) async fn append_set_read_flags_response<S>(
                 .is_err()
             {
                 partial_completion = true;
+            } else {
+                changed |= message_changed;
             }
         }
+    }
+    // [MS-OXCMSG] 3.2.5.10 commits the read-state mutation immediately.
+    // Notify the subscribed contents table so Outlook refreshes PidTagMessageFlags.
+    if changed {
+        session.record_notification(MapiNotificationEvent::content(folder_id, None));
     }
     responses.extend_from_slice(&rop_set_read_flags_response(request, partial_completion));
 }

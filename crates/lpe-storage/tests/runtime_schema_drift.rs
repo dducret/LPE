@@ -3251,6 +3251,17 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         updated_jmap.unread && updated_jmap.flagged && updated_jmap.bcc.is_empty(),
         "JMAP projection must reflect MAPI flag mutation while still hiding protected Bcc"
     );
+    let updated_sent_mailbox = storage
+        .fetch_jmap_mailboxes(fixture.account_id)
+        .await
+        .context("fetch Sent mailbox after MAPI flag mutation")?
+        .into_iter()
+        .find(|mailbox| mailbox.id == submitted.sent_mailbox_id)
+        .context("Sent mailbox missing after MAPI flag mutation")?;
+    anyhow::ensure!(
+        updated_sent_mailbox.unread_emails == 1,
+        "mailbox unread count must track the canonical read state changed through MAPI"
+    );
 
     Ok(())
 }

@@ -721,7 +721,13 @@ impl Storage {
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        for row in rows {
+        let mut affected_mailbox_ids = rows
+            .iter()
+            .map(|row| row.try_get::<Uuid, _>("mailbox_id"))
+            .collect::<Result<Vec<_>, _>>()?;
+        affected_mailbox_ids.sort_unstable();
+        affected_mailbox_ids.dedup();
+        for row in &rows {
             Self::insert_mail_change_log_in_tx(
                 &mut tx,
                 &tenant_id,
@@ -740,6 +746,14 @@ impl Storage {
                 }),
             )
             .await?;
+        }
+        if update.unread.is_some() {
+            for mailbox_id in affected_mailbox_ids {
+                Self::recalculate_mailbox_counts_in_tx(
+                    &mut tx, &tenant_id, account_id, mailbox_id, modseq,
+                )
+                .await?;
+            }
         }
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
