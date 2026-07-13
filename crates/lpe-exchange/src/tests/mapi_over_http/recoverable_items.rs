@@ -972,13 +972,8 @@ async fn mapi_over_http_empty_folder_notifies_when_partial_purge_changes_content
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x58, 0x01, 0, 0, 0, 0, 1]));
-
-    let mut wait_headers = mapi_headers("NotificationWait");
-    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let response = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
-        .await
-        .unwrap();
-    let body = response_bytes(response).await;
-    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+    ));
 }
