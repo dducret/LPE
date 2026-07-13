@@ -3701,27 +3701,34 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
             "Inbox",
         )])),
         mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
-        mapi_notification_polls: Arc::new(Mutex::new(vec![MapiNotificationPoll {
-            event_pending: true,
-            cursor: Some(8),
-            events: vec![
-                crate::mapi::notifications::MapiNotificationEvent::canonical(
-                    crate::mapi::notifications::MapiNotificationKind::Content,
-                    0x0010,
-                    folder_id,
-                    Some(message_id),
-                    None,
-                    8,
-                    44,
-                    Some(3),
-                    Some(0),
-                    "updated".to_string(),
-                    Some("Inbox".to_string()),
-                    None,
-                    Some("quarterly report".to_string()),
-                ),
-            ],
-        }])),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(8),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0010,
+                        folder_id,
+                        Some(message_id),
+                        None,
+                        8,
+                        44,
+                        Some(3),
+                        Some(0),
+                        "updated".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        Some("quarterly report".to_string()),
+                    ),
+                ],
+            },
+            MapiNotificationPoll {
+                event_pending: false,
+                cursor: Some(7),
+                events: Vec::new(),
+            },
+        ])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
