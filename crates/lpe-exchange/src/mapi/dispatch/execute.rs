@@ -423,11 +423,15 @@ pub(super) fn append_execute_status_response(
             input_object(session, handle_slots, request),
             responses,
         ),
-        Some(RopId::ResetTable) => append_reset_table_response(
-            request,
-            input_object_mut(session, handle_slots, request).is_some_and(reset_table_state),
-            responses,
-        ),
+        Some(RopId::ResetTable) => {
+            let handle = input_handle(handle_slots, request);
+            let reset_succeeded =
+                input_object_mut(session, handle_slots, request).is_some_and(reset_table_state);
+            if reset_succeeded {
+                session.deactivate_table_notifications(handle);
+            }
+            append_reset_table_response(request, reset_succeeded, responses);
+        }
         _ => {}
     }
 }

@@ -1319,13 +1319,31 @@ where
     }
     let notification_deliveries = session.take_pending_notification_deliveries();
     if !notification_deliveries.is_empty() {
-        tracing::debug!(
+        let notification_targets = notification_deliveries
+            .iter()
+            .map(|(handle, event)| {
+                format!(
+                    "handle={handle};target={};event=0x{:04x};folder=0x{:016x}",
+                    if session.table_notification_active_handles.contains(handle) {
+                        "table"
+                    } else {
+                        "subscription"
+                    },
+                    event.event_mask,
+                    event.folder_id
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        tracing::info!(
+            rca_debug = true,
             adapter = "mapi",
             endpoint = "emsmdb",
             operation = "Execute",
             account_id = %principal.account_id,
             mapi_request_id = request_id,
             notification_count = notification_deliveries.len(),
+            notification_targets,
             "mapi execute appended RopNotify responses"
         );
         for (notification_handle, event) in notification_deliveries {

@@ -2384,7 +2384,7 @@ async fn mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
     append_mapi_wire_id(&mut rops, parent_folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
-    rops.extend_from_slice(&0x0110u16.to_le_bytes());
+    rops.extend_from_slice(&0x0010u16.to_le_bytes());
     rops.push(1);
     let response = service
         .handle_mapi(

@@ -27,6 +27,7 @@ fn session_debug_context_or_none(context: &str) -> &str {
 
 mod lifecycle;
 mod named_properties;
+mod table_notifications;
 mod types;
 #[cfg(test)]
 pub(crate) use lifecycle::begin_active_session_request_for_test;
@@ -1042,68 +1043,6 @@ impl MapiSession {
         handle
     }
 
-    pub(in crate::mapi) fn record_notification(&mut self, event: MapiNotificationEvent) {
-        if self.handles.values().any(|object| {
-            matches!(
-                object,
-                MapiObject::NotificationSubscription { registration }
-                    if registration_matches_event(registration, &event)
-            )
-        }) {
-            self.pending_notifications.push_back(event);
-        }
-    }
-
-    pub(in crate::mapi) fn pending_notification_count(&self) -> usize {
-        self.pending_notifications.len()
-    }
-
-    pub(in crate::mapi) fn take_pending_notification_deliveries(
-        &mut self,
-    ) -> Vec<(u32, MapiNotificationEvent)> {
-        let events: Vec<_> = self.pending_notifications.drain(..).collect();
-        let mut deliveries = Vec::new();
-        for event in events {
-            let mut notification_handles: Vec<_> = self
-                .handles
-                .iter()
-                .filter_map(|(handle, object)| match object {
-                    MapiObject::NotificationSubscription { registration }
-                        if registration_matches_event(registration, &event) =>
-                    {
-                        Some(*handle)
-                    }
-                    _ => None,
-                })
-                .collect();
-            notification_handles.sort_unstable();
-            deliveries.extend(
-                notification_handles
-                    .into_iter()
-                    .map(|handle| (handle, event.clone())),
-            );
-        }
-        deliveries
-    }
-
-    pub(in crate::mapi) fn matching_notifications(
-        &self,
-        events: Vec<MapiNotificationEvent>,
-    ) -> Vec<MapiNotificationEvent> {
-        events
-            .into_iter()
-            .filter(|event| {
-                self.handles.values().any(|object| {
-                    matches!(
-                        object,
-                        MapiObject::NotificationSubscription { registration }
-                            if registration_matches_event(registration, event)
-                    )
-                })
-            })
-            .collect()
-    }
-
     pub(in crate::mapi) fn hierarchy_sync_completed(&self) -> bool {
         self.post_hierarchy_actions
             .last_completed_hierarchy_sync_root
@@ -1422,6 +1361,7 @@ pub(in crate::mapi) fn release_handle_slot(
         return;
     };
     if *handle != u32::MAX {
+        session.forget_table_notification_handle(*handle);
         session.handles.remove(handle);
         session.message_handle_generations.remove(handle);
     }

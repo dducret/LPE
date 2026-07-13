@@ -138,6 +138,7 @@ pub(super) fn append_table_control_dispatch_response(
                 snapshot,
                 responses,
             );
+            session.activate_table_notifications_for_request(handle_slots, request);
             TableControlFlow::Continue
         }
         Some(
@@ -191,6 +192,7 @@ pub(super) fn append_table_control_dispatch_response(
                 snapshot,
                 responses,
             );
+            session.activate_table_notifications_for_request(handle_slots, request);
             TableControlFlow::Continue
         }
         Some(RopId::FindRow) => {
@@ -206,6 +208,7 @@ pub(super) fn append_table_control_dispatch_response(
                 snapshot,
                 responses,
             );
+            session.activate_table_notifications_for_request(handle_slots, request);
             TableControlFlow::Continue
         }
         _ => TableControlFlow::Continue,

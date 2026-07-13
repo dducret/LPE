@@ -3540,7 +3540,7 @@ async fn mapi_over_http_notification_wait_reports_content_event_after_registered
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
-    rops.extend_from_slice(&0x0008u16.to_le_bytes());
+    rops.extend_from_slice(&0x0108u16.to_le_bytes());
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0u64.to_le_bytes());
@@ -3592,7 +3592,7 @@ async fn mapi_over_http_notification_wait_reports_content_event_after_registered
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
-    rops.extend_from_slice(&0x0004u16.to_le_bytes());
+    rops.extend_from_slice(&0x0104u16.to_le_bytes());
     rops.push(1);
     append_rop_create_message(&mut rops, 1, 3, test_mapi_folder_id(5));
     append_rop_set_properties(&mut rops, 3, 2, &property_values);
@@ -3762,6 +3762,135 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
     expected.extend_from_slice(&3u32.to_le_bytes());
     expected.extend_from_slice(&0u32.to_le_bytes());
     assert_eq!(response_rops, expected);
+}
+
+#[tokio::test]
+async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
+    let folder_id = test_mapi_folder_id(5);
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(8),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0010,
+                        folder_id,
+                        Some(message_id),
+                        None,
+                        8,
+                        44,
+                        Some(3),
+                        Some(2),
+                        "updated".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        Some("quarterly report".to_string()),
+                    ),
+                ],
+            },
+            MapiNotificationPoll {
+                event_pending: false,
+                cursor: Some(7),
+                events: Vec::new(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    for tag in [
+        0x6748_0014u32,
+        0x674A_0014,
+        0x674D_0014,
+        0x674E_0003,
+        0x0E07_0003,
+    ] {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x17, 0x00, 0x02]); // RopQueryPosition
+    rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x03]); // RopRegisterNotification
+    rops.extend_from_slice(&0x0010u16.to_le_bytes());
+    rops.push(0);
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.extend_from_slice(&0u64.to_le_bytes());
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x04, 0x10]); // NoNotifications table
+    rops.extend_from_slice(&[0x17, 0x00, 0x04]); // RopQueryPosition
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+
+    let mut notification_execute_headers = mapi_headers("Execute");
+    notification_execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &notification_execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // [MS-OXCNOTIF] section 3.1.4.3 automatically subscribes a table after
+    // QueryPosition. The target handle is the table (3), not the explicit
+    // ObjectModified subscription (4).
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x04, 0, 0, 0, 0, 0x10, 0xB0]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x2A, 0x04, 0, 0, 0, 0, 0x00, 0x01]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x2A, 0x05, 0, 0, 0, 0, 0x00, 0x01]
+    ));
 }
 
 #[tokio::test]

@@ -3064,6 +3064,8 @@ fn test_mapi_session() -> MapiSession {
         next_local_replica_sequence: 1,
         notification_cursor: None,
         pending_notifications: VecDeque::new(),
+        table_notification_eligible_handles: HashSet::new(),
+        table_notification_active_handles: HashSet::new(),
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),

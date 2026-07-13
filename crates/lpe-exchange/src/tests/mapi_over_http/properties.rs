@@ -3345,7 +3345,7 @@ async fn mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table(
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x02]); // RopRegisterNotification
-    rops.extend_from_slice(&0x0078u16.to_le_bytes());
+    rops.extend_from_slice(&0x0178u16.to_le_bytes());
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0u64.to_le_bytes());

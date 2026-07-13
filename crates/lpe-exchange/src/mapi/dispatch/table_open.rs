@@ -103,6 +103,8 @@ pub(super) async fn append_open_table_response<S>(
                     session.deleted_advertised_special_folders.clone(),
                 ),
             );
+            let table_flags = request.payload.first().copied().unwrap_or(0);
+            session.remember_table_notification_eligibility(handle, table_flags & 0x10 == 0);
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID
                 && snapshot.public_folders().is_empty()
@@ -274,6 +276,7 @@ pub(super) async fn append_open_table_response<S>(
                     initial_sort.clone(),
                 ),
             );
+            session.remember_table_notification_eligibility(handle, table_flags & 0x10 == 0);
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = contents_table_open_row_count(
                 contents_folder_id,

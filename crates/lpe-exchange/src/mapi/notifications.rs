@@ -10,7 +10,7 @@ pub(in crate::mapi) struct MapiNotificationRegistration {
     pub(in crate::mapi) folder_id: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum MapiNotificationKind {
     Content,
     Hierarchy,
@@ -318,8 +318,6 @@ pub(in crate::mapi) fn registration_matches_event(
 
 fn notification_type_matches(requested: u16, event_mask: u16) -> bool {
     requested & event_mask != 0
-        || requested & MapiNotificationEventMask::TableModified.as_u16() != 0
-        || event_mask == MapiNotificationEventMask::TableModified.as_u16()
 }
 
 pub(in crate::mapi) fn notification_registration_from_request(

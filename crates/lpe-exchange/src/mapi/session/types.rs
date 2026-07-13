@@ -38,6 +38,8 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_local_replica_sequence: u64,
     pub(in crate::mapi) notification_cursor: Option<i64>,
     pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
+    pub(in crate::mapi) table_notification_eligible_handles: HashSet<u32>,
+    pub(in crate::mapi) table_notification_active_handles: HashSet<u32>,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
     pub(in crate::mapi) post_hierarchy_actions: PostHierarchyActionState,

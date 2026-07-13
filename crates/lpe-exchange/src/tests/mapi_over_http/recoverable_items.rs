@@ -955,7 +955,7 @@ async fn mapi_over_http_empty_folder_notifies_when_partial_purge_changes_content
     append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
-    rops.extend_from_slice(&0x0008u16.to_le_bytes());
+    rops.extend_from_slice(&0x0108u16.to_le_bytes());
     rops.push(0);
     append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
     rops.extend_from_slice(&0u64.to_le_bytes());
