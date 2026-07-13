@@ -15,7 +15,8 @@ use crate::mapi::tables::{
     default_conversation_action_property_tags, default_event_property_tags,
     default_folder_property_tags, default_journal_entry_property_tags,
     default_message_property_tags, default_note_property_tags, default_store_property_tags,
-    default_task_property_tags, message_recipients, write_standard_property_row,
+    default_task_property_tags, message_recipients, serialize_recipient_row,
+    write_standard_property_row,
 };
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiMailStoreSnapshot;
@@ -42,6 +43,33 @@ pub(in crate::mapi) fn rop_open_message_response(
     response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
+    response
+}
+
+pub(in crate::mapi) fn rop_open_message_response_with_recipients(
+    request: &RopRequest,
+    subject: &str,
+    email: &JmapEmail,
+) -> Vec<u8> {
+    let recipients = message_recipients(email);
+    let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response.push(0);
+    write_typed_string(&mut response, "");
+    write_typed_string(&mut response, subject);
+    response.extend_from_slice(&(recipients.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    // [MS-OXCROPS] 2.2.6.1.2 permits an empty RecipientColumns array;
+    // the intrinsic fields in each RecipientRow still carry its address and name.
+    response.extend_from_slice(&0u16.to_le_bytes());
+    response.push(recipients.len().min(u8::MAX as usize) as u8);
+    for recipient in recipients.into_iter().take(u8::MAX as usize) {
+        let row = serialize_recipient_row(recipient.address);
+        response.push(recipient.recipient_type);
+        response.extend_from_slice(&0x0FFFu16.to_le_bytes());
+        response.extend_from_slice(&0u16.to_le_bytes());
+        response.extend_from_slice(&(row.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        response.extend_from_slice(&row[..row.len().min(u16::MAX as usize)]);
+    }
     response
 }
 

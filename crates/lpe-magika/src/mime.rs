@@ -36,15 +36,20 @@ pub fn extract_visible_body_parts(bytes: &[u8]) -> Result<VisibleBodyParts> {
         .to_ascii_lowercase()
         .starts_with("text/html")
     {
-        let body = String::from_utf8_lossy(&decode_transfer_encoding(
-            split_headers_and_body_bytes(bytes).1,
-            &parse_rfc822_headers_bytes(split_headers_and_body_bytes(bytes).0)
-                .get("content-transfer-encoding")
-                .map(|value| value.to_ascii_lowercase())
-                .unwrap_or_default(),
-        )?)
-        .trim()
-        .to_string();
+        let (header_block, body_block) = split_headers_and_body_bytes(bytes);
+        let headers = parse_rfc822_headers_bytes(header_block);
+        let content_type = headers
+            .get("content-type")
+            .cloned()
+            .unwrap_or_else(|| "text/html".to_string());
+        let transfer_encoding = headers
+            .get("content-transfer-encoding")
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
+        let body = decode_text_charset(&decoded_body, &content_type)
+            .trim()
+            .to_string();
         (!body.is_empty()).then_some(body)
     } else {
         first_html_part(bytes)?
@@ -147,14 +152,14 @@ fn parse_visible_part(bytes: &[u8]) -> Result<ParsedVisiblePart> {
 
                 text_plain.or(text_html).unwrap_or_default()
             }
-            None => String::from_utf8_lossy(&decoded_body).to_string(),
+            None => decode_text_charset(&decoded_body, &content_type),
         }
     } else if content_type_lower.starts_with("text/html") {
-        html_to_text(&String::from_utf8_lossy(&decoded_body))
+        html_to_text(&decode_text_charset(&decoded_body, &content_type))
     } else if content_type_lower.starts_with("text/plain")
         || content_type_lower.starts_with("message/rfc822")
     {
-        String::from_utf8_lossy(&decoded_body).to_string()
+        decode_text_charset(&decoded_body, &content_type)
     } else {
         String::new()
     };
@@ -193,7 +198,9 @@ fn first_html_part(bytes: &[u8]) -> Result<Option<String>> {
     }
 
     if content_type_lower.starts_with("text/html") {
-        let html = String::from_utf8_lossy(&decoded_body).trim().to_string();
+        let html = decode_text_charset(&decoded_body, &content_type)
+            .trim()
+            .to_string();
         return Ok((!html.is_empty()).then_some(html));
     }
 
@@ -321,6 +328,17 @@ fn decode_transfer_encoding(body: &[u8], encoding: &str) -> Result<Vec<u8>> {
         }
         "quoted-printable" => decode_quoted_printable(body),
         _ => Ok(body.to_vec()),
+    }
+}
+
+fn decode_text_charset(body: &[u8], content_type: &str) -> String {
+    match content_type_parameter(content_type, "charset")
+        .unwrap_or_else(|| "utf-8".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "iso-8859-1" | "latin1" | "latin-1" => body.iter().map(|byte| char::from(*byte)).collect(),
+        _ => String::from_utf8_lossy(body).to_string(),
     }
 }
 

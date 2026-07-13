@@ -153,6 +153,25 @@ fn extract_visible_text_prefers_plaintext_from_multipart_alternative() {
 }
 
 #[test]
+fn extract_visible_text_decodes_quoted_printable_iso_8859_1() {
+    let message = concat!(
+        "Content-Type: multipart/alternative; boundary=\"b1\"\r\n",
+        "\r\n",
+        "--b1\r\n",
+        "Content-Type: text/plain; charset=\"iso-8859-1\"\r\n",
+        "Content-Transfer-Encoding: quoted-printable\r\n",
+        "\r\n",
+        "Test re=E7u ok, dans junk\r\n",
+        "--b1--\r\n"
+    );
+
+    assert_eq!(
+        extract_visible_text(message.as_bytes()).unwrap(),
+        "Test reçu ok, dans junk"
+    );
+}
+
+#[test]
 fn extract_visible_text_uses_html_when_plaintext_is_missing() {
     let message = concat!(
         "Content-Type: text/html; charset=utf-8\r\n",

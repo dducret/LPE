@@ -10,6 +10,7 @@ pub(in crate::mapi::dispatch) fn log_open_message_debug(
     email: &JmapEmail,
     response_len: usize,
 ) {
+    let recipient_count = message_recipients(email).len();
     tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
@@ -34,7 +35,9 @@ pub(in crate::mapi::dispatch) fn log_open_message_debug(
             .as_ref()
             .map(|body| body.len())
             .unwrap_or(0),
-        recipient_count = message_recipients(email).len(),
+        recipient_count,
+        open_recipient_column_count = 0,
+        open_recipient_row_count = recipient_count.min(u8::MAX as usize),
         has_attachments = email.has_attachments,
         unread = email.unread,
         size_octets = email.size_octets,

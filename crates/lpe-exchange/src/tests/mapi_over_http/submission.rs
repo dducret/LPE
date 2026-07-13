@@ -1564,6 +1564,91 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_open_message_returns_visible_recipient_rows() {
+    let message_id = "22222222-2222-2222-2222-222222222222";
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(message_id, mailbox_id, "inbox", "Recipient message");
+    email.cc.push(JmapEmailAddress {
+        address: "carol@example.test".to_string(),
+        display_name: Some("Carol".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(5),
+        test_mapi_message_id(message_id),
+    );
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops[8], 0x03);
+    let mut offset = 8 + 2 + 4 + 1;
+    assert_eq!(response_rops[offset], 0x01); // Empty SubjectPrefix TypedString.
+    offset += 1;
+    assert_eq!(response_rops[offset], 0x04); // Unicode NormalizedSubject TypedString.
+    offset += 1;
+    assert_eq!(
+        read_rop_utf16z(&response_rops, &mut offset).unwrap(),
+        "Recipient message"
+    );
+    assert_eq!(
+        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
+        2
+    );
+    offset += 2;
+    assert_eq!(
+        u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
+        0
+    );
+    offset += 2;
+    assert_eq!(response_rops[offset], 2);
+    assert!(contains_bytes(
+        &response_rops[offset + 1..],
+        &utf16z("bob@example.test")
+    ));
+    assert!(contains_bytes(
+        &response_rops[offset + 1..],
+        &utf16z("carol@example.test")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
     let message_id = "22222222-2222-2222-2222-222222222222";
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
@@ -1638,9 +1723,8 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rops = &rop_buffer[2..2 + response_rop_size];
     let read_recipients_offset = response_rops
-        .iter()
-        .enumerate()
-        .find_map(|(offset, byte)| (*byte == 0x0F).then_some(offset))
+        .windows(6)
+        .position(|window| window == [0x0F, 0x02, 0, 0, 0, 0])
         .unwrap();
 
     assert_eq!(response_rops[read_recipients_offset + 1], 0x02);
