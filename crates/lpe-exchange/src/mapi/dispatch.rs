@@ -1288,6 +1288,50 @@ where
             break;
         }
     }
+    if let Some(cursor) = session.notification_cursor {
+        if let Ok(poll) = store
+            .poll_mapi_notifications(principal.account_id, cursor)
+            .await
+        {
+            let polled_event_count = poll.events.len();
+            let matching_events = session.matching_notifications(poll.events);
+            let matching_event_count = matching_events.len();
+            for event in matching_events {
+                session.record_notification(event);
+            }
+            session.notification_cursor = poll.cursor.or(Some(cursor));
+            if poll.event_pending || polled_event_count != 0 {
+                tracing::debug!(
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    operation = "Execute",
+                    account_id = %principal.account_id,
+                    mapi_request_id = request_id,
+                    notification_cursor = cursor,
+                    next_notification_cursor = ?session.notification_cursor,
+                    polled_event_count,
+                    matching_event_count,
+                    queued_event_count = session.pending_notification_count(),
+                    "mapi execute polled pending notifications"
+                );
+            }
+        }
+    }
+    let notification_deliveries = session.take_pending_notification_deliveries();
+    if !notification_deliveries.is_empty() {
+        tracing::debug!(
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            operation = "Execute",
+            account_id = %principal.account_id,
+            mapi_request_id = request_id,
+            notification_count = notification_deliveries.len(),
+            "mapi execute appended RopNotify responses"
+        );
+        for (notification_handle, event) in notification_deliveries {
+            responses.extend_from_slice(&rop_notify_response(notification_handle, 0, &event));
+        }
+    }
     log_post_hierarchy_release_events(
         principal,
         request_id,

@@ -1054,8 +1054,36 @@ impl MapiSession {
         }
     }
 
-    pub(in crate::mapi) fn take_pending_notifications(&mut self) -> Vec<MapiNotificationEvent> {
-        self.pending_notifications.drain(..).collect()
+    pub(in crate::mapi) fn pending_notification_count(&self) -> usize {
+        self.pending_notifications.len()
+    }
+
+    pub(in crate::mapi) fn take_pending_notification_deliveries(
+        &mut self,
+    ) -> Vec<(u32, MapiNotificationEvent)> {
+        let events: Vec<_> = self.pending_notifications.drain(..).collect();
+        let mut deliveries = Vec::new();
+        for event in events {
+            let mut notification_handles: Vec<_> = self
+                .handles
+                .iter()
+                .filter_map(|(handle, object)| match object {
+                    MapiObject::NotificationSubscription { registration }
+                        if registration_matches_event(registration, &event) =>
+                    {
+                        Some(*handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            notification_handles.sort_unstable();
+            deliveries.extend(
+                notification_handles
+                    .into_iter()
+                    .map(|handle| (handle, event.clone())),
+            );
+        }
+        deliveries
     }
 
     pub(in crate::mapi) fn matching_notifications(

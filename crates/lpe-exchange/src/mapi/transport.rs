@@ -642,9 +642,8 @@ where
     }
 
     let mut session = session;
-    let mut events = session.take_pending_notifications();
-    let initial_queued_event_count = events.len();
-    let mut event_pending = !events.is_empty();
+    let initial_queued_event_count = session.pending_notification_count();
+    let mut event_pending = initial_queued_event_count != 0;
     let mut waited_for_empty_events = false;
     let initial_cursor = session.notification_cursor;
     let mut first_poll_event_pending = false;
@@ -666,8 +665,10 @@ where
                 first_poll_event_pending = poll.event_pending;
                 first_poll_event_count = poll.events.len();
                 first_poll_cursor = poll.cursor.or(Some(cursor));
-                events = session.matching_notifications(poll.events);
-                event_pending = poll.event_pending || !events.is_empty();
+                for event in session.matching_notifications(poll.events) {
+                    session.record_notification(event);
+                }
+                event_pending = session.pending_notification_count() != 0;
                 session.notification_cursor = poll.cursor.or(Some(cursor));
             }
         }
@@ -738,8 +739,10 @@ where
                 second_poll_event_pending = poll.event_pending;
                 second_poll_event_count = poll.events.len();
                 second_poll_cursor = poll.cursor.or(Some(cursor));
-                events = session.matching_notifications(poll.events);
-                event_pending = poll.event_pending || !events.is_empty();
+                for event in session.matching_notifications(poll.events) {
+                    session.record_notification(event);
+                }
+                event_pending = session.pending_notification_count() != 0;
                 session.notification_cursor = poll.cursor.or(Some(cursor));
             }
         }
@@ -747,7 +750,7 @@ where
     let post_inbox_fai_handoff_context =
         format_inbox_post_fai_handoff_context(&session.post_hierarchy_actions);
     if event_pending
-        || !events.is_empty()
+        || session.pending_notification_count() != 0
         || active_during_empty_wait
         || reacquire_after_wait_failed
     {
@@ -774,7 +777,7 @@ where
             second_poll_event_count,
             second_poll_cursor = ?second_poll_cursor,
             event_pending,
-            event_count = events.len(),
+            event_count = session.pending_notification_count(),
             inbox_associated_query_rows_returned_non_empty = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_returned_non_empty,
@@ -835,7 +838,7 @@ where
             second_poll_event_count,
             second_poll_cursor = ?second_poll_cursor,
             event_pending,
-            event_count = events.len(),
+            event_count = session.pending_notification_count(),
             inbox_associated_query_rows_returned_non_empty = session
                 .post_hierarchy_actions
                 .inbox_associated_query_rows_returned_non_empty,
@@ -874,7 +877,7 @@ where
         );
     }
     store_session(session_id.clone(), session);
-    let body = notification_wait_body_with_events(event_pending, &events);
+    let body = notification_wait_body(event_pending);
     mapi_response_with_cookies(
         "NotificationWait",
         request_id,
@@ -906,7 +909,7 @@ fn notification_wait_empty_response(
         "NotificationWait",
         request_id,
         0,
-        notification_wait_body_with_events(false, &[]),
+        notification_wait_body(false),
         session_context_cookies(endpoint, session_id, false),
     )
 }

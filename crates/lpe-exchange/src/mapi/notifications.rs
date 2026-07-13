@@ -143,13 +143,6 @@ impl MapiNotificationEvent {
         self.change_kind.as_deref()
     }
 
-    fn has_extended_details(&self) -> bool {
-        self.object_kind.is_some()
-            || self.change_kind.is_some()
-            || self.display_name.is_some()
-            || self.parent_display_name.is_some()
-            || self.message_subject.is_some()
-    }
 }
 
 pub(in crate::mapi) fn rop_register_notification_response(request: &RopRequest) -> Vec<u8> {
@@ -175,70 +168,131 @@ mod tests {
     }
 }
 
-pub(in crate::mapi) fn notification_wait_body_with_events(
-    event_pending: bool,
-    events: &[MapiNotificationEvent],
-) -> Vec<u8> {
+/// [MS-OXCMAPIHTTP] section 2.2.4.4.2: NotificationWait only signals that an
+/// event is pending. Notification details are returned by a subsequent Execute.
+pub(in crate::mapi) fn notification_wait_body(event_pending: bool) -> Vec<u8> {
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, u32::from(event_pending));
-    write_u32(&mut body, events.len().min(u32::MAX as usize) as u32);
-    for event in events.iter().take(u32::MAX as usize) {
-        write_u16(&mut body, event.event_mask);
-        body.push(match event.kind {
-            MapiNotificationKind::Content => 1,
-            MapiNotificationKind::Hierarchy => 2,
-        });
-        body.push(
-            u8::from(event.message_id.is_some())
-                | (u8::from(event.old_folder_id.is_some()) << 1)
-                | (u8::from(event.total_messages.is_some() || event.unread_messages.is_some())
-                    << 2)
-                | (u8::from(event.has_extended_details()) << 3),
-        );
-        body.extend_from_slice(&wire_id_bytes_from_object_id(event.folder_id).unwrap_or([0; 8]));
-        body.extend_from_slice(
-            &event
-                .message_id
-                .and_then(wire_id_bytes_from_object_id)
-                .unwrap_or([0; 8]),
-        );
-        body.extend_from_slice(
-            &event
-                .old_folder_id
-                .and_then(wire_id_bytes_from_object_id)
-                .unwrap_or([0; 8]),
-        );
-        write_u64(&mut body, event.change_cursor.unwrap_or_default() as u64);
-        write_u64(&mut body, event.modseq.unwrap_or_default());
-        write_u32(&mut body, event.total_messages.unwrap_or(-1) as u32);
-        write_u32(&mut body, event.unread_messages.unwrap_or(-1) as u32);
-        if event.has_extended_details() {
-            write_u16_prefixed_bytes(&mut body, event.object_kind.unwrap_or("").as_bytes());
-            write_u16_prefixed_bytes(
-                &mut body,
-                event.change_kind.as_deref().unwrap_or("").as_bytes(),
+    write_u32(&mut body, 0);
+    body
+}
+
+/// [MS-OXCROPS] sections 2.2.14.2 and 3.1.5.1.3; [MS-OXCNOTIF]
+/// section 2.2.1.4.1.2. RopNotify is an extra ROP response appended to the
+/// RopsList and carries the notification subscription's server object handle.
+pub(in crate::mapi) fn rop_notify_response(
+    notification_handle: u32,
+    logon_id: u8,
+    event: &MapiNotificationEvent,
+) -> Vec<u8> {
+    let mut response = vec![0x2A];
+    write_u32(&mut response, notification_handle);
+    response.push(logon_id);
+    append_notification_data(&mut response, event);
+    response
+}
+
+fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEvent) {
+    let notification_type = event.event_mask & 0x0FFF;
+    let message_event = event.kind == MapiNotificationKind::Content && event.message_id.is_some();
+    match notification_type {
+        0x0100 => {
+            write_u16(response, 0x0100);
+            write_u16(response, 0x0001);
+        }
+        0x0010 => {
+            let mut flags = 0x0010;
+            if message_event {
+                flags |= 0x8000;
+            }
+            if event.total_messages.is_some() {
+                flags |= 0x1000;
+            }
+            if event.unread_messages.is_some() {
+                flags |= 0x2000;
+            }
+            write_u16(response, flags);
+            append_event_object_ids(response, event, message_event);
+            write_u16(response, 0);
+            if let Some(total_messages) = event.total_messages {
+                write_u32(response, total_messages.max(0) as u32);
+            }
+            if let Some(unread_messages) = event.unread_messages {
+                write_u32(response, unread_messages.max(0) as u32);
+            }
+        }
+        0x0004 | 0x0008 => {
+            write_u16(
+                response,
+                notification_type | if message_event { 0x8000 } else { 0 },
             );
-            write_u16_prefixed_bytes(
-                &mut body,
-                event.display_name.as_deref().unwrap_or("").as_bytes(),
+            append_event_object_ids(response, event, message_event);
+            if !message_event {
+                append_wire_id(response, event.folder_id);
+            }
+            if notification_type == 0x0004 {
+                write_u16(response, 0);
+            }
+        }
+        0x0020 | 0x0040 => {
+            write_u16(
+                response,
+                notification_type | if message_event { 0x8000 } else { 0 },
             );
-            write_u16_prefixed_bytes(
-                &mut body,
-                event
-                    .parent_display_name
-                    .as_deref()
-                    .unwrap_or("")
-                    .as_bytes(),
-            );
-            write_u16_prefixed_bytes(
-                &mut body,
-                event.message_subject.as_deref().unwrap_or("").as_bytes(),
-            );
+            let object_id = event_object_id(event);
+            append_wire_id(response, object_id);
+            if message_event {
+                append_wire_id(response, event.message_id.unwrap_or_default());
+            } else {
+                append_wire_id(response, event.folder_id);
+            }
+            append_wire_id(response, event.old_folder_id.unwrap_or(object_id));
+            if message_event {
+                append_wire_id(response, event.message_id.unwrap_or_default());
+            } else {
+                append_wire_id(response, event.old_folder_id.unwrap_or(event.folder_id));
+            }
+        }
+        0x0002 if message_event => {
+            write_u16(response, 0x8002);
+            append_event_object_ids(response, event, true);
+            write_u32(response, 0);
+            response.push(0);
+            response.extend_from_slice(b"IPM.Note\0");
+        }
+        0x0080 => {
+            write_u16(response, 0x0080);
+            append_wire_id(response, event_object_id(event));
+        }
+        _ => {
+            write_u16(response, 0x0100);
+            write_u16(response, 0x0001);
         }
     }
-    body
+}
+
+fn append_event_object_ids(
+    response: &mut Vec<u8>,
+    event: &MapiNotificationEvent,
+    message_event: bool,
+) {
+    append_wire_id(response, event_object_id(event));
+    if message_event {
+        append_wire_id(response, event.message_id.unwrap_or_default());
+    }
+}
+
+fn event_object_id(event: &MapiNotificationEvent) -> u64 {
+    match event.kind {
+        MapiNotificationKind::Content => event.folder_id,
+        MapiNotificationKind::Hierarchy => event.message_id.unwrap_or(event.folder_id),
+    }
+}
+
+fn append_wire_id(response: &mut Vec<u8>, object_id: u64) {
+    response.extend_from_slice(&wire_id_bytes_from_object_id(object_id).unwrap_or([0; 8]));
 }
 
 pub(in crate::mapi) fn registration_matches_event(
