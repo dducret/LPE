@@ -34,6 +34,9 @@ pub(in crate::mapi) fn read_flags_are_valid(read_flags: Option<u8>, allow_defaul
         return false;
     }
     let effective = flags & !RF_RESERVED;
-    let valid = matches!(effective, 0x00 | 0x01 | 0x05 | 0x10 | 0x20 | 0x40);
+    // [MS-OXCMSG] 2.2.3.10.1 and 2.2.3.11.1 define 0x04 as
+    // rfClearReadFlag. The client's receipt-suppression requirement does not
+    // make the server-side clear-read operation ambiguous.
+    let valid = matches!(effective, 0x00 | 0x01 | 0x04 | 0x05 | 0x10 | 0x20 | 0x40);
     valid && (allow_default || effective != 0)
 }

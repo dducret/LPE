@@ -234,16 +234,15 @@ fn property_defaults_serialize_multi_value_instance_columns() {
 
 #[test]
 fn microsoft_read_flags_validation_matches_message_protocol_rules() {
-    for flags in [0x00, 0x01, 0x05, 0x10, 0x20, 0x40, 0x0A] {
+    for flags in [0x00, 0x01, 0x04, 0x05, 0x10, 0x20, 0x40, 0x0A] {
         assert!(read_flags_are_valid(Some(flags), true));
     }
-    for flags in [0x01, 0x05, 0x10, 0x20, 0x40] {
+    for flags in [0x01, 0x04, 0x05, 0x10, 0x20, 0x40] {
         assert!(read_flags_are_valid(Some(flags), false));
     }
 
     assert!(!read_flags_are_valid(Some(0x00), false));
     assert!(!read_flags_are_valid(Some(0x0A), false));
-    assert!(!read_flags_are_valid(Some(0x04), true));
     assert!(!read_flags_are_valid(Some(0x11), true));
     assert!(!read_flags_are_valid(Some(0x60), true));
     assert!(!read_flags_are_valid(Some(0x80), true));

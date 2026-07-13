@@ -3437,7 +3437,7 @@ async fn mapi_over_http_microsoft_set_read_flags_rejects_invalid_parameters() {
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
-        0x66, 0x00, 0x01, 0x00, 0x04, // RopSetReadFlags, invalid ReadFlags.
+        0x66, 0x00, 0x01, 0x00, 0x80, // RopSetReadFlags, unknown ReadFlags bit.
     ]);
     rops.extend_from_slice(&0u16.to_le_bytes());
 
@@ -3482,6 +3482,33 @@ async fn mapi_over_http_microsoft_set_read_flags_rejects_invalid_parameters() {
         &[0x66, 0x01, 0x00, 0, 0x00, 0x00, 0x00]
     ));
     assert!(!emails.lock().unwrap()[0].unread);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x66, 0x00, 0x01, 0x00, 0x04, // RopSetReadFlags, rfClearReadFlag.
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x66, 0x01, 0x00, 0, 0x00, 0x00, 0x00]
+    ));
+    assert!(emails.lock().unwrap()[0].unread);
 }
 
 #[tokio::test]
@@ -3632,6 +3659,83 @@ async fn mapi_over_http_outlook_set_message_read_flag_accepts_default_flag() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x11, 0x00, 0, 0, 0, 0, 0]));
     assert!(!emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_set_message_read_flag_accepts_clear_read_flag() {
+    let message_id = "37373737-3737-3737-3737-373737373739";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Clear message read flag",
+    );
+    email.unread = false;
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut open_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    open_rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    open_rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_message_id(message_id));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX]));
+    let open_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let open_cookie = mapi_cookie_header(&open_response);
+    let open_body = response_bytes(open_response).await;
+    let (_, open_handles) = response_rops_and_handles_from_execute_body(&open_body);
+
+    // Outlook 16 trace 202607131718 request :240 uses this exact
+    // RopSetMessageReadFlag shape to mark a message unread.
+    let read_rops = [0x11, 0x00, 0x00, 0x00, 0x04];
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&open_cookie).unwrap());
+    let request = execute_body(&rop_buffer(&read_rops, &[open_handles[2]]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x11, 0x00, 0, 0, 0, 0, 0]));
+    assert!(emails.lock().unwrap()[0].unread);
 }
 
 #[tokio::test]
