@@ -1,4 +1,5 @@
 use super::*;
+use crate::mapi::wire::MapiNotificationEventMask;
 
 fn principal() -> AccountPrincipal {
     AccountPrincipal {
@@ -93,6 +94,67 @@ fn session_records_transport_request_lifetime() {
     assert_eq!(session.last_request_id, "test:3");
     assert_eq!(session.request_count, 3);
     assert_eq!(session.execute_request_count, 1);
+}
+
+#[test]
+fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let hierarchy_handle = 77;
+    session.handles.insert(
+        hierarchy_handle,
+        MapiObject::HierarchyTable {
+            folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            columns: Vec::new(),
+            columns_set: true,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session
+        .table_notification_active_handles
+        .insert(hierarchy_handle);
+
+    session.record_notification(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectModified.as_u16(),
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            Some(0x0000_0000_0044_0001),
+            None,
+            1,
+            1,
+            Some(4),
+            Some(3),
+            "updated".to_string(),
+            None,
+            None,
+            Some("Test".to_string()),
+        )
+        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+    );
+
+    assert_eq!(session.pending_notification_count(), 1);
+    let deliveries = session.take_pending_notification_deliveries();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].0, hierarchy_handle);
+    assert_eq!(deliveries[0].1.kind, MapiNotificationKind::Hierarchy);
+    assert_eq!(
+        deliveries[0].1.event_mask,
+        MapiNotificationEventMask::TableModified.as_u16()
+    );
+    assert_eq!(
+        deliveries[0].1.folder_id,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+    );
 }
 
 #[test]

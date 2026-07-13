@@ -235,6 +235,7 @@ macro_rules! store_impl_public_address_im {
                     scope_box.role AS scope_role,
                     scope_box.total_messages AS scope_total_messages,
                     scope_box.unread_messages AS scope_unread_messages,
+                    scope_parent_box.role AS scope_parent_role,
                     object_box.display_name AS object_display_name,
                     object_box.role AS object_role,
                     object_box.parent_mailbox_id AS object_parent_id,
@@ -245,6 +246,7 @@ macro_rules! store_impl_public_address_im {
                     source_box.display_name AS source_display_name,
                     message.normalized_subject AS message_subject,
                     scope_identity.mapi_object_id AS scope_mapi_object_id,
+                    scope_parent_identity.mapi_object_id AS scope_parent_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
                     message_identity.mapi_object_id AS message_mapi_object_id,
@@ -259,6 +261,10 @@ macro_rules! store_impl_public_address_im {
                  AND object_box.account_id = log.account_id
                  AND object_box.id = log.object_id
                  AND log.object_kind = 'mailbox'
+                LEFT JOIN mailboxes scope_parent_box
+                  ON scope_parent_box.tenant_id = scope_box.tenant_id
+                 AND scope_parent_box.account_id = scope_box.account_id
+                 AND scope_parent_box.id = scope_box.parent_mailbox_id
                 LEFT JOIN mailboxes parent_box
                   ON parent_box.tenant_id = object_box.tenant_id
                  AND parent_box.account_id = object_box.account_id
@@ -282,6 +288,12 @@ macro_rules! store_impl_public_address_im {
                  AND object_identity.object_kind = 'mailbox'
                  AND object_identity.canonical_id = log.object_id
                  AND object_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities scope_parent_identity
+                  ON scope_parent_identity.tenant_id = log.tenant_id
+                 AND scope_parent_identity.account_id = log.account_id
+                 AND scope_parent_identity.object_kind = 'mailbox'
+                 AND scope_parent_identity.canonical_id = scope_box.parent_mailbox_id
+                 AND scope_parent_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities parent_identity
                   ON parent_identity.tenant_id = log.tenant_id
                  AND parent_identity.account_id = log.account_id

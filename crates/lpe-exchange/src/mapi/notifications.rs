@@ -19,6 +19,7 @@ pub(crate) enum MapiNotificationKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) folder_id: u64,
+    pub(in crate::mapi) parent_folder_id: Option<u64>,
     pub(in crate::mapi) message_id: Option<u64>,
     pub(in crate::mapi) old_folder_id: Option<u64>,
     pub(in crate::mapi) canonical_folder_id: Option<uuid::Uuid>,
@@ -40,6 +41,7 @@ impl MapiNotificationEvent {
     pub(in crate::mapi) fn content(folder_id: u64, message_id: Option<u64>) -> Self {
         Self {
             folder_id,
+            parent_folder_id: None,
             message_id,
             old_folder_id: None,
             canonical_folder_id: None,
@@ -61,6 +63,7 @@ impl MapiNotificationEvent {
     pub(in crate::mapi) fn hierarchy(folder_id: u64, changed_folder_id: Option<u64>) -> Self {
         Self {
             folder_id,
+            parent_folder_id: None,
             message_id: changed_folder_id,
             old_folder_id: None,
             canonical_folder_id: None,
@@ -96,6 +99,7 @@ impl MapiNotificationEvent {
     ) -> Self {
         Self {
             folder_id,
+            parent_folder_id: None,
             message_id,
             old_folder_id,
             canonical_folder_id: None,
@@ -124,6 +128,11 @@ impl MapiNotificationEvent {
     ) -> Self {
         self.canonical_folder_id = canonical_folder_id;
         self.canonical_message_id = canonical_message_id;
+        self
+    }
+
+    pub(crate) fn with_parent_folder_id(mut self, parent_folder_id: Option<u64>) -> Self {
+        self.parent_folder_id = parent_folder_id;
         self
     }
 

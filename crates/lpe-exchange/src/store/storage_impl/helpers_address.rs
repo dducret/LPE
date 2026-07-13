@@ -200,6 +200,14 @@ fn mapi_notification_event_from_change_row(
                 scope_role.as_deref(),
                 row.try_get::<i64, _>("scope_mapi_object_id").ok(),
             )?;
+            let parent_folder_id = mapi_folder_id_from_role_or_identity(
+                row.try_get::<String, _>("scope_parent_role")
+                    .ok()
+                    .as_deref(),
+                row.try_get::<i64, _>("scope_parent_mapi_object_id")
+                    .ok(),
+            )
+            .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
             Some(MapiNotificationEvent::canonical(
                 MapiNotificationKind::Content,
                 event_mask,
@@ -225,6 +233,7 @@ fn mapi_notification_event_from_change_row(
                     row.try_get::<Uuid, _>("message_id").ok(),
                 )
             })
+            .map(|event| event.with_parent_folder_id(parent_folder_id))
         }
         _ => None,
     }

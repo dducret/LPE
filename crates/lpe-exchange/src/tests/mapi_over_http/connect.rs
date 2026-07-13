@@ -3803,7 +3803,8 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
                         Some("Inbox".to_string()),
                         None,
                         Some("quarterly report".to_string()),
-                    ),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
                 ],
             },
             MapiNotificationPoll {
@@ -3846,13 +3847,31 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
     rops.extend_from_slice(&0u64.to_le_bytes());
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x04, 0x10]); // NoNotifications table
     rops.extend_from_slice(&[0x17, 0x00, 0x04]); // RopQueryPosition
+    rops.extend_from_slice(&[0x02, 0x00, 0x00, 0x05]); // Open IPM subtree
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x04, 0x00, 0x05, 0x06, 0x00]); // RopGetHierarchyTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x06, 0x00]); // RopSetColumns
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    for tag in [0x6748_0014u32, 0x3602_0003, 0x3603_0003] {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x17, 0x00, 0x06]); // RopQueryPosition
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
             &execute_body(&rop_buffer(
                 &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                &[
+                    1,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                ],
             )),
         )
         .await
@@ -3887,6 +3906,15 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
         &response_rops,
         &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
     ));
+    // Run 2133: changing Inbox counts also changes the Inbox row in the
+    // active IPM-subtree hierarchy table.
+    assert!(
+        contains_bytes(
+            &response_rops,
+            &[0x2A, 0x07, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+        ),
+        "response={response_rops:02x?}"
+    );
     assert!(contains_bytes(
         &response_rops,
         &[0x2A, 0x04, 0, 0, 0, 0, 0x10, 0xB0]

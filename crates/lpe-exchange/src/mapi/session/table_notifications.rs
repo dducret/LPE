@@ -84,6 +84,9 @@ impl MapiSession {
         for event in events {
             let table_event = table_changed_event(&event);
             let folder_event = folder_counts_modified_event(&event);
+            let hierarchy_table_event = folder_event
+                .as_ref()
+                .and_then(folder_counts_hierarchy_table_event);
             let mut event_deliveries = Vec::new();
             for (handle, object) in &self.handles {
                 match object {
@@ -102,10 +105,18 @@ impl MapiSession {
                             event_deliveries.push((*handle, table_event.clone(), true));
                         }
                     }
-                    _ if self.table_notification_active_handles.contains(handle)
-                        && table_matches_event(object, &event) =>
-                    {
-                        event_deliveries.push((*handle, table_event.clone(), true));
+                    _ if self.table_notification_active_handles.contains(handle) => {
+                        if table_matches_event(object, &event) {
+                            event_deliveries.push((*handle, table_event.clone(), true));
+                        } else if let Some(hierarchy_table_event) = &hierarchy_table_event {
+                            if table_matches_event(object, hierarchy_table_event) {
+                                event_deliveries.push((
+                                    *handle,
+                                    hierarchy_table_event.clone(),
+                                    true,
+                                ));
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -122,7 +133,7 @@ impl MapiSession {
             });
             for (handle, delivery, table_change) in event_deliveries {
                 if table_change
-                    && !delivered_table_changes.insert((handle, event.kind, event.folder_id))
+                    && !delivered_table_changes.insert((handle, delivery.kind, delivery.folder_id))
                 {
                     continue;
                 }
@@ -144,14 +155,26 @@ impl MapiSession {
 
     fn has_notification_target(&self, event: &MapiNotificationEvent) -> bool {
         let table_event = table_changed_event(event);
+        let folder_event = folder_counts_modified_event(event);
+        let hierarchy_table_event = folder_event
+            .as_ref()
+            .and_then(folder_counts_hierarchy_table_event);
         self.handles.iter().any(|(handle, object)| match object {
             MapiObject::NotificationSubscription { registration } => {
                 registration_matches_event(registration, event)
                     || registration_matches_event(registration, &table_event)
+                    || folder_event
+                        .as_ref()
+                        .map(|folder_event| registration_matches_event(registration, folder_event))
+                        .unwrap_or(false)
             }
             _ => {
                 self.table_notification_active_handles.contains(handle)
-                    && table_matches_event(object, event)
+                    && (table_matches_event(object, event)
+                        || hierarchy_table_event
+                            .as_ref()
+                            .map(|hierarchy_event| table_matches_event(object, hierarchy_event))
+                            .unwrap_or(false))
             }
         })
     }
@@ -178,6 +201,17 @@ fn folder_counts_modified_event(event: &MapiNotificationEvent) -> Option<MapiNot
     folder_event.object_kind = Some("mailbox");
     folder_event.message_subject = None;
     Some(folder_event)
+}
+
+fn folder_counts_hierarchy_table_event(
+    folder_event: &MapiNotificationEvent,
+) -> Option<MapiNotificationEvent> {
+    // [MS-OXCNOTIF] section 3.1.4.3: changing a folder's content counts also
+    // changes that folder's row in the automatically subscribed parent table.
+    let mut table_event = folder_event.clone();
+    table_event.folder_id = folder_event.parent_folder_id?;
+    table_event.event_mask = MapiNotificationEventMask::TableModified.as_u16();
+    Some(table_event)
 }
 
 fn table_matches_event(object: &MapiObject, event: &MapiNotificationEvent) -> bool {
