@@ -142,7 +142,6 @@ impl MapiNotificationEvent {
     pub(crate) fn change_kind(&self) -> Option<&str> {
         self.change_kind.as_deref()
     }
-
 }
 
 pub(in crate::mapi) fn rop_register_notification_response(request: &RopRequest) -> Vec<u8> {

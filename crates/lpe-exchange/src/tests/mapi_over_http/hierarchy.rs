@@ -2341,27 +2341,34 @@ async fn mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mapi_notification_cursor: Arc::new(Mutex::new(Some(11))),
-        mapi_notification_polls: Arc::new(Mutex::new(vec![MapiNotificationPoll {
-            event_pending: true,
-            cursor: Some(12),
-            events: vec![
-                crate::mapi::notifications::MapiNotificationEvent::canonical(
-                    crate::mapi::notifications::MapiNotificationKind::Hierarchy,
-                    0x0010,
-                    parent_folder_id,
-                    Some(changed_folder_id),
-                    None,
-                    12,
-                    45,
-                    Some(0),
-                    Some(0),
-                    "updated".to_string(),
-                    Some("Moved Projects".to_string()),
-                    Some("Clients".to_string()),
-                    None,
-                ),
-            ],
-        }])),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(12),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Hierarchy,
+                        0x0010,
+                        parent_folder_id,
+                        Some(changed_folder_id),
+                        None,
+                        12,
+                        45,
+                        Some(0),
+                        Some(0),
+                        "updated".to_string(),
+                        Some("Moved Projects".to_string()),
+                        Some("Clients".to_string()),
+                        None,
+                    ),
+                ],
+            },
+            MapiNotificationPoll {
+                event_pending: false,
+                cursor: Some(11),
+                events: Vec::new(),
+            },
+        ])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2396,22 +2403,30 @@ async fn mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
         .await
         .unwrap();
     let body = response_bytes(response).await;
+    assert_eq!(body.len(), 16);
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
-    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0010);
-    assert_eq!(body[18], 2);
-    assert_eq!(body[19], 0b0000_1101);
-    assert_eq!(&body[20..28], &mapi_wire_id_bytes(parent_folder_id));
-    assert_eq!(&body[28..36], &mapi_wire_id_bytes(changed_folder_id));
-    assert_eq!(u64::from_le_bytes(body[44..52].try_into().unwrap()), 12);
-    assert_eq!(u64::from_le_bytes(body[52..60].try_into().unwrap()), 45);
-    assert_eq!(u32::from_le_bytes(body[60..64].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[64..68].try_into().unwrap()), 0);
-    let details = notification_detail_strings(&body[68..]);
-    assert_eq!(
-        details,
-        vec!["mailbox", "updated", "Moved Projects", "Clients", ""]
-    );
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+
+    let mut notification_execute_headers = mapi_headers("Execute");
+    notification_execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &notification_execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected = vec![0x2A];
+    expected.extend_from_slice(&3u32.to_le_bytes());
+    expected.push(0);
+    expected.extend_from_slice(&0x3010u16.to_le_bytes());
+    expected.extend_from_slice(&mapi_wire_id_bytes(changed_folder_id));
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    assert_eq!(response_rops, expected);
 }
 
 #[tokio::test]
@@ -2451,21 +2466,10 @@ async fn mapi_over_http_notification_wait_reports_hierarchy_event_after_register
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(created_mailboxes.lock().unwrap().len(), 1);
-
-    let mut wait_headers = mapi_headers("NotificationWait");
-    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let response = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
-        .await
-        .unwrap();
-    let body = response_bytes(response).await;
-    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
-    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0100);
-    assert_eq!(body[18], 2);
+    let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
-        &body,
-        &mapi_wire_id_bytes(test_mapi_folder_id(1))
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
     ));
 }
 

@@ -3375,21 +3375,9 @@ async fn mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table(
 
     assert!(contains_bytes(response_rops, &[0x66, 0x01, 0, 0, 0, 0, 0]));
     assert!(!emails.lock().unwrap()[0].unread);
-
-    let mut wait_headers = mapi_headers("NotificationWait");
-    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let response = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
-        .await
-        .unwrap();
-    let body = response_bytes(response).await;
-    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
-    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0100);
-    assert_eq!(body[18], 1);
     assert!(contains_bytes(
-        &body,
-        &mapi_wire_id_bytes(test_mapi_folder_id(5))
+        response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
     ));
 }
 

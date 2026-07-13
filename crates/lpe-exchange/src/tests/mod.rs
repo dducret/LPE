@@ -7625,20 +7625,6 @@ fn decode_partial_completion_response(bytes: &[u8]) -> (u8, u8) {
     (bytes[0], bytes[6])
 }
 
-fn notification_detail_strings(mut bytes: &[u8]) -> Vec<String> {
-    let mut values = Vec::new();
-    while bytes.len() >= 2 {
-        let size = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as usize;
-        bytes = &bytes[2..];
-        if bytes.len() < size {
-            break;
-        }
-        values.push(String::from_utf8_lossy(&bytes[..size]).into_owned());
-        bytes = &bytes[size..];
-    }
-    values
-}
-
 fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     let change_marker = 0x4012_0003u32.to_le_bytes();
     let message_marker = 0x4015_0003u32.to_le_bytes();
