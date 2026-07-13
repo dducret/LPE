@@ -3761,6 +3761,14 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
     expected.extend_from_slice(&0u16.to_le_bytes());
     expected.extend_from_slice(&3u32.to_le_bytes());
     expected.extend_from_slice(&0u32.to_le_bytes());
+    expected.push(0x2A);
+    expected.extend_from_slice(&3u32.to_le_bytes());
+    expected.push(0);
+    expected.extend_from_slice(&0x3010u16.to_le_bytes());
+    expected.extend_from_slice(&mapi_wire_id_bytes(folder_id));
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(&3u32.to_le_bytes());
+    expected.extend_from_slice(&0u32.to_le_bytes());
     assert_eq!(response_rops, expected);
 }
 
@@ -3883,6 +3891,15 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
         &response_rops,
         &[0x2A, 0x04, 0, 0, 0, 0, 0x10, 0xB0]
     ));
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2: a content change that updates
+    // folder counts also modifies the folder object. The folder notification
+    // carries TotalMessageCount and UnreadMessageCount without the Message bit.
+    let mut folder_counts_notification = vec![0x2A, 0x04, 0, 0, 0, 0, 0x10, 0x30];
+    append_mapi_wire_id(&mut folder_counts_notification, folder_id);
+    folder_counts_notification.extend_from_slice(&0u16.to_le_bytes());
+    folder_counts_notification.extend_from_slice(&3u32.to_le_bytes());
+    folder_counts_notification.extend_from_slice(&2u32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &folder_counts_notification));
     assert!(!contains_bytes(
         &response_rops,
         &[0x2A, 0x04, 0, 0, 0, 0, 0x00, 0x01]

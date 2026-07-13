@@ -83,12 +83,18 @@ impl MapiSession {
         let mut delivered_table_changes = HashSet::new();
         for event in events {
             let table_event = table_changed_event(&event);
+            let folder_event = folder_counts_modified_event(&event);
             let mut event_deliveries = Vec::new();
             for (handle, object) in &self.handles {
                 match object {
                     MapiObject::NotificationSubscription { registration } => {
                         if registration_matches_event(registration, &event) {
                             event_deliveries.push((*handle, event.clone(), false));
+                        }
+                        if let Some(folder_event) = &folder_event {
+                            if registration_matches_event(registration, folder_event) {
+                                event_deliveries.push((*handle, folder_event.clone(), false));
+                            }
                         }
                         if event.event_mask != MapiNotificationEventMask::TableModified.as_u16()
                             && registration_matches_event(registration, &table_event)
@@ -104,8 +110,16 @@ impl MapiSession {
                     _ => {}
                 }
             }
-            event_deliveries
-                .sort_unstable_by_key(|(handle, _, table_change)| (*handle, *table_change));
+            event_deliveries.sort_unstable_by_key(|(handle, delivery, table_change)| {
+                (
+                    *handle,
+                    *table_change,
+                    match delivery.kind {
+                        MapiNotificationKind::Content => 0,
+                        MapiNotificationKind::Hierarchy => 1,
+                    },
+                )
+            });
             for (handle, delivery, table_change) in event_deliveries {
                 if table_change
                     && !delivered_table_changes.insert((handle, event.kind, event.folder_id))
@@ -147,6 +161,23 @@ fn table_changed_event(event: &MapiNotificationEvent) -> MapiNotificationEvent {
     let mut table_event = event.clone();
     table_event.event_mask = MapiNotificationEventMask::TableModified.as_u16();
     table_event
+}
+
+fn folder_counts_modified_event(event: &MapiNotificationEvent) -> Option<MapiNotificationEvent> {
+    if event.kind != MapiNotificationKind::Content
+        || (event.total_messages.is_none() && event.unread_messages.is_none())
+    {
+        return None;
+    }
+    let mut folder_event = event.clone();
+    folder_event.kind = MapiNotificationKind::Hierarchy;
+    folder_event.event_mask = MapiNotificationEventMask::ObjectModified.as_u16();
+    folder_event.message_id = Some(event.folder_id);
+    folder_event.old_folder_id = None;
+    folder_event.canonical_message_id = None;
+    folder_event.object_kind = Some("mailbox");
+    folder_event.message_subject = None;
+    Some(folder_event)
 }
 
 fn table_matches_event(object: &MapiObject, event: &MapiNotificationEvent) -> bool {
