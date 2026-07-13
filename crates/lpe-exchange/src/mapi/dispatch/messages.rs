@@ -667,7 +667,9 @@ pub(super) async fn append_set_message_read_flag_response<S>(
         ));
         return;
     };
-    if !read_flags_are_valid(request.read_flags(), false) {
+    // [MS-OXCMSG] 2.2.3.10.1 and 2.2.3.11.1: rfDefault (0x00)
+    // marks the message read and is valid for RopSetMessageReadFlag.
+    if !read_flags_are_valid(request.read_flags(), true) {
         responses.extend_from_slice(&rop_error_response(
             0x11,
             request.response_handle_index(),
@@ -784,7 +786,9 @@ pub(super) async fn append_set_message_read_flag_response<S>(
     if changed {
         session.record_notification(MapiNotificationEvent::content(folder_id, None));
     }
-    responses.extend_from_slice(&rop_set_message_read_flag_response(request, changed));
+    // [MS-OXCMSG] 2.2.3.11.2: private-mailbox responses always report
+    // ReadStatusChanged as zero; the nonzero form carries public-folder data.
+    responses.extend_from_slice(&rop_set_message_read_flag_response(request, false));
 }
 
 pub(super) async fn append_set_read_flags_response<S>(
