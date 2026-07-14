@@ -1262,11 +1262,23 @@ impl MapiMailStoreSnapshot {
         let source_key = crate::mapi::identity::source_key_for_object_id(item_id);
         self.associated_config_messages_for_folder(folder_id)
             .into_iter()
+            .find(|message| message.folder_id == folder_id && message.id == item_id)
+            .or_else(|| {
+                self.associated_config_message_for_folder_and_source_key(folder_id, &source_key)
+            })
+    }
+
+    pub(crate) fn associated_config_message_for_folder_and_source_key(
+        &self,
+        folder_id: u64,
+        source_key: &[u8],
+    ) -> Option<MapiAssociatedConfigMessage> {
+        self.associated_config_messages_for_folder(folder_id)
+            .into_iter()
             .find(|message| {
                 message.folder_id == folder_id
-                    && (message.id == item_id
-                        || associated_config_source_key(&message.properties_json)
-                            .is_some_and(|message_source_key| message_source_key == source_key))
+                    && associated_config_source_key(&message.properties_json)
+                        .is_some_and(|message_source_key| message_source_key == source_key)
             })
     }
 

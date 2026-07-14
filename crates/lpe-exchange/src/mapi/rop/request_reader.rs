@@ -758,16 +758,18 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(RopId::SynchronizationImportDeletes) => {
             let input_handle_index = cursor.read_u8()?;
-            let delete_flags = cursor.read_u8()?;
-            let message_id_count = cursor.read_u16()? as usize;
-            let mut payload = vec![delete_flags];
-            payload.extend_from_slice(&(message_id_count as u16).to_le_bytes());
-            payload.extend_from_slice(cursor.read_bytes(message_id_count * 8)?);
+            let start = cursor.position;
+            cursor.read_u8()?;
+            let property_value_count = cursor.read_u16()? as usize;
+            for _ in 0..property_value_count {
+                parse_tagged_property(cursor)?;
+            }
+            let end = cursor.position;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
-                payload,
+                payload: cursor.bytes[start..end].to_vec(),
             })
         }
         Some(RopId::SynchronizationImportMessageMove) => {

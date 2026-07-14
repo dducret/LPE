@@ -607,7 +607,7 @@ not by itself authorize broad client publication.
 | Profile data | Canonical storage | API | JMAP | MAPI over HTTP | Tests and gaps |
 | --- | --- | --- | --- | --- | --- |
 | Messages | `messages`, `mailbox_messages`, `recoverable_items`, MIME/body/blob tables, submission rows | `/api/mail/messages/submit`, draft and flag APIs; `/api/mail/recoverable-items` browse/restore/purge | `Email/*`, `Mailbox/*`, `Thread/*`, `EmailSubmission/*`; normal views exclude recoverable items | Contents tables, ICS, FastTransfer, import/save/send ROPs; bounded Recoverable Items virtual folders for browse/restore/purge over `recoverable_items` | Covered by existing mail/JMAP/MAPI tests plus canonical recoverable-state tests; no PST/OST content handling. |
-| Contacts | collaboration contact collections and contact rows | `/api/mail/contacts` and sharing APIs | `AddressBook/*`, `ContactCard/*` | NSPI and MAPI contact projections | Covered by collaboration/JMAP/MAPI tests; NSPI mutation remains deferred. |
+| Contacts | collaboration contact collections and contact rows | `/api/mail/contacts` and sharing APIs | `AddressBook/*`, `ContactCard/*` | NSPI and MAPI contact projections; contacts with canonical Email1-Email3 values project synchronized `PidLidAddressBookProviderEmailList` and `PidLidAddressBookProviderArrayType` values as required by `[MS-OXOCNTC]` sections 2.2.1.2, 2.2.1.2.11, and 2.2.1.2.12 | Covered by collaboration/JMAP/MAPI tests; NSPI mutation remains deferred. |
 | Calendars | calendar collections, events, grants, free/busy projections | `/api/mail/calendar/events`, delegation/free-busy APIs | `Calendar/*`, `CalendarEvent/*` | Calendar folder, appointment EntryIDs, free/busy/delegate projections | Covered by calendar/JMAP/MAPI tests; full Exchange delegate data folders remain gated on canonical delegate/free-busy semantics. |
 | Tasks | task lists, task rows, grants, reminder metadata | `/api/mail/tasks`, `/api/mail/task-lists`, reminders API | `TaskList/*`, `Task/*`, `Reminder/*` | Task folder and reminder/search-folder projections | Covered by task/reminder/JMAP/MAPI tests. |
 | Notes | canonical client note rows | `/api/mail/notes` | private `Note/*` | Notes folder item projection and custom properties | Covered by notes API/JMAP/MAPI tests. |
@@ -990,6 +990,18 @@ client-local source keys outside LPE's persisted MAPI identity range. LPE
 acknowledges those saves with transient object identities but must not import
 them into the canonical mailbox or they will surface as user-visible trash
 messages.
+Outlook 16.0.20131 uploads FAI deletions with
+`RopSynchronizationImportDeletes` (`RopId 0x74`) as one required
+`PtypMultipleBinary` (`0x00001102`) `TaggedPropertyValue` containing serialized
+22-byte GIDs, not as an array of fixed 8-byte MAPI IDs. The ROP reader must
+consume the complete tagged value before parsing the next ROP; otherwise GID
+bytes can be misread as ROP headers and inflate the response handle table. The
+content collector resolves each raw SourceKey against canonical associated
+configuration messages before interpreting its global counter, so Outlook-
+allocated keys outside LPE's persisted identity range can delete their matching
+FAI while already-absent keys remain idempotent. This follows [MS-OXCROPS]
+sections 2.2.13.5.1 and 2.2.13.5.2, [MS-OXCFXICS] section
+2.2.3.2.4.5.1, and [MS-OXCDATA] sections 2.2.1.3, 2.11.1, and 2.11.4.
 Outlook Calendar startup can create Freebusy Data view/configuration messages
 under the special Freebusy Data folder. Until LPE stores first-class writable
 Freebusy Data FAI state, those creates are acknowledged as transient associated

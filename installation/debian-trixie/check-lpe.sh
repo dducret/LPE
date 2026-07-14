@@ -139,7 +139,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_as
   || fail "Table public.mapi_associated_config_messages is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_associated_config_messages"
 
-mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%associated_config%';")" \
+mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%associated_config%';")" \
   || fail "Unable to inspect MAPI associated configuration replay shape constraint"
 [[ "$mapi_associated_config_shape_constraint_ok" -ge "1" ]] \
   || fail "MAPI associated configuration replay shape constraint is stale. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
@@ -201,7 +201,7 @@ recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -
   || fail "Recoverable-item change-log constraints are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recoverable-item change-log constraints are present"
 
-recoverable_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")" \
+recoverable_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")" \
   || fail "Unable to inspect recoverable-item replay shape constraint"
 [[ "$recoverable_shape_constraint_ok" -ge "1" ]] \
   || fail "Recoverable-item replay shape constraint is stale. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."

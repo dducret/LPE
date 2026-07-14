@@ -27,6 +27,21 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
             Some(MapiValue::String(contact.email.clone()))
         }
+        // [MS-OXOCNTC] sections 2.2.1.2, 2.2.1.2.11, and 2.2.1.2.12
+        // require these properties to be present and synchronized when an
+        // electronic address is defined.
+        PID_LID_ADDRESS_BOOK_PROVIDER_EMAIL_LIST_TAG => {
+            contact_address_book_provider_email_list(contact).map(MapiValue::MultiI32)
+        }
+        PID_LID_ADDRESS_BOOK_PROVIDER_ARRAY_TYPE_TAG => {
+            contact_address_book_provider_email_list(contact).map(|indexes| {
+                MapiValue::U32(
+                    indexes
+                        .into_iter()
+                        .fold(0, |mask, index| mask | (1 << index)),
+                )
+            })
+        }
         PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG => {
             contact_email_value(contact, 0).map(|_| MapiValue::String("SMTP".to_string()))
         }
@@ -224,6 +239,14 @@ fn contact_email_value(contact: &AccessibleContact, index: usize) -> Option<Stri
         }
     }
     values.into_iter().nth(index)
+}
+
+fn contact_address_book_provider_email_list(contact: &AccessibleContact) -> Option<Vec<i32>> {
+    let indexes = (0..3)
+        .filter(|index| contact_email_value(contact, *index).is_some())
+        .map(|index| index as i32)
+        .collect::<Vec<_>>();
+    (!indexes.is_empty()).then_some(indexes)
 }
 
 fn contact_url_by_label(contact: &AccessibleContact, labels: &[&str]) -> String {

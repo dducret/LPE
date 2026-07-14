@@ -1340,6 +1340,81 @@ fn contact_secondary_email_named_property_uses_emails_json() {
         ),
         Some(MapiValue::String("SMTP".to_string()))
     );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_LID_ADDRESS_BOOK_PROVIDER_EMAIL_LIST_TAG
+        ),
+        Some(MapiValue::MultiI32(vec![0, 1]))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_LID_ADDRESS_BOOK_PROVIDER_ARRAY_TYPE_TAG
+        ),
+        Some(MapiValue::U32(3))
+    );
+}
+
+#[test]
+fn outlook_contact_view_provider_array_restriction_matches_contact_email() {
+    let account_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555555);
+    let mut contact = default_contact_for_mapping(account_id, "default");
+    contact.id = Uuid::from_u128(0x66666666_6666_4666_8666_666666666666);
+    contact.email = "denis@example.test".to_string();
+    crate::mapi::identity::remember_mapi_identity(
+        contact.id,
+        crate::mapi::identity::mapi_store_id(92),
+    );
+    let restriction = MapiRestriction::Or(vec![
+        MapiRestriction::Content {
+            property_tag: PID_TAG_MESSAGE_CLASS_W,
+            value: "IPM.DistList".to_string(),
+            fuzzy_level_low: 0x0002,
+            fuzzy_level_high: 0x0001,
+        },
+        MapiRestriction::And(vec![
+            MapiRestriction::Content {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                value: "IPM.Contact".to_string(),
+                fuzzy_level_low: 0x0002,
+                fuzzy_level_high: 0x0001,
+            },
+            MapiRestriction::Property {
+                relop: 0x05,
+                property_tag: PID_LID_ADDRESS_BOOK_PROVIDER_ARRAY_TYPE_TAG,
+                value: MapiValue::U32(0),
+            },
+        ]),
+    ]);
+
+    assert!(restriction_matches_contact_in_folder(
+        Some(&restriction),
+        &contact,
+        CONTACTS_FOLDER_ID
+    ));
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_LID_ADDRESS_BOOK_PROVIDER_ARRAY_TYPE_TAG
+        ),
+        Some(MapiValue::U32(1))
+    );
+    assert_eq!(
+        contact_property_value(
+            &contact,
+            1,
+            CONTACTS_FOLDER_ID,
+            PID_LID_ADDRESS_BOOK_PROVIDER_EMAIL_LIST_TAG
+        ),
+        Some(MapiValue::MultiI32(vec![0]))
+    );
 }
 
 #[test]

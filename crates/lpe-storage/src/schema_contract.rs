@@ -58,6 +58,7 @@ const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
+const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -952,6 +953,23 @@ fn update_script_requires_the_current_schema_without_mutating_it() {
             "update-lpe.sh must not mutate the LPE 0.5.0 schema: {forbidden}"
         );
     }
+}
+
+#[test]
+fn fresh_schema_checks_validate_constraint_shape_without_migration_names() {
+    assert!(
+        !CHECK_LPE_SCRIPT.contains("conname = 'mail_change_log_object_shape_check'"),
+        "check-lpe.sh must validate the canonical CHECK definition without requiring a migration-assigned constraint name"
+    );
+    assert_source_contains_all(
+        "check-lpe.sh canonical mail change constraint checks",
+        CHECK_LPE_SCRIPT,
+        &[
+            "conrelid = 'public.mail_change_log'::regclass AND contype = 'c'",
+            "pg_get_constraintdef(oid) LIKE '%associated_config%'",
+            "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
+        ],
+    );
 }
 
 #[test]

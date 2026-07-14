@@ -395,24 +395,40 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_delete_message_ids(&self) -> Vec<u64> {
+        self.import_delete_source_keys()
+            .iter()
+            .filter_map(|source_key| {
+                (source_key.len() == 22
+                    && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
+                    .then(|| {
+                        crate::mapi::identity::global_counter_from_globcnt(&source_key[16..22])
+                            .map(crate::mapi::identity::mapi_store_id)
+                    })
+                    .flatten()
+            })
+            .collect()
+    }
+
+    pub(in crate::mapi) fn import_delete_source_keys(&self) -> Vec<Vec<u8>> {
         if !matches!(
             RopId::from_u8(self.rop_id),
             Some(RopId::SynchronizationImportDeletes)
         ) {
             return Vec::new();
         }
-        let count = self
-            .payload
-            .get(1..3)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u16::from_le_bytes)
-            .unwrap_or(0) as usize;
-        self.payload
-            .get(3..)
-            .unwrap_or_default()
-            .chunks_exact(8)
-            .take(count)
-            .filter_map(crate::mapi::identity::object_id_from_wire_id)
+        let mut cursor = Cursor::new(&self.payload);
+        let Ok(_) = cursor.read_u8() else {
+            return Vec::new();
+        };
+        let Ok(property_value_count) = cursor.read_u16() else {
+            return Vec::new();
+        };
+        (0..property_value_count)
+            .filter_map(|_| parse_tagged_property(&mut cursor).ok())
+            .flat_map(|(tag, value)| match (tag, value) {
+                (0x0000_1102, MapiValue::MultiBinary(values)) => values,
+                _ => Vec::new(),
+            })
             .collect()
     }
 

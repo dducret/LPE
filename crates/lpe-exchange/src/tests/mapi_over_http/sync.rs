@@ -1,5 +1,22 @@
 use super::*;
 
+fn append_rop_sync_import_deletes(
+    rops: &mut Vec<u8>,
+    input_handle_index: u8,
+    import_delete_flags: u8,
+    object_ids: &[u64],
+) {
+    rops.extend_from_slice(&[0x74, 0x00, input_handle_index, import_delete_flags]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x0000_1102u32.to_le_bytes());
+    rops.extend_from_slice(&(object_ids.len() as u32).to_le_bytes());
+    for object_id in object_ids {
+        let source_key = crate::mapi::identity::source_key_for_object_id(*object_id);
+        rops.extend_from_slice(&(source_key.len() as u16).to_le_bytes());
+        rops.extend_from_slice(&source_key);
+    }
+}
+
 #[tokio::test]
 async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_handle() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
@@ -5858,12 +5875,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_2_message_delete_returns_transfer
         rops.extend_from_slice(&0u32.to_le_bytes());
         rops.extend_from_slice(&[0x77, 0x00, 0x02]); // UploadStateStreamEnd
     }
-    rops.extend_from_slice(&[
-        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
-        0x02, // hard delete
-    ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x02, &[test_mapi_message_id(message_id)]);
     rops.extend_from_slice(&[
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
@@ -8122,12 +8134,12 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     rops.extend_from_slice(&1u16.to_le_bytes());
     append_mapi_wire_id(&mut rops, test_mapi_message_id(read_message_id));
     rops.push(1);
-    rops.extend_from_slice(&[
-        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
+    append_rop_sync_import_deletes(
+        &mut rops,
         0x02,
-    ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(delete_message_id));
+        0x02,
+        &[test_mapi_message_id(delete_message_id)],
+    );
     rops.extend_from_slice(&[
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
@@ -8245,11 +8257,8 @@ async fn mapi_over_http_sync_import_delete_ignores_transient_trash_artifact() {
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::TRASH_FOLDER_ID);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
-        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
-        0x02,
     ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, out_of_range_object_id);
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x02, &[out_of_range_object_id]);
 
     let response = service
         .handle_mapi(
@@ -8263,6 +8272,69 @@ async fn mapi_over_http_sync_import_delete_ignores_transient_trash_artifact() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
     assert!(deleted_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_deletes_removes_fai_by_outlook_source_key() {
+    let account = FakeStore::account();
+    let outlook_source_object_id = crate::mapi::identity::mapi_store_id(0xa00a_5207_3216);
+    let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+        id: Uuid::parse_str("16161616-1616-4616-8616-161616161616").unwrap(),
+        account_id: account.account_id,
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        message_class: "IPM.Configuration.AccountPrefs".to_string(),
+        subject: "IPM.Configuration.AccountPrefs".to_string(),
+        properties_json: serde_json::json!({
+            "0x65e00102": {
+                "type": "binary",
+                "value": "741f6fd38e1a654f9d422dfb451c8f10a00a52073216"
+            }
+        }),
+    }]));
+    let store = FakeStore {
+        session: Some(account),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        associated_configs: associated_configs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+    ]);
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x00, &[outlook_source_object_id]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = response_bytes(response).await;
+    let (response_rops, response_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
+    assert_eq!(response_handles.len(), 3);
+    assert!(associated_configs.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -8348,9 +8420,7 @@ async fn mapi_over_http_sync_import_hard_delete_reports_partial_when_retention_b
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x7E, 0x00, 0x01, 0x02, 0x01]);
-    rops.extend_from_slice(&[0x74, 0x00, 0x02, 0x02]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x02, &[test_mapi_message_id(message_id)]);
 
     let response = service
         .handle_mapi(
@@ -8417,11 +8487,8 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
-        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
-        0x00,
     ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x00, &[test_mapi_message_id(message_id)]);
     rops.extend_from_slice(&[
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
@@ -8489,9 +8556,7 @@ async fn mapi_over_http_sync_import_delete_from_trash_child_hard_deletes() {
     append_mapi_wire_id(&mut rops, child_folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x7E, 0x00, 0x01, 0x02, 0x01]);
-    rops.extend_from_slice(&[0x74, 0x00, 0x02, 0x00]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x00, &[test_mapi_message_id(message_id)]);
 
     let response = service
         .handle_mapi(
@@ -8852,11 +8917,8 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_2_hierarchy_delete_returns_transf
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&[
         0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
-        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
-        0x02, // hard delete
     ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, folder_mapi_id);
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x02, &[folder_mapi_id]);
     rops.extend_from_slice(&[
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer

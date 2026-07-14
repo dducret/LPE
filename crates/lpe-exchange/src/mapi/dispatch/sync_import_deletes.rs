@@ -67,7 +67,30 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
     };
     let mut partial_completion = false;
     let hard_delete = request.import_delete_hard_delete();
-    for message_id in request.import_delete_message_ids() {
+    for source_key in request.import_delete_source_keys() {
+        let message_id =
+            source_key_global_counter(&source_key).map(crate::mapi::identity::mapi_store_id);
+        if let Some(message) = message_id
+            .and_then(|message_id| snapshot.associated_config_message_for_id(message_id))
+            .filter(|message| message.folder_id == folder_id)
+            .or_else(|| {
+                snapshot.associated_config_message_for_folder_and_source_key(folder_id, &source_key)
+            })
+        {
+            if store
+                .delete_mapi_associated_config(principal.account_id, message.canonical_id)
+                .await
+                .is_err()
+            {
+                partial_completion = true;
+            } else {
+                record_sync_upload_content_checkpoint(session, folder_id);
+            }
+            continue;
+        }
+        let Some(message_id) = message_id else {
+            continue;
+        };
         let email = message_for_id(folder_id, message_id, mailboxes, emails);
         if transient_client_local_message_id(message_id) && email.is_none() {
             continue;
