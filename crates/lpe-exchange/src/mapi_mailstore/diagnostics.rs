@@ -650,7 +650,10 @@ pub(crate) fn default_folder_hierarchy_membership_summary(
             let row = summary
                 .rows
                 .iter()
-                .find(|row| row.folder_id == Some(*folder_id));
+                .find(|row| {
+                    row.folder_id == Some(*folder_id)
+                        || row.source_counter == Some(source_counter)
+                });
             let row_present = row.is_some();
             let row_index = row.map(|row| row.row_index).unwrap_or_default();
             let parent_folder_matches = row
@@ -880,7 +883,9 @@ pub(crate) fn hierarchy_microsoft_payload_comparison(
     requested_property_tags: &[u32],
     summary: &HierarchyTransferDebugSummary,
 ) -> HierarchyMicrosoftPayloadComparison {
-    let folder_id_expected = true;
+    // [MS-OXCFXICS] section 2.2.4.3.5: PidTagFolderId is present if and only if
+    // the Eid synchronization extra flag is set.
+    let folder_id_expected = sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0;
     let parent_folder_id_expected_by_no_foreign_identifiers =
         sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0;
     let parent_folder_id_recommended_by_eid = sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0;

@@ -4263,10 +4263,7 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
-    assert_eq!(
-        inbox.folder_id,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID)
-    );
+    assert_eq!(inbox.folder_id, None);
     assert_eq!(
         inbox.parent_folder_id,
         Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)

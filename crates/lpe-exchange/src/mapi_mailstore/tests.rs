@@ -887,10 +887,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
     assert!(summary.rows[0]
         .property_tags
         .contains(&PID_TAG_CONTAINER_CLASS_W));
-    assert_eq!(
-        summary.rows[0].folder_id,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID)
-    );
+    assert_eq!(summary.rows[0].folder_id, None);
     assert_eq!(summary.rows[0].source_key_len, 22);
     assert_eq!(summary.rows[0].parent_source_key_len, 0);
     assert!(hierarchy_identity_properties_before_display_name(
@@ -922,7 +919,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
         .contains("ranges=4-5"));
     assert_eq!(validation.top_level_row_count, 1);
     assert_eq!(validation.nested_row_count, 0);
-    assert_eq!(validation.rows_without_folder_id, 0);
+    assert_eq!(validation.rows_without_folder_id, 1);
     assert_eq!(validation.rows_missing_core_property_count, 0);
     assert_eq!(validation.rows_with_content_counts_present, 0);
     assert_eq!(validation.rows_with_folder_type_present, 1);
@@ -1040,7 +1037,7 @@ fn hierarchy_microsoft_payload_comparison_matches_documented_folder_change_rules
     );
 
     assert!(comparison.required_missing_row_names.is_empty());
-    assert!(comparison.folder_id_expected);
+    assert!(!comparison.folder_id_expected);
     assert!(comparison.folder_id_presence_mismatch_rows.is_empty());
     assert!(comparison.parent_folder_id_expected_by_no_foreign_identifiers);
     assert!(!comparison.parent_folder_id_recommended_by_eid);
@@ -1230,7 +1227,10 @@ fn hierarchy_transfer_debug_summary_tracks_emitted_ipm_final_state_counters() {
     assert_eq!(validation.semantic_flags, "ok");
     assert_eq!(validation.top_level_row_count, 16);
     assert_eq!(validation.nested_row_count, 3);
-    assert_eq!(validation.rows_without_folder_id, 0);
+    assert_eq!(
+        validation.rows_without_folder_id,
+        summary.folder_change_count
+    );
     assert_eq!(validation.rows_missing_core_property_count, 0);
     assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
     assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
@@ -1301,7 +1301,7 @@ fn default_folder_hierarchy_membership_summary_tracks_top_level_ipm_folders() {
 }
 
 #[test]
-fn hierarchy_transfer_includes_folder_id_without_eid_extra_flag() {
+fn hierarchy_transfer_without_eid_omits_folder_id_but_keeps_parent_folder_id() {
     let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
     crate::mapi::identity::remember_mapi_identity(
         mailbox_id,
@@ -1335,11 +1335,12 @@ fn hierarchy_transfer_includes_folder_id_without_eid_extra_flag() {
     let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
 
     assert_eq!(summary.rows.len(), 1);
+    assert_eq!(summary.rows[0].folder_id, None);
     assert_eq!(
-        summary.rows[0].folder_id,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        summary.rows[0].parent_folder_id,
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
     );
-    assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+    assert!(!summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
 }
 
 #[test]
@@ -1565,7 +1566,8 @@ fn hierarchy_transfer_omits_custom_sync_root_and_projects_children() {
 
     assert_eq!(summary.rows.len(), 1);
     assert_eq!(summary.rows[0].display_name, "Archive");
-    assert_eq!(summary.rows[0].folder_id, Some(child_folder_id));
+    assert_eq!(summary.rows[0].folder_id, None);
+    assert_eq!(summary.rows[0].parent_folder_id, Some(root_folder_id));
     assert_eq!(summary.rows[0].parent_source_key_len, 0);
 }
 

@@ -520,8 +520,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 }
             }
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
-            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-            write_object_id(&mut buffer, folder_id);
+            // [MS-OXCFXICS] section 2.2.4.3.5: PidTagFolderId is present
+            // in folderChange if and only if SynchronizationExtraFlags.Eid.
+            if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
+                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+                write_object_id(&mut buffer, folder_id);
+            }
             if sync_type != SYNC_TYPE_HIERARCHY
                 || sync_flags & 0x0100 != 0
                 || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
