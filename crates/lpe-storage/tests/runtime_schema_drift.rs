@@ -1,6 +1,7 @@
 use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
+use lpe_domain::InboundDeliveryRequest;
 use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CollaborationGrantInput,
     CollaborationResourceKind, CreatePublicFolderTreeInput, JmapImportedEmailInput,
@@ -120,6 +121,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "mailbox SQL path",
             exercise_mailbox_path(&storage, &fixture).await,
+        );
+        collect(
+            &mut failures,
+            "inbound MIME canonical body path",
+            exercise_inbound_mime_canonical_body_path(&storage, pool, &fixture).await,
         );
         collect(
             &mut failures,
@@ -877,6 +883,67 @@ async fn exercise_mailbox_path(storage: &Storage, fixture: &RuntimeFixture) -> R
         .fetch_imap_mailbox_state(fixture.account_id, fixture.inbox_id)
         .await
         .context("fetch_imap_mailbox_state")?;
+    Ok(())
+}
+
+async fn exercise_inbound_mime_canonical_body_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let trace_id = format!("runtime-inbound-{}", Uuid::new_v4());
+    let raw_message = format!(
+        concat!(
+            "From: sender@example.test\r\n",
+            "To: {}\r\n",
+            "Subject: Re: Test 10:57\r\n",
+            "Message-ID: <{}@example.test>\r\n",
+            "Content-Type: text/plain; charset=\"iso-8859-1\"\r\n",
+            "Content-Transfer-Encoding: quoted-printable\r\n",
+            "\r\n",
+            "Test r=E9ussi 10:58\r\n"
+        ),
+        fixture.account_email, trace_id
+    )
+    .into_bytes();
+
+    storage
+        .deliver_inbound_message(InboundDeliveryRequest {
+            trace_id: trace_id.clone(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec![fixture.account_email.clone()],
+            subject: "Re: Test 10:57".to_string(),
+            body_text: "Test r\u{fffd}ussi 10:58".to_string(),
+            internet_message_id: Some(format!("<{trace_id}@example.test>")),
+            raw_message,
+        })
+        .await
+        .context("deliver inbound ISO-8859-1 MIME fixture")?;
+
+    let stored_body = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT b.body_text
+        FROM message_bodies b
+        JOIN message_headers h
+          ON h.tenant_id = b.tenant_id
+         AND h.message_id = b.message_id
+        WHERE h.tenant_id = $1
+          AND lower(h.header_name) = 'x-lpe-ct-trace-id'
+          AND h.header_value = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(&trace_id)
+    .fetch_one(pool)
+    .await
+    .context("load canonical inbound message body")?;
+
+    anyhow::ensure!(
+        stored_body == "Test réussi 10:58",
+        "core trusted the edge body projection instead of raw MIME: {stored_body:?}"
+    );
     Ok(())
 }
 

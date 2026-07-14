@@ -11,7 +11,7 @@ use sqlx::{Postgres, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-use crate::mail::{parse_header_recipients, parse_headers_map, parse_message_attachments};
+use crate::mail::{parse_header_recipients, parse_headers_map, parse_rfc822_message};
 use crate::shared::allocate_uid_validity;
 use crate::{submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput};
 
@@ -64,7 +64,8 @@ impl Storage {
 
         let mail_from = crate::normalize_email(&request.mail_from);
         let subject = crate::normalize_subject(&request.subject);
-        let body_text = request.body_text.trim().to_string();
+        let parsed_message = parse_rfc822_message(&request.raw_message)?;
+        let body_text = parsed_message.body_text.trim().to_string();
         let headers = parse_headers_map(&request.raw_message);
         let rcpt_to = request
             .rcpt_to
@@ -111,7 +112,7 @@ impl Storage {
         let mut rejected = Vec::new();
         let mut stored_messages = Vec::new();
         let thread_id = Uuid::new_v4();
-        let attachments = parse_message_attachments(&request.raw_message)?;
+        let attachments = parsed_message.attachments;
         let mut followups = Vec::new();
 
         for recipient in &rcpt_to {
