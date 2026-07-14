@@ -820,7 +820,13 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             sync_property_tags,
             PID_TAG_MESSAGE_FLAGS,
         ) {
-            write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
+            // [MS-OXCMSG] section 2.2.1.6: mfFAI identifies an FAI message.
+            let message_flags = if object.associated {
+                MSGFLAG_FAI
+            } else {
+                MSGFLAG_READ
+            };
+            write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
         }
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W) {
             write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);

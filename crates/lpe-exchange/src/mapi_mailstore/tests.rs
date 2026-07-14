@@ -1741,6 +1741,7 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
     );
     let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
     assert_eq!(summary.fai_items.len(), 1);
+    assert_eq!(summary.fai_items[0].message_flags, Some(MSGFLAG_FAI));
     let item = &summary.fai_items[0];
     let message_start = item.message_start_marker_offset.unwrap();
     let property_start = item.property_list_start_offset.unwrap();
@@ -1756,7 +1757,7 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
 }
 
 #[test]
-fn content_sync_manifest_unicode_fai_uses_unicode_normalized_subject() {
+fn content_sync_manifest_unicode_fai_uses_unicode_subject_and_fai_message_flag() {
     let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999996").unwrap();
     let item_id = crate::mapi::identity::mapi_store_id(96);
     crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
@@ -1797,6 +1798,7 @@ fn content_sync_manifest_unicode_fai_uses_unicode_normalized_subject() {
 
     assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_W, &utf16z("Calendar"));
     assert_absent_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A);
+    assert_i32_property(&buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
     assert_eq!(summary.fai_items.len(), 1);
     assert!(summary.fai_items[0]

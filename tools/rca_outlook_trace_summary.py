@@ -776,6 +776,7 @@ def record_common_views_fai_transfer_summary(
         f"virtual={int_field(fields, 'virtual_count')};"
         f"normalized_subject_string8={int_field(fields, 'normalized_subject_string8_count')};"
         f"normalized_subject_unicode={int_field(fields, 'normalized_subject_unicode_count')};"
+        f"missing_mf_fai={int_field(fields, 'missing_mf_fai_count')};"
         f"first={field_text(fields, 'first_item_class')}/{field_text(fields, 'first_item_subject')};"
         f"last={field_text(fields, 'last_item_class')}/{field_text(fields, 'last_item_subject')};"
         f"selection={field_text(fields, 'active_transfer_selection') or 'unknown'}"
@@ -3823,6 +3824,11 @@ def issue_buckets(
         for key in log.get("common_views_fai_transfer_summaries", {})
     ):
         issues.append("common_views_fai_unicode_normalized_subject_string8")
+    if any(
+        int_text_field(key, "missing_mf_fai") > 0
+        for key in log.get("common_views_fai_transfer_summaries", {})
+    ):
+        issues.append("common_views_fai_missing_mf_fai")
     if log.get("zero_default_tags"):
         for name, _count in actionable_zero_default_tag_counts(
             log["zero_default_tags"]

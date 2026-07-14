@@ -143,6 +143,15 @@ pub(crate) fn log_fai_content_sync_debug(
                 .iter()
                 .filter(|item| item.property_tags.contains(&PID_TAG_NORMALIZED_SUBJECT_W))
                 .count();
+            let missing_mf_fai_count = summary
+                .fai_items
+                .iter()
+                .filter(|item| {
+                    !item
+                        .message_flags
+                        .is_some_and(|flags| flags & MSGFLAG_FAI != 0)
+                })
+                .count();
             let persisted_count = summary
                 .fai_items
                 .iter()
@@ -191,6 +200,7 @@ pub(crate) fn log_fai_content_sync_debug(
                 total_property_count,
                 normalized_subject_string8_count,
                 normalized_subject_unicode_count,
+                missing_mf_fai_count,
                 first_item_id = %first_item
                     .and_then(|item| item.item_id)
                     .map(format_u64_hex)
@@ -255,6 +265,13 @@ pub(crate) fn log_fai_content_sync_debug(
                     message_class = %item.message_class,
                     subject = %item.subject,
                     associated = item.associated.unwrap_or_default(),
+                    message_flags = format_args!(
+                        "0x{:08x}",
+                        item.message_flags.unwrap_or_default()
+                    ),
+                    message_flags_mf_fai = item
+                        .message_flags
+                        .is_some_and(|flags| flags & MSGFLAG_FAI != 0),
                     classification,
                     state_origin,
                     source_key_hex = %item.source_key_hex,

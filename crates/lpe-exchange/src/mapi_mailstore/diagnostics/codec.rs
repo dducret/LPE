@@ -30,6 +30,7 @@ pub(crate) struct ContentTransferFaiItemDebug {
     pub(crate) source_key_hex: String,
     pub(crate) parent_source_key_hex: String,
     pub(crate) associated: Option<bool>,
+    pub(crate) message_flags: Option<u32>,
     pub(crate) property_tags: Vec<u32>,
     pub(crate) property_value_shapes: Vec<(u32, String)>,
     pub(crate) change_number_in_final_cnset_fai: bool,
@@ -58,6 +59,7 @@ struct ContentTransferMessageDebug {
     change_number: Option<u64>,
     associated: bool,
     associated_present: bool,
+    message_flags: Option<u32>,
     subject: String,
     message_class: String,
     entry_id_len: usize,
@@ -335,6 +337,9 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
                 message.associated_present = true;
                 message.associated = decode_debug_bool(&property.value).unwrap_or_default()
             }
+            PID_TAG_MESSAGE_FLAGS => {
+                message.message_flags = decode_debug_i32(&property.value).map(|value| value as u32)
+            }
             PID_TAG_MID => message.item_id = decode_debug_object_id(&property.value),
             PID_TAG_CHANGE_NUMBER => {
                 message.change_number = decode_debug_change_number(&property.value)
@@ -404,6 +409,7 @@ fn finish_content_fai_debug_message(
         source_key_len,
         parent_source_key_len,
         associated: message.associated_present.then_some(message.associated),
+        message_flags: message.message_flags,
         property_tags: message.property_tags,
         property_value_shapes: message.property_value_shapes,
         item_start_offset,
