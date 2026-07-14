@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
+// Version 3 adds the owner Inbox special-folder identification properties to
+// folderChange, so version 2 checkpoints must replay a full hierarchy once.
+pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 3;
 
 pub(super) fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
     let size = u16::from_le_bytes(request.payload.get(..2)?.try_into().ok()?) as usize;

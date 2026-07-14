@@ -1424,6 +1424,41 @@ fn hierarchy_transfer_calendar_includes_account_scoped_entry_id() {
 }
 
 #[test]
+fn hierarchy_transfer_inbox_includes_calendar_identification_entry_id() {
+    let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+    let inbox = virtual_special_mailbox(crate::mapi::identity::INBOX_FOLDER_ID)
+        .expect("virtual inbox folder");
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let buffer = sync_manifest_buffer_with_final_state(
+        account_id,
+        SYNC_TYPE_HIERARCHY,
+        0,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        std::slice::from_ref(&inbox),
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&inbox),
+        std::slice::from_ref(&inbox),
+        &[],
+        &[],
+        &[],
+        &[],
+        1,
+    );
+
+    // [MS-OXOSFLD] section 2.2.3 and [MS-OXCFXICS] section 2.2.4.3.5:
+    // the owner Inbox folderChange carries its Calendar identification property.
+    assert_variable_property(&buffer, 0x36D0_0102, &calendar_entry_id);
+}
+
+#[test]
 fn hierarchy_transfer_respects_entry_id_exclusion() {
     let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
     let mailbox = virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)

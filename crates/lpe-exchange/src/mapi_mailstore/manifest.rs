@@ -1,5 +1,15 @@
 use super::*;
 
+const OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS: [(u32, u64); 7] = [
+    (0x36D0_0102, crate::mapi::identity::CALENDAR_FOLDER_ID),
+    (0x36D1_0102, crate::mapi::identity::CONTACTS_FOLDER_ID),
+    (0x36D2_0102, crate::mapi::identity::JOURNAL_FOLDER_ID),
+    (0x36D3_0102, crate::mapi::identity::NOTES_FOLDER_ID),
+    (0x36D4_0102, crate::mapi::identity::TASKS_FOLDER_ID),
+    (0x36D5_0102, crate::mapi::identity::REMINDERS_FOLDER_ID),
+    (0x36D7_0102, crate::mapi::identity::DRAFTS_FOLDER_ID),
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
     pub(crate) id: Uuid,
@@ -476,6 +486,15 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
             let content_unread_count_present = sync_type != SYNC_TYPE_HIERARCHY
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
+            let owner_inbox_special_folder_entry_id_count =
+                if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+                    OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS
+                        .iter()
+                        .filter(|(tag, _)| !property_tag_excluded(excluded_property_tags, *tag))
+                        .count()
+                } else {
+                    0
+                };
             let display_name = mapi_folder_display_name(mailbox);
             tracing::info!(
                 rca_debug = true,
@@ -505,6 +524,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 local_commit_time_max,
                 local_commit_time_max_present,
                 deleted_count_total_present,
+                owner_inbox_special_folder_entry_id_count,
+                owner_inbox_calendar_entry_id_present = owner_inbox_special_folder_entry_id_count
+                    > 0
+                    && !property_tag_excluded(excluded_property_tags, 0x36D0_0102),
                 folder_type_excluded =
                     property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE),
                 access_excluded = property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS),
@@ -553,6 +576,21 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTAINER_CLASS_W) {
                 write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
+            }
+            if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+                // [MS-OXOSFLD] section 2.2.3 stores these identification
+                // properties on the owner's Inbox. [MS-OXCFXICS] section
+                // 2.2.4.3.5 carries unfiltered folder properties in folderChange.
+                for (property_tag, special_folder_id) in OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS {
+                    if !property_tag_excluded(excluded_property_tags, property_tag) {
+                        let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+                            mailbox_guid,
+                            special_folder_id,
+                        )
+                        .expect("special folders use valid MAPI folder IDs");
+                        write_binary_property(&mut buffer, property_tag, &entry_id);
+                    }
+                }
             }
             if container_class == "IPF.Appointment"
                 && !property_tag_excluded(

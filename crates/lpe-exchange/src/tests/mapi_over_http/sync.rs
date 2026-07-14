@@ -3519,6 +3519,19 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x3613_001Fu32.to_le_bytes()
     ));
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let mut calendar_identification_property = 0x36D0_0102u32.to_le_bytes().to_vec();
+    calendar_identification_property
+        .extend_from_slice(&(calendar_entry_id.len() as u32).to_le_bytes());
+    calendar_identification_property.extend_from_slice(&calendar_entry_id);
+    assert!(contains_bytes(
+        &response_rops,
+        &calendar_identification_property
+    ));
     assert!(!contains_bytes(
         &response_rops,
         &0x001A_001Fu32.to_le_bytes()
@@ -4275,7 +4288,7 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint() {
+async fn mapi_over_http_hierarchy_sync_replays_version_2_server_checkpoint() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 3;
@@ -4292,7 +4305,12 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
             MapiCheckpointKind::Hierarchy,
             99,
             9,
-            serde_json::json!({"source": "emsmdb-ics-download"}),
+            serde_json::json!({
+                "source": "emsmdb-ics-download",
+                "syncType": 2,
+                "syncRootFolderId": test_mapi_folder_id(4),
+                "hierarchySyncVersion": 2
+            }),
         )
         .await
         .unwrap();
@@ -4363,7 +4381,7 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
                 "source": "emsmdb-ics-download",
                 "syncType": 2,
                 "syncRootFolderId": test_mapi_folder_id(1),
-                "hierarchySyncVersion": 2
+                "hierarchySyncVersion": 3
             }),
         )
         .await
@@ -4491,7 +4509,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
             .cursor_json
             .get("hierarchySyncVersion")
             .and_then(serde_json::Value::as_u64),
-        Some(2)
+        Some(3)
     );
 
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
