@@ -24,7 +24,7 @@ pub(super) async fn append_message_dispatch_response<S>(
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
     created_emails: &mut Vec<JmapEmail>,

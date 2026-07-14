@@ -415,6 +415,29 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn remember_created_event(
+        &mut self,
+        folder_id: u64,
+        event_id: u64,
+        event: AccessibleEvent,
+    ) {
+        let canonical_id = event.id;
+        self.events.push(MapiEvent {
+            id: event_id,
+            folder_id,
+            canonical_id,
+            event,
+            attachments: Vec::new(),
+        });
+        if let Some(folder) = self
+            .collaboration_folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id)
+        {
+            folder.item_count = folder.item_count.saturating_add(1);
+        }
+    }
+
     pub(crate) fn with_public_folders(
         mut self,
         folders: Vec<PublicFolder>,

@@ -115,7 +115,7 @@ async fn mapi_over_http_calendar_custom_properties_do_not_persist_for_existing_g
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden() {
+async fn mapi_over_http_calendar_save_keep_open_returns_change_key_in_same_execute() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
@@ -124,6 +124,8 @@ async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden(
         ..Default::default()
     };
     let events = store.events.clone();
+    let reminders = store.reminders.clone();
+    let mapi_identities = store.mapi_identities.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -171,12 +173,23 @@ async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden(
         "Alice.Organizer@Example.Test",
     );
     append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
+    let reminder_at = "2026-05-04T09:15:00Z";
+    append_mapi_bool_property(&mut property_values, 0x8503_000B, true);
+    append_mapi_i32_property(&mut property_values, 0x8501_0003, 15);
+    append_mapi_i64_property(
+        &mut property_values,
+        0x8560_0040,
+        mapi_mailstore::filetime_from_rfc3339_utc(reminder_at) as i64,
+    );
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_set_properties(&mut rops, 1, 12, &property_values);
-    append_rop_save_changes_message(&mut rops, 1, 1);
-    append_rop_save_changes_message(&mut rops, 1, 1);
-    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x0061_0040]);
+    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 2, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 15, &property_values);
+    // [MS-OXCFXICS] section 3.3.5.11 requires the post-save state properties to
+    // remain readable when RopSaveChangesMessage keeps the message open; see
+    // [MS-OXCMSG] sections 2.2.3.3.1-2 and [MS-OXCROPS] section 2.2.8.3.2.
+    append_rop_save_changes_message_with_flags(&mut rops, 2, 1, 0x0A);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x65E2_0102]);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie.clone());
     let response = service
@@ -187,17 +200,20 @@ async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden(
         )
         .await
         .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x0C, 0x01, 0x0F, 0x01, 0x04, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x07, 0x01, 0x0F, 0x01, 0x04, 0x80]
-    ));
-    {
+    let response_body = response_bytes(response).await;
+    let (response_rops, response_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert_eq!(response_handles.len(), 3);
+    assert_ne!(response_handles[1], u32::MAX);
+    assert_ne!(response_handles[2], u32::MAX);
+    assert_ne!(response_handles[1], response_handles[2]);
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("post-save PidTagChangeKey must be readable on the retained event handle");
+    let mut value_offset = row_offset + 1;
+    let change_key = read_rop_binary_u16(&response_rops, &mut value_offset)
+        .expect("post-save PidTagChangeKey must be a PtypBinary value");
+    let canonical_event_id = {
         let stored = events.lock().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].title, "RCA Calendar");
@@ -219,7 +235,20 @@ async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden(
             stored[0].recurrence_json,
             r#"{"frequency":"daily","count":3}"#
         );
-    }
+        stored[0].id
+    };
+    let event_id = mapi_identities.lock().unwrap()[&canonical_event_id];
+    assert_eq!(
+        change_key,
+        mapi_mailstore::change_key_for_change_number(mapi_mailstore::change_number_for_store_id(
+            event_id
+        ))
+    );
+    assert!(reminders.lock().unwrap().iter().any(|reminder| {
+        reminder.source_type == "calendar"
+            && reminder.source_id == canonical_event_id
+            && reminder.reminder_at == reminder_at
+    }));
 }
 
 #[tokio::test]

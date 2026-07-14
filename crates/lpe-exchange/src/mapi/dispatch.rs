@@ -334,7 +334,7 @@ where
             &session,
         )
     {
-        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
         let emails = snapshot.emails();
         log_execute_dispatch_start_debug(
@@ -352,7 +352,7 @@ where
             &mut session,
             &mailboxes,
             &emails,
-            &snapshot,
+            &mut snapshot,
             validator,
             &execute.rop_buffer,
             request_debug.all_release,
@@ -439,7 +439,7 @@ where
 
     let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
-    let snapshot = match load_mapi_store_for_access_plan(
+    let mut snapshot = match load_mapi_store_for_access_plan(
         store,
         principal.account_id,
         &access_plan,
@@ -512,7 +512,7 @@ where
         &mut session,
         &mailboxes,
         &emails,
-        &snapshot,
+        &mut snapshot,
         validator,
         &execute.rop_buffer,
         request_debug.all_release,
@@ -836,7 +836,7 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     validator: &Validator<V>,
     rop_buffer: &[u8],
     request_all_rops_are_release: bool,

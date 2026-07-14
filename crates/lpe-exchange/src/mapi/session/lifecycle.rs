@@ -184,7 +184,7 @@ where
     }
 
     let access_plan = plan_mapi_store_access(&session, rop_buffer);
-    let snapshot =
+    let mut snapshot =
         load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await?;
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
@@ -201,7 +201,7 @@ where
         &mut session,
         &mailboxes,
         &emails,
-        &snapshot,
+        &mut snapshot,
         validator,
         rop_buffer,
         false,

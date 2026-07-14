@@ -9,7 +9,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
     created_emails: &mut Vec<JmapEmail>,
 ) {
@@ -277,6 +277,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         ));
                         return;
                     }
+                    snapshot.remember_created_event(folder_id, event_id, event);
                     session.handles.insert(
                         handle,
                         MapiObject::Event {

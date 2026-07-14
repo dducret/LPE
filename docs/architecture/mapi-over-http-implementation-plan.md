@@ -1162,6 +1162,32 @@ client crash. A PostgreSQL-backed MAPI regression now requires a dynamically
 assigned `PidLidAppointmentTimeZoneDefinitionStartDisplay` to save as
 `Europe/Berlin` and project back to the Outlook Windows key.
 
+The `202607141822` follow-up isolated the next failure after canonical
+appointment persistence. Request `:301` at 18:19:09 executed
+`RopWriteStream (0x2D)`, `RopRelease (0x01)`, two
+`RopSetProperties (0x0A)`, `RopSaveChangesMessage (0x0C)`, and
+`RopGetPropertiesSpecific (0x07)` in order. The save succeeded with flags
+`0x0A`, retained message handle `0xBF`, and returned MID
+`0x0000000000590001`; the following read of `PidTagChangeKey
+(0x65E20102)` on that same handle returned `0x8004010F`. PostgreSQL already
+contained the canonical event and MAPI identity, including ChangeKey
+`741f6fd38e1a654f9d422dfb451c8f10000000000059`. Dump
+`OUTLOOK (22).DMP` retained the same normalized `MAPI_E_NOT_FOUND` in
+Outlook's `IMessage::SaveChanges` path while displaying the modal error; it
+did not contain a native crash.
+
+ROPs in one buffer are processed sequentially ([MS-OXCROPS] section 1.3),
+`KeepOpenReadWrite` keeps the saved Message object open and returns its MID
+([MS-OXCMSG] sections 2.2.3.3.1, 2.2.3.3.2, 4.8.1, and 4.8.2), and an ICS
+client can immediately retrieve the new `PidTagChangeKey` after that save
+([MS-OXCFXICS] sections 2.2.1.2.7 and 3.3.5.11; response shape in
+[MS-OXCROPS] section 2.2.8.3.2). LPE therefore overlays the exact event
+returned by the store into the request-local MAPI snapshot only after all
+canonical save stages succeed. This makes the immediately following
+`RopGetPropertiesSpecific` observe the committed object without adding
+persistent or parallel Calendar state; the overlay is discarded with the
+request.
+
 `dispatch/message_save.rs` and `dispatch/properties.rs` are over the production
 line target. Before adding further save/read behavior, split collaboration item
 save branches into `dispatch/collaboration_message_save.rs` and direct property
