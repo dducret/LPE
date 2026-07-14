@@ -3741,7 +3741,7 @@ fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_f
     assert_eq!(input.time, "10:00");
     assert_eq!(input.duration_minutes, 45);
     assert_eq!(input.location, "Room B");
-    assert_eq!(input.time_zone, "W. Europe Standard Time");
+    assert_eq!(input.time_zone, "Europe/Berlin");
     assert_eq!(input.status, "tentative");
     assert_eq!(input.recurrence_rule, existing.recurrence_rule);
     assert_eq!(input.attendees, "Bob One, Cara Two");

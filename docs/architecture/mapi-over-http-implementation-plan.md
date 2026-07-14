@@ -1131,10 +1131,11 @@ For single-instance appointments, the human-readable
 `(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna`, while the
 accompanying `PidLidAppointmentTimeZoneDefinitionStartDisplay` carried the
 stable key `W. Europe Standard Time`. LPE parses only the bounded persisted
-`TZDEFINITION` header/key-name shape and stores that key in canonical
-`calendar_events.time_zone`; reads regenerate the timezone structures from
-that canonical value. The exact properties and formats are documented by
-[MS-OXOCAL] sections 2.2.1.40 through 2.2.1.43. Initial appointment save also
+`TZDEFINITION` header/key-name shape, maps that Windows key to the CLDR world
+IANA mapping `Europe/Berlin`, and stores the IANA key in canonical
+`calendar_events.time_zone`; reads map it back to `W. Europe Standard Time`
+and regenerate the timezone structures. The exact wire properties and formats
+are documented by [MS-OXOCAL] sections 2.2.1.40 through 2.2.1.43. Initial appointment save also
 maps `PidLidReminderSet` and `PidLidReminderSignalTime` to the canonical
 `calendar_events.reminder_set` and `calendar_events.reminder_at` fields, and
 direct GetProps plus ICS read those same fields, following [MS-OXORMDR]
@@ -1149,6 +1150,17 @@ categories are not claimed by this correction: the current canonical Contact
 model has no category field, so adding categories requires a separate
 schema/API decision backed by a real Contacts trace rather than a MAPI-only
 shadow property.
+
+The 17:14 follow-up trace proved why the Windows/IANA boundary is required.
+Build `89e37cd38b98` accepted `PidTagHtml`, both stream writes, and both
+`RopSetProperties` calls, but request `:309` returned `0x8004010F` from
+`RopSaveChangesMessage`. The pending event carried `W. Europe Standard Time`
+into PostgreSQL `AT TIME ZONE`, which accepts the canonical IANA identifier,
+and no `calendar_events` row was created. Dump `OUTLOOK (21).DMP` showed the
+main thread in `ItemUIHost::HrSaveAndCommitEx` and the modal alert pump, not a
+client crash. A PostgreSQL-backed MAPI regression now requires a dynamically
+assigned `PidLidAppointmentTimeZoneDefinitionStartDisplay` to save as
+`Europe/Berlin` and project back to the Outlook Windows key.
 
 `dispatch/message_save.rs` and `dispatch/properties.rs` are over the production
 line target. Before adding further save/read behavior, split collaboration item

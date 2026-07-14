@@ -452,7 +452,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].title, "Test calendrier IDs nommés");
     assert_eq!(stored[0].location, "Salle Zürich");
-    assert_eq!(stored[0].time_zone, "W. Europe Standard Time");
+    assert_eq!(stored[0].time_zone, "Europe/Berlin");
     assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
     let event_id = stored[0].id;
     drop(stored);
@@ -3753,6 +3753,28 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
+
+    let appointment_guid = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut named_rops = vec![0x56, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00];
+    named_rops.extend_from_slice(&appointment_guid);
+    named_rops.extend_from_slice(&0x825Eu32.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(&response_rops[..8], &[0x56, 0x00, 0, 0, 0, 0, 1, 0]);
+    let time_zone_definition_tag =
+        (u32::from(u16::from_le_bytes(response_rops[8..10].try_into().unwrap())) << 16) | 0x0102;
+    renew_mapi_request_id(&mut execute_headers);
+
     let mut property_values = Vec::new();
     append_mapi_utf16_property(
         &mut property_values,
@@ -3770,10 +3792,15 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
         test_filetime("2026-06-06", "15:30"),
     );
     append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 700");
+    append_mapi_binary_property(
+        &mut property_values,
+        time_zone_definition_tag,
+        &test_calendar_time_zone_definition("W. Europe Standard Time"),
+    );
 
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, folder.id);
-    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    append_rop_set_properties(&mut rops, 1, 5, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     let response = service
         .handle_mapi(
@@ -3805,6 +3832,7 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
     assert_eq!(custom_events[0].time, "14:00");
     assert_eq!(custom_events[0].duration_minutes, 90);
     assert_eq!(custom_events[0].location, "Room 700");
+    assert_eq!(custom_events[0].time_zone, "Europe/Berlin");
     let default_events = storage
         .fetch_accessible_events_in_collection(fixture.account_id, "default")
         .await?;

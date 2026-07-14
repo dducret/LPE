@@ -230,6 +230,16 @@ fn calendar_time_zone_key(time_zone: &str) -> &'static str {
     recognized_calendar_time_zone_key(time_zone).unwrap_or("UTC")
 }
 
+fn canonical_calendar_time_zone_key(time_zone: &str) -> Option<&'static str> {
+    // [MS-OXOCAL] 2.2.1.41-2.2.1.43 carry the Windows key on the wire;
+    // canonical PostgreSQL calendar state uses the corresponding IANA key.
+    match recognized_calendar_time_zone_key(time_zone) {
+        Some("W. Europe Standard Time") => Some("Europe/Berlin"),
+        Some("UTC") => Some("UTC"),
+        _ => None,
+    }
+}
+
 fn calendar_time_zone_struct(event: &AccessibleEvent) -> Vec<u8> {
     let tz = calendar_time_zone(event);
     let mut value = Vec::with_capacity(48);
@@ -585,7 +595,7 @@ fn calendar_time_zone_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<
         if let Some(MapiValue::Binary(value)) = properties.get(&property_tag) {
             if let Some(key_name) = calendar_time_zone_definition_key(value) {
                 return Some(
-                    recognized_calendar_time_zone_key(&key_name)
+                    canonical_calendar_time_zone_key(&key_name)
                         .unwrap_or(key_name.as_str())
                         .to_string(),
                 );
@@ -595,7 +605,7 @@ fn calendar_time_zone_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<
     optional_pending_text_property(properties, &[PID_LID_TIME_ZONE_DESCRIPTION_W_TAG])
         .filter(|value| !value.trim().is_empty())
         .map(|description| {
-            recognized_calendar_time_zone_key(&description)
+            canonical_calendar_time_zone_key(&description)
                 .unwrap_or(description.as_str())
                 .to_string()
         })
