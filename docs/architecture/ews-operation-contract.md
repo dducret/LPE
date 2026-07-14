@@ -1,13 +1,13 @@
-# EWS Parity Matrix - 2026-06-02
+# EWS Operation Contract
 
 ## Scope
 
-This matrix expands `docs/audits/ews-audit-2026-05-30.md` into one row for every operation listed in Microsoft's EWS operation catalog:
+This matrix records one row for every operation listed in Microsoft's EWS operation catalog:
 
 - <https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-operations-in-exchange>
 - <https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-xml-elements-in-exchange>
 
-Microsoft's operation catalog page was last updated on 2023-03-29 and was reviewed again for this matrix on 2026-06-02. The current `LPE` dispatcher surface was checked against `crates/lpe-exchange/src/service.rs` on the same date. This is a documentation parity matrix only. It does not add, remove, or change runtime behavior.
+Microsoft's operation catalog page was last updated on 2023-03-29. This is the current documentation contract for the `LPE` dispatcher surface. It does not add, remove, or change runtime behavior.
 
 `crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` owns a local snapshot of Microsoft's operation catalog from that page and checks this matrix against it. Every documented operation name must have exactly one gate entry: either a named SOAP behavior test for implemented/partial operations or an explicit unsupported SOAP assertion with a tracked reason for unsupported gaps.
 

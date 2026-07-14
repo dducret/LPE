@@ -81,7 +81,7 @@ impl Storage {
 
             if !present {
                 bail!(
-                    "required table public.{table} is missing; LPE 0.4 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                    "required table public.{table} is missing; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
         }

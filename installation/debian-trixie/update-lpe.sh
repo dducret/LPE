@@ -231,90 +231,16 @@ fi
 INSTALLED_SCHEMA_VERSION="$(
   psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
 )" || {
-  echo "Unable to read installed schema metadata. LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
+  echo "Unable to read installed schema metadata. LPE 0.5.0 updates require a database initialized with init-schema.sh from the 0.5.0 source tree." >&2
   exit 1
 }
 
 if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
   echo "Installed schema version ${INSTALLED_SCHEMA_VERSION} does not match required ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
+  echo "Upgrades from releases before LPE 0.5.0 are unsupported. Initialize a new empty database with init-schema.sh." >&2
   exit 1
 fi
-
-if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_profile_settings');" | grep -qx 'mapi_profile_settings'; then
-  echo "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
-  exit 1
-fi
-
-if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_navigation_shortcuts');" | grep -qx 'mapi_navigation_shortcuts'; then
-  echo "Table public.mapi_navigation_shortcuts is missing. LPE 0.4 requires an initialized database before compatibility updates can run." >&2
-  exit 1
-fi
-
-if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_custom_property_values');" | grep -qx 'mapi_custom_property_values'; then
-  echo "Table public.mapi_custom_property_values is missing. LPE 0.4 requires an initialized database before compatibility updates can run." >&2
-  exit 1
-fi
-
-echo "Applying LPE 0.4 schema compatibility updates..."
-psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f "${SRC_DIR}/installation/debian-trixie/update-lpe-0.4-compat.sql"
-
-mapi_shortcut_group_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")"
-mapi_shortcut_target_nullable="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")"
-mapi_shortcut_save_stamp_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'save_stamp' AND is_nullable = 'NO' AND column_default = '0';")"
-mapi_shortcut_save_stamp_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass AND conname = 'mapi_navigation_shortcuts_save_stamp_check' AND pg_get_constraintdef(oid) LIKE '%save_stamp >= 0%' AND pg_get_constraintdef(oid) LIKE '%4294967295%';")"
-if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" || "${mapi_shortcut_save_stamp_column_count}" != "1" || "${mapi_shortcut_save_stamp_constraint_count}" != "1" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_navigation_shortcuts shape." >&2
-  exit 1
-fi
-mapi_profile_ost_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_profile_settings'::regclass AND conname = 'mapi_profile_settings_ipm_subtree_ost_id_check' AND pg_get_constraintdef(oid) LIKE '%<= 2048%';")"
-if [[ "${mapi_profile_ost_constraint_count}" != "1" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_profile_settings OST identity shape." >&2
-  exit 1
-fi
-mapi_folder_profile_property_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_folder_profile_property_values');")"
-mapi_folder_profile_property_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_folder_profile_property_values_account_idx');")"
-if [[ "${mapi_folder_profile_property_table}" != "mapi_folder_profile_property_values" || "${mapi_folder_profile_property_idx}" != "mapi_folder_profile_property_values_account_idx" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_folder_profile_property_values shape." >&2
-  exit 1
-fi
-mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"
-mapi_associated_config_logical_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages_logical_idx');")"
-if [[ "${mapi_associated_config_table}" != "mapi_associated_config_messages" || "${mapi_associated_config_logical_idx}" != "mapi_associated_config_messages_logical_idx" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_associated_config_messages shape." >&2
-  exit 1
-fi
-search_folder_user_saved_name_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');")"
-if [[ "${search_folder_user_saved_name_idx}" != "search_folders_user_saved_name_idx" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce search_folders_user_saved_name_idx." >&2
-  exit 1
-fi
-recipient_suggestions_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions');")"
-recipient_suggestions_active_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_active_email_idx');")"
-recipient_suggestions_rank_idx="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_rank_idx');")"
-if [[ "${recipient_suggestions_table}" != "recipient_suggestions" || "${recipient_suggestions_active_idx}" != "recipient_suggestions_active_email_idx" || "${recipient_suggestions_rank_idx}" != "recipient_suggestions_rank_idx" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected recipient_suggestions shape." >&2
-  exit 1
-fi
-recoverable_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');")"
-recoverable_account_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name IN ('recoverable_items_retention_days', 'litigation_hold_enabled', 'litigation_hold_started_at');")"
-recoverable_mailbox_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'recoverable_items_retention_days';")"
-managed_retention_mailbox_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'retention_policy_tag_id';")"
-managed_retention_mailbox_fk_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mailboxes'::regclass AND conname = 'mailboxes_retention_policy_tag_fk';")"
-recoverable_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")"
-recoverable_shape_constraint_ok="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")"
-if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_column_count}" != "3" || "${recoverable_mailbox_column_count}" != "1" || "${managed_retention_mailbox_column_count}" != "1" || "${managed_retention_mailbox_fk_count}" != "1" || "${recoverable_change_constraint_count}" -lt "4" || "${recoverable_shape_constraint_ok}" -lt "1" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected recoverable-items shape." >&2
-  exit 1
-fi
-public_folder_table_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_replicas', 'public_folder_per_user_state');")"
-public_folder_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_replica%';")"
-public_folder_sync_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.account_sync_state'::regclass, 'public.canonical_change_journal'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folders%';")"
-if [[ "${public_folder_table_count}" != "6" || "${public_folder_change_constraint_count}" -lt "4" || "${public_folder_sync_constraint_count}" != "2" ]]; then
-  echo "LPE 0.4 schema compatibility update did not produce the expected public-folder shape." >&2
-  exit 1
-fi
-echo "Applied idempotent LPE 0.4 schema compatibility updates."
+echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"
 validate_host_port "${LPE_IMAP_BIND_ADDRESS}" \

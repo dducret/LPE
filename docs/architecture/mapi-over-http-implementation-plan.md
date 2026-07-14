@@ -847,7 +847,7 @@ canonical `from` identity.
 
 Each supported Outlook version must have separate evidence. A pass for Outlook
 2016 does not imply a pass for Outlook 2019, and vice versa.
-Use `docs/architecture/outlook-cached-mode-gate-evidence-template.md` to record
+Use `docs/architecture/outlook-cached-mode-release-evidence-template.md` to record
 deployment, autodiscover, local harness, Microsoft RCA, real Outlook profile,
 and log evidence. Completing the template does not by itself mark the gate
 passed or authorize publication.
@@ -874,13 +874,9 @@ Success criteria for each version:
    account and tenant used, public host, endpoint flags, autodiscover response,
    RCA result, local harness result, and relevant server/client logs.
 
-The 2026-05-31 Outlook 16.0.20026 cached-mode audit in
-`docs/audits/mapi-http-outlook-cached-mode-audit-2026-05-31.md` records partial
-real-client evidence for autodiscover, NSPI bootstrap, EMSMDB profile/sync ROPs,
-session cookies, and checkpoint storage. It does not include Microsoft RCA
-exported output, does not identify separate Outlook 2016 and Outlook 2019 runs,
-and does not prove close/reopen-twice or canonical send/`Sent` behavior. Treat it
-as implementation evidence only, not a publication-gate pass.
+Record new real-client evidence in the release evidence template. Keep raw
+traces and logs outside the normative documentation tree; Git history remains
+the source for retired investigation narratives.
 
 Calendar troubleshooting diagnostics log the Calendar default folder contract,
 projected canonical calendar counts, and hierarchy-sync `PidTagParentSourceKey`

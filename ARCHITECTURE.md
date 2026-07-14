@@ -17,7 +17,7 @@ Its stable architectural base is:
 - `IMAP` as a permanently supported mailbox-access communication protocol and compatibility layer
 - `ActiveSync` as the first mobile/native compatibility target for clients that support `Exchange ActiveSync`
 - `EWS` as the active Exchange compatibility implementation, without moving `SMTP` or canonical mailbox state out of `LPE`
-- `MAPI over HTTP` as the primary implementation track for classic Outlook for Windows Exchange-account support, with public edge routing present and autodiscover publication gated until the Outlook interoperability matrix passes; Outlook Anywhere / RPC over HTTP is a legacy compatibility shim for later `EXPR` publication, not the first implementation path
+- `MAPI over HTTP` as the primary classic Outlook for Windows Exchange-account path, with authenticated public edge routing and MAPI Autodiscover publication enabled for the 0.5.0 baseline; Outlook Anywhere / RPC over HTTP remains a separately gated legacy `EXPR` compatibility shim
 - full Outlook support as an explicit release goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through `MAPI over HTTP`
 - `LPE-CT` as the distinct DMZ sorting center for external exposure, inbound `SMTP`, outbound relay, quarantine, and perimeter enforcement
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
@@ -38,7 +38,7 @@ That means:
 - `EWS` is the Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
 - `MAPI over HTTP` must be completed first for Outlook 2016 and Outlook 2019 desktop: profile creation, EMSMDB mailbox synchronization, NSPI address book behavior, send and draft flows through canonical submission, reconnect behavior, cached-mode ICS stability, and authoritative `Sent` visibility
 - Outlook Anywhere / RPC over HTTP is a legacy compatibility shim after the MAPI over HTTP path; when administrators publish legacy `EXPR` autodiscover metadata, `/rpc/rpcproxy.dll` must implement authenticated RPC/HTTP mailbox transport, not only HTTP authentication
-- MAPI readiness evidence must distinguish project-owned local harness passes, Microsoft Remote Connectivity Analyzer passes, and real Outlook 2016 / 2019 cached-mode profile passes; public MAPI autodiscover waits for all three evidence classes
+- MAPI readiness evidence distinguishes project-owned local harness passes, Microsoft Remote Connectivity Analyzer passes, and real cached-mode Outlook profile runs; these remain release-quality evidence even though 0.5.0 no longer has a second runtime publication flag
 - Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; administrators can explicitly publish `EWS` plus legacy `EXCH` / `EXPR` autodiscover metadata only behind the documented gates, while the first supported Exchange-account publication path is completed `MAPI over HTTP`
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
 
@@ -91,7 +91,7 @@ The important non-negotiable rules are:
 - `docs/architecture/ews-mapi-mvp.md`
 - `docs/architecture/mapi-over-http-implementation-plan.md`
 - `docs/architecture/public-folders-mapi-mvp.md`
-- `docs/architecture/outlook-cached-mode-gate-evidence-template.md`
+- `docs/architecture/outlook-cached-mode-release-evidence-template.md`
 - `docs/architecture/mapi-full-object-support-execution.md`
 - `docs/architecture/nspi-support-matrix.md`
 - `docs/architecture/ews-interoperability-matrix.md`

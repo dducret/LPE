@@ -58,9 +58,6 @@ const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
-const UPDATE_LPE_COMPAT_SQL: &str =
-    include_str!("../../../installation/debian-trixie/update-lpe-0.4-compat.sql");
-const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -930,238 +927,31 @@ fn mapi_folder_profile_properties_are_bounded_profile_state() {
 }
 
 #[test]
-fn update_script_only_applies_documented_schema_compatibility_updates() {
-    for forbidden in [
-        "CREATE TABLE IF NOT EXISTS public.mapi_named_properties",
-        "CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values",
-        "CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages",
-        "CREATE TABLE IF NOT EXISTS public.calendar_event_attachments",
-        "ALTER TABLE public.mailbox_messages",
-        "ALTER TABLE public.mapi_object_identities ADD COLUMN",
-        "repair-notes-journal-reminders-schema.sh",
-        "repair-mapi-identity-keys.sh",
-    ] {
-        assert!(
-            !UPDATE_LPE_SCRIPT.contains(forbidden),
-            "update-lpe.sh must not apply SQL update fragment: {forbidden}"
-        );
-    }
-
-    assert_source_contains_all(
-        "update-lpe.sh compatibility SQL dispatcher",
-        UPDATE_LPE_SCRIPT,
-        &[
-            "update-lpe-0.4-compat.sql",
-            "psql \"${DATABASE_URL}\" -v ON_ERROR_STOP=1 -f",
-        ],
-    );
-
-    assert_sources_contain_all(
-        "update-lpe.sh recoverable-items compatibility patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "CREATE TABLE IF NOT EXISTS public.recoverable_items",
-            "ADD COLUMN IF NOT EXISTS recoverable_items_retention_days",
-            "ADD COLUMN IF NOT EXISTS litigation_hold_enabled",
-            "ADD CONSTRAINT mail_change_log_object_shape_check",
-            "ADD CONSTRAINT tombstones_object_shape_check",
-            "CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx",
-            "recoverable_shape_constraint_ok",
-            "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
-            "pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
-            "(summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh recoverable-items compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "to_regclass('public.recoverable_items')",
-            "recoverable_items_retention_days",
-            "litigation_hold_enabled",
-            "recoverable_change_constraint_count",
-            "recoverable_shape_constraint_ok",
-            "pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
-            "recoverable_item",
-        ],
-    );
-    assert_sources_contain_all(
-        "update-lpe.sh MAPI custom property object-kind compatibility patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "mapi_custom_property_values_object_kind_check",
-            "public_folder_item",
-            "ALTER TABLE public.mapi_custom_property_values",
-        ],
-    );
-    assert_sources_contain_all(
-        "update-lpe.sh MAPI associated configuration compatibility patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "ADD COLUMN IF NOT EXISTS save_stamp BIGINT NOT NULL DEFAULT 0",
-            "mapi_navigation_shortcuts_save_stamp_check",
-            "mapi_shortcut_save_stamp_constraint_count",
-            "CREATE TABLE IF NOT EXISTS public.mapi_folder_profile_property_values",
-            "mapi_folder_profile_property_values_account_idx",
-            "CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages",
-            "mapi_object_identities_object_kind_check",
-            "associated_config",
-            "mail_change_log_object_shape_check",
-            "CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx",
-            "DROP INDEX IF EXISTS public.mapi_associated_config_messages_logical_idx",
-            "ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject)",
-            "public.mapi_associated_config_messages",
-            "IPM.Microsoft.PendingChange.MigrateFlags",
-        ],
-    );
-    assert_sources_contain_all(
-        "update-lpe.sh MAPI source key uniqueness compatibility patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "mapi_object_identities_active_source_key_uidx",
-            "decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')",
-            "lpad(to_hex(mapi_global_counter), 12, '0')",
-            "WHERE deleted_at IS NULL",
-        ],
-    );
-    assert_source_contains_all(
-        "update-lpe.sh MAPI low dynamic named-property renumbering patch",
-        UPDATE_LPE_COMPAT_SQL,
-        &[
-            "mapi_named_property_low_dynamic_renumber",
-            "property_id >= 32769",
-            "property_id < 36864",
-            "property_id IN (33005, 33261, 33643, 33872, 36615)",
-            "UPDATE public.mapi_custom_property_values",
-            "UPDATE public.mapi_folder_profile_property_values",
-            "UPDATE public.mapi_associated_config_messages",
-            "UPDATE public.mapi_named_properties",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh MAPI associated configuration compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "mapi_shortcut_save_stamp_column_count",
-            "mapi_shortcut_save_stamp_constraint_count",
-            "to_regclass('public.mapi_folder_profile_property_values')",
-            "to_regclass('public.mapi_associated_config_messages')",
-            "mapi_associated_config_shape_constraint_ok",
-            "mail_change_log_object_shape_check",
-            "associated_config",
-            "mapi_low_dynamic_property_count",
-            "WITH mapped AS",
-            "property_tag::bigint >> 16",
-            "jsonb_object_keys(config.properties_json)",
-            "MAPI low dynamic named-property ids are migrated",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh MAPI source key uniqueness compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "to_regclass('public.mapi_object_identities_active_source_key_uidx')",
-            "MAPI active source-key uniqueness index is present",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh MAPI custom property object-kind compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "mapi_custom_public_folder_item_constraint_count",
-            "public_folder_item",
-            "MAPI custom property object-kind constraint includes public_folder_item",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh recipient suggestions compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "to_regclass('public.recipient_suggestions')",
-            "recipient_suggestions_active_email_idx",
-            "recipient_suggestions_rank_idx",
-        ],
-    );
-
-    assert_sources_contain_all(
-        "update-lpe.sh public-folder compatibility patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "CREATE TABLE IF NOT EXISTS public.public_folder_trees",
-            "CREATE TABLE IF NOT EXISTS public.public_folders",
-            "CREATE TABLE IF NOT EXISTS public.public_folder_items",
-            "CREATE TABLE IF NOT EXISTS public.public_folder_permissions",
-            "CREATE TABLE IF NOT EXISTS public.public_folder_replicas",
-            "CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state",
-            "public_folder_change_constraint_count",
-            "public_folder_sync_constraint_count",
-            "public_folder_replica",
-            "account_sync_state_category_check",
-            "canonical_change_journal_category_check",
-        ],
-    );
-    assert_sources_contain_all(
-        "update-lpe.sh EWS compatibility SQL model patch",
-        &[UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL],
-        &[
-            "CREATE TABLE IF NOT EXISTS public.account_client_configurations",
-            "CREATE TABLE IF NOT EXISTS public.delegate_preferences",
-            "CREATE TABLE IF NOT EXISTS public.retention_policy_tags",
-            "CREATE TABLE IF NOT EXISTS public.account_retention_policy_assignments",
-            "ADD COLUMN IF NOT EXISTS retention_policy_tag_id UUID",
-            "mailboxes_retention_policy_tag_fk",
-            "CREATE TABLE IF NOT EXISTS public.compliance_cases",
-            "CREATE TABLE IF NOT EXISTS public.compliance_holds",
-            "CREATE TABLE IF NOT EXISTS public.compliance_hold_mailboxes",
-            "CREATE TABLE IF NOT EXISTS public.discovery_searches",
-            "CREATE TABLE IF NOT EXISTS public.discovery_search_jobs",
-            "CREATE TABLE IF NOT EXISTS public.discovery_result_items",
-            "CREATE TABLE IF NOT EXISTS public.non_indexable_item_reports",
-            "CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_jobs",
-            "CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_entries",
-            "CREATE TABLE IF NOT EXISTS public.lpe_ct_transport_trace_events",
-            "CREATE TABLE IF NOT EXISTS public.mail_app_catalog",
-            "CREATE TABLE IF NOT EXISTS public.mail_app_tenant_policies",
-            "CREATE TABLE IF NOT EXISTS public.mail_app_installations",
-            "CREATE TABLE IF NOT EXISTS public.mail_app_consents",
-            "CREATE TABLE IF NOT EXISTS public.mail_app_token_events",
-            "CREATE TABLE IF NOT EXISTS public.unified_messaging_calls",
-            "CREATE TABLE IF NOT EXISTS public.recipient_suggestions",
-            "recipient_suggestions_active_email_idx",
-            "recipient_suggestions_rank_idx",
-            "recipient_suggestions_table",
-            "CREATE TABLE IF NOT EXISTS public.contact_groups",
-            "CREATE TABLE IF NOT EXISTS public.contact_group_members",
-        ],
-    );
-    assert_source_contains_all(
-        "check-lpe.sh public-folder compatibility check",
-        CHECK_LPE_SCRIPT,
-        &[
-            "public_folder_replicas",
-            "public_folder_replica",
-            "public_folder_sync_constraint_count",
-            "[[ \"$public_folder_table_count\" == \"6\" ]]",
-        ],
-    );
-}
-
-#[test]
-fn update_script_rejects_non_current_schema_without_mutating_it() {
+fn update_script_requires_the_current_schema_without_mutating_it() {
     assert_source_contains_all(
         "update-lpe.sh",
         UPDATE_LPE_SCRIPT,
         &[
             "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE",
-            "SELECT to_regclass('public.mapi_profile_settings');",
             "INSTALLED_SCHEMA_VERSION",
             "EXPECTED_SCHEMA_VERSION",
-            "requires an empty database initialized with init-schema.sh",
-            "Applying LPE 0.4 schema compatibility updates",
-            "mapi_profile_settings_ipm_subtree_ost_id_check",
-            "<= 2048",
+            "Upgrades from releases before LPE 0.5.0 are unsupported",
+            "no compatibility SQL is required",
         ],
     );
+
+    for forbidden in [
+        "psql \"${DATABASE_URL}\" -v ON_ERROR_STOP=1 -f",
+        "CREATE TABLE",
+        "ALTER TABLE",
+        "UPDATE public.",
+        "DELETE FROM public.",
+    ] {
+        assert!(
+            !UPDATE_LPE_SCRIPT.contains(forbidden),
+            "update-lpe.sh must not mutate the LPE 0.5.0 schema: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -1177,7 +967,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_tables() {
             "\"mapi_profile_settings\"",
             "SELECT to_regclass($1) IS NOT NULL",
             "required table public.{table} is missing",
-            "LPE 0.4 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+            "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
 }
@@ -1992,15 +1782,6 @@ fn recipient_suggestions_contact_delete_clears_only_contact_id() {
             "FOREIGN KEY (tenant_id, contact_id) REFERENCES contacts (tenant_id, id) ON DELETE SET NULL\n"
         ),
         "recipient_suggestions contact FK must not use composite-column SET NULL"
-    );
-    assert!(
-        [UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL]
-            .iter()
-            .any(|source| source.contains("ADD CONSTRAINT recipient_suggestions_contact_fk"))
-            && [UPDATE_LPE_SCRIPT, UPDATE_LPE_COMPAT_SQL]
-                .iter()
-                .any(|source| source.contains("ON DELETE SET NULL (contact_id)")),
-        "update-lpe.sh must replace existing recipient_suggestions contact FKs with the column-specific SET NULL action"
     );
 }
 

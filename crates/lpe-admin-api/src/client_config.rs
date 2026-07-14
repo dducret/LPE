@@ -294,7 +294,7 @@ impl PublishedEndpoints {
     }
 
     fn mapi_autodiscover_enabled(&self) -> bool {
-        self.mapi_enabled && self.outlook_interop_gate_passed
+        self.mapi_enabled
     }
 
     fn mapi_http_autodiscover_selected(&self) -> bool {

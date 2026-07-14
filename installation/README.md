@@ -1,11 +1,11 @@
 # Installation
 
-These installation instructions are aligned with the current repository schema `0.4.0-sql-v2`.
+These installation instructions are aligned with the current repository schema `0.5.0-sql-v1`.
 
-Fresh LPE `0.4` installations initialize an empty SQL database from the
-canonical schema. Existing `0.4` databases can be advanced by `update-lpe.sh`
-when a repository change includes an explicitly documented, idempotent SQL
-compatibility update. Use `LPE_RESET_SCHEMA=true` only for an intentional
+LPE `0.5.0` installations initialize an empty SQL database from the canonical
+schema. Databases from releases before 0.5.0 are not upgraded in place.
+`update-lpe.sh` accepts only the current schema version and performs no SQL
+compatibility mutation. Use `LPE_RESET_SCHEMA=true` only for an intentional
 destructive reset.
 The schema initializer creates the real platform tenant row
 `00000000-0000-0000-0000-000000000001` and the default storage pool/policy
@@ -342,14 +342,13 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` performs the schema-version check, applies documented idempotent SQL compatibility updates for initialized `0.4` databases, including the recoverable-items store and replay-shape constraints, public-folder replica topology table, MAPI navigation shortcut columns and save stamps, MAPI folder profile property values, MAPI associated configuration message rows, active MAPI source-key uniqueness, MAPI named-property id uniqueness repair, and user-saved Search Folder uniqueness index, rebuilds code/web assets, and refuses to continue when required baseline tables or schema metadata are missing
+- `update-lpe.sh` requires the exact current 0.5.0 schema version, performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or incomplete databases
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
-- `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` applies the canonical `0.4.0-sql-v2` schema, including the platform tenant UUID row and default storage pool/policy metadata, only when the SQL database is empty; existing initialized databases should use `update-lpe.sh` for documented compatibility updates; set `LPE_RESET_SCHEMA=true` only for an intentional destructive reset
+- `init-schema.sh` applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, only when the SQL database is empty; set `LPE_RESET_SCHEMA=true` only for an intentional destructive reset
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -652,7 +651,7 @@ and `JMAP` HTTPS/WSS paths. `/mail/`, `/admin/`, and `/assets/` proxy to
 and `/api/jmap/ws`.
 
 `LPE-CT` must also publish the public client configuration, `ActiveSync`, EWS,
-guarded MAPI paths, and the bounded RCA RPC proxy auth shim:
+authenticated MAPI paths, and the bounded RCA RPC proxy auth shim:
 `/Microsoft-Server-ActiveSync`, `/mapi/`, `/rpc/rpcproxy.dll`,
 `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/autodiscover`,
 `/autodiscover/`, `/Autodiscover`, `/Autodiscover/`, `/autoconfig/`,
@@ -660,9 +659,8 @@ guarded MAPI paths, and the bounded RCA RPC proxy auth shim:
 publication returns an Outlook autodiscover XML response containing `IMAP`,
 an Autodiscover v2 JSON response for single-protocol endpoint probes, an
 opt-in `WEB` discovery block with `OWAUrl` pointing at the public `/mail/`
-webmail URL when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
-both `LPE_AUTOCONFIG_MAPI_ENABLED` and
-`LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are enabled, a legacy top-level
+webmail URL when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, a `mapiHttp` block
+for capable Outlook clients when `LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, a legacy top-level
 `EXCH` provider only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also
 enabled with an explicitly published EWS or fully gated MAPI surface, and a
 legacy top-level `EXPR` provider only when
@@ -697,10 +695,10 @@ defaults to the RPC/HTTP connection timeout.
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
-- Outlook support remains a release goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
+- Outlook mobile uses `ActiveSync`; Outlook for Windows desktop uses `MAPI over HTTP` as the primary Exchange-account path. `IMAP` remains an optional compatibility profile, and deployments may independently enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility.
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or fully gated MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
+- `MAPI over HTTP` routes are the classic Outlook desktop Exchange-account path; new 0.5.0 installations set `LPE_AUTOCONFIG_MAPI_ENABLED=true`, and capable Outlook clients receive the authenticated `/mapi/emsmdb` and `/mapi/nspi` endpoints. SOAP Exchange `GetUserSettings`, legacy `EXCH`, and legacy `EXPR` remain separately controlled; `EXPR` still requires the RPC proxy and legacy interoperability gate
 - MAPI over HTTP session context, request-id replay protection, ROP handles, and FastTransfer / ICS handles are in-process state on the core `LPE` node. Multi-node deployments must keep `/mapi/emsmdb`, `/mapi/nspi`, and `/rpc/rpcproxy.dll` traffic sticky to the same active core node for the life of the MAPI session, or expect Outlook to reconnect through fresh `Connect` / `Bind` / `Logon` probes after a restart or failover.
 - Outlook Anywhere / RPC over HTTP is required when legacy `EXPR` is published; `/rpc/rpcproxy.dll` must be routed by `LPE-CT` to the core exchange adapter and must not be replaced by a static web-server response.
 - The public `/rpc/rpcproxy.dll` route must use streaming proxy settings equivalent to `/mapi/`: long read/send timeouts, `proxy_buffering off`, `proxy_request_buffering off`, and `client_max_body_size 0`. RCA `RPC_IN_DATA` opens a long upload channel with a very large advertised request body; without the explicit body-size override, nginx can reject the mailbox-store channel with `413` before the core service can drain it.
@@ -785,9 +783,9 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` checks the installed schema version, applies documented
-idempotent SQL compatibility updates for initialized `0.4` databases, then
-rebuilds and redeploys code and web assets. For a new `0.4` deployment, point
+`update-lpe.sh` checks that the installed schema is exactly the current 0.5.0
+baseline, performs no SQL mutation, then rebuilds and redeploys code and web
+assets. Pre-0.5 databases are rejected. For a new 0.5.0 deployment, point
 `DATABASE_URL` at an empty SQL database and run `init-schema.sh`; for a
 disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before
 running `init-schema.sh`.

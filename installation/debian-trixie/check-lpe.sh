@@ -94,37 +94,37 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.searcha
 pass "Found view public.searchable_mail_documents"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_named_properties');" | grep -qx 'mapi_named_properties' \
-  || fail "Table public.mapi_named_properties is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+  || fail "Table public.mapi_named_properties is missing. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_named_properties"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_custom_property_values');" | grep -qx 'mapi_custom_property_values' \
-  || fail "Table public.mapi_custom_property_values is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+  || fail "Table public.mapi_custom_property_values is missing. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_custom_property_values"
 
 mapi_custom_public_folder_item_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_custom_property_values'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_item%';")" \
   || fail "Unable to inspect MAPI custom property object-kind constraint"
 [[ "$mapi_custom_public_folder_item_constraint_count" -ge "1" ]] \
-  || fail "MAPI custom property object-kind constraint does not allow public_folder_item. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI custom property object-kind constraint does not allow public_folder_item. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI custom property object-kind constraint includes public_folder_item"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_profile_settings');" | grep -qx 'mapi_profile_settings' \
-  || fail "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+  || fail "Table public.mapi_profile_settings is missing. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_profile_settings"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_folder_profile_property_values');" | grep -qx 'mapi_folder_profile_property_values' \
-  || fail "Table public.mapi_folder_profile_property_values is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Table public.mapi_folder_profile_property_values is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_folder_profile_property_values"
 
 mapi_shortcut_group_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" \
   || fail "Unable to inspect MAPI navigation shortcut columns"
 [[ "$mapi_shortcut_group_column_count" == "2" ]] \
-  || fail "MAPI navigation shortcut group/header columns are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI navigation shortcut group/header columns are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI navigation shortcut group/header columns are present"
 
 mapi_shortcut_target_nullable="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")" \
   || fail "Unable to inspect MAPI navigation shortcut target column"
 [[ "$mapi_shortcut_target_nullable" == "YES" ]] \
-  || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI navigation shortcut target folder column supports group headers"
 
 mapi_shortcut_save_stamp_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'save_stamp' AND is_nullable = 'NO' AND column_default = '0';")" \
@@ -132,97 +132,97 @@ mapi_shortcut_save_stamp_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1
 mapi_shortcut_save_stamp_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass AND conname = 'mapi_navigation_shortcuts_save_stamp_check' AND pg_get_constraintdef(oid) LIKE '%save_stamp >= 0%' AND pg_get_constraintdef(oid) LIKE '%4294967295%';")" \
   || fail "Unable to inspect MAPI navigation shortcut save_stamp constraint"
 [[ "$mapi_shortcut_save_stamp_column_count" == "1" && "$mapi_shortcut_save_stamp_constraint_count" == "1" ]] \
-  || fail "MAPI navigation shortcut save_stamp column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI navigation shortcut save_stamp column is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI navigation shortcut save_stamp column is present"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');" | grep -qx 'mapi_associated_config_messages' \
-  || fail "Table public.mapi_associated_config_messages is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Table public.mapi_associated_config_messages is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_associated_config_messages"
 
 mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%associated_config%';")" \
   || fail "Unable to inspect MAPI associated configuration replay shape constraint"
 [[ "$mapi_associated_config_shape_constraint_ok" -ge "1" ]] \
-  || fail "MAPI associated configuration replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI associated configuration replay shape constraint is stale. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI associated configuration replay shape constraint is current"
 
 mapi_low_dynamic_property_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "WITH mapped AS (SELECT 1 FROM public.mapi_named_properties WHERE property_id >= 32768 AND property_id < 36864 AND NOT ((property_id BETWEEN 32768 AND 33023) OR (property_id BETWEEN 33280 AND 33535) OR (property_id BETWEEN 34048 AND 34303) OR (property_id BETWEEN 34560 AND 34815) OR (property_id BETWEEN 35072 AND 35078) OR (property_id BETWEEN 35328 AND 35839) OR property_id IN (33005, 33261, 33643, 33872, 36615))), custom_values AS (SELECT 1 FROM public.mapi_custom_property_values WHERE ((property_tag::bigint >> 16)::integer) >= 32768 AND ((property_tag::bigint >> 16)::integer) < 36864 AND NOT ((((property_tag::bigint >> 16)::integer) BETWEEN 32768 AND 33023) OR (((property_tag::bigint >> 16)::integer) BETWEEN 33280 AND 33535) OR (((property_tag::bigint >> 16)::integer) BETWEEN 34048 AND 34303) OR (((property_tag::bigint >> 16)::integer) BETWEEN 34560 AND 34815) OR (((property_tag::bigint >> 16)::integer) BETWEEN 35072 AND 35078) OR (((property_tag::bigint >> 16)::integer) BETWEEN 35328 AND 35839) OR ((property_tag::bigint >> 16)::integer) IN (33005, 33261, 33643, 33872, 36615))), folder_values AS (SELECT 1 FROM public.mapi_folder_profile_property_values WHERE ((property_tag::bigint >> 16)::integer) >= 32768 AND ((property_tag::bigint >> 16)::integer) < 36864 AND NOT ((((property_tag::bigint >> 16)::integer) BETWEEN 32768 AND 33023) OR (((property_tag::bigint >> 16)::integer) BETWEEN 33280 AND 33535) OR (((property_tag::bigint >> 16)::integer) BETWEEN 34048 AND 34303) OR (((property_tag::bigint >> 16)::integer) BETWEEN 34560 AND 34815) OR (((property_tag::bigint >> 16)::integer) BETWEEN 35072 AND 35078) OR (((property_tag::bigint >> 16)::integer) BETWEEN 35328 AND 35839) OR ((property_tag::bigint >> 16)::integer) IN (33005, 33261, 33643, 33872, 36615))), config_keys AS (SELECT 1 FROM public.mapi_associated_config_messages config, jsonb_object_keys(config.properties_json) key WHERE key ~ '^0x[0-9a-fA-F]{8}$' AND (('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) >= 32768 AND (('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) < 36864 AND NOT (((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 32768 AND 33023) OR ((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 33280 AND 33535) OR ((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 34048 AND 34303) OR ((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 34560 AND 34815) OR ((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 35072 AND 35078) OR ((('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) BETWEEN 35328 AND 35839) OR (('x' || substring(key FROM 3 FOR 4))::bit(16)::integer) IN (33005, 33261, 33643, 33872, 36615))) SELECT (SELECT COUNT(*) FROM mapped) + (SELECT COUNT(*) FROM custom_values) + (SELECT COUNT(*) FROM folder_values) + (SELECT COUNT(*) FROM config_keys);")" \
   || fail "Unable to inspect MAPI low dynamic named-property ids"
 [[ "$mapi_low_dynamic_property_count" == "0" ]] \
-  || fail "MAPI low dynamic named-property ids remain. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
-pass "MAPI low dynamic named-property ids are migrated"
+  || fail "MAPI low dynamic named-property ids remain. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "MAPI named-property ids use the reserved ranges"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.search_folders_user_saved_name_idx');" | grep -qx 'search_folders_user_saved_name_idx' \
-  || fail "User-saved Search Folder uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "User-saved Search Folder uniqueness index is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "User-saved Search Folder uniqueness index is present"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions');" | grep -qx 'recipient_suggestions' \
-  || fail "Table public.recipient_suggestions is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Table public.recipient_suggestions is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.recipient_suggestions"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_active_email_idx');" | grep -qx 'recipient_suggestions_active_email_idx' \
-  || fail "Recipient suggestions active-email uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recipient suggestions active-email uniqueness index is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recipient suggestions active-email uniqueness index is present"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recipient_suggestions_rank_idx');" | grep -qx 'recipient_suggestions_rank_idx' \
-  || fail "Recipient suggestions ranking index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recipient suggestions ranking index is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recipient suggestions ranking index is present"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
-  || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Table public.recoverable_items is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.recoverable_items"
 
 recoverable_account_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name IN ('recoverable_items_retention_days', 'litigation_hold_enabled', 'litigation_hold_started_at');")" \
   || fail "Unable to inspect recoverable-item account columns"
 [[ "$recoverable_account_column_count" == "3" ]] \
-  || fail "Recoverable-item account retention/hold columns are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recoverable-item account retention/hold columns are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recoverable-item account retention/hold columns are present"
 
 recoverable_mailbox_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'recoverable_items_retention_days';")" \
   || fail "Unable to inspect recoverable-item mailbox columns"
 [[ "$recoverable_mailbox_column_count" == "1" ]] \
-  || fail "Recoverable-item mailbox retention override column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recoverable-item mailbox retention override column is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recoverable-item mailbox retention override column is present"
 
 managed_retention_mailbox_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'retention_policy_tag_id';")" \
   || fail "Unable to inspect managed retention folder mailbox columns"
 [[ "$managed_retention_mailbox_column_count" == "1" ]] \
-  || fail "Managed retention folder mailbox tag column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Managed retention folder mailbox tag column is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Managed retention folder mailbox tag column is present"
 
 managed_retention_mailbox_fk_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mailboxes'::regclass AND conname = 'mailboxes_retention_policy_tag_fk';")" \
   || fail "Unable to inspect managed retention folder mailbox constraint"
 [[ "$managed_retention_mailbox_fk_count" == "1" ]] \
-  || fail "Managed retention folder mailbox tag constraint is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Managed retention folder mailbox tag constraint is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Managed retention folder mailbox tag constraint is present"
 
 recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")" \
   || fail "Unable to inspect recoverable-item change-log constraints"
 [[ "$recoverable_change_constraint_count" -ge "4" ]] \
-  || fail "Recoverable-item change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recoverable-item change-log constraints are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recoverable-item change-log constraints are present"
 
 recoverable_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")" \
   || fail "Unable to inspect recoverable-item replay shape constraint"
 [[ "$recoverable_shape_constraint_ok" -ge "1" ]] \
-  || fail "Recoverable-item replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Recoverable-item replay shape constraint is stale. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Recoverable-item replay shape constraint is current"
 
 public_folder_table_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_replicas', 'public_folder_per_user_state');")" \
   || fail "Unable to inspect public-folder tables"
 [[ "$public_folder_table_count" == "6" ]] \
-  || fail "Public-folder canonical tables are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Public-folder canonical tables are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Public-folder canonical tables are present"
 
 public_folder_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_replica%';")" \
   || fail "Unable to inspect public-folder change-log constraints"
 [[ "$public_folder_change_constraint_count" -ge "4" ]] \
-  || fail "Public-folder change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Public-folder change-log constraints are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Public-folder change-log constraints are present"
 
 public_folder_sync_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.account_sync_state'::regclass, 'public.canonical_change_journal'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folders%';")" \
   || fail "Unable to inspect public-folder sync constraints"
 [[ "$public_folder_sync_constraint_count" == "2" ]] \
-  || fail "Public-folder sync constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "Public-folder sync constraints are missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Public-folder sync constraints are present"
 
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
@@ -237,11 +237,11 @@ pass "Schema version is $expected_schema_version"
 mapi_identity_constraint_count="$(mapi_identity_key_constraint_count "$DATABASE_URL")" \
   || fail "Unable to inspect MAPI identity key constraints"
 [[ "$mapi_identity_constraint_count" == "3" ]] \
-  || fail "MAPI identity key constraints do not match the current 22-byte schema. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+  || fail "MAPI identity key constraints do not match the current 22-byte schema. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI identity key constraints match the current 22-byte schema"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_object_identities_active_source_key_uidx');" | grep -qx 'mapi_object_identities_active_source_key_uidx' \
-  || fail "MAPI active source-key uniqueness index is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+  || fail "MAPI active source-key uniqueness index is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI active source-key uniqueness index is present"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
@@ -284,6 +284,18 @@ autodiscover_body="$(curl --silent --show-error --fail \
 [[ "$autodiscover_body" == *"<Type>IMAP</Type>"* ]] \
   || fail "Autodiscover endpoint does not publish IMAP"
 pass "Outlook autodiscover endpoint is published by nginx"
+
+if [[ "${LPE_AUTOCONFIG_MAPI_ENABLED:-false}" == "true" ]]; then
+  mapi_autodiscover_body="$(curl --silent --show-error --fail \
+    --header 'Content-Type: application/xml' \
+    --header 'X-MapiHttpCapability: 1' \
+    --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
+    "http://127.0.0.1/autodiscover/autodiscover.xml")" \
+    || fail "MAPI-capable Autodiscover request failed"
+  [[ "$mapi_autodiscover_body" == *'<Protocol Type="mapiHttp" Version="1">'* ]] \
+    || fail "Autodiscover does not publish MAPI over HTTP"
+  pass "Autodiscover publishes MAPI over HTTP"
+fi
 
 admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \
   || fail "HTTP request failed: http://127.0.0.1/"

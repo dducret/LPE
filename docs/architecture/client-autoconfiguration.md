@@ -2,7 +2,7 @@
 
 ## Current State/Functionality Overview
 
-`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. Exchange-style discovery blocks remain gated so Outlook desktop is not forced away from the default `IMAP` path.
+`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.0 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated.
 
 ## Implementation/Usage
 
@@ -17,7 +17,7 @@
   ActiveSync/MobileSync probes, but it must not imply support for older
   ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` only when the local MAPI tests and project-owned scripted readiness harness pass, Microsoft Remote Connectivity Analyzer Outlook Connectivity passes, Outlook 2016 / 2019 cached-mode profile labs pass, and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe must be a positive integer supported by `LPE`; it never publishes MAPI by itself and suppresses legacy `EXCH` / `EXPR` metadata only when the gated `mapiHttp` response is actually being published.
+- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.0 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
@@ -69,8 +69,8 @@
 | `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` | `SSL` |
 | `LPE_AUTOCONFIG_EWS_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_EWS_URL` | `{public_scheme}://{public_host}/EWS/Exchange.asmx` |
-| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on` |
-| `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | true values: `true`, `1`, `yes`, `on`; keep false until the local harness, Microsoft RCA, and real Outlook evidence checklist below passes |
+| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on`; new 0.5.0 installations set `true` |
+| `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | legacy `EXPR`/RPC over HTTP release gate; it does not control MAPI over HTTP publication |
 | `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` | true values: `true`, `1`, `yes`, `on` |
@@ -85,7 +85,7 @@
 | --- | --- |
 | `Protocol=AutoDiscoverV1` | canonical POX URL |
 | `Protocol=EWS` | configured EWS URL only when `LPE_AUTOCONFIG_EWS_ENABLED` is true |
-| `Protocol=MapiHttp` | configured EMSMDB URL only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true |
+| `Protocol=MapiHttp` | configured EMSMDB URL when `LPE_AUTOCONFIG_MAPI_ENABLED` is true |
 | `Protocol=ActiveSync` / `MobileSync` | ActiveSync endpoint for mobile-client probes |
 
 Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap` for JMAP service discovery.
@@ -96,9 +96,9 @@ Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap
 | `python tools/rca_outlook_connectivity_check.py --check-mapi-empty-deleted-items --allow-mutating-fixtures --dangerously-empty-deleted-items` | Project-owned destructive fixture check that creates a message in `Deleted Items`, empties `Deleted Items` through MAPI `RopEmptyFolder`, and verifies disappearance through EWS and JMAP; IMAP absence is covered by local storage/runtime tests until this harness has an IMAP connection helper |
 | `python tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures` | EWS autodiscover, authentication, canonical send-to-`Sent`, contact/calendar create-read-delete |
 
-## Outlook Publication Evidence Checklist
+## Outlook Release Evidence Checklist
 
-Keep `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED=false` until all items are true for the exact public host being advertised:
+Record these checks for the exact public host used for a 0.5.x release. The checklist no longer acts as a second MAPI runtime switch; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy `EXPR`/RPC over HTTP:
 
 - Microsoft MAPI/HTTP and Autodiscover references have been checked for the release, including `MS-OXCMAPIHTTP` transport, `MS-OXDSCLI` `X-MapiHttpCapability` handling, and the MapiHttp response shape.
 - `cargo test -p lpe-admin-api` and `cargo test -p lpe-exchange` pass for the exact revision being deployed.

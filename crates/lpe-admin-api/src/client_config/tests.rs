@@ -419,21 +419,15 @@ async fn autodiscover_json_publishes_ews_only_when_enabled() {
 }
 
 #[tokio::test]
-async fn autodiscover_json_keeps_mapi_publication_gated() {
+async fn autodiscover_json_publishes_mapi_when_enabled() {
     assert!(render_autodiscover_json(&sample_config(), Some("MapiHttp")).is_none());
 
     let config = PublishedEndpoints {
         mapi_enabled: true,
         ..sample_config()
     };
-    assert!(render_autodiscover_json(&config, Some("MapiHttp")).is_none());
-
-    let config = PublishedEndpoints {
-        outlook_interop_gate_passed: true,
-        ..config
-    };
     let response = render_autodiscover_json(&config, Some("MapiHttp"))
-        .expect("MAPI JSON discovery should be published when final Outlook gate passed");
+        .expect("MAPI JSON discovery should be published when MAPI is enabled");
     let body = body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -842,7 +836,7 @@ fn invalid_mapi_http_capability_header_is_ignored() {
 }
 
 #[test]
-fn mapi_http_capability_header_and_enable_flag_are_not_publication_gate() {
+fn mapi_http_capability_header_and_enable_flag_publish_mapi() {
     let _guard = ENV_LOCK.lock().unwrap();
     std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
     std::env::remove_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED");
@@ -864,7 +858,7 @@ fn mapi_http_capability_header_and_enable_flag_are_not_publication_gate() {
     assert!(!config.legacy_exch_autodiscover_enabled);
     assert!(!config.legacy_expr_autodiscover_enabled);
     assert!(!config.rpc_proxy_enabled);
-    assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+    assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
 
@@ -891,7 +885,7 @@ fn legacy_exchange_autodiscover_publication_has_separate_provider_opt_ins() {
     assert!(!config.outlook_interop_gate_passed);
     assert!(config.legacy_exch_autodiscover_enabled);
     assert!(!config.legacy_expr_autodiscover_enabled);
-    assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+    assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
     assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
     assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 

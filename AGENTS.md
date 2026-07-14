@@ -196,7 +196,8 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - the initial Linux deployment target is `Debian Trixie`
 - installation scripts must first target deployment from the Git repository
 - Windows Server support is deferred and must not be assumed in Linux scripts
-- new `LPE` `0.4` deployments start from an empty SQL database, but initialized
-  `0.4` databases may receive documented, idempotent SQL compatibility updates
-  through update scripts when the release policy and affected architecture or
-  installation documentation are updated in the same work
+- new `LPE` `0.5.0` deployments start from an empty SQL database
+- upgrades from pre-0.5 releases are unsupported; `update-lpe.sh` must reject
+  their schema versions without mutation
+- any future in-place 0.5.x schema update requires an explicit release-policy
+  decision and matching architecture and installation documentation

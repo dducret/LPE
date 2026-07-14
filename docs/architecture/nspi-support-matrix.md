@@ -69,5 +69,6 @@ Required local validation:
 cargo test -p lpe-exchange nspi
 ```
 
-The release/publication gate remains the MAPI over HTTP Outlook readiness path
-documented in the MAPI implementation and Outlook cached-mode evidence docs.
+NSPI remains part of the MAPI over HTTP 0.5.x release-quality path documented
+in the MAPI implementation and Outlook cached-mode evidence docs. A regression
+in bind, resolve, or URL discovery is a published Outlook compatibility defect.

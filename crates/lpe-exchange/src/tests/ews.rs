@@ -9254,7 +9254,7 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
     let parity_matrix = parity_matrix_ews_operation_names();
     assert_eq!(
         documented, parity_matrix,
-        "docs/audits/ews-parity-matrix-2026-05-30.md must list exactly the Microsoft EWS operation catalog snapshot"
+        "docs/architecture/ews-operation-contract.md must list exactly the Microsoft EWS operation catalog snapshot"
     );
 
     let mut covered = std::collections::BTreeSet::new();
@@ -9392,7 +9392,7 @@ fn unsupported_reason_map() -> std::collections::BTreeMap<&'static str, &'static
 }
 
 fn parity_matrix_ews_operation_names() -> std::collections::BTreeSet<&'static str> {
-    include_str!("../../../../docs/audits/ews-parity-matrix-2026-05-30.md")
+    include_str!("../../../../docs/architecture/ews-operation-contract.md")
         .lines()
         .filter_map(|line| {
             let rest = line.strip_prefix("| `")?;

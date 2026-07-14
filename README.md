@@ -2,11 +2,11 @@
 
 `LPE` is a modern mail and collaboration platform written primarily in Rust.
 
-The repository is aligned for release `0.4.0`.
+The repository is aligned for release `0.5.0`.
 
-Release `0.4.0` requires a fresh empty SQL database initialized from the canonical schema.
+Release `0.5.0` requires a fresh empty SQL database initialized from the canonical schema. Upgrades from pre-0.5 releases are not supported.
 
-See `docs/releases/0.4.0.md` for the short release note.
+See `docs/releases/0.5.0.md` for the short release note.
 
 ## Initial Principles
 
@@ -30,7 +30,7 @@ The near-term order is:
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
 - `EWS`: Exchange-style folder, mail, contacts, calendar, and task synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
-- `MAPI over HTTP`: complete the classic Outlook for Windows Exchange-account path over authenticated `/mapi/emsmdb` and `/mapi/nspi`; supported publication remains gated until profile creation, mailbox sync, NSPI, send, reconnect, and canonical `Sent` behavior pass the Outlook interoperability matrix
+- `MAPI over HTTP`: maintain the published classic Outlook for Windows Exchange-account path over authenticated `/mapi/emsmdb` and `/mapi/nspi`, with profile creation, mailbox sync, NSPI, send, reconnect, and canonical `Sent` behavior protected by regression tests and real-client runs
 - `ActiveSync` as the flagship compatibility target for Outlook mobile and other native mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 
@@ -54,7 +54,7 @@ The current repository already contains:
 - an explicit internal `LPE` / `LPE-CT` HTTP integration contract
 - MVP protocol adapters for `JMAP Mail`, `JMAP Contacts`, `JMAP Calendars`, `IMAP`, `ActiveSync`, `EWS`, `Sieve` / `ManageSieve`, `CardDAV`, and `CalDAV`
 - canonical personal tasks exposed through the account workspace model
-- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, opt-in `EWS`, and guarded opt-in `MAPI over HTTP` interoperability testing
+- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, opt-in `EWS`, and enabled-by-default `MAPI over HTTP` on new 0.5.0 installations
 - a web client backed by persistent account authentication and mailbox/workspace APIs
 - first observability foundations with metrics and structured tracing
 

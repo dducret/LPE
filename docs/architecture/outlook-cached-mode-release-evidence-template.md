@@ -1,19 +1,19 @@
-# Outlook Cached-Mode Gate Evidence Template
+# Outlook Cached-Mode Release Evidence Template
 
 ## Current State/Functionality Overview
 
-This template records evidence for the guarded Outlook 2016 and Outlook 2019
-cached-mode `MAPI over HTTP` gate. It is an evidence capture artifact only. It
-does not mark the gate passed, enable MAPI autodiscover, or set
-`LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`.
+This template records Outlook 2016 and Outlook 2019 cached-mode `MAPI over HTTP`
+release evidence. It is an evidence capture artifact only and does not change
+runtime configuration. In 0.5.x, `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`
+is reserved for legacy `EXPR`/RPC over HTTP and does not control MAPI over HTTP.
 
-Use one completed copy per deployment class and test window. Do not merge
+Create one completed copy per deployment class and test window. Do not merge
 Outlook 2016 and Outlook 2019 evidence; each client version needs its own real
 profile result.
 
 ## Implementation/Usage
 
-Complete the fields below before any publication decision. Redact passwords,
+Complete the fields below for each release acceptance pass. Redact passwords,
 tokens, session cookies, private message bodies, and unrelated mailbox content.
 Keep enough trace identifiers, timestamps, and sanitized payload excerpts to
 reproduce the result.
@@ -31,10 +31,7 @@ reproduce the result.
 | Account | `<mailbox address>` |
 | Auth method | `<Basic, bearer, other>` |
 | TLS certificate | `<issuer, subject/SAN, expiry, validation status>` |
-| Endpoint flags | `LPE_AUTOCONFIG_EWS_ENABLED=<true/false>; LPE_AUTOCONFIG_MAPI_ENABLED=<true/false>; LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED=<false>` |
-
-`LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` must remain `false` while this
-template is being collected.
+| Endpoint flags | `LPE_AUTOCONFIG_EWS_ENABLED=<true/false>; LPE_AUTOCONFIG_MAPI_ENABLED=<true/false>; LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=<true/false>` |
 
 ### Client Matrix
 
@@ -43,7 +40,7 @@ template is being collected.
 | Outlook 2016 | `<version/build/channel>` | `<Windows version/build>` | `<clean Exchange profile>` | `<enabled>` | `<pass/fail/not run>` | `<logs/screenshots/trace ids>` |
 | Outlook 2019 | `<version/build/channel>` | `<Windows version/build>` | `<clean Exchange profile>` | `<enabled>` | `<pass/fail/not run>` | `<logs/screenshots/trace ids>` |
 
-### Gate Results
+### Release Evidence Results
 
 | Gate | Required evidence | Result | Evidence reference |
 | --- | --- | --- | --- |
@@ -52,8 +49,8 @@ template is being collected.
 | Outlook 2016 real profile | Clean Outlook 2016 Exchange profile creates, syncs cached mode, reopens twice, resolves NSPI, submits via canonical LPE submission, and shows canonical `Sent` | `<pass/fail/not run>` | `<client logs, screenshots, server trace ids>` |
 | Outlook 2019 real profile | Clean Outlook 2019 Exchange profile creates, syncs cached mode, reopens twice, resolves NSPI, submits via canonical LPE submission, and shows canonical `Sent` | `<pass/fail/not run>` | `<client logs, screenshots, server trace ids>` |
 
-All four rows must be independently `pass` before a publication decision can
-consider setting `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED=true`.
+Record every row independently. Missing evidence is a release-quality risk and
+must not be silently reported as a pass. It does not toggle MAPI publication.
 
 ### Autodiscover Response
 
@@ -132,5 +129,6 @@ Complete this checklist separately for Outlook 2016 and Outlook 2019.
 | Microsoft RCA pass | Does not imply Outlook 2016 or Outlook 2019 cached-mode profile pass. |
 | Outlook 2016 pass | Does not imply Outlook 2019 pass. |
 | Outlook 2019 pass | Does not imply Outlook 2016 pass. |
-| Publication | Requires local harness, Microsoft RCA, Outlook 2016, and Outlook 2019 evidence to pass, plus explicit endpoint flags. |
-| This template | Records evidence only; it must not enable MAPI autodiscover or set `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`. |
+| MAPI publication | Controlled by `LPE_AUTOCONFIG_MAPI_ENABLED` and client capability negotiation. |
+| This template | Records release evidence only; it does not change endpoint flags. |
+| Legacy `EXPR` | Still requires its independent RPC proxy and interoperability gates. |

@@ -40,7 +40,7 @@ existing_public_objects="$(
 )"
 
 if [[ "${existing_public_objects}" != "0" && "${LPE_RESET_SCHEMA:-false}" != "true" ]]; then
-  echo "The target database is not empty. LPE 0.4 requires an empty SQL database." >&2
+  echo "The target database is not empty. LPE 0.5.0 requires an empty SQL database." >&2
   echo "Create a new empty database, or set LPE_RESET_SCHEMA=true only for an intentional destructive reset." >&2
   exit 1
 fi
