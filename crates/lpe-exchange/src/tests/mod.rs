@@ -5153,7 +5153,15 @@ impl ExchangeStore for FakeStore {
             phone: input.phone,
             team: input.team,
             notes: input.notes,
-            ..Default::default()
+            structured_name: input.structured_name,
+            emails_json: input.emails_json.unwrap_or_default(),
+            phones_json: input.phones_json.unwrap_or_default(),
+            addresses_json: input.addresses_json.unwrap_or_default(),
+            urls_json: input.urls_json.unwrap_or_default(),
+            organization_name: input.organization_name,
+            job_title: input.job_title,
+            raw_vcard: input.raw_vcard,
+            source: input.source,
         };
         self.contact_versions.lock().unwrap().insert(contact.id, 1);
         self.contacts.lock().unwrap().push(contact.clone());
@@ -5177,6 +5185,27 @@ impl ExchangeStore for FakeStore {
         contact.phone = input.phone;
         contact.team = input.team;
         contact.notes = input.notes;
+        contact.structured_name = input.structured_name;
+        if let Some(value) = input.emails_json {
+            contact.emails_json = value;
+        }
+        if let Some(value) = input.phones_json {
+            contact.phones_json = value;
+        }
+        if let Some(value) = input.addresses_json {
+            contact.addresses_json = value;
+        }
+        if let Some(value) = input.urls_json {
+            contact.urls_json = value;
+        }
+        contact.organization_name = input.organization_name;
+        contact.job_title = input.job_title;
+        if input.raw_vcard_is_explicit {
+            contact.raw_vcard = input.raw_vcard;
+        }
+        if input.source_is_explicit {
+            contact.source = input.source;
+        }
         let mut versions = self.contact_versions.lock().unwrap();
         let version = versions
             .get(&contact_id)

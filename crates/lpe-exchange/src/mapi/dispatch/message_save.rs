@@ -188,6 +188,18 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     return;
                 }
             };
+            let (properties, reminder_set, reminder_at) =
+                match split_reminder_property_values(properties.into_iter().collect()) {
+                    Ok(values) => values,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
             let input = match event_input_from_mapi(
                 principal.account_id,
                 None,
@@ -229,6 +241,25 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                             return;
                         }
                     };
+                    if (reminder_set.is_some() || reminder_at.is_some())
+                        && store
+                            .update_accessible_event_reminder(
+                                principal.account_id,
+                                event.id,
+                                reminder_set,
+                                reminder_at,
+                                None,
+                            )
+                            .await
+                            .is_err()
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        return;
+                    }
                     if upsert_custom_property_values_from_map(
                         store,
                         principal,

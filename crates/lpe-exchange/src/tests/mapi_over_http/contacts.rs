@@ -1,6 +1,135 @@
 use super::*;
 
 #[tokio::test]
+async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let contacts = store.contacts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let address_guid = [
+        0x04, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let named_properties = [0x8083u32, 0x8093u32];
+    let mut named_rops = vec![0x56, 0x00, 0x00, 0x02];
+    named_rops.extend_from_slice(&(named_properties.len() as u16).to_le_bytes());
+    for lid in named_properties {
+        named_rops.push(0x00);
+        named_rops.extend_from_slice(&address_guid);
+        named_rops.extend_from_slice(&lid.to_le_bytes());
+    }
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(&response_rops[..6], &[0x56, 0x00, 0, 0, 0, 0]);
+    let property_ids = response_rops[8..12]
+        .chunks_exact(2)
+        .map(|value| u16::from_le_bytes(value.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    let tag = |index: usize| (u32::from(property_ids[index]) << 16) | 0x001F;
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x3001_001F, "Élodie Müller");
+    append_mapi_utf16_property(&mut property_values, tag(0), "elodie@example.test");
+    append_mapi_utf16_property(&mut property_values, tag(1), "e.mueller@example.test");
+    append_mapi_utf16_property(&mut property_values, 0x3A16_001F, "Société Zürich");
+    append_mapi_utf16_property(&mut property_values, 0x3A1C_001F, "+41 44 555 01 02");
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_set_properties(&mut rops, 1, 5, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+            && !response_rops
+                .windows(4)
+                .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "Outlook contact create returned an error: {response_rops:02x?}"
+    );
+
+    let stored = contacts.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].name, "Élodie Müller");
+    assert_eq!(stored[0].email, "elodie@example.test");
+    assert_eq!(stored[0].organization_name, "Société Zürich");
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("elodie@example.test"));
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("e.mueller@example.test"));
+    let contact_id = stored[0].id;
+    drop(stored);
+
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, tag(0), "elodie.updated@example.test");
+    append_mapi_utf16_property(&mut update_values, tag(1), "e.updated@example.test");
+    let mut update_rops = Vec::new();
+    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut update_rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    let stored = contacts.lock().unwrap();
+    assert_eq!(stored[0].email, "elodie.updated@example.test");
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("e.updated@example.test"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

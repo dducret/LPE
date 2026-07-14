@@ -3433,7 +3433,7 @@ fn zero_duration_events_project_non_zero_mapi_appointment_window() {
 
 #[test]
 fn calendar_projection_uses_canonical_all_day_status_and_participants() {
-    let event = lpe_storage::AccessibleEvent {
+    let mut event = lpe_storage::AccessibleEvent {
         id: Uuid::from_u128(0x7777),
         uid: "canonical-calendar".to_string(),
         collection_id: "default".to_string(),
@@ -3632,6 +3632,21 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
         Some(MapiValue::Bool(false))
     );
+
+    let global_object_id = vec![
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08, 0x00, 0x00, 0x00, 0x00, 0x40, 0x6F, 0xD6, 0x61, 0xE4, 0x73, 0xC8, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x2A, 0x58, 0x44, 0xB3, 0xA4,
+        0x44, 0xF7, 0x4A, 0x9C, 0x24, 0x6C, 0x60, 0x88, 0x6F, 0x11, 0x6B,
+    ];
+    event.uid = format!(
+        "mapi-goid:{}",
+        lpe_domain::crypto::hex_lower(&global_object_id)
+    );
+    assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_GLOBAL_OBJECT_ID_TAG),
+        Some(MapiValue::Binary(global_object_id))
+    );
 }
 
 #[test]
@@ -3736,15 +3751,11 @@ fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_f
 }
 
 #[test]
-fn mapi_over_http_calendar_binary_payloads_fail_explicitly() {
+fn mapi_over_http_calendar_opaque_binary_properties_are_accepted() {
     let mut properties = HashMap::new();
     properties.insert(0x8200_0102, MapiValue::Binary(vec![1, 2, 3]));
 
-    let error = reject_unsupported_mapi_event_properties(&properties).unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("MAPI binary calendar recurrence or meeting payloads are not supported"));
+    reject_unsupported_mapi_event_properties(&properties).unwrap();
 }
 
 #[test]

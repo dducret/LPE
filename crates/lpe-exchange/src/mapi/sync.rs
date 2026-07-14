@@ -140,7 +140,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .map(|event| {
                     calendar_sync_object(
                         event,
-                        snapshot.reminder_for_source("event", event.canonical_id),
+                        snapshot.reminder_for_source("calendar", event.canonical_id),
                     )
                 }),
         );

@@ -1071,8 +1071,10 @@ open-on-delete, copy, move, and context-menu bits from `[MS-OXCMSG]` section
 Calendar content sync also projects canonical attachment presence from
 `calendar_event_attachments` through `PidTagHasAttachments`; attachment table,
 open, stream, create, and save paths use canonical calendar attachment rows.
-Binary timezone payload writes remain rejected until parser-backed
-canonical timezone mappings exist.
+Binary timezone payloads accompanying a mapped `PidLidTimeZoneDescription`
+are accepted during appointment creation; canonical timezone state remains the
+description and read projections regenerate the timezone structures. An
+unsupported standalone timezone definition does not create parallel state.
 `PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
 Gregorian daily, weekly, monthly-by-day including month-end, monthly-nth,
 yearly-by-month-day, and yearly-nth recurrence patterns, including supported
@@ -1088,9 +1090,73 @@ participation status on the existing event; and bounded cancellation payloads
 delete the existing canonical event. Modified exceptions that override body,
 reminder, busy status, attachment, or other per-instance fields, Hijri
 recurrence, malformed recurrence blobs, unsupported meeting
-response/cancel properties, and other binary meeting payloads remain
+response/cancel properties, and other unsupported meeting-response or
+cancellation payloads remain
 unsupported and are rejected with deterministic parseable errors instead of
 being stored as opaque MAPI blobs.
+
+The real Outlook 15:25 capture on 2026-07-14 isolated appointment creation
+before ICS: `RopCreateMessage` returned a pending Calendar Message object, but
+`RopOpenStream`/`RopWriteStream` for binary `PidTagHtml` returned
+`0x8004010F`; the following `RopSaveChangesMessage` attempts returned
+`0x80040102`, and PostgreSQL contained no `calendar_events` row. The live dump
+showed Outlook displaying the resulting modal error rather than a memory
+crash. Pending Calendar Message objects now support the same writable HTML
+stream contract as other Message objects, and saving maps that stream to
+canonical `body_html`. Appointment creation accepts the additional named
+properties permitted on Message objects, maps supported fields to canonical
+event columns, and retains the supplied `PidLidGlobalObjectId` in canonical
+`calendar_events.uid` so reads reproduce the identical BLOB without a MAPI-only
+event store. This behavior follows [MS-OXCPRPT] sections 2.2.14 and 3.2.5.13,
+[MS-OXCROPS] sections 2.2.9.1, 2.2.9.3, 2.2.6.3, and 2.2.8.6,
+[MS-OXCMSG] section 2.2, and [MS-OXOCAL] sections 2.2.1.27, 2.2.1.28, and
+4.2.2.1.
+The same 15:25 request showed that Outlook used the mailbox mappings returned
+by `RopGetPropertyIdsFromNames`, rather than the numeric LIDs, when it wrote the
+appointment. The observed mappings included `0x90E5 -> PSETID_Appointment
+0x820D` (`PidLidAppointmentStartWhole`), `0x90E6 -> 0x820E`
+(`PidLidAppointmentEndWhole`), `0x90E8 -> 0x825E` and `0x90E9 -> 0x825F`
+(the start/end display `TZDEFINITION` properties), `0x9109 -> 0x8234`
+(`PidLidTimeZoneDescription`), `0x900E -> PSETID_Common 0x8503`
+(`PidLidReminderSet`), and `0x9132 -> 0x8560`
+(`PidLidReminderSignalTime`). Set/delete operations, direct property reads, and
+writable Calendar property streams now resolve the mailbox-assigned ID through
+the session registry before applying canonical semantics. Unknown named
+properties keep their assigned ID and remain bounded custom properties; the
+mailbox mapping itself is never rewritten. This follows [MS-OXCPRPT] sections
+3.1.4.1 and 3.2.5.10.
+
+For single-instance appointments, the human-readable
+`PidLidTimeZoneDescription` captured from Outlook was
+`(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna`, while the
+accompanying `PidLidAppointmentTimeZoneDefinitionStartDisplay` carried the
+stable key `W. Europe Standard Time`. LPE parses only the bounded persisted
+`TZDEFINITION` header/key-name shape and stores that key in canonical
+`calendar_events.time_zone`; reads regenerate the timezone structures from
+that canonical value. The exact properties and formats are documented by
+[MS-OXOCAL] sections 2.2.1.40 through 2.2.1.43. Initial appointment save also
+maps `PidLidReminderSet` and `PidLidReminderSignalTime` to the canonical
+`calendar_events.reminder_set` and `calendar_events.reminder_at` fields, and
+direct GetProps plus ICS read those same fields, following [MS-OXORMDR]
+sections 2.2.1.1 and 2.2.1.2.
+There is no MAPI-only reminder state.
+
+The named-property normalization is shared by Contacts. Outlook writes for
+`PSETID_Address` LIDs `0x8083`, `0x8093`, and `0x80A3` now map Email1, Email2,
+and Email3 into canonical `contacts.emails_json`, preserving Unicode names and
+multiple addresses as required by [MS-OXOCNTC] section 2.2.1.2. Contact
+categories are not claimed by this correction: the current canonical Contact
+model has no category field, so adding categories requires a separate
+schema/API decision backed by a real Contacts trace rather than a MAPI-only
+shadow property.
+
+`dispatch/message_save.rs` and `dispatch/properties.rs` are over the production
+line target. Before adding further save/read behavior, split collaboration item
+save branches into `dispatch/collaboration_message_save.rs` and direct property
+read/stream orchestration into `dispatch/property_reads.rs`; keep the existing
+dispatch entry points as thin routing functions. This correction changes only
+the bounded existing branches so that the protocol semantics are fixed before
+that mechanical extraction.
 Calendar attachments are projected only through canonical
 `calendar_event_attachments`:
 `PidTagHasAttachments`, `RopGetValidAttachments`, `RopGetAttachmentTable`, and

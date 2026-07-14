@@ -360,10 +360,35 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             .filter(|value| !value.trim().is_empty())
     })
     .unwrap_or_else(|| existing.name.clone());
+    let email1 = optional_pending_text_property(
+        properties,
+        &[
+            PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL1_DISPLAY_NAME_W_TAG,
+            PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME_W_TAG,
+        ],
+    );
+    let email2 = optional_pending_text_property(
+        properties,
+        &[
+            PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL2_DISPLAY_NAME_W_TAG,
+            PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG,
+        ],
+    );
+    let email3 = optional_pending_text_property(
+        properties,
+        &[
+            PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG,
+            PID_LID_EMAIL3_DISPLAY_NAME_W_TAG,
+            PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG,
+        ],
+    );
     let email = optional_pending_text_property(
         properties,
         &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W],
     )
+    .or_else(|| email1.clone())
     .unwrap_or_else(|| existing.email.clone());
     let mobile_phone =
         optional_pending_text_property(properties, &[PID_TAG_MOBILE_TELEPHONE_NUMBER_W]);
@@ -398,11 +423,12 @@ pub(in crate::mapi) fn contact_input_from_mapi(
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
         structured_name,
-        emails_json: Some(update_primary_labeled_json(
-            &existing.emails_json,
-            "email",
-            "work",
+        emails_json: Some(contact_emails_json_from_mapi(
+            existing,
             &email,
+            email1.as_deref(),
+            email2.as_deref(),
+            email3.as_deref(),
         )),
         phones_json: Some(contact_phones_json_from_mapi(
             existing,
@@ -420,6 +446,40 @@ pub(in crate::mapi) fn contact_input_from_mapi(
         job_title: title,
         ..Default::default()
     }
+}
+
+fn contact_emails_json_from_mapi(
+    existing: &AccessibleContact,
+    primary: &str,
+    email1: Option<&str>,
+    email2: Option<&str>,
+    email3: Option<&str>,
+) -> serde_json::Value {
+    if email1.is_none() && email2.is_none() && email3.is_none() {
+        return update_primary_labeled_json(&existing.emails_json, "email", "work", primary);
+    }
+    let mut rows = Vec::new();
+    if let Some(value) = email1
+        .or((!primary.trim().is_empty()).then_some(primary))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        rows.push(serde_json::json!({
+            "email": value,
+            "label": "work",
+            "isDefault": true
+        }));
+    }
+    for (value, label) in [(email2, "home"), (email3, "other")] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            rows.push(serde_json::json!({
+                "email": value,
+                "label": label,
+                "isDefault": false
+            }));
+        }
+    }
+    serde_json::Value::Array(rows)
 }
 
 fn contact_display_name_from_structured(name: &lpe_storage::ContactNameFields) -> String {
@@ -556,6 +616,18 @@ fn reject_unsupported_mapi_contact_properties(properties: &HashMap<u32, MapiValu
                 | PID_TAG_PERSONAL_HOME_PAGE_W
                 | PID_TAG_BUSINESS_HOME_PAGE_W
                 | PID_TAG_BODY_W
+                | PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG
+                | PID_LID_EMAIL1_DISPLAY_NAME_W_TAG
+                | PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG
+                | PID_LID_EMAIL1_ORIGINAL_DISPLAY_NAME_W_TAG
+                | PID_LID_EMAIL2_ADDRESS_TYPE_W_TAG
+                | PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
+                | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+                | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG
+                | PID_LID_EMAIL3_ADDRESS_TYPE_W_TAG
+                | PID_LID_EMAIL3_DISPLAY_NAME_W_TAG
+                | PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
+                | PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG
         );
         if !supported {
             return Err(anyhow!(

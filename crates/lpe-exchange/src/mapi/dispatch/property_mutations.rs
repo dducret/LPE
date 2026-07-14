@@ -96,7 +96,10 @@ where
             responses.extend_from_slice(&response);
             return PropertyMutationFlow::StopBatch;
         }
-    };
+    }
+    .into_iter()
+    .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
+    .collect::<Vec<_>>();
     let set_result = if let Some(result) = stage_virtual_conversation_action_property_values(
         session,
         handle_slots,
@@ -283,7 +286,11 @@ pub(super) async fn append_delete_properties_response<S>(
 ) where
     S: ExchangeStore,
 {
-    let property_tags = request.property_tags();
+    let property_tags = request
+        .property_tags()
+        .into_iter()
+        .map(|tag| session.normalize_named_property_tag(tag))
+        .collect::<Vec<_>>();
     let object = input_object(session, handle_slots, request).cloned();
     let delete_result = if let Some(result) = stage_virtual_conversation_action_property_delete(
         session,

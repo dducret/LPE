@@ -111,7 +111,15 @@ pub(super) fn property_stream_data(
             (object, open_mode),
             (MapiObject::CommonViewNamedView { .. }, 1 | 2)
         ) && common_view_named_view_stream_property_is_writable(property_tag);
-    if open_mode != 0 && !writable_associated_config && !writable_common_view_named_view {
+    let writable_pending_event = matches!(
+        (object, open_mode),
+        (MapiObject::PendingEvent { .. }, 1 | 2)
+    );
+    if open_mode != 0
+        && !writable_associated_config
+        && !writable_common_view_named_view
+        && !writable_pending_event
+    {
         return None;
     }
     let allow_empty_missing_stream = !matches!(object, MapiObject::AssociatedConfig { .. });
@@ -155,6 +163,26 @@ pub(super) fn property_stream_data(
             .and_then(|message| {
                 common_view_named_view_property_value(&message, mailbox_guid, property_tag)
             }),
+        MapiObject::PendingEvent { properties, .. } => match open_mode {
+            2 => None,
+            _ => properties
+                .get(&canonical_property_storage_tag(property_tag))
+                .cloned(),
+        },
+        MapiObject::Event {
+            folder_id,
+            event_id,
+        } if open_mode == 0 => snapshot
+            .event_for_id(*folder_id, *event_id)
+            .and_then(|event| {
+                event_property_value_with_reminder(
+                    &event.event,
+                    event.id,
+                    event.folder_id,
+                    property_tag,
+                    snapshot.reminder_for_source("calendar", event.canonical_id),
+                )
+            }),
         _ => return None,
     };
     let stream = match value {
@@ -171,6 +199,11 @@ pub(super) fn property_stream_data(
         })
     } else if writable_common_view_named_view {
         Some(StreamWriteTarget::VolatileProperty)
+    } else if writable_pending_event {
+        Some(StreamWriteTarget::PendingEventProperty {
+            handle: input_handle,
+            property_tag,
+        })
     } else {
         None
     };
@@ -252,6 +285,15 @@ pub(in crate::mapi) fn message_body_stream_data(
             2 => (String::new(), Some(String::new())),
             _ => return None,
         },
+        MapiObject::PendingEvent { properties, .. } => match open_mode {
+            0 | 1 => (
+                pending_text_property(properties, &[PID_TAG_BODY_W]),
+                optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+                    .or_else(|| pending_html_binary_property(properties)),
+            ),
+            2 => (String::new(), Some(String::new())),
+            _ => return None,
+        },
         MapiObject::PublicFolderItem {
             folder_id,
             item_id,
@@ -309,6 +351,12 @@ pub(in crate::mapi) fn message_body_stream_data(
     let target = match (session.handles.get(&input_handle), open_mode) {
         (Some(MapiObject::PendingMessage { .. }), 1 | 2) => {
             Some(StreamWriteTarget::PendingMessageProperty {
+                handle: input_handle,
+                property_tag,
+            })
+        }
+        (Some(MapiObject::PendingEvent { .. }), 1 | 2) => {
+            Some(StreamWriteTarget::PendingEventProperty {
                 handle: input_handle,
                 property_tag,
             })
@@ -505,6 +553,20 @@ pub(in crate::mapi) fn sync_stream_target(
         } => {
             let value = stream_property_value(property_tag, data)?;
             if let Some(MapiObject::PendingMessage { properties, .. }) =
+                session.handles.get_mut(&handle)
+            {
+                properties.insert(canonical_property_storage_tag(property_tag), value);
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::PendingEventProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::PendingEvent { properties, .. }) =
                 session.handles.get_mut(&handle)
             {
                 properties.insert(canonical_property_storage_tag(property_tag), value);

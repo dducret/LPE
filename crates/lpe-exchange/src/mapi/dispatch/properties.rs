@@ -226,8 +226,9 @@ pub(super) async fn append_get_properties_specific_response<S>(
             "rca debug mapi get properties named property context"
         );
     }
+    let normalized_request = normalized_get_properties_request(session, request);
     let property_response = rop_get_properties_specific_response_with_custom(
-        request,
+        &normalized_request,
         object,
         principal,
         mailboxes,
@@ -437,6 +438,21 @@ pub(super) async fn append_get_properties_specific_response<S>(
     }
 }
 
+fn normalized_get_properties_request(session: &MapiSession, request: &RopRequest) -> RopRequest {
+    let mut normalized = request.clone();
+    for (index, property_tag) in request.property_tags().into_iter().enumerate() {
+        let offset = 4 + index * 4;
+        if let Some(bytes) = normalized.payload.get_mut(offset..offset + 4) {
+            bytes.copy_from_slice(
+                &session
+                    .normalize_named_property_tag(property_tag)
+                    .to_le_bytes(),
+            );
+        }
+    }
+    normalized
+}
+
 pub(super) fn append_get_properties_all_response(
     principal: &AccountPrincipal,
     session: &MapiSession,
@@ -557,12 +573,14 @@ pub(super) async fn append_open_stream_response<S>(
             request.stream_open_mode().unwrap_or(0)
         ));
     }
+    let stream_property_tag =
+        session.normalize_named_property_tag(request.stream_property_tag().unwrap_or(0));
     let Some((stream_data, writable_target)) = open_stream_data(
         store,
         principal,
         session,
         input_handle,
-        request.stream_property_tag().unwrap_or(0),
+        stream_property_tag,
         request.stream_open_mode().unwrap_or(0),
         mailboxes,
         emails,

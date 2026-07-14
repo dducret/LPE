@@ -108,6 +108,18 @@ impl MapiSession {
             })
     }
 
+    pub(in crate::mapi) fn normalize_named_property_tag(&self, property_tag: u32) -> u32 {
+        let tag = MapiPropertyTag::new(property_tag);
+        if tag.property_id() < FIRST_NAMED_PROPERTY_ID {
+            return property_tag;
+        }
+        self.named_property_ids
+            .get(&tag.property_id())
+            .and_then(well_known_named_property_id)
+            .map(|property_id| (u32::from(property_id) << 16) | u32::from(tag.property_type_code()))
+            .unwrap_or(property_tag)
+    }
+
     pub(in crate::mapi) fn named_properties_for_query(
         &self,
         guid: Option<[u8; 16]>,

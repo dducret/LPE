@@ -223,6 +223,289 @@ async fn mapi_over_http_calendar_create_persists_then_existing_handle_is_hidden(
 }
 
 #[tokio::test]
+async fn mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    // [MS-OXOCAL] 2.2.1.27 and 2.2.1.28: GlobalObjectId and
+    // CleanGlobalObjectId use the documented 56-byte binary representation.
+    let global_object_id = [
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08, 0x00, 0x00, 0x00, 0x00, 0x40, 0x6F, 0xD6, 0x61, 0xE4, 0x73, 0xC8, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x2A, 0x58, 0x44, 0xB3, 0xA4,
+        0x44, 0xF7, 0x4A, 0x9C, 0x24, 0x6C, 0x60, 0x88, 0x6F, 0x11, 0x6B,
+    ];
+    let html = b"<html><body>Corps calendrier Outlook</body></html>";
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Appointment");
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Test calendrier Outlook");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-07-15", "09:00"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0061_0040,
+        test_filetime("2026-07-15", "10:00"),
+    );
+    append_mapi_binary_property(&mut property_values, 0x8001_0102, &global_object_id);
+    append_mapi_binary_property(&mut property_values, 0x8002_0102, &global_object_id);
+
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]); // RopOpenStream, PidTagHtml.
+    rops.extend_from_slice(&0x1013_0102u32.to_le_bytes());
+    rops.push(0x02);
+    rops.extend_from_slice(&[0x2D, 0x00, 0x02]); // RopWriteStream.
+    rops.extend_from_slice(&(html.len() as u16).to_le_bytes());
+    rops.extend_from_slice(html);
+    append_rop_set_properties(&mut rops, 1, 6, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+            && !response_rops
+                .windows(4)
+                .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "Outlook calendar create returned an error: {response_rops:02x?}"
+    );
+
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].title, "Test calendrier Outlook");
+    assert_eq!(stored[0].body_html, String::from_utf8_lossy(html));
+    assert_eq!(
+        stored[0].uid,
+        format!(
+            "mapi-goid:{}",
+            lpe_domain::crypto::hex_lower(&global_object_id)
+        )
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let reminders = store.reminders.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    // [MS-OXCPRPT] 3.1.4.1 and 3.2.5.10: use the mailbox-assigned
+    // property IDs returned for the documented Calendar named properties.
+    let appointment_guid = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let common_guid = [
+        0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let named_properties = [
+        (appointment_guid, 0x8208u32), // PidLidLocation
+        (appointment_guid, 0x820Du32), // PidLidAppointmentStartWhole
+        (appointment_guid, 0x820Eu32), // PidLidAppointmentEndWhole
+        (appointment_guid, 0x8234u32), // PidLidTimeZoneDescription
+        (appointment_guid, 0x825Eu32), // PidLidAppointmentTimeZoneDefinitionStartDisplay
+        (common_guid, 0x8503u32),      // PidLidReminderSet
+        (common_guid, 0x8560u32),      // PidLidReminderSignalTime
+        (appointment_guid, 0x8216u32), // PidLidAppointmentRecur
+    ];
+    let mut named_rops = vec![0x56, 0x00, 0x00, 0x02];
+    named_rops.extend_from_slice(&(named_properties.len() as u16).to_le_bytes());
+    for (guid, lid) in named_properties {
+        named_rops.push(0x00);
+        named_rops.extend_from_slice(&guid);
+        named_rops.extend_from_slice(&lid.to_le_bytes());
+    }
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(&response_rops[..6], &[0x56, 0x00, 0, 0, 0, 0]);
+    assert_eq!(
+        u16::from_le_bytes(response_rops[6..8].try_into().unwrap()) as usize,
+        named_properties.len()
+    );
+    let property_ids = response_rops[8..8 + named_properties.len() * 2]
+        .chunks_exact(2)
+        .map(|value| u16::from_le_bytes(value.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(property_ids.iter().all(|property_id| *property_id > 0x8000));
+
+    let start = test_filetime("2026-07-15", "09:00");
+    let end = test_filetime("2026-07-15", "10:00");
+    let reminder_at = "2026-07-15T08:45:00Z";
+    let tag =
+        |index: usize, property_type: u32| (u32::from(property_ids[index]) << 16) | property_type;
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0037_001F,
+        "Test calendrier IDs nommés",
+    );
+    append_mapi_i64_property(&mut property_values, 0x0060_0040, start);
+    append_mapi_i64_property(&mut property_values, 0x0061_0040, end);
+    append_mapi_utf16_property(&mut property_values, tag(0, 0x001F), "Salle Zürich");
+    append_mapi_i64_property(&mut property_values, tag(1, 0x0040), start);
+    append_mapi_i64_property(&mut property_values, tag(2, 0x0040), end);
+    append_mapi_utf16_property(
+        &mut property_values,
+        tag(3, 0x001F),
+        "(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna",
+    );
+    append_mapi_binary_property(
+        &mut property_values,
+        tag(4, 0x0102),
+        &test_calendar_time_zone_definition("W. Europe Standard Time"),
+    );
+    append_mapi_bool_property(&mut property_values, tag(5, 0x000B), true);
+    append_mapi_i64_property(
+        &mut property_values,
+        tag(6, 0x0040),
+        mapi_mailstore::filetime_from_rfc3339_utc(reminder_at) as i64,
+    );
+
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    let recurrence = test_daily_calendar_recur_blob();
+    rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]); // RopOpenStream.
+    rops.extend_from_slice(&tag(7, 0x0102).to_le_bytes());
+    rops.push(0x02);
+    rops.extend_from_slice(&[0x2D, 0x00, 0x02]); // RopWriteStream.
+    rops.extend_from_slice(&(recurrence.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&recurrence);
+    append_rop_set_properties(&mut rops, 1, 10, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+            && !response_rops
+                .windows(4)
+                .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "Outlook calendar create returned an error: {response_rops:02x?}"
+    );
+
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].title, "Test calendrier IDs nommés");
+    assert_eq!(stored[0].location, "Salle Zürich");
+    assert_eq!(stored[0].time_zone, "W. Europe Standard Time");
+    assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
+    let event_id = stored[0].id;
+    drop(stored);
+    assert!(reminders.lock().unwrap().iter().any(|reminder| {
+        reminder.source_type == "calendar"
+            && reminder.source_id == event_id
+            && reminder.reminder_at == reminder_at
+    }));
+
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut get_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_get_properties_specific(
+        &mut get_rops,
+        2,
+        &[
+            tag(0, 0x001F),
+            tag(3, 0x001F),
+            tag(5, 0x000B),
+            tag(6, 0x0040),
+        ],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &utf16z("Salle Zürich")),
+        "dynamic named-property GetProps did not return location: {response_rops:02x?}"
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("W. Europe Standard Time")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &(mapi_mailstore::filetime_from_rfc3339_utc(reminder_at) as i64).to_le_bytes()
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

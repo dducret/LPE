@@ -108,6 +108,33 @@ fn test_daily_calendar_recur_blob() -> Vec<u8> {
     value
 }
 
+fn test_calendar_time_zone_definition(key_name: &str) -> Vec<u8> {
+    let key_name = key_name.encode_utf16().collect::<Vec<_>>();
+    let cb_header = 2usize
+        .saturating_add(2)
+        .saturating_add(key_name.len().saturating_mul(2))
+        .saturating_add(2) as u16;
+    let mut value = vec![0x02, 0x01];
+    value.extend_from_slice(&cb_header.to_le_bytes());
+    value.extend_from_slice(&0x0002u16.to_le_bytes());
+    value.extend_from_slice(&(key_name.len() as u16).to_le_bytes());
+    for unit in key_name {
+        value.extend_from_slice(&unit.to_le_bytes());
+    }
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&[0x02, 0x01]);
+    value.extend_from_slice(&0x003Eu16.to_le_bytes());
+    value.extend_from_slice(&0x0002u16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&[0; 14]);
+    value.extend_from_slice(&(-60i32).to_le_bytes());
+    value.extend_from_slice(&0i32.to_le_bytes());
+    value.extend_from_slice(&(-60i32).to_le_bytes());
+    value.extend_from_slice(&[0, 0, 10, 0, 0, 0, 5, 0, 3, 0, 0, 0, 0, 0, 0, 0]);
+    value.extend_from_slice(&[0, 0, 3, 0, 0, 0, 5, 0, 2, 0, 0, 0, 0, 0, 0, 0]);
+    value
+}
+
 fn open_embedded_message_response_contains_subject(response_rops: &[u8], subject: &str) -> bool {
     let mut tail = vec![0x01, 0x04];
     tail.extend_from_slice(&utf16z(subject));

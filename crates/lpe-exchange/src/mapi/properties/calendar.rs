@@ -209,17 +209,25 @@ fn appointment_duration(event: &AccessibleEvent) -> i32 {
     ((end - start) / 600_000_000).min(i32::MAX as u64) as i32
 }
 
-fn calendar_time_zone_key(time_zone: &str) -> &'static str {
+fn recognized_calendar_time_zone_key(time_zone: &str) -> Option<&'static str> {
     if time_zone.eq_ignore_ascii_case("W. Europe Standard Time")
         || time_zone.eq_ignore_ascii_case("Europe/Zurich")
         || time_zone.eq_ignore_ascii_case("Europe/Berlin")
         || time_zone.eq_ignore_ascii_case("Europe/Rome")
         || time_zone.eq_ignore_ascii_case("Europe/Vienna")
+        || time_zone
+            .eq_ignore_ascii_case("(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna")
     {
-        "W. Europe Standard Time"
+        Some("W. Europe Standard Time")
+    } else if time_zone.eq_ignore_ascii_case("UTC") {
+        Some("UTC")
     } else {
-        "UTC"
+        None
     }
+}
+
+fn calendar_time_zone_key(time_zone: &str) -> &'static str {
+    recognized_calendar_time_zone_key(time_zone).unwrap_or("UTC")
 }
 
 fn calendar_time_zone_struct(event: &AccessibleEvent) -> Vec<u8> {
@@ -350,6 +358,11 @@ fn push_system_time(value: &mut Vec<u8>, system_time: CalendarSystemTime) {
 }
 
 fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
+    if let Some(encoded) = event.uid.strip_prefix("mapi-goid:") {
+        if let Some(value) = hex_to_bytes(encoded) {
+            return value;
+        }
+    }
     let uid = if event.uid.is_empty() {
         event.id.to_string()
     } else {
@@ -505,15 +518,21 @@ pub(in crate::mapi) fn event_input_from_mapi(
     Ok(UpsertClientEventInput {
         id,
         account_id,
-        uid: existing.uid.clone(),
+        uid: properties
+            .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
+            .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
+            .and_then(|value| match value {
+                MapiValue::Binary(value) => Some(format!(
+                    "mapi-goid:{}",
+                    lpe_domain::crypto::hex_lower(value)
+                )),
+                _ => None,
+            })
+            .unwrap_or_else(|| existing.uid.clone()),
         date,
         time,
-        time_zone: optional_pending_text_property(
-            properties,
-            &[PID_LID_TIME_ZONE_DESCRIPTION_W_TAG],
-        )
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| existing.time_zone.clone()),
+        time_zone: calendar_time_zone_from_mapi(properties)
+            .unwrap_or_else(|| existing.time_zone.clone()),
         duration_minutes: end
             .map(|_| duration_minutes)
             .unwrap_or(existing.duration_minutes),
@@ -554,9 +573,61 @@ pub(in crate::mapi) fn event_input_from_mapi(
         attendees_json: participants.attendees_json,
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
-        body_html: optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
-            .unwrap_or_else(|| existing.body_html.clone()),
+        body_html: pending_html_property(properties).unwrap_or_else(|| existing.body_html.clone()),
     })
+}
+
+fn calendar_time_zone_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    for property_tag in [
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG,
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG,
+    ] {
+        if let Some(MapiValue::Binary(value)) = properties.get(&property_tag) {
+            if let Some(key_name) = calendar_time_zone_definition_key(value) {
+                return Some(
+                    recognized_calendar_time_zone_key(&key_name)
+                        .unwrap_or(key_name.as_str())
+                        .to_string(),
+                );
+            }
+        }
+    }
+    optional_pending_text_property(properties, &[PID_LID_TIME_ZONE_DESCRIPTION_W_TAG])
+        .filter(|value| !value.trim().is_empty())
+        .map(|description| {
+            recognized_calendar_time_zone_key(&description)
+                .unwrap_or(description.as_str())
+                .to_string()
+        })
+}
+
+fn calendar_time_zone_definition_key(value: &[u8]) -> Option<String> {
+    // [MS-OXOCAL] 2.2.1.41-2.2.1.43: the display properties contain a
+    // little-endian persisted TZDEFINITION whose key name is not null-terminated.
+    let major_version = *value.first()?;
+    if major_version != 0x02 {
+        return None;
+    }
+    let flags = u16::from_le_bytes(value.get(4..6)?.try_into().ok()?);
+    if flags & 0x0002 == 0 {
+        return None;
+    }
+    let mut offset = 6usize;
+    if flags & 0x0001 != 0 {
+        offset = offset.checked_add(16)?;
+    }
+    let key_name_length = usize::from(u16::from_le_bytes(
+        value.get(offset..offset + 2)?.try_into().ok()?,
+    ));
+    offset = offset.checked_add(2)?;
+    let byte_length = key_name_length.checked_mul(2)?;
+    let units = value
+        .get(offset..offset.checked_add(byte_length)?)?
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    let key_name = String::from_utf16(&units).ok()?;
+    (!key_name.trim().is_empty()).then_some(key_name)
 }
 
 pub(in crate::mapi) fn meeting_response_event_input_from_mapi(
@@ -777,49 +848,11 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<()> {
     reject_unsupported_calendar_message_class(properties)?;
+    // [MS-OXCMSG] 2.2 permits other Message object properties even when they
+    // have no effect on this protocol. Calendar named properties that do not
+    // map to first-class canonical fields are persisted by the custom-property
+    // helper instead of making RopSaveChangesMessage fail.
     for (tag, value) in properties {
-        if matches!(value, MapiValue::Binary(_)) && *tag != PID_LID_APPOINTMENT_RECUR_TAG {
-            return Err(anyhow!(
-                "MAPI binary calendar recurrence or meeting payloads are not supported"
-            ));
-        }
-        let supported = matches!(
-            *tag,
-            PID_TAG_SUBJECT_W
-                | PID_TAG_NORMALIZED_SUBJECT_W
-                | PID_TAG_DISPLAY_NAME_W
-                | PID_TAG_BODY_W
-                | PID_TAG_SENDER_NAME_W
-                | PID_TAG_SENDER_EMAIL_ADDRESS_W
-                | PID_TAG_DISPLAY_TO_W
-                | PID_TAG_DISPLAY_CC_W
-                | PID_TAG_CREATION_TIME
-                | PID_TAG_LAST_MODIFICATION_TIME
-                | PID_TAG_START_DATE
-                | PID_TAG_END_DATE
-                | PID_LID_COMMON_START_TAG
-                | PID_LID_COMMON_END_TAG
-                | PID_TAG_LOCATION_W
-                | PID_LID_LOCATION_W_TAG
-                | PID_TAG_BODY_HTML_W
-                | PID_LID_BUSY_STATUS_TAG
-                | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
-                | PID_LID_APPOINTMENT_START_WHOLE_TAG
-                | PID_LID_APPOINTMENT_END_WHOLE_TAG
-                | PID_LID_APPOINTMENT_DURATION_TAG
-                | PID_LID_APPOINTMENT_SUB_TYPE_TAG
-                | PID_LID_APPOINTMENT_RECUR_TAG
-                | PID_LID_ALL_ATTENDEES_STRING_W_TAG
-                | PID_LID_TO_ATTENDEES_STRING_W_TAG
-                | PID_LID_CC_ATTENDEES_STRING_W_TAG
-                | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
-                | PID_TAG_MESSAGE_CLASS_W
-        );
-        if !supported {
-            return Err(anyhow!(
-                "MAPI calendar property {tag:#010X} is outside the canonical calendar subset"
-            ));
-        }
         if *tag == PID_LID_APPOINTMENT_STATE_FLAGS_TAG {
             let flags = value
                 .as_i64()

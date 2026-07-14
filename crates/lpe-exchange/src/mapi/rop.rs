@@ -1172,10 +1172,11 @@ pub(in crate::mapi) fn serialize_object_property(
         }) => snapshot
             .event_for_id(*folder_id, *event_id)
             .map(|event| {
-                serialize_event_row_with_attachments(
+                serialize_event_row_with_reminder_and_attachments(
                     &event.event,
                     event.id,
                     event.folder_id,
+                    snapshot.reminder_for_source("calendar", event.canonical_id),
                     !event.attachments.is_empty(),
                     &[tag],
                 )
