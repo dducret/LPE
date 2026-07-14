@@ -895,10 +895,7 @@ fn associated_config_default_sync_tags(
 fn associated_config_standard_sync_tag(tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(tag),
-        PID_TAG_SOURCE_KEY
-            | PID_TAG_PARENT_SOURCE_KEY
-            | PID_TAG_CHANGE_KEY
-            | PID_TAG_PREDECESSOR_CHANGE_LIST
+        PID_TAG_PARENT_SOURCE_KEY
             | PID_TAG_CHANGE_NUMBER
             | PID_TAG_FOLDER_ID
             | PID_TAG_MID

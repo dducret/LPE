@@ -1002,6 +1002,16 @@ allocated keys outside LPE's persisted identity range can delete their matching
 FAI while already-absent keys remain idempotent. This follows [MS-OXCROPS]
 sections 2.2.13.5.1 and 2.2.13.5.2, [MS-OXCFXICS] section
 2.2.3.2.4.5.1, and [MS-OXCDATA] sections 2.2.1.3, 2.11.1, and 2.11.4.
+Persisted FAI synchronization identity must remain stable across ICS upload and
+download. In the 2026-07-14 14:50 Outlook trace, PostgreSQL retained the three
+Calendar configuration SourceKeys ending in `73610`, `73611`, and `73612`, but
+the content-sync FastTransfer manifest regenerated SourceKeys ending in
+`000035`, `000036`, and `000037` from LPE's internal object IDs. Outlook's OST
+integrity report consequently identified three Hidden Messages present only on
+the server and three present only in the OST. FAI FastTransfer now emits the
+persisted `PidTagSourceKey`, `PidTagChangeKey`, and
+`PidTagPredecessorChangeList` byte-for-byte and generates local values only when
+they are absent. This follows [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.5.
 Outlook Calendar startup can create Freebusy Data view/configuration messages
 under the special Freebusy Data folder. Until LPE stores first-class writable
 Freebusy Data FAI state, those creates are acknowledged as transient associated

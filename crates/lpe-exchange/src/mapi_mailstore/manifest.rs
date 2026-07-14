@@ -193,6 +193,46 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
     list
 }
 
+fn special_message_binary_property(
+    object: &SpecialMessageSyncFact,
+    property_tag: u32,
+) -> Option<&[u8]> {
+    object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag == property_tag, value) {
+            (true, SpecialMessagePropertyValue::Binary(value)) => Some(value.as_slice()),
+            _ => None,
+        })
+}
+
+pub(crate) fn special_message_source_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+    // [MS-OXCFXICS] 3.2.5.5: output a persisted PidTagSourceKey and
+    // generate one from the internal identifier only when it is missing.
+    special_message_binary_property(object, PID_TAG_SOURCE_KEY)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| source_key_for_store_id(object.item_id))
+}
+
+pub(super) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+    special_message_binary_property(object, PID_TAG_CHANGE_KEY)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| change_key_for_change_number(change_number_for_store_id(object.item_id)))
+}
+
+pub(super) fn special_message_predecessor_change_list(object: &SpecialMessageSyncFact) -> Vec<u8> {
+    special_message_binary_property(object, PID_TAG_PREDECESSOR_CHANGE_LIST)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| predecessor_change_list(change_number_for_store_id(object.item_id)))
+}
+
+pub(super) fn special_message_property_is_sync_identity(property_tag: u32) -> bool {
+    matches!(
+        property_tag,
+        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST
+    )
+}
+
 pub(crate) fn filetime_from_rfc3339_utc(value: &str) -> u64 {
     parse_rfc3339_utc_seconds(value)
         .map(windows_filetime_from_signed_unix_seconds)
@@ -768,6 +808,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
 
     for object in &special_objects {
         let change_number = change_number_for_store_id(object.item_id);
+        let source_key = special_message_source_key(object);
+        let change_key = special_message_change_key(object);
+        let predecessor_change_list = special_message_predecessor_change_list(object);
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
             write_content_sync_progress_per_message(
                 &mut buffer,
@@ -776,22 +819,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             );
         }
         write_u32(&mut buffer, INCR_SYNC_CHG);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_SOURCE_KEY,
-            &source_key_for_store_id(object.item_id),
-        );
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
         write_i64(&mut buffer, object.last_modified_filetime as i64);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_CHANGE_KEY,
-            &change_key_for_change_number(change_number),
-        );
+        write_binary_property(&mut buffer, PID_TAG_CHANGE_KEY, &change_key);
         write_binary_property(
             &mut buffer,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list(change_number),
+            &predecessor_change_list,
         );
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
@@ -902,7 +937,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             );
         }
         for (tag, value) in &object.named_properties {
-            if content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag) {
+            if !special_message_property_is_sync_identity(*tag)
+                && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
+            {
                 write_special_message_property(&mut buffer, *tag, value);
             }
         }

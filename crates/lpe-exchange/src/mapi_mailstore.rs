@@ -24,7 +24,7 @@ pub(crate) use manifest::{
     canonical_message_change_number_with_attachments, change_key_for_change_number,
     change_number_for_store_id, filetime_from_change_number, filetime_from_rfc3339_utc,
     predecessor_change_list, source_key_for_mailbox_folder, source_key_for_mailbox_role,
-    source_key_for_store_id, source_key_for_uuid,
+    source_key_for_store_id, source_key_for_uuid, special_message_source_key,
     sync_manifest_buffer_with_special_objects_and_final_state, sync_state_token_with_attachments,
     sync_state_token_with_special_objects, virtual_special_mailbox, AttachmentSyncFact,
     FaiContentSyncDebugContext, MessageAttachmentSyncFacts, SpecialMessagePropertyValue,
@@ -758,29 +758,23 @@ pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
             .then(left.canonical_id.cmp(&right.canonical_id))
     });
     for object in objects {
-        let change_number = change_number_for_store_id(object.item_id);
+        let source_key = manifest::special_message_source_key(object);
+        let change_key = manifest::special_message_change_key(object);
+        let predecessor_change_list = manifest::special_message_predecessor_change_list(object);
         write_u32(&mut buffer, START_FAI_MSG);
         write_binary_property(
             &mut buffer,
             PID_TAG_PARENT_SOURCE_KEY,
             &source_key_for_store_id(folder_id),
         );
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_SOURCE_KEY,
-            &source_key_for_store_id(object.item_id),
-        );
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
         write_i64(&mut buffer, object.last_modified_filetime as i64);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_CHANGE_KEY,
-            &change_key_for_change_number(change_number),
-        );
+        write_binary_property(&mut buffer, PID_TAG_CHANGE_KEY, &change_key);
         write_binary_property(
             &mut buffer,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list(change_number),
+            &predecessor_change_list,
         );
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
         write_u32(&mut buffer, PID_TAG_MID);
@@ -796,7 +790,9 @@ pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
             object.message_size as i32,
         );
         for (tag, value) in &object.named_properties {
-            write_special_message_property(&mut buffer, *tag, value);
+            if !manifest::special_message_property_is_sync_identity(*tag) {
+                write_special_message_property(&mut buffer, *tag, value);
+            }
         }
         write_u32(&mut buffer, END_MESSAGE);
     }

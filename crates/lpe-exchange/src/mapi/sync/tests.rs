@@ -339,6 +339,82 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
 }
 
 #[test]
+fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let canonical_id = Uuid::parse_str("4ff7d398-6c12-4a91-aa0f-6efb4fdba738").unwrap();
+    let item_id = crate::mapi::identity::mapi_store_id(0x35);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let source_key = [
+        crate::mapi::identity::STORE_REPLICA_GUID.as_slice(),
+        &[0xa0, 0x0a, 0x52, 0x07, 0x36, 0x10],
+    ]
+    .concat();
+    let change_key = [
+        0x8e, 0x42, 0x51, 0x20, 0xb7, 0xa4, 0x26, 0x4a, 0x87, 0x53, 0x6c, 0x05, 0x1f, 0x77, 0xbc,
+        0x30, 0x00, 0x00, 0x04, 0x1e,
+    ];
+    let predecessor_change_list =
+        [std::slice::from_ref(&(change_key.len() as u8)), &change_key].concat();
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id,
+            folder_id: CALENDAR_FOLDER_ID,
+            message_class: "IPM.Configuration.Calendar".to_string(),
+            subject: "IPM.Configuration.Calendar".to_string(),
+            properties_json: serde_json::json!({
+                "0x65e00102": {
+                    "type": "binary",
+                    "value": "741f6fd38e1a654f9d422dfb451c8f10a00a52073610"
+                },
+                "0x65e20102": {
+                    "type": "binary",
+                    "value": "8e425120b7a4264a87536c051f77bc300000041e"
+                },
+                "0x65e30102": {
+                    "type": "binary",
+                    "value": "148e425120b7a4264a87536c051f77bc300000041e"
+                },
+                "0x7c060003": {"type": "i32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c2f3e"}
+            }),
+        },
+    ]);
+    let objects = special_sync_objects_for(
+        CALENDAR_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
+    let buffer = associated_content_sync_buffer(account_id, CALENDAR_FOLDER_ID, &objects);
+    let copy_buffer = mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+        CALENDAR_FOLDER_ID,
+        &objects,
+    );
+
+    for transfer in [&buffer, &copy_buffer] {
+        for (tag, value) in [
+            (PID_TAG_SOURCE_KEY, source_key.as_slice()),
+            (PID_TAG_CHANGE_KEY, change_key.as_slice()),
+            (
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                predecessor_change_list.as_slice(),
+            ),
+        ] {
+            let mut encoded = tag.to_le_bytes().to_vec();
+            encoded.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(value);
+            assert!(
+                transfer
+                    .windows(encoded.len())
+                    .any(|window| window == encoded),
+                "missing imported property 0x{tag:08x}"
+            );
+        }
+    }
+}
+
+#[test]
 fn import_rop_success_responses_return_zero_object_ids() {
     let import_change = RopRequest {
         rop_id: 0x72,

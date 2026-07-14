@@ -87,7 +87,7 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
         .join(",");
     let source_keys = objects
         .iter()
-        .map(|object| bytes_to_hex(&mapi_mailstore::source_key_for_store_id(object.item_id)))
+        .map(|object| bytes_to_hex(&mapi_mailstore::special_message_source_key(object)))
         .collect::<Vec<_>>()
         .join(",");
     let canonical_ids = objects
