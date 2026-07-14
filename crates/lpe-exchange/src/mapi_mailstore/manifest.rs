@@ -56,6 +56,24 @@ impl Default for FaiContentSyncDebugContext<'_> {
     }
 }
 
+fn normalized_subject_tag(sync_flags: u16) -> u32 {
+    if sync_flags & SYNC_FLAG_UNICODE != 0 {
+        PID_TAG_NORMALIZED_SUBJECT_W
+    } else {
+        PID_TAG_NORMALIZED_SUBJECT_A
+    }
+}
+
+fn write_normalized_subject_property(buffer: &mut Vec<u8>, property_tag: u32, subject: &str) {
+    // [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.9.1.1: canonical
+    // Unicode strings remain Unicode when the synchronization advertises Unicode.
+    if property_tag == PID_TAG_NORMALIZED_SUBJECT_W {
+        write_utf16_property(buffer, property_tag, subject);
+    } else {
+        write_string8_property(buffer, property_tag, subject);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SpecialMessagePropertyValue {
     Binary(Vec<u8>),
@@ -692,13 +710,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         if subject_in_scope {
             write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
         }
+        let normalized_subject_tag = normalized_subject_tag(sync_flags);
         if content_property_in_scope(
             sync_type,
             sync_flags,
             sync_property_tags,
-            PID_TAG_NORMALIZED_SUBJECT_A,
+            normalized_subject_tag,
         ) {
-            write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
+            write_normalized_subject_property(&mut buffer, normalized_subject_tag, &email.subject);
         }
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
@@ -806,13 +825,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W) {
             write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
         }
+        let normalized_subject_tag = normalized_subject_tag(sync_flags);
         if content_property_in_scope(
             sync_type,
             sync_flags,
             sync_property_tags,
-            PID_TAG_NORMALIZED_SUBJECT_A,
+            normalized_subject_tag,
         ) {
-            write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+            write_normalized_subject_property(&mut buffer, normalized_subject_tag, &object.subject);
         }
         if content_property_in_scope(
             sync_type,

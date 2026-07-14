@@ -1756,6 +1756,55 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
 }
 
 #[test]
+fn content_sync_manifest_unicode_fai_uses_unicode_normalized_subject() {
+    let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999996").unwrap();
+    let item_id = crate::mapi::identity::mapi_store_id(96);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let special = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        item_id,
+        canonical_id,
+        associated: true,
+        subject: "Calendar".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+        message_size: 128,
+        read_state: None,
+        named_properties: Vec::new(),
+    };
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_UNICODE | SYNC_FLAG_FAI,
+        SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+        &[],
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&special),
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&special),
+        &[],
+        &[],
+        1,
+    );
+
+    assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_W, &utf16z("Calendar"));
+    assert_absent_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A);
+    let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+    assert_eq!(summary.fai_items.len(), 1);
+    assert!(summary.fai_items[0]
+        .property_tags
+        .contains(&PID_TAG_NORMALIZED_SUBJECT_W));
+}
+
+#[test]
 fn content_sync_manifest_applies_property_excludes_to_special_objects() {
     let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999998").unwrap();
     let item_id = crate::mapi::identity::mapi_store_id(98);

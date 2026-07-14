@@ -310,6 +310,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     let account_id_debug = principal.account_id.to_string();
     mapi_mailstore::log_fai_content_sync_debug(
         sync_type,
+        sync_flags,
         folder_id,
         principal.account_id,
         &all_special_sync_objects,

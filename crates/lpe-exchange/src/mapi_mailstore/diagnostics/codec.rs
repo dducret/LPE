@@ -348,6 +348,9 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
             PID_TAG_NORMALIZED_SUBJECT_A => {
                 message.subject = decode_debug_string8z(&property.value).unwrap_or_default()
             }
+            PID_TAG_NORMALIZED_SUBJECT_W => {
+                message.subject = decode_debug_utf16z(&property.value).unwrap_or_default()
+            }
             PID_TAG_MESSAGE_CLASS_W => {
                 message.message_class = decode_debug_utf16z(&property.value).unwrap_or_default()
             }
@@ -429,6 +432,8 @@ pub(super) fn content_fai_debug_value_shape_property(tag: u32) -> bool {
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_MESSAGE_CLASS_W
             | PID_TAG_SUBJECT_W
+            | PID_TAG_NORMALIZED_SUBJECT_A
+            | PID_TAG_NORMALIZED_SUBJECT_W
             | PID_TAG_ASSOCIATED
             | PID_TAG_MESSAGE_FLAGS
             | PID_TAG_MESSAGE_SIZE
@@ -837,7 +842,7 @@ pub(super) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_MESSAGE_SIZE => "PidTagMessageSize",
         PID_TAG_MESSAGE_CLASS_W => "PidTagMessageClass",
         PID_TAG_SUBJECT_W => "PidTagSubject",
-        PID_TAG_NORMALIZED_SUBJECT_A => "PidTagNormalizedSubject",
+        PID_TAG_NORMALIZED_SUBJECT_A | PID_TAG_NORMALIZED_SUBJECT_W => "PidTagNormalizedSubject",
         PID_TAG_ENTRY_ID => "PidTagEntryId",
         PID_TAG_RECORD_KEY => "PidTagRecordKey",
         PID_TAG_SEARCH_KEY => "PidTagSearchKey",

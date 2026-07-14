@@ -111,6 +111,56 @@ def empty_log_summary() -> dict:
 
 
 class RcaOutlookTraceSummaryTests(unittest.TestCase):
+    def test_common_views_fai_unicode_string8_subject_is_actionable(self) -> None:
+        summary = empty_log_summary()
+        rca.record_common_views_fai_transfer_summary(
+            summary,
+            {
+                "folder_role": "__mapi_common_views",
+                "sync_flags": "0xa139",
+                "item_count": 12,
+                "persisted_count": 10,
+                "synthetic_count": 2,
+                "virtual_count": 0,
+                "normalized_subject_string8_count": 12,
+                "normalized_subject_unicode_count": 0,
+            },
+        )
+
+        self.assertIn(
+            "common_views_fai_unicode_normalized_subject_string8",
+            rca.actionable_issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+        )
+
+    def test_common_views_fai_unicode_subject_is_not_actionable(self) -> None:
+        summary = empty_log_summary()
+        rca.record_common_views_fai_transfer_summary(
+            summary,
+            {
+                "folder_role": "__mapi_common_views",
+                "sync_flags": "0xa139",
+                "item_count": 12,
+                "persisted_count": 10,
+                "synthetic_count": 2,
+                "virtual_count": 0,
+                "normalized_subject_string8_count": 0,
+                "normalized_subject_unicode_count": 12,
+            },
+        )
+
+        self.assertNotIn(
+            "common_views_fai_unicode_normalized_subject_string8",
+            rca.actionable_issue_buckets(
+                {"nonzero_response_codes": Counter(), "parse_errors": Counter()},
+                summary,
+                None,
+            ),
+        )
+
     def test_associated_findrow_rowset_violation_is_actionable(self) -> None:
         summary = empty_log_summary()
         summary["associated_findrow_rowset_violations"][

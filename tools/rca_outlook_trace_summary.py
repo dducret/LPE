@@ -769,10 +769,13 @@ def record_common_views_fai_transfer_summary(
     if field_text(fields, "folder_role") != "__mapi_common_views":
         return
     key = (
+        f"sync_flags={field_text(fields, 'sync_flags') or '0x0000'};"
         f"items={int_field(fields, 'item_count')};"
         f"persisted={int_field(fields, 'persisted_count')};"
         f"synthetic={int_field(fields, 'synthetic_count')};"
         f"virtual={int_field(fields, 'virtual_count')};"
+        f"normalized_subject_string8={int_field(fields, 'normalized_subject_string8_count')};"
+        f"normalized_subject_unicode={int_field(fields, 'normalized_subject_unicode_count')};"
         f"first={field_text(fields, 'first_item_class')}/{field_text(fields, 'first_item_subject')};"
         f"last={field_text(fields, 'last_item_class')}/{field_text(fields, 'last_item_subject')};"
         f"selection={field_text(fields, 'active_transfer_selection') or 'unknown'}"
@@ -1042,6 +1045,13 @@ def int_field(fields: dict[str, Any], key: str) -> int:
 def int_text_field(text: str, key: str) -> int:
     try:
         return int(first_field(text, key) or "0")
+    except ValueError:
+        return 0
+
+
+def int_auto_text_field(text: str, key: str) -> int:
+    try:
+        return int(first_field(text, key) or "0", 0)
     except ValueError:
         return 0
 
@@ -3807,6 +3817,12 @@ def issue_buckets(
         issues.append("common_views_fai_missing_default_named_view:compact")
     if common_views_fai_missing_default_named_view(log, "sent_to"):
         issues.append("common_views_fai_missing_default_named_view:sent_to")
+    if any(
+        int_auto_text_field(key, "sync_flags") & 0x0001
+        and int_text_field(key, "normalized_subject_string8") > 0
+        for key in log.get("common_views_fai_transfer_summaries", {})
+    ):
+        issues.append("common_views_fai_unicode_normalized_subject_string8")
     if log.get("zero_default_tags"):
         for name, _count in actionable_zero_default_tag_counts(
             log["zero_default_tags"]

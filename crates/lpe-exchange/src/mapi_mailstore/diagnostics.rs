@@ -104,6 +104,7 @@ pub(crate) fn log_hierarchy_transfer_debug(
 
 pub(crate) fn log_fai_content_sync_debug(
     sync_type: u8,
+    sync_flags: u16,
     folder_id: u64,
     mailbox_guid: Uuid,
     special_objects: &[SpecialMessageSyncFact],
@@ -132,6 +133,16 @@ pub(crate) fn log_fai_content_sync_debug(
                 .iter()
                 .map(|item| item.property_tags.len())
                 .sum::<usize>();
+            let normalized_subject_string8_count = summary
+                .fai_items
+                .iter()
+                .filter(|item| item.property_tags.contains(&PID_TAG_NORMALIZED_SUBJECT_A))
+                .count();
+            let normalized_subject_unicode_count = summary
+                .fai_items
+                .iter()
+                .filter(|item| item.property_tags.contains(&PID_TAG_NORMALIZED_SUBJECT_W))
+                .count();
             let persisted_count = summary
                 .fai_items
                 .iter()
@@ -170,6 +181,7 @@ pub(crate) fn log_fai_content_sync_debug(
                 folder_role,
                 folder_container_class = debug_container_class_for_fai_folder(folder_id),
                 sync_type = format_args!("0x{sync_type:02x}"),
+                sync_flags = format_args!("0x{sync_flags:04x}"),
                 checkpoint_kind = %context.checkpoint_kind,
                 item_count,
                 persisted_count,
@@ -177,6 +189,8 @@ pub(crate) fn log_fai_content_sync_debug(
                 virtual_count,
                 total_transfer_bytes = transfer_buffer.len(),
                 total_property_count,
+                normalized_subject_string8_count,
+                normalized_subject_unicode_count,
                 first_item_id = %first_item
                     .and_then(|item| item.item_id)
                     .map(format_u64_hex)

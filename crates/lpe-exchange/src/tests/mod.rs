@@ -7758,6 +7758,7 @@ const FX_END_ATTACH: u32 = 0x400E_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
+const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
@@ -9092,6 +9093,9 @@ fn strict_record_content_body_property(
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
         PID_TAG_NORMALIZED_SUBJECT_A => {
             message.subject = Some(strict_decode_string8z(&property.value)?)
+        }
+        PID_TAG_NORMALIZED_SUBJECT_W => {
+            message.subject = Some(strict_decode_utf16z(&property.value)?)
         }
         PID_TAG_MESSAGE_FLAGS | PID_TAG_FLAG_STATUS => {
             let _ = strict_decode_u32_property(&property)?;
