@@ -2424,7 +2424,7 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
 }
 
 #[test]
-fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
+fn calendar_sort_uses_only_backed_calendar_values() {
     let account_id = Uuid::from_u128(0xbc737006441349b9aefc3cb6e0088492);
     // Keep these identities distinct from the captured Calendar row fixture;
     // the process-wide identity registry is shared by parallel tests.
@@ -2462,7 +2462,7 @@ fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
         recurrence_json: "{}".to_string(),
         recurrence_exceptions_json: "[]".to_string(),
         title: "Zero".to_string(),
-        location: String::new(),
+        location: "Zulu room".to_string(),
         organizer_json: "{}".to_string(),
         attendees: String::new(),
         attendees_json: "[]".to_string(),
@@ -2473,6 +2473,7 @@ fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
     one_minute.id = one_minute_id;
     one_minute.uid = "one-minute".to_string();
     one_minute.title = "One minute".to_string();
+    one_minute.location = "Alpha room".to_string();
     one_minute.duration_minutes = 1;
 
     let rows = [
@@ -2487,7 +2488,7 @@ fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
                 change_number: 1,
                 change_key: mapi_mailstore::change_key_for_change_number(1),
                 predecessor_change_list: mapi_mailstore::predecessor_change_list(1),
-                updated_at: "2026-05-25T14:00:00Z".to_string(),
+                updated_at: "2026-05-25T15:00:00Z".to_string(),
             },
             event: zero_duration,
             attachments: Vec::new(),
@@ -2525,6 +2526,43 @@ fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
     );
     assert_eq!(row_refs[0].event.title, "Zero");
     assert_eq!(row_refs[1].event.title, "One minute");
+
+    for property_tag in [PID_TAG_DISPLAY_NAME_W, 0x3A0D_001F] {
+        let mut row_refs = rows.iter().collect::<Vec<_>>();
+        sort_events(
+            &mut row_refs,
+            &[MapiSortOrder {
+                property_tag,
+                order: 0,
+            }],
+        );
+        assert_eq!(row_refs[0].event.title, "Zero");
+        assert_eq!(row_refs[1].event.title, "One minute");
+    }
+
+    let mut row_refs = rows.iter().collect::<Vec<_>>();
+    sort_events(
+        &mut row_refs,
+        &[MapiSortOrder {
+            property_tag: PID_LID_LOCATION_W_TAG,
+            order: 0,
+        }],
+    );
+    assert_eq!(row_refs[0].event.title, "One minute");
+    assert_eq!(row_refs[1].event.title, "Zero");
+
+    for property_tag in [PID_TAG_LAST_MODIFICATION_TIME, PID_TAG_LOCAL_COMMIT_TIME] {
+        let mut row_refs = rows.iter().collect::<Vec<_>>();
+        sort_events(
+            &mut row_refs,
+            &[MapiSortOrder {
+                property_tag,
+                order: 0,
+            }],
+        );
+        assert_eq!(row_refs[0].event.title, "One minute");
+        assert_eq!(row_refs[1].event.title, "Zero");
+    }
 }
 
 #[test]

@@ -3572,8 +3572,12 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         Some(MapiValue::I64(event_end_filetime(&event) as i64))
     );
     assert_eq!(
-        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_LOCATION_W),
-        Some(MapiValue::String("Room A".to_string()))
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, 0x3A0D_001F),
+        None
+    );
+    assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_DISPLAY_NAME_W),
+        None
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_SENDER_NAME_W),

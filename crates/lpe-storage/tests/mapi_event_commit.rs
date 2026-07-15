@@ -1,4 +1,4 @@
-use std::{env, str::FromStr, sync::OnceLock};
+use std::{env, str::FromStr, sync::OnceLock, time::Duration};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
@@ -393,6 +393,115 @@ async fn mapi_event_commit_persists_one_atomic_version() -> Result<()> {
         .fetch_mapi_event_versions(fixture.account_id, &[fixture.event_id])
         .await?;
     assert_eq!(fetched_versions, vec![version]);
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
+async fn mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock() -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+
+    let first = fixture
+        .storage
+        .commit_mapi_event_update(commit_input(&fixture, "First timestamped version"))
+        .await?;
+    let MapiEventCommitOutcome::Saved(first) = first else {
+        panic!("expected first saved MAPI Event outcome");
+    };
+
+    let mut blocker = fixture.storage.pool().begin().await?;
+    let blocker_pid = sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
+        .fetch_one(&mut *blocker)
+        .await?;
+    sqlx::query("SELECT id FROM calendar_events WHERE id = $1 FOR UPDATE")
+        .bind(fixture.event_id)
+        .fetch_one(&mut *blocker)
+        .await?;
+
+    let mut second_input = commit_input(&fixture, "Version saved after the row lock");
+    second_input.expected_modseq = first.version.canonical_modseq;
+    let waiting_storage = fixture.storage.clone();
+    let waiting_commit =
+        tokio::spawn(async move { waiting_storage.commit_mapi_event_update(second_input).await });
+
+    let waiting_transaction_started_at = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let started_at = sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT to_char(
+                    activity.xact_start AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                )
+                FROM pg_stat_activity activity
+                WHERE $1 = ANY(pg_blocking_pids(activity.pid))
+                  AND activity.wait_event_type = 'Lock'
+                  AND activity.query LIKE '%FOR UPDATE OF event%'
+                ORDER BY activity.xact_start
+                LIMIT 1
+                "#,
+            )
+            .bind(blocker_pid)
+            .fetch_optional(fixture.storage.pool())
+            .await?;
+            if let Some(started_at) = started_at {
+                return Ok::<_, sqlx::Error>(started_at);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .context("second MAPI Event commit did not wait for the row lock")??;
+
+    let concurrent_updated_at = sqlx::query_scalar::<_, String>(
+        r#"
+        UPDATE calendar_events
+        SET updated_at = clock_timestamp()
+        WHERE id = $1
+        RETURNING to_char(
+            updated_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        )
+        "#,
+    )
+    .bind(fixture.event_id)
+    .fetch_one(&mut *blocker)
+    .await?;
+    assert!(
+        waiting_transaction_started_at < concurrent_updated_at,
+        "the regression requires the waiting transaction to predate the concurrent timestamp"
+    );
+    blocker.commit().await?;
+
+    let second = tokio::time::timeout(Duration::from_secs(5), waiting_commit)
+        .await
+        .context("waiting MAPI Event commit did not finish after releasing the row lock")??;
+    let MapiEventCommitOutcome::Saved(second) = second? else {
+        panic!("expected second saved MAPI Event outcome");
+    };
+    assert_eq!(second.version.canonical_modseq, 9);
+    assert!(first.version.updated_at < concurrent_updated_at);
+    assert!(
+        concurrent_updated_at < second.version.updated_at,
+        "[MS-OXCMSG] section 3.2.5.3 save version timestamps must remain monotone"
+    );
+
+    let persisted_updated_at = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT to_char(
+            updated_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        )
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(persisted_updated_at, second.version.updated_at);
 
     fixture.cleanup().await
 }

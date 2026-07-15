@@ -396,7 +396,6 @@ pub(in crate::mapi) const PID_TAG_PERSONAL_HOME_PAGE_W: u32 = 0x3A50_001F;
 pub(in crate::mapi) const PID_TAG_BUSINESS_HOME_PAGE_W: u32 = 0x3A51_001F;
 pub(in crate::mapi) const PID_TAG_START_DATE: u32 = 0x0060_0040;
 pub(in crate::mapi) const PID_TAG_END_DATE: u32 = 0x0061_0040;
-pub(in crate::mapi) const PID_TAG_LOCATION_W: u32 = 0x3FFB_001F;
 pub(crate) const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
 pub(crate) const DYNAMIC_NAMED_PROPERTY_ID_START: u16 = 0x9000;
 pub(crate) const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;

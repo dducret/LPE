@@ -78,7 +78,7 @@ where
         mapi_object_debug_folder_id(set_properties_object.as_ref()),
         format_debug_property_tags(&set_properties_probe.property_tags)
     ));
-    let values = match request.property_values() {
+    let requested_values = match request.property_values() {
         Ok(values) => values,
         Err(_) => {
             let response =
@@ -96,10 +96,15 @@ where
             responses.extend_from_slice(&response);
             return PropertyMutationFlow::StopBatch;
         }
-    }
-    .into_iter()
-    .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
-    .collect::<Vec<_>>();
+    };
+    let requested_property_tags = requested_values
+        .iter()
+        .map(|(tag, _)| *tag)
+        .collect::<Vec<_>>();
+    let values = requested_values
+        .into_iter()
+        .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
+        .collect::<Vec<_>>();
     let mut event_property_problems = Vec::new();
     let set_result = if let Some(result) = stage_virtual_conversation_action_property_values(
         session,
@@ -117,6 +122,16 @@ where
             Some(MapiObject::Event { .. }) => {
                 stage_event_property_values(session, handle_slots, request, snapshot, values)
                     .map(|problems| event_property_problems = problems)
+            }
+            Some(MapiObject::PendingEvent { .. }) => {
+                stage_pending_event_property_values(
+                    session,
+                    handle_slots,
+                    request,
+                    principal,
+                    values,
+                )
+                .map(|problems| event_property_problems = problems)
             }
             Some(MapiObject::AssociatedConfig {
                 folder_id,
@@ -230,6 +245,10 @@ where
     };
     match set_result {
         Ok(()) => {
+            restore_requested_property_problem_tags(
+                &requested_property_tags,
+                &mut event_property_problems,
+            );
             // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.5: valid properties in
             // a mixed request succeed while invalid properties are reported.
             let response = if event_property_problems.is_empty() {
@@ -296,8 +315,10 @@ pub(super) async fn append_delete_properties_response<S>(
 ) where
     S: ExchangeStore,
 {
-    let property_tags = request
-        .property_tags()
+    let requested_property_tags = request.property_tags();
+    let property_tags = requested_property_tags
+        .iter()
+        .copied()
         .into_iter()
         .map(|tag| session.normalize_named_property_tag(tag))
         .collect::<Vec<_>>();
@@ -429,6 +450,10 @@ pub(super) async fn append_delete_properties_response<S>(
     };
     match delete_result {
         Ok(()) => {
+            restore_requested_property_problem_tags(
+                &requested_property_tags,
+                &mut event_property_problems,
+            );
             let response = if event_property_problems.is_empty() {
                 rop_delete_properties_response(request)
             } else {
@@ -441,6 +466,17 @@ pub(super) async fn append_delete_properties_response<S>(
             request.response_handle_index(),
             0x8004_0102,
         )),
+    }
+}
+
+fn restore_requested_property_problem_tags(
+    requested_tags: &[u32],
+    problems: &mut [(usize, u32, u32)],
+) {
+    for (index, tag, _) in problems {
+        if let Some(requested_tag) = requested_tags.get(*index) {
+            *tag = *requested_tag;
+        }
     }
 }
 

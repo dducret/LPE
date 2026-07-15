@@ -265,19 +265,21 @@ pub(in crate::mapi) fn sort_events(
     rows.sort_by(|left, right| {
         for sort_order in sort_orders {
             let ordering = match sort_order.property_tag {
-                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                     compare_case_insensitive(&left.event.title, &right.event.title)
                 }
-                PID_TAG_LOCATION_W | PID_LID_LOCATION_W_TAG => {
+                PID_LID_LOCATION_W_TAG => {
                     compare_case_insensitive(&left.event.location, &right.event.location)
                 }
                 PID_TAG_START_DATE
                 | PID_LID_COMMON_START_TAG
                 | PID_LID_APPOINTMENT_START_WHOLE_TAG
-                | PID_TAG_MESSAGE_DELIVERY_TIME
-                | PID_TAG_LAST_MODIFICATION_TIME => {
+                | PID_TAG_MESSAGE_DELIVERY_TIME => {
                     (left.event.date.as_str(), left.event.time.as_str())
                         .cmp(&(right.event.date.as_str(), right.event.time.as_str()))
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                    left.version.updated_at.cmp(&right.version.updated_at)
                 }
                 PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
                     event_end_filetime(&left.event).cmp(&event_end_filetime(&right.event))

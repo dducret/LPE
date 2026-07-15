@@ -584,6 +584,21 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
                     if bytes == &mapi_mailstore::predecessor_change_list(124)
             )
     }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_LOCAL_COMMIT_TIME
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::I64(filetime)
+                    if *filetime
+                        == mapi_mailstore::filetime_from_rfc3339_utc(
+                            "2026-05-25T14:00:00Z"
+                        ) as i64
+            )
+    }));
+    assert!(!sync
+        .named_properties
+        .iter()
+        .any(|(tag, _)| *tag == 0x3A0D_001F));
     assert_eq!(
         sync.last_modified_filetime,
         mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:00:00Z")

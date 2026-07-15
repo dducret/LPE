@@ -147,7 +147,7 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_reports_only_nondeletable_property(
+async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields(
 ) {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-4171-8171-717171717171").unwrap();
@@ -233,9 +233,9 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_r
     let body = response_bytes(response).await;
     let (_, handles) = response_rops_and_handles_from_execute_body(&body);
 
-    // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.5: deletable custom and
-    // client-owned canonical fields are staged while the required Subject is
-    // returned as the sole PropertyProblem.
+    // [MS-OXCPRPT] section 3.2.5.5 and [MS-OXCICAL] section 2.1.3.1.1.20.24:
+    // deletable custom and client-owned canonical fields are staged, including
+    // an absent Subject which the canonical calendar represents as an empty title.
     let mut delete_rops = Vec::new();
     append_rop_delete_properties(
         &mut delete_rops,
@@ -257,21 +257,20 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_r
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    let mut expected_problem = vec![0x0B, 0x02, 0, 0, 0, 0, 1, 0];
-    expected_problem.extend_from_slice(&3u16.to_le_bytes());
-    expected_problem.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
-    expected_problem.extend_from_slice(&0x8004_0102u32.to_le_bytes());
-    assert!(contains_bytes(&response_rops, &expected_problem));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0B, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
     assert!(
         response_rops
             .windows(4)
             .filter(|window| *window == &0x8004_010Fu32.to_le_bytes())
             .count()
-            >= 2
+            >= 3
     );
     assert!(!contains_bytes(&response_rops, &utf16z("Room to clear")));
     assert!(!contains_bytes(&response_rops, &utf16z("Body to clear")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("Mixed delete remains canonical")
     ));
@@ -296,7 +295,7 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_r
         save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
     assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
     let stored = events.lock().unwrap();
-    assert_eq!(stored[0].title, "Mixed delete remains canonical");
+    assert!(stored[0].title.is_empty());
     assert!(stored[0].location.is_empty());
     assert!(stored[0].notes.is_empty());
     drop(stored);
@@ -311,6 +310,268 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_r
         .unwrap()
         .is_empty());
     assert_eq!(event_versions.lock().unwrap()[&event_id], 4);
+
+    let mut reopen_rops = Vec::new();
+    append_rop_open_message_with_flags(
+        &mut reopen_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+        0x01,
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&reopen_rops, &handles)),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (_, alias_handles) = response_rops_and_handles_from_execute_body(&body);
+
+    let mut alias_value = Vec::new();
+    append_mapi_utf16_property(&mut alias_value, 0x8208_001F, "Alias restored room");
+    let mut alias_rops = Vec::new();
+    append_rop_delete_properties(&mut alias_rops, 2, &[0x8208_001F]);
+    append_rop_set_properties(&mut alias_rops, 2, 1, &alias_value);
+    append_rop_get_properties_specific(
+        &mut alias_rops,
+        2,
+        &[0x8208_001F],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&alias_rops, &alias_handles)),
+        )
+        .await
+        .unwrap();
+    let alias_response = response_rops_from_execute_response(response).await;
+    let alias_utf16 = utf16z("Alias restored room");
+    assert!(
+        alias_response
+            .windows(alias_utf16.len())
+            .filter(|window| *window == &alias_utf16)
+            .count()
+            >= 1
+    );
+    let save_response =
+        save_staged_calendar_event(&service, &mut execute_headers, &alias_handles).await;
+    assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].location, "Alias restored room");
+    assert_eq!(event_versions.lock().unwrap()[&event_id], 5);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_hiding_reminder() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
+    let events = Arc::new(Mutex::new(vec![AccessibleEvent {
+        id: event_id,
+        uid: event_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-07-15".to_string(),
+        time: "14:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Reminder remains coherent".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "{}".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }]));
+    let event_versions = Arc::new(Mutex::new(HashMap::from([(event_id, 2)])));
+    let store = FakeStore {
+        session: Some(account),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events,
+        event_versions: event_versions.clone(),
+        reminders: Arc::new(Mutex::new(vec![ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: event_id,
+            occurrence_start_at: None,
+            title: "Reminder remains coherent".to_string(),
+            due_at: Some("2026-07-15T14:00:00Z".to_string()),
+            reminder_at: "2026-07-15T13:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "pending".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message_with_flags(
+        &mut open_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+        0x01,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (_, handles) = response_rops_and_handles_from_execute_body(&body);
+
+    let reminder_tags = [0x8503_000B, 0x8501_0003, 0x8502_0040, 0x8560_0040];
+    let mut delete_rops = Vec::new();
+    append_rop_delete_properties(&mut delete_rops, 2, &[0x8501_0003]);
+    append_rop_get_properties_specific(&mut delete_rops, 2, &reminder_tags);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &handles)),
+        )
+        .await
+        .unwrap();
+    let delete_response = response_rops_from_execute_response(response).await;
+    let mut expected_problem = vec![0x0B, 0x02, 0, 0, 0, 0, 1, 0, 0, 0];
+    expected_problem.extend_from_slice(&0x8501_0003u32.to_le_bytes());
+    expected_problem.extend_from_slice(&0x8004_0102u32.to_le_bytes());
+    assert!(
+        contains_bytes(&delete_response, &expected_problem),
+        "reminder delta Delete response: {delete_response:02x?}"
+    );
+    assert!(contains_bytes(&delete_response, &15i32.to_le_bytes()));
+    assert!(contains_bytes(
+        &delete_response,
+        &test_filetime("2026-07-15", "13:45").to_le_bytes()
+    ));
+
+    let save_response =
+        save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
+    assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert_eq!(event_versions.lock().unwrap()[&event_id], 3);
+
+    let mut reopen_rops = Vec::new();
+    append_rop_open_message_with_flags(
+        &mut reopen_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+        0x01,
+    );
+    append_rop_get_properties_specific(&mut reopen_rops, 2, &reminder_tags);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&reopen_rops, &handles)),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (reopen_response, disable_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&reopen_response, &15i32.to_le_bytes()));
+    assert!(contains_bytes(
+        &reopen_response,
+        &test_filetime("2026-07-15", "13:45").to_le_bytes()
+    ));
+
+    let mut disable_value = Vec::new();
+    append_mapi_bool_property(&mut disable_value, 0x8503_000B, false);
+    let mut disable_rops = Vec::new();
+    append_rop_set_properties(&mut disable_rops, 2, 1, &disable_value);
+    append_rop_delete_properties(
+        &mut disable_rops,
+        2,
+        &[0x8501_0003, 0x8502_0040, 0x8560_0040],
+    );
+    append_rop_get_properties_specific(&mut disable_rops, 2, &reminder_tags);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&disable_rops, &disable_handles)),
+        )
+        .await
+        .unwrap();
+    let disable_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &disable_response,
+        &[0x0B, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(
+        disable_response
+            .windows(4)
+            .filter(|window| *window == &0x8004_010Fu32.to_le_bytes())
+            .count()
+            >= 3
+    );
+    let save_response =
+        save_staged_calendar_event(&service, &mut execute_headers, &disable_handles).await;
+    assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
+
+    let mut absent_rops = Vec::new();
+    append_rop_open_message_with_flags(
+        &mut absent_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+        0x01,
+    );
+    append_rop_delete_properties(&mut absent_rops, 2, &[0x8503_000B]);
+    append_rop_delete_properties(
+        &mut absent_rops,
+        2,
+        &[0x8501_0003, 0x8502_0040, 0x8560_0040],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&absent_rops, &disable_handles)),
+        )
+        .await
+        .unwrap();
+    let absent_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &absent_response,
+        &[0x0B, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
 }
 
 #[tokio::test]
@@ -697,9 +958,9 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
         0x0061_0040,
         test_filetime("2026-07-15", "08:00"),
     );
-    append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 1");
+    append_mapi_utf16_property(&mut property_values, 0x8208_001F, "Room 1");
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Agenda");
-    append_mapi_utf16_property(&mut property_values, 0x1013_001F, "<p>Agenda</p>");
+    append_mapi_binary_property(&mut property_values, 0x1013_0102, b"<p>Agenda</p>");
     append_mapi_i32_property(&mut property_values, 0x8205_0003, 1);
     append_mapi_bool_property(&mut property_values, 0x8215_000B, false);
     let reminder_at = "2026-07-15T07:15:00Z";
@@ -718,7 +979,7 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     // remain readable when RopSaveChangesMessage keeps the message open; see
     // [MS-OXCMSG] sections 2.2.3.3.1-2 and [MS-OXCROPS] section 2.2.8.3.2.
     append_rop_save_changes_message_with_flags(&mut rops, 2, 1, 0x0A);
-    append_rop_get_properties_specific(&mut rops, 1, &[0x65E2_0102]);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x65E2_0102, 0x6709_0040]);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie.clone());
     let response = service
@@ -742,6 +1003,16 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     let mut value_offset = row_offset + 1;
     let change_key = read_rop_binary_u16(&response_rops, &mut value_offset)
         .expect("post-save PidTagChangeKey must be a PtypBinary value");
+    let created_local_commit_time =
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:00Z");
+    assert_eq!(
+        u64::from_le_bytes(
+            response_rops[value_offset..value_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        created_local_commit_time
+    );
     let canonical_event_id = {
         let stored = events.lock().unwrap();
         assert_eq!(stored.len(), 1);
@@ -789,16 +1060,33 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     ] {
         append_mapi_i64_property(&mut updated_values, tag, value);
     }
+    let forged_server_time = test_filetime("2039-01-01", "00:00");
+    append_mapi_i64_property(&mut updated_values, 0x3008_0040, forged_server_time);
+    append_mapi_i64_property(&mut updated_values, 0x6709_0040, forged_server_time);
+    append_mapi_binary_property(&mut updated_values, 0x65E2_0102, b"forged-change-key");
+    append_mapi_binary_property(&mut updated_values, 0x65E3_0102, b"forged-pcl");
+    append_mapi_i64_property(&mut updated_values, 0x67A4_0014, 99);
     let mut update_rops = Vec::new();
-    append_rop_set_properties(&mut update_rops, 0, 10, &updated_values);
+    append_rop_set_properties(&mut update_rops, 0, 15, &updated_values);
     update_rops.extend_from_slice(&[0x7A, 0x00, 0x00]); // RopDeletePropertiesNoReplicate.
     update_rops.extend_from_slice(&1u16.to_le_bytes());
     // PidTagReplyRecipientEntries.
     update_rops.extend_from_slice(&0x004F_0102u32.to_le_bytes());
+    append_rop_delete_properties(
+        &mut update_rops,
+        0,
+        &[
+            0x3008_0040,
+            0x6709_0040,
+            0x65E2_0102,
+            0x65E3_0102,
+            0x67A4_0014,
+        ],
+    );
     // [MS-OXCMSG] sections 2.2.3.3.1-2: the first 0x0A save kept the
     // Message object open read/write, so Outlook can mutate and save it again.
     append_rop_save_changes_message_with_flags(&mut update_rops, 1, 0, 0x0A);
-    append_rop_get_properties_specific(&mut update_rops, 0, &[0x65E2_0102]);
+    append_rop_get_properties_specific(&mut update_rops, 0, &[0x65E2_0102, 0x6709_0040]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -820,14 +1108,42 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
         String::from_utf8_lossy(&response_body)
     );
     let (update_response_rops, _) = response_rops_and_handles_from_execute_body(&response_body);
-    assert!(
-        contains_bytes(&update_response_rops, &[0x0A, 0x00, 0, 0, 0, 0, 0, 0]),
-        "retained event SetProperties failed: {update_response_rops:02x?}"
-    );
+    let mut expected_set_problems = vec![0x0A, 0x00, 0, 0, 0, 0, 5, 0];
+    for (index, tag) in [
+        (10u16, 0x3008_0040u32),
+        (11, 0x6709_0040),
+        (12, 0x65E2_0102),
+        (13, 0x65E3_0102),
+        (14, 0x67A4_0014),
+    ] {
+        expected_set_problems.extend_from_slice(&index.to_le_bytes());
+        expected_set_problems.extend_from_slice(&tag.to_le_bytes());
+        expected_set_problems.extend_from_slice(&0x8004_0102u32.to_le_bytes());
+    }
+    assert!(contains_bytes(
+        &update_response_rops,
+        &expected_set_problems
+    ));
     assert!(
         contains_bytes(&update_response_rops, &[0x7A, 0x00, 0, 0, 0, 0, 0, 0]),
         "retained event DeletePropertiesNoReplicate failed: {update_response_rops:02x?}"
     );
+    let mut expected_delete_problems = vec![0x0B, 0x00, 0, 0, 0, 0, 5, 0];
+    for (index, tag) in [
+        (0u16, 0x3008_0040u32),
+        (1, 0x6709_0040),
+        (2, 0x65E2_0102),
+        (3, 0x65E3_0102),
+        (4, 0x67A4_0014),
+    ] {
+        expected_delete_problems.extend_from_slice(&index.to_le_bytes());
+        expected_delete_problems.extend_from_slice(&tag.to_le_bytes());
+        expected_delete_problems.extend_from_slice(&0x8004_0102u32.to_le_bytes());
+    }
+    assert!(contains_bytes(
+        &update_response_rops,
+        &expected_delete_problems
+    ));
     assert!(
         contains_bytes(&update_response_rops, &[0x0C, 0x01, 0, 0, 0, 0]),
         "retained event second SaveChangesMessage failed: {update_response_rops:02x?}"
@@ -837,6 +1153,14 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     let mut value_offset = row_offset + 1;
     let second_save_change_key = read_rop_binary_u16(&update_response_rops, &mut value_offset)
         .expect("second-save PidTagChangeKey must be a PtypBinary value");
+    assert_eq!(
+        u64::from_le_bytes(
+            update_response_rops[value_offset..value_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:15:00Z")
+    );
     assert_eq!(second_save_change_key.len(), 22);
     assert_ne!(
         second_save_change_key, change_key,
@@ -873,6 +1197,35 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
         clip_property_tags,
         vec![0x8235_0040, 0x8236_0040, 0x8501_0003]
     );
+    drop(stored_reminders);
+    drop(stored);
+
+    let mut reopen_rops = Vec::new();
+    append_rop_open_message(
+        &mut reopen_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        event_id,
+    );
+    append_rop_get_properties_specific(&mut reopen_rops, 2, &[0x6709_0040]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reopen_rops,
+                &[response_handles[1], response_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let reopen_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &reopen_response,
+        &mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:15:00Z").to_le_bytes()
+    ));
 }
 
 #[tokio::test]
@@ -1723,10 +2076,36 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         "initial event version",
     );
 
+    let mut second_values = Vec::new();
+    append_mapi_utf16_property(&mut second_values, 0x0E1D_001F, "B normalized loses");
+    append_mapi_utf16_property(&mut second_values, 0x0037_001F, "Staged by handle B");
+    append_mapi_utf16_property(&mut second_values, 0x8208_001F, "Room B");
+    let mut stage_second_rops = Vec::new();
+    append_rop_set_properties(&mut stage_second_rops, 3, 3, &second_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &stage_second_rops,
+                &[1, folder_handle, first_event_handle, second_event_handle],
+            )),
+        )
+        .await
+        .unwrap();
+    let stage_second_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &stage_second_response,
+        &[0x0A, 0x03, 0, 0, 0, 0, 0, 0]
+    ));
+    assert_eq!(events.lock().unwrap()[0].title, "Concurrent calendar baseline");
+
     let mut first_values = Vec::new();
     append_mapi_utf16_property(&mut first_values, 0x0037_001F, "Committed by handle A");
+    append_mapi_utf16_property(&mut first_values, 0x0E1D_001F, "A normalized loses");
     let mut first_save_rops = Vec::new();
-    append_rop_set_properties(&mut first_save_rops, 2, 1, &first_values);
+    append_rop_set_properties(&mut first_save_rops, 2, 2, &first_values);
     // [MS-OXCMSG] sections 2.2.3.3.1 and 3.2.5.3: KeepOpenReadWrite
     // commits A while retaining the transaction handle for post-save properties.
     append_rop_save_changes_message_with_flags(&mut first_save_rops, 1, 2, 0x02);
@@ -1763,6 +2142,11 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
 
     let mut stale_save_rops = Vec::new();
     append_rop_save_changes_message_with_flags(&mut stale_save_rops, 1, 3, 0x02);
+    append_rop_get_properties_specific(
+        &mut stale_save_rops,
+        3,
+        &[0x0037_001F, 0x8208_001F],
+    );
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -1781,6 +2165,11 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         contains_bytes(&stale_response_rops, &[0x0C, 0x01, 0x09, 0x01, 0x04, 0x80]),
         "stale handle B must receive ecObjectModified: {stale_response_rops:02x?}"
     );
+    assert!(contains_bytes(
+        &stale_response_rops,
+        &utf16z("Staged by handle B")
+    ));
+    assert!(contains_bytes(&stale_response_rops, &utf16z("Room B")));
     assert_eq!(
         events.lock().unwrap()[0].title,
         "Committed by handle A",
@@ -1793,8 +2182,7 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
     );
 
     let mut force_save_rops = Vec::new();
-    // ForceSave suppresses ecObjectModified even without staged property changes and
-    // establishes a new version without rewriting the canonical Event fields
+    // ForceSave suppresses ecObjectModified and commits the still-staged B values
     // ([MS-OXCMSG] sections 2.2.3.3.1 and 3.2.5.3).
     append_rop_save_changes_message_with_flags(&mut force_save_rops, 1, 3, 0x04);
     append_rop_get_properties_specific(&mut force_save_rops, 3, &[0x65E2_0102]);
@@ -1827,15 +2215,20 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
     );
     assert_eq!(
         events.lock().unwrap()[0].title,
-        "Committed by handle A",
-        "a no-op ForceSave must not rewrite canonical Event fields"
+        "Staged by handle B",
+        "ForceSave must commit the stale handle's retained transaction"
     );
+    assert_eq!(events.lock().unwrap()[0].location, "Room B");
     assert!(event_versions.lock().unwrap()[&event_id] > first_modseq);
 
-    let mut second_values = Vec::new();
-    append_mapi_utf16_property(&mut second_values, 0x0037_001F, "Saved after forced rebase");
+    let mut post_force_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut post_force_values,
+        0x0037_001F,
+        "Saved after forced rebase",
+    );
     let mut post_force_save_rops = Vec::new();
-    append_rop_set_properties(&mut post_force_save_rops, 3, 1, &second_values);
+    append_rop_set_properties(&mut post_force_save_rops, 3, 1, &post_force_values);
     append_rop_save_changes_message_with_flags(&mut post_force_save_rops, 1, 3, 0x02);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -1855,6 +2248,7 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         "handle B save after ForceSave failed: {post_force_response_rops:02x?}"
     );
     assert_eq!(events.lock().unwrap()[0].title, "Saved after forced rebase");
+    assert_eq!(events.lock().unwrap()[0].location, "Room B");
 }
 
 #[tokio::test]
@@ -2502,19 +2896,46 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
+    // [MS-OXCPRPT] section 3.2.5.10 and [MS-OXOCAL] section 2.2.1.4:
+    // PidLidLocation is a named property in PSETID_Appointment, so the client
+    // writes the mailbox-assigned property ID returned by RopGetPropertyIdsFromNames.
+    let appointment_guid = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut named_rops = vec![0x56, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00];
+    named_rops.extend_from_slice(&appointment_guid);
+    named_rops.extend_from_slice(&0x8208u32.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(&response_rops[..8], &[0x56, 0x00, 0, 0, 0, 0, 1, 0]);
+    let location_property_id = u16::from_le_bytes(response_rops[8..10].try_into().unwrap());
+    assert!(location_property_id >= crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START);
+    let location_tag = (u32::from(location_property_id) << 16) | 0x001F;
+    renew_mapi_request_id(&mut execute_headers);
+
     let mut update_values = Vec::new();
     append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated implicit calendar");
-    append_mapi_utf16_property(&mut update_values, 0x3FFB_001F, "Room 2");
+    append_mapi_utf16_property(&mut update_values, location_tag, "Room 2");
     let mut update_rops = Vec::new();
     append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_open_message(
+    append_rop_open_message_with_flags(
         &mut update_rops,
         1,
         2,
         test_mapi_folder_id(16),
         test_mapi_uuid_id(&event_id),
+        0x01,
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    append_rop_save_changes_message(&mut update_rops, 2, 2);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -2560,7 +2981,7 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_event() {
+async fn mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
@@ -2598,6 +3019,11 @@ async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_eve
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
     append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[0x0037_001F, 0x0060_0040, 0x8216_0102],
+    );
     append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie);
@@ -2611,11 +3037,27 @@ async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_eve
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
+    // [MS-OXCPRPT] section 3.2.5.4: Set succeeds, reports only the malformed
+    // recurrence at its exact request index/tag, and retains the valid values.
+    let mut expected_problem = vec![0x0A, 0x01, 0, 0, 0, 0, 1, 0];
+    expected_problem.extend_from_slice(&2u16.to_le_bytes());
+    expected_problem.extend_from_slice(&0x8216_0102u32.to_le_bytes());
+    expected_problem.extend_from_slice(&0x8004_0102u32.to_le_bytes());
+    assert!(
+        contains_bytes(&response_rops, &expected_problem),
+        "PendingEvent mixed Set response: {response_rops:02x?}"
+    );
+    assert!(contains_bytes(&response_rops, &utf16z("Rejected recurrence")));
     assert!(contains_bytes(
         &response_rops,
-        &0x8004_0102u32.to_le_bytes()
+        &test_filetime("2026-05-04", "09:30").to_le_bytes()
     ));
-    assert!(events.lock().unwrap().is_empty());
+    assert!(!contains_bytes(&response_rops, &[1, 2, 3]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].title, "Rejected recurrence");
+    assert!(stored[0].recurrence_rule.is_empty());
 }
 
 #[tokio::test]
@@ -5501,7 +5943,7 @@ async fn mapi_over_http_advertised_calendar_open_message_projects_default_collec
         &[
             0x001A_001F,
             0x0037_001F,
-            0x3FFB_001F,
+            0x8208_001F,
             0x1000_001F,
             0x1013_001F,
             0x0C1F_001F,
@@ -5972,7 +6414,7 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
         0x8217_0003u32, // PidLidAppointmentStateFlags
         0x8001_0102u32, // PidLidGlobalObjectId
         0x8002_0102u32, // PidLidCleanGlobalObjectId
-        0x3FFB_001Fu32, // PidTagLocation
+        0x8208_001Fu32, // PidLidLocation
         0x0E1B_000Bu32, // PidTagHasAttachments
     ];
     rops.extend_from_slice(&(columns.len() as u16).to_le_bytes());
@@ -6160,7 +6602,7 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
         0x0061_0040,
         test_filetime("2026-06-06", "15:30"),
     );
-    append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 700");
+    append_mapi_utf16_property(&mut property_values, 0x8208_001F, "Room 700");
     append_mapi_binary_property(
         &mut property_values,
         time_zone_definition_tag,
@@ -6289,7 +6731,7 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
         0x0061_0040,
         test_filetime("2026-06-07", "11:00"),
     );
-    append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 702");
+    append_mapi_utf16_property(&mut property_values, 0x8208_001F, "Room 702");
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "After update");
 
     let mut rops = Vec::new();

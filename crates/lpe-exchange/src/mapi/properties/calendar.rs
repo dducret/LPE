@@ -76,23 +76,20 @@ fn event_property_value_with_optional_version(
         PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_MID | PID_TAG_INST_ID => Some(MapiValue::U64(item_id)),
         PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(event.title.clone()))
         }
         PID_TAG_BODY_W => Some(MapiValue::String(event.notes.clone())),
         PID_TAG_START_DATE
         | PID_LID_COMMON_START_TAG
         | PID_LID_APPOINTMENT_START_WHOLE_TAG
-        | PID_TAG_MESSAGE_DELIVERY_TIME
-        | PID_TAG_LAST_MODIFICATION_TIME => {
+        | PID_TAG_MESSAGE_DELIVERY_TIME => {
             Some(MapiValue::I64(event_start_filetime(event) as i64))
         }
         PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
             Some(MapiValue::I64(event_end_filetime(event) as i64))
         }
-        PID_TAG_LOCATION_W | PID_LID_LOCATION_W_TAG => {
-            Some(MapiValue::String(event.location.clone()))
-        }
+        PID_LID_LOCATION_W_TAG => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
@@ -617,18 +614,17 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .as_ref()
             .map(|recurrence| recurrence.recurrence_exceptions_json.clone())
             .unwrap_or_else(|| existing.recurrence_exceptions_json.clone()),
-        title: optional_pending_text_property(
+        title: clearable_pending_text_property(
             properties,
             &[
                 PID_TAG_SUBJECT_W,
                 PID_TAG_NORMALIZED_SUBJECT_W,
-                PID_TAG_DISPLAY_NAME_W,
             ],
-        )
-        .unwrap_or_else(|| existing.title.clone()),
+            &existing.title,
+        ),
         location: clearable_pending_text_property(
             properties,
-            &[PID_TAG_LOCATION_W, PID_LID_LOCATION_W_TAG],
+            &[PID_LID_LOCATION_W_TAG],
             &existing.location,
         ),
         organizer_json: participants.organizer_json,

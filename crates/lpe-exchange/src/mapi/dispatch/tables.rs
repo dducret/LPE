@@ -1002,13 +1002,12 @@ fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_TAG_ENTRY_ID
             | PID_TAG_INSTANCE_KEY
             | PID_TAG_NORMALIZED_SUBJECT_W
-            | PID_TAG_DISPLAY_NAME_W
             | PID_TAG_BODY_W
             | PID_TAG_START_DATE
             | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_END_DATE
-            | PID_TAG_LOCATION_W
             | PID_TAG_ACCESS
             | PID_TAG_HAS_ATTACHMENTS
             | PID_TAG_MESSAGE_SIZE

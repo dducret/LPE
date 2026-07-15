@@ -334,7 +334,7 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
         PID_TAG_BODY_W,
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
-        PID_TAG_LOCATION_W,
+        PID_LID_LOCATION_W_TAG,
         PID_TAG_MESSAGE_CLASS_W,
         PID_LID_REMINDER_SET_TAG,
         PID_LID_REMINDER_DELTA_TAG,
@@ -351,6 +351,8 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
     ]
 }
 

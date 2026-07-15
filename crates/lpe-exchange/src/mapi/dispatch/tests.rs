@@ -2237,6 +2237,8 @@ fn calendar_event_column_support_covers_observed_outlook_view_probe_columns() {
         PID_TAG_SUBJECT_W,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_STATUS,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
         PID_LID_OUTLOOK_COMMON_8578_TAG,
         PID_LID_SIDE_EFFECTS_TAG,
         PID_LID_COMMON_START_TAG,
@@ -2246,9 +2248,16 @@ fn calendar_event_column_support_covers_observed_outlook_view_probe_columns() {
     ]);
 
     assert!(summary.contains(
-        "backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x85780003,0x85100003,0x85160040,0x85170040,0x8208001f,0x82050003"
+        "backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x0037001f,0x0e070003,0x0e170003,0x30080040,0x67090040,0x85780003,0x85100003,0x85160040,0x85170040,0x8208001f,0x82050003"
     ));
     assert!(summary.ends_with("defaulted=;named_or_dynamic="));
+
+    let unsupported_aliases =
+        calendar_event_table_column_support_summary(&[PID_TAG_DISPLAY_NAME_W, 0x3A0D_001F]);
+    assert_eq!(
+        unsupported_aliases,
+        "backed=;defaulted=0x3001001f,0x3a0d001f;named_or_dynamic="
+    );
 }
 
 #[test]

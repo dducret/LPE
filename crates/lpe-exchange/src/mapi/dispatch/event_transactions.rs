@@ -1,6 +1,28 @@
 use super::*;
 use anyhow::bail;
 
+const EVENT_SUBJECT_ALIASES: &[u32] = &[
+    PID_TAG_SUBJECT_W,
+    PID_TAG_NORMALIZED_SUBJECT_W,
+];
+const EVENT_LOCATION_ALIASES: &[u32] = &[PID_LID_LOCATION_W_TAG];
+const EVENT_HTML_ALIASES: &[u32] = &[PID_TAG_BODY_HTML_W, PID_TAG_HTML_BINARY];
+const EVENT_TEMPORAL_PROPERTIES: &[u32] = &[
+    PID_TAG_START_DATE,
+    PID_TAG_END_DATE,
+    PID_LID_COMMON_START_TAG,
+    PID_LID_COMMON_END_TAG,
+    PID_LID_APPOINTMENT_START_WHOLE_TAG,
+    PID_LID_APPOINTMENT_END_WHOLE_TAG,
+    PID_LID_APPOINTMENT_DURATION_TAG,
+];
+const EVENT_REMINDER_PROPERTIES: &[u32] = &[
+    PID_LID_REMINDER_SET_TAG,
+    PID_LID_REMINDER_TIME_TAG,
+    PID_LID_REMINDER_SIGNAL_TIME_TAG,
+    PID_LID_REMINDER_DELTA_TAG,
+];
+
 pub(super) fn stage_event_property_values(
     session: &mut MapiSession,
     handle_slots: &[u32],
@@ -28,71 +50,261 @@ pub(super) fn stage_event_property_values(
         .enumerate()
         .map(|(index, (tag, value))| (index, tag, canonical_property_storage_tag(tag), value))
         .collect::<Vec<_>>();
-    let mut merged = transaction.pending_properties.clone();
-    for (_, _, storage_tag, value) in &values {
-        merged.insert(*storage_tag, value.clone());
+    let mut problems = values
+        .iter()
+        .filter(|(_, _, storage_tag, _)| event_property_is_server_managed(*storage_tag))
+        .map(|(index, tag, _, _)| (*index, *tag, 0x8004_0102))
+        .collect::<Vec<_>>();
+    let values = values
+        .into_iter()
+        .filter(|(_, _, storage_tag, _)| !event_property_is_server_managed(*storage_tag))
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(problems);
     }
+    let staged_values = values
+        .iter()
+        .map(|(_, _, storage_tag, value)| (*storage_tag, value.clone()))
+        .collect::<Vec<_>>();
+    let mut merged = transaction.pending_properties.clone();
+    let mut merged_deleted = transaction.deleted_properties.clone();
+    apply_event_property_values(&mut merged, &mut merged_deleted, &staged_values);
     if validate_staged_event_property_values(event, merged).is_ok() {
-        for (_, _, storage_tag, value) in values {
-            transaction.deleted_properties.remove(&storage_tag);
-            transaction.pending_properties.insert(storage_tag, value);
-        }
-        return Ok(Vec::new());
+        apply_event_property_values(
+            &mut transaction.pending_properties,
+            &mut transaction.deleted_properties,
+            &staged_values,
+        );
+        return Ok(problems);
     }
 
-    let mut problems = Vec::new();
-    let mut staged = HashSet::new();
-    let temporal = values
-        .iter()
-        .filter(|(_, _, storage_tag, _)| event_temporal_property_is_coupled(*storage_tag))
-        .collect::<Vec<_>>();
-    if !temporal.is_empty() {
-        let mut merged = transaction.pending_properties.clone();
-        for (_, _, storage_tag, value) in &temporal {
-            merged.insert(*storage_tag, value.clone());
-        }
-        if validate_staged_event_property_values(event, merged).is_ok() {
-            for (_, _, storage_tag, value) in temporal {
-                transaction.deleted_properties.remove(storage_tag);
-                transaction
-                    .pending_properties
-                    .insert(*storage_tag, value.clone());
-                staged.insert(*storage_tag);
-            }
-        } else {
-            for (index, tag, storage_tag, _) in temporal {
-                problems.push((*index, *tag, 0x8004_0102));
-                staged.insert(*storage_tag);
-            }
-        }
-    }
-    for (index, tag, storage_tag, value) in values {
-        if staged.contains(&storage_tag) {
+    let mut staged_indices = HashSet::new();
+    for coupled_tags in [EVENT_TEMPORAL_PROPERTIES, EVENT_REMINDER_PROPERTIES] {
+        let coupled = values
+            .iter()
+            .filter(|(_, _, storage_tag, _)| coupled_tags.contains(storage_tag))
+            .collect::<Vec<_>>();
+        if coupled.is_empty() {
             continue;
         }
+        let candidates = coupled
+            .iter()
+            .map(|(_, _, storage_tag, value)| (*storage_tag, value.clone()))
+            .collect::<Vec<_>>();
         let mut merged = transaction.pending_properties.clone();
-        merged.insert(storage_tag, value.clone());
+        let mut merged_deleted = transaction.deleted_properties.clone();
+        apply_event_property_values(&mut merged, &mut merged_deleted, &candidates);
+        if validate_staged_event_property_values(event, merged).is_ok() {
+            apply_event_property_values(
+                &mut transaction.pending_properties,
+                &mut transaction.deleted_properties,
+                &candidates,
+            );
+        } else {
+            for (index, tag, _, _) in &coupled {
+                problems.push((*index, *tag, 0x8004_0102));
+            }
+        }
+        staged_indices.extend(coupled.into_iter().map(|(index, _, _, _)| *index));
+    }
+    for (index, tag, storage_tag, value) in values {
+        if staged_indices.contains(&index) {
+            continue;
+        }
+        let candidate = [(storage_tag, value)];
+        let mut merged = transaction.pending_properties.clone();
+        let mut merged_deleted = transaction.deleted_properties.clone();
+        apply_event_property_values(&mut merged, &mut merged_deleted, &candidate);
         if validate_staged_event_property_values(event, merged).is_err() {
             problems.push((index, tag, 0x8004_0102));
             continue;
         }
-        transaction.deleted_properties.remove(&storage_tag);
-        transaction.pending_properties.insert(storage_tag, value);
+        apply_event_property_values(
+            &mut transaction.pending_properties,
+            &mut transaction.deleted_properties,
+            &candidate,
+        );
     }
     problems.sort_unstable_by_key(|(index, _, _)| *index);
     Ok(problems)
 }
 
-fn event_temporal_property_is_coupled(tag: u32) -> bool {
+pub(super) fn stage_pending_event_property_values(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    principal: &AccountPrincipal,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<Vec<(usize, u32, u32)>> {
+    let Some(MapiObject::PendingEvent { properties, .. }) =
+        input_object_mut(session, handle_slots, request)
+    else {
+        bail!("MAPI PendingEvent handle was not found");
+    };
+    let values = values
+        .into_iter()
+        .enumerate()
+        .map(|(index, (tag, value))| (index, tag, canonical_property_storage_tag(tag), value))
+        .collect::<Vec<_>>();
+    let mut problems = values
+        .iter()
+        .filter(|(_, _, storage_tag, _)| event_property_is_server_managed(*storage_tag))
+        .map(|(index, tag, _, _)| (*index, *tag, 0x8004_0102))
+        .collect::<Vec<_>>();
+    let values = values
+        .into_iter()
+        .filter(|(_, _, storage_tag, _)| !event_property_is_server_managed(*storage_tag))
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(problems);
+    }
+    let staged_values = values
+        .iter()
+        .map(|(_, _, storage_tag, value)| (*storage_tag, value.clone()))
+        .collect::<Vec<_>>();
+    let mut merged = properties.clone();
+    apply_event_property_values(&mut merged, &mut HashSet::new(), &staged_values);
+    if validate_pending_event_property_values(principal.account_id, merged).is_ok() {
+        apply_event_property_values(properties, &mut HashSet::new(), &staged_values);
+        return Ok(problems);
+    }
+
+    let mut staged_indices = HashSet::new();
+    for coupled_tags in [EVENT_TEMPORAL_PROPERTIES, EVENT_REMINDER_PROPERTIES] {
+        let coupled = values
+            .iter()
+            .filter(|(_, _, storage_tag, _)| coupled_tags.contains(storage_tag))
+            .collect::<Vec<_>>();
+        if coupled.is_empty() {
+            continue;
+        }
+        let candidates = coupled
+            .iter()
+            .map(|(_, _, storage_tag, value)| (*storage_tag, value.clone()))
+            .collect::<Vec<_>>();
+        let mut merged = properties.clone();
+        apply_event_property_values(&mut merged, &mut HashSet::new(), &candidates);
+        if validate_pending_event_property_values(principal.account_id, merged).is_ok() {
+            apply_event_property_values(properties, &mut HashSet::new(), &candidates);
+        } else {
+            problems.extend(
+                coupled
+                    .iter()
+                    .map(|(index, tag, _, _)| (*index, *tag, 0x8004_0102)),
+            );
+        }
+        staged_indices.extend(coupled.into_iter().map(|(index, _, _, _)| *index));
+    }
+    for (index, tag, storage_tag, value) in values {
+        if staged_indices.contains(&index) {
+            continue;
+        }
+        let candidate = [(storage_tag, value)];
+        let mut merged = properties.clone();
+        apply_event_property_values(&mut merged, &mut HashSet::new(), &candidate);
+        if validate_pending_event_property_values(principal.account_id, merged).is_err() {
+            problems.push((index, tag, 0x8004_0102));
+            continue;
+        }
+        apply_event_property_values(properties, &mut HashSet::new(), &candidate);
+    }
+    problems.sort_unstable_by_key(|(index, _, _)| *index);
+    Ok(problems)
+}
+
+fn validate_pending_event_property_values(
+    account_id: Uuid,
+    merged: HashMap<u32, MapiValue>,
+) -> Result<()> {
+    let (property_values, _, _) = split_reminder_property_values(merged.into_iter().collect())?;
+    let (canonical_values, _) = split_custom_property_values(property_values.into_iter().collect());
+    event_input_from_mapi(
+        account_id,
+        None,
+        &default_event_for_mapping(account_id, DEFAULT_CALENDAR_COLLECTION_ID),
+        &canonical_values.into_iter().collect(),
+    )?;
+    Ok(())
+}
+
+fn apply_event_property_values(
+    pending: &mut HashMap<u32, MapiValue>,
+    deleted: &mut HashSet<u32>,
+    values: &[(u32, MapiValue)],
+) {
+    for aliases in [
+        EVENT_SUBJECT_ALIASES,
+        EVENT_LOCATION_ALIASES,
+        EVENT_HTML_ALIASES,
+    ] {
+        if values.iter().any(|(tag, _)| aliases.contains(tag)) {
+            for tag in aliases {
+                pending.remove(tag);
+                deleted.remove(tag);
+            }
+        }
+    }
+    for (tag, value) in values {
+        pending.insert(*tag, value.clone());
+        deleted.remove(tag);
+    }
+    if let Some((_, value)) = values
+        .iter()
+        .rev()
+        .find(|(tag, _)| *tag == PID_TAG_SUBJECT_W)
+        .or_else(|| {
+            values
+                .iter()
+                .rev()
+                .find(|(tag, _)| *tag == PID_TAG_NORMALIZED_SUBJECT_W)
+        })
+    {
+        for tag in EVENT_SUBJECT_ALIASES {
+            pending.insert(*tag, value.clone());
+        }
+    }
+    if let Some((_, value)) = values
+        .iter()
+        .rev()
+        .find(|(tag, _)| EVENT_LOCATION_ALIASES.contains(tag))
+    {
+        for tag in EVENT_LOCATION_ALIASES {
+            pending.insert(*tag, value.clone());
+        }
+    }
+    if let Some((_, value)) = values
+        .iter()
+        .rev()
+        .find(|(tag, _)| EVENT_HTML_ALIASES.contains(tag))
+    {
+        match value {
+            MapiValue::String(value) => {
+                pending.insert(PID_TAG_BODY_HTML_W, MapiValue::String(value.clone()));
+                pending.insert(
+                    PID_TAG_HTML_BINARY,
+                    MapiValue::Binary(value.as_bytes().to_vec()),
+                );
+            }
+            MapiValue::Binary(value) => {
+                pending.insert(PID_TAG_HTML_BINARY, MapiValue::Binary(value.clone()));
+                if let Ok(value) = String::from_utf8(value.clone()) {
+                    pending.insert(PID_TAG_BODY_HTML_W, MapiValue::String(value));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn event_property_is_server_managed(tag: u32) -> bool {
     matches!(
         tag,
-        PID_TAG_START_DATE
-            | PID_TAG_END_DATE
-            | PID_LID_COMMON_START_TAG
-            | PID_LID_COMMON_END_TAG
-            | PID_LID_APPOINTMENT_START_WHOLE_TAG
-            | PID_LID_APPOINTMENT_END_WHOLE_TAG
-            | PID_LID_APPOINTMENT_DURATION_TAG
+        PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+            | PID_TAG_DISPLAY_NAME_W
     )
 }
 
@@ -150,7 +362,25 @@ pub(super) fn stage_event_property_deletions(
     let mut problems = Vec::new();
     for (index, tag) in property_tags.iter().enumerate() {
         let storage_tag = canonical_property_storage_tag(*tag);
+        if event_property_is_server_managed(storage_tag) {
+            problems.push((index, *tag, 0x8004_0102));
+            continue;
+        }
         if stage_clearable_event_property_deletion(transaction, storage_tag) {
+            continue;
+        }
+        if matches!(
+            storage_tag,
+            PID_LID_REMINDER_DELTA_TAG
+                | PID_LID_REMINDER_TIME_TAG
+                | PID_LID_REMINDER_SIGNAL_TIME_TAG
+        ) {
+            if staged_event_reminder_is_active(transaction, reminder) {
+                problems.push((index, *tag, 0x8004_0102));
+            } else {
+                transaction.pending_properties.remove(&storage_tag);
+                transaction.deleted_properties.insert(storage_tag);
+            }
             continue;
         }
         if !is_custom_property_tag(storage_tag)
@@ -178,16 +408,21 @@ fn stage_clearable_event_property_deletion(
 ) -> bool {
     let clear_text = MapiValue::String(String::new());
     match storage_tag {
-        PID_TAG_LOCATION_W | PID_LID_LOCATION_W_TAG => {
-            transaction
-                .pending_properties
-                .insert(PID_TAG_LOCATION_W, clear_text.clone());
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            for tag in EVENT_SUBJECT_ALIASES {
+                transaction
+                    .pending_properties
+                    .insert(*tag, clear_text.clone());
+                transaction.deleted_properties.insert(*tag);
+            }
+        }
+        PID_LID_LOCATION_W_TAG => {
             transaction
                 .pending_properties
                 .insert(PID_LID_LOCATION_W_TAG, clear_text);
             transaction
                 .deleted_properties
-                .extend([PID_TAG_LOCATION_W, PID_LID_LOCATION_W_TAG]);
+                .insert(PID_LID_LOCATION_W_TAG);
         }
         PID_TAG_BODY_W => {
             transaction
@@ -206,23 +441,30 @@ fn stage_clearable_event_property_deletion(
                 .deleted_properties
                 .extend([PID_TAG_BODY_HTML_W, PID_TAG_HTML_BINARY]);
         }
-        PID_LID_REMINDER_SET_TAG
-        | PID_LID_REMINDER_TIME_TAG
-        | PID_LID_REMINDER_SIGNAL_TIME_TAG
-        | PID_LID_REMINDER_DELTA_TAG => {
+        PID_LID_REMINDER_SET_TAG => {
             transaction
                 .pending_properties
                 .insert(PID_LID_REMINDER_SET_TAG, MapiValue::Bool(false));
-            transaction.deleted_properties.extend([
-                PID_LID_REMINDER_SET_TAG,
-                PID_LID_REMINDER_TIME_TAG,
-                PID_LID_REMINDER_SIGNAL_TIME_TAG,
-                PID_LID_REMINDER_DELTA_TAG,
-            ]);
+            // The canonical Event can represent disabling a reminder, but not
+            // independently removing Delta/Time/Signal while keeping it active.
+            transaction
+                .deleted_properties
+                .insert(PID_LID_REMINDER_SET_TAG);
         }
         _ => return false,
     }
     true
+}
+
+fn staged_event_reminder_is_active(
+    transaction: &MapiEventTransaction,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> bool {
+    transaction
+        .pending_properties
+        .get(&PID_LID_REMINDER_SET_TAG)
+        .and_then(MapiValue::as_bool)
+        .unwrap_or(reminder.is_some())
 }
 
 pub(super) fn event_handle_is_writable(open_mode_flags: u8, may_write: bool) -> bool {

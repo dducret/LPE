@@ -682,7 +682,7 @@ impl Storage {
             r#"
             UPDATE calendar_events
             SET modseq = $4,
-                updated_at = NOW()
+                updated_at = GREATEST(clock_timestamp(), updated_at + INTERVAL '1 microsecond')
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = $3
@@ -762,8 +762,8 @@ fn validate_mapi_event_commit_input(input: &MapiEventCommitInput) -> Result<()> 
 }
 
 fn validate_mapi_event_fields(event: &UpsertClientEventInput) -> Result<()> {
-    if event.date.trim().is_empty() || event.time.trim().is_empty() || event.title.trim().is_empty() {
-        bail!("event date, time, and title are required");
+    if event.date.trim().is_empty() || event.time.trim().is_empty() {
+        bail!("event date and time are required");
     }
     Ok(())
 }
