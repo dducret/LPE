@@ -1768,6 +1768,9 @@ struct FakeStore {
     mapi_folder_permission_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     mapi_ipm_subtree_ost_id: Arc<Mutex<Option<Vec<u8>>>>,
     fail_mapi_ipm_subtree_ost_id_store: bool,
+    deny_mapi_event_create: bool,
+    miss_mapi_event_create: bool,
+    fail_mapi_event_create: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     deleted_search_folders: Arc<Mutex<Vec<Uuid>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
@@ -5125,6 +5128,15 @@ impl ExchangeStore for FakeStore {
         &'a self,
         input: MapiEventCreateInput,
     ) -> StoreFuture<'a, MapiEventCreateOutcome> {
+        if self.fail_mapi_event_create {
+            return Box::pin(async { Err(anyhow::anyhow!("forced MAPI Event create failure")) });
+        }
+        if self.deny_mapi_event_create {
+            return Box::pin(async { Ok(MapiEventCreateOutcome::AccessDenied) });
+        }
+        if self.miss_mapi_event_create {
+            return Box::pin(async { Ok(MapiEventCreateOutcome::NotFound) });
+        }
         let account = Self::account();
         let collection = self
             .calendar_collections

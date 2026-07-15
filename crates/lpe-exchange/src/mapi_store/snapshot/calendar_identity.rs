@@ -1,7 +1,11 @@
 use super::*;
 
+// [MS-OXCFXICS] section 3.1.5.3 requires server-compatible internal IDs for
+// every communication. Section 3.2.5.5 requires a persisted SourceKey to be
+// emitted when present. Keep both values bound to the requesting principal's
+// durable identity rows for the complete lifetime of this snapshot.
 struct ScopedCalendarIdentities {
-    folders: HashMap<Uuid, (u64, Vec<u8>)>,
+    folders: HashMap<Uuid, u64>,
     events: HashMap<Uuid, (u64, Vec<u8>)>,
 }
 
@@ -10,13 +14,15 @@ impl ScopedCalendarIdentities {
         let mut folders = HashMap::new();
         let mut events = HashMap::new();
         for record in records {
-            let identity = (record.object_id, record.source_key.clone());
             match record.object_kind {
                 MapiIdentityObjectKind::Mailbox => {
-                    folders.insert(record.canonical_id, identity);
+                    folders.insert(record.canonical_id, record.object_id);
                 }
                 MapiIdentityObjectKind::CalendarEvent => {
-                    events.insert(record.canonical_id, identity);
+                    events.insert(
+                        record.canonical_id,
+                        (record.object_id, record.source_key.clone()),
+                    );
                 }
                 _ => {}
             }
@@ -33,15 +39,12 @@ impl ScopedCalendarIdentities {
             &collection.id,
         )
         .expect("custom Calendar collection identity");
-        self.folders
-            .get(&canonical_id)
-            .map(|identity| identity.0)
-            .ok_or_else(|| {
-                anyhow!(
-                    "principal-scoped MAPI Calendar folder identity is missing for collection {}",
-                    collection.id
-                )
-            })
+        self.folders.get(&canonical_id).copied().ok_or_else(|| {
+            anyhow!(
+                "principal-scoped MAPI Calendar folder identity is missing for collection {}",
+                collection.id
+            )
+        })
     }
 
     fn event(&self, canonical_id: Uuid) -> Result<(u64, Vec<u8>)> {

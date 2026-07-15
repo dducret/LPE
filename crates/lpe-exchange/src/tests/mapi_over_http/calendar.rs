@@ -147,7 +147,8 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_delete_properties_reports_only_invalid_property() {
+async fn mapi_over_http_calendar_delete_properties_clears_canonical_fields_and_reports_only_nondeletable_property(
+) {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-4171-8171-717171717171").unwrap();
     let custom_tag = 0x8002_001F;
@@ -170,11 +171,11 @@ async fn mapi_over_http_calendar_delete_properties_reports_only_invalid_property
         recurrence_json: "{}".to_string(),
         recurrence_exceptions_json: "[]".to_string(),
         title: "Mixed delete remains canonical".to_string(),
-        location: String::new(),
+        location: "Room to clear".to_string(),
         organizer_json: "{}".to_string(),
         attendees: String::new(),
         attendees_json: "{}".to_string(),
-        notes: String::new(),
+        notes: "Body to clear".to_string(),
         body_html: String::new(),
     }]));
     let event_versions = Arc::new(Mutex::new(HashMap::from([(event_id, 3)])));
@@ -232,10 +233,20 @@ async fn mapi_over_http_calendar_delete_properties_reports_only_invalid_property
     let body = response_bytes(response).await;
     let (_, handles) = response_rops_and_handles_from_execute_body(&body);
 
-    // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.5: deleting the custom
-    // property is staged while PidTagSubject is returned as one PropertyProblem.
+    // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.5: deletable custom and
+    // client-owned canonical fields are staged while the required Subject is
+    // returned as the sole PropertyProblem.
     let mut delete_rops = Vec::new();
-    append_rop_delete_properties(&mut delete_rops, 2, &[custom_tag, 0x0037_001F]);
+    append_rop_delete_properties(
+        &mut delete_rops,
+        2,
+        &[custom_tag, 0x8208_001F, 0x1000_001F, 0x0037_001F],
+    );
+    append_rop_get_properties_specific(
+        &mut delete_rops,
+        2,
+        &[0x8208_001F, 0x1000_001F, 0x0037_001F],
+    );
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -247,11 +258,26 @@ async fn mapi_over_http_calendar_delete_properties_reports_only_invalid_property
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
     let mut expected_problem = vec![0x0B, 0x02, 0, 0, 0, 0, 1, 0];
-    expected_problem.extend_from_slice(&1u16.to_le_bytes());
+    expected_problem.extend_from_slice(&3u16.to_le_bytes());
     expected_problem.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
     expected_problem.extend_from_slice(&0x8004_0102u32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &expected_problem));
+    assert!(
+        response_rops
+            .windows(4)
+            .filter(|window| *window == &0x8004_010Fu32.to_le_bytes())
+            .count()
+            >= 2
+    );
+    assert!(!contains_bytes(&response_rops, &utf16z("Room to clear")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Body to clear")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Mixed delete remains canonical")
+    ));
     assert_eq!(events.lock().unwrap()[0].title, "Mixed delete remains canonical");
+    assert_eq!(events.lock().unwrap()[0].location, "Room to clear");
+    assert_eq!(events.lock().unwrap()[0].notes, "Body to clear");
     assert_eq!(
         store
             .fetch_mapi_custom_property_values(
@@ -269,7 +295,11 @@ async fn mapi_over_http_calendar_delete_properties_reports_only_invalid_property
     let save_response =
         save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
     assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
-    assert_eq!(events.lock().unwrap()[0].title, "Mixed delete remains canonical");
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].title, "Mixed delete remains canonical");
+    assert!(stored[0].location.is_empty());
+    assert!(stored[0].notes.is_empty());
+    drop(stored);
     assert!(store
         .fetch_mapi_custom_property_values(
             account.account_id,
@@ -384,6 +414,101 @@ async fn mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
     ));
     assert_eq!(events.lock().unwrap()[0].title, "Read only save");
     assert_eq!(event_versions.lock().unwrap()[&event_id], 6);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_pending_handle() {
+    for (deny, miss, fail, expected_error) in [
+        (true, false, false, 0x8007_0005u32),
+        (false, true, false, 0x8004_010Fu32),
+        (false, false, true, 0x8000_4005u32),
+    ] {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+                "default", "calendar", "Calendar",
+            )])),
+            events: events.clone(),
+            deny_mapi_event_create: deny,
+            miss_mapi_event_create: miss,
+            fail_mapi_event_create: fail,
+            ..Default::default()
+        };
+        let service = ExchangeService::new(store);
+        let connect = service
+            .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+            .await
+            .unwrap();
+        let mut execute_headers = mapi_headers("Execute");
+        execute_headers.insert(
+            "cookie",
+            HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+        );
+
+        let mut properties = Vec::new();
+        append_mapi_utf16_property(&mut properties, 0x0037_001F, "Retained failed create");
+        append_mapi_i64_property(
+            &mut properties,
+            0x0060_0040,
+            test_filetime("2026-07-15", "13:00"),
+        );
+        append_mapi_i64_property(
+            &mut properties,
+            0x0061_0040,
+            test_filetime("2026-07-15", "13:30"),
+        );
+        let mut stage_rops = Vec::new();
+        append_rop_create_message(&mut stage_rops, 0, 1, test_mapi_folder_id(16));
+        append_rop_set_properties(&mut stage_rops, 1, 3, &properties);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&stage_rops, &[1, u32::MAX])),
+            )
+            .await
+            .unwrap();
+        let body = response_bytes(response).await;
+        let (_, handles) = response_rops_and_handles_from_execute_body(&body);
+        assert_ne!(handles[1], u32::MAX);
+
+        // [MS-OXCMSG] section 3.2.5.3 and [MS-OXCROPS] section 2.2.6.3:
+        // Save returns the store failure unchanged and leaves the Message object valid.
+        let mut save_rops = Vec::new();
+        append_rop_save_changes_message(&mut save_rops, 1, 1);
+        renew_mapi_request_id(&mut execute_headers);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&save_rops, &handles)),
+            )
+            .await
+            .unwrap();
+        let save_response = response_rops_from_execute_response(response).await;
+        let mut expected = vec![0x0C, 0x01];
+        expected.extend_from_slice(&expected_error.to_le_bytes());
+        assert!(contains_bytes(&save_response, &expected));
+        assert!(events.lock().unwrap().is_empty());
+
+        let mut get_rops = Vec::new();
+        append_rop_get_properties_specific(&mut get_rops, 1, &[0x0037_001F]);
+        renew_mapi_request_id(&mut execute_headers);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&get_rops, &handles)),
+            )
+            .await
+            .unwrap();
+        let get_response = response_rops_from_execute_response(response).await;
+        assert!(contains_bytes(
+            &get_response,
+            &utf16z("Retained failed create")
+        ));
+    }
 }
 
 #[tokio::test]

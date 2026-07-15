@@ -630,8 +630,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
             properties,
             &[PID_TAG_LOCATION_W, PID_LID_LOCATION_W_TAG],
             &existing.location,
-        )
-        .to_string(),
+        ),
         organizer_json: participants.organizer_json,
         attendees: participants.attendees,
         attendees_json: participants.attendees_json,
@@ -639,21 +638,20 @@ pub(in crate::mapi) fn event_input_from_mapi(
             properties,
             &[PID_TAG_BODY_W],
             &existing.notes,
-        )
-        .to_string(),
+        ),
         body_html: clearable_pending_html_property(properties, &existing.body_html),
     })
 }
 
-fn clearable_pending_text_property<'a>(
-    properties: &'a HashMap<u32, MapiValue>,
+fn clearable_pending_text_property(
+    properties: &HashMap<u32, MapiValue>,
     tags: &[u32],
-    existing: &'a str,
-) -> Cow<'a, str> {
+    existing: &str,
+) -> String {
     if tags.iter().any(|tag| properties.contains_key(tag)) {
-        Cow::Owned(pending_text_property(properties, tags))
+        pending_text_property(properties, tags)
     } else {
-        Cow::Borrowed(existing)
+        existing.to_string()
     }
 }
 
