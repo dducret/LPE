@@ -999,13 +999,33 @@ pub(in crate::mapi) fn mapi_diagnostic_response(
     response_code: u16,
     message: &str,
 ) -> Response {
-    mapi_response(
+    mapi_diagnostic_response_with_cookies(
+        request_type,
+        request_id,
+        response_code,
+        message,
+        Vec::new(),
+    )
+}
+
+fn mapi_diagnostic_response_with_cookies(
+    request_type: &str,
+    request_id: &str,
+    response_code: u16,
+    message: &str,
+    cookies: Vec<String>,
+) -> Response {
+    let mut response = mapi_response_with_cookies(
         request_type,
         request_id,
         response_code,
         message.as_bytes().to_vec(),
-        None,
-    )
+        cookies,
+    );
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("text/html"));
+    response
 }
 
 pub(in crate::mapi) fn mapi_response(
@@ -1451,17 +1471,13 @@ pub(in crate::mapi) fn execute_success_body(
     body
 }
 
-pub(in crate::mapi) fn execute_failure_response(
+pub(in crate::mapi) fn execute_transport_failure_response(
     request_id: &str,
-    status_code: u32,
+    response_code: u16,
     message: &str,
-    cookie: Option<String>,
+    cookies: Vec<String>,
 ) -> Response {
-    let mut body = Vec::new();
-    write_u32(&mut body, status_code);
-    write_u32(&mut body, message.len() as u32);
-    body.extend_from_slice(message.as_bytes());
-    mapi_response("Execute", request_id, status_code as u16, body, cookie)
+    mapi_diagnostic_response_with_cookies("Execute", request_id, response_code, message, cookies)
 }
 
 pub(in crate::mapi) fn insert_header(response: &mut Response, name: &'static str, value: &str) {

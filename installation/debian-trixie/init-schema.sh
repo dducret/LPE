@@ -29,8 +29,16 @@ if ! ensure_database_url; then
   exit 1
 fi
 
+expected_schema_version="$(
+  awk -F"'" '/schema_version TEXT NOT NULL CHECK/ { print $2; exit }' "${SCHEMA_FILE}"
+)"
+if [[ -z "${expected_schema_version}" ]]; then
+  echo "Unable to read expected schema version from ${SCHEMA_FILE}" >&2
+  exit 1
+fi
+
 existing_public_objects="$(
-  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "
     SELECT COUNT(*)
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -45,12 +53,21 @@ if [[ "${existing_public_objects}" != "0" && "${LPE_RESET_SCHEMA:-false}" != "tr
   exit 1
 fi
 
-psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE;"
-psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA public;"
-psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f "${SCHEMA_FILE}"
+psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 --single-transaction \
+  -c "DROP SCHEMA IF EXISTS public CASCADE;" \
+  -c "CREATE SCHEMA public;" \
+  -f "${SCHEMA_FILE}"
 
 schema_version="$(
-  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM schema_metadata WHERE singleton = TRUE"
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
 )"
+mapi_identity_version_column_count="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
+)"
+
+if [[ "${schema_version}" != "${expected_schema_version}" || "${mapi_identity_version_column_count}" != "2" ]]; then
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}." >&2
+  exit 1
+fi
 
 echo "LPE schema ${schema_version} initialized successfully."

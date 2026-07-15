@@ -240,6 +240,18 @@ if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
   echo "Upgrades from releases before LPE 0.5.0 are unsupported. Initialize a new empty database with init-schema.sh." >&2
   exit 1
 fi
+
+MAPI_IDENTITY_VERSION_COLUMN_COUNT="$(
+  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
+)" || {
+  echo "Unable to inspect MAPI identity version column shapes." >&2
+  exit 1
+}
+if [[ "${MAPI_IDENTITY_VERSION_COLUMN_COUNT}" != "2" ]]; then
+  echo "MAPI identity version column shapes are invalid despite schema label ${EXPECTED_SCHEMA_VERSION}; expected bigint/bytea NOT NULL." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"

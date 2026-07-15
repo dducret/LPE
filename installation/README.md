@@ -6,7 +6,14 @@ LPE `0.5.0` installations initialize an empty SQL database from the canonical
 schema. Databases from releases before 0.5.0 are not upgraded in place.
 `update-lpe.sh` accepts only the current schema version and performs no SQL
 compatibility mutation. Use `LPE_RESET_SCHEMA=true` only for an intentional
-destructive reset.
+destructive reset. `init-schema.sh` performs its public-schema reset, canonical
+schema application in one transaction, then validates the installed version
+and MAPI-column shape before announcing success. A failure during reset or
+schema application rolls back that transaction. `init-schema.sh`,
+`update-lpe.sh`, and `check-lpe.sh` validate both the schema label and the
+required durable MAPI identity version columns (`mapi_change_number` and
+`predecessor_change_list`), so a database tagged `0.5.0-sql-v1` but physically
+incomplete is rejected.
 The schema initializer creates the real platform tenant row
 `00000000-0000-0000-0000-000000000001` and the default storage pool/policy
 metadata; runtime bootstrap must not create string pseudo-tenants.
@@ -342,14 +349,14 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` requires the exact current 0.5.0 schema version, performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or incomplete databases
+- `update-lpe.sh` requires the exact current 0.5.0 schema version and the required durable MAPI identity version columns, performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or physically incomplete databases
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, only when the SQL database is empty; set `LPE_RESET_SCHEMA=true` only for an intentional destructive reset
-- `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
+- `init-schema.sh` resets or creates `public` and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version plus the durable MAPI identity version columns before reporting success, and it requires an empty SQL database unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
+- `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version and required durable MAPI identity version columns, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
 - `test-ha-core-active-passive.sh` validates local core HA role gating and readiness transitions

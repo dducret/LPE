@@ -60,6 +60,7 @@ const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
 const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
+const INIT_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/init-schema.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -1016,6 +1017,98 @@ fn update_script_requires_the_current_schema_without_mutating_it() {
 }
 
 #[test]
+fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns() {
+    for (label, source, count_variable) in [
+        (
+            "check-lpe.sh",
+            CHECK_LPE_SCRIPT,
+            "mapi_identity_version_column_count",
+        ),
+        (
+            "update-lpe.sh",
+            UPDATE_LPE_SCRIPT,
+            "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
+        ),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                count_variable,
+                "FROM information_schema.columns",
+                "table_schema = 'public'",
+                "table_name = 'mapi_object_identities'",
+                "column_name IN ('mapi_change_number', 'predecessor_change_list')",
+                "is_nullable = 'NO'",
+                "WHEN 'mapi_change_number' THEN 'bigint'",
+                "WHEN 'predecessor_change_list' THEN 'bytea'",
+                "bigint/bytea NOT NULL",
+                "Initialize a fresh LPE 0.5.0 database",
+            ],
+        );
+    }
+
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "update-lpe.sh must reject missing MAPI identity version columns before stopping LPE",
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "update-lpe.sh must reject missing MAPI identity version columns before building LPE",
+    );
+}
+
+#[test]
+fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
+    assert_source_contains_all(
+        "init-schema.sh",
+        INIT_LPE_SCRIPT,
+        &[
+            "LPE_RESET_SCHEMA",
+            "--single-transaction",
+            "DROP SCHEMA IF EXISTS public CASCADE;",
+            "CREATE SCHEMA public;",
+            "expected_schema_version",
+            "mapi_identity_version_column_count",
+            "FROM information_schema.columns",
+            "table_name = 'mapi_object_identities'",
+            "column_name IN ('mapi_change_number', 'predecessor_change_list')",
+            "is_nullable = 'NO'",
+            "WHEN 'mapi_change_number' THEN 'bigint'",
+            "WHEN 'predecessor_change_list' THEN 'bytea'",
+            "Schema initialization validation failed",
+        ],
+    );
+
+    let reset_apply_start = INIT_LPE_SCRIPT
+        .find("psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 --single-transaction")
+        .expect("init-schema.sh must start one atomic reset/application command");
+    let reset_apply_tail = &INIT_LPE_SCRIPT[reset_apply_start..];
+    let reset_apply_end = reset_apply_tail
+        .find("\n\n")
+        .unwrap_or(reset_apply_tail.len());
+    assert_source_contains_all(
+        "init-schema.sh atomic reset/application command",
+        &reset_apply_tail[..reset_apply_end],
+        &[
+            "-c \"DROP SCHEMA IF EXISTS public CASCADE;\"",
+            "-c \"CREATE SCHEMA public;\"",
+            "-f \"${SCHEMA_FILE}\"",
+        ],
+    );
+    assert_contains_before(
+        INIT_LPE_SCRIPT,
+        "mapi_identity_version_column_count",
+        "initialized successfully",
+        "init-schema.sh must validate the durable MAPI columns before reporting success",
+    );
+}
+
+#[test]
 fn fresh_schema_checks_validate_constraint_shape_without_migration_names() {
     assert!(
         !CHECK_LPE_SCRIPT.contains("conname = 'mail_change_log_object_shape_check'"),
@@ -1033,18 +1126,26 @@ fn fresh_schema_checks_validate_constraint_shape_without_migration_names() {
 }
 
 #[test]
-fn runtime_schema_check_rejects_missing_required_mapi_tables() {
+fn runtime_schema_check_rejects_missing_required_mapi_shape() {
     assert_source_contains_all(
         "storage core schema assertion",
         CORE_STORAGE,
         &[
             "assert_required_schema_objects",
+            "\"mapi_object_identities\"",
             "\"mapi_named_properties\"",
             "\"mapi_custom_property_values\"",
             "\"mapi_associated_config_messages\"",
             "\"mapi_profile_settings\"",
-            "SELECT to_regclass($1) IS NOT NULL",
-            "required table public.{table} is missing",
+            "FROM information_schema.tables",
+            "FROM information_schema.columns",
+            "\"mapi_change_number\"",
+            "\"predecessor_change_list\"",
+            "(\"mapi_change_number\", \"bigint\")",
+            "(\"predecessor_change_list\", \"bytea\")",
+            "AND is_nullable = 'NO'",
+            "required table {schema_name}.{table} is missing",
+            "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities",
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );

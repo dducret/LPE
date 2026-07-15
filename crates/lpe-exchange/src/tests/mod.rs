@@ -1771,6 +1771,7 @@ struct FakeStore {
     deny_mapi_event_create: bool,
     miss_mapi_event_create: bool,
     fail_mapi_event_create: bool,
+    fail_fetch_mapi_event_versions: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     deleted_search_folders: Arc<Mutex<Vec<Uuid>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
@@ -5095,6 +5096,13 @@ impl ExchangeStore for FakeStore {
         _principal_account_id: Uuid,
         event_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<MapiEventVersion>> {
+        if self.fail_fetch_mapi_event_versions {
+            return Box::pin(async {
+                Err(anyhow::anyhow!(
+                    "forced durable MAPI Event version load failure"
+                ))
+            });
+        }
         let canonical_versions = self.event_versions.lock().unwrap().clone();
         let identities = self.mapi_identities.lock().unwrap().clone();
         let mut stored_versions = self.mapi_event_identity_versions.lock().unwrap();

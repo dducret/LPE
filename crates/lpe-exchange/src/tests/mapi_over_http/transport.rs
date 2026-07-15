@@ -257,6 +257,131 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
 }
 
 #[tokio::test]
+async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_session_cookies() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        fail_fetch_mapi_event_versions: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x01];
+    logon_rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rops.extend_from_slice(legacy_dn);
+    let mut logon_headers = mapi_headers("Execute");
+    logon_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &logon_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon.headers().get("x-responsecode").unwrap(), "0");
+
+    let mut open_folder_rops = Vec::new();
+    append_rop_open_folder(
+        &mut open_folder_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    let mut open_folder_headers = mapi_headers("Execute");
+    open_folder_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&logon)).unwrap(),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &open_folder_headers,
+            &execute_body(&rop_buffer(&open_folder_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    // [MS-OXCMAPIHTTP] section 2.2.3.3.3: a server-side store failure is
+    // Unknown Failure (1), not Invalid Header (4).
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "1");
+    assert_eq!(response.headers().get("content-type").unwrap(), "text/html");
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    // [MS-OXCMAPIHTTP] sections 3.1.5.2 and 3.2.5.2 require the complete
+    // Session Context cookie set on the next request and response.
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
+    let body = response_bytes(response).await;
+    assert!(String::from_utf8(body)
+        .unwrap()
+        .contains("forced durable MAPI Event version load failure"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_malformed_execute_body_is_invalid_body_with_session_cookies() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &[0; 4])
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    // [MS-OXCMAPIHTTP] section 2.2.3.3.3: code 12 is Invalid Request Body.
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "12");
+    assert_eq!(response.headers().get("content-type").unwrap(), "text/html");
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
+    assert!(String::from_utf8(response_bytes(response).await)
+        .unwrap()
+        .contains("invalid Execute request body"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_transport_echoes_request_id_and_client_info() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

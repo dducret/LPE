@@ -18,6 +18,12 @@ before it is advertised.
 - MAPI over HTTP endpoints remain authenticated and opt-in. Autodiscover may
   publish the MAPI endpoint only when the MAPI gate is enabled and the documented
   interop gate has passed for the deployment.
+- MAPI over HTTP startup and publication require both the exact
+  `0.5.0-sql-v1` schema label and every required physical MAPI table and
+  column. A tagged but incomplete schema is a fatal storage-startup and
+  readiness failure; LPE must reject it before accepting or advertising a MAPI
+  session rather than exposing the database failure through an Outlook
+  `Execute` request.
 - Top-level `EXPR` metadata is permitted only for the later Outlook Anywhere /
   RPC over HTTP path. It must not be used to imply that MAPI over HTTP or RPC
   proxy behavior is complete before the corresponding transport is implemented.
@@ -43,6 +49,22 @@ before it is advertised.
   Outlook's MAPI HTTP parser.
 - Stale `Disconnect` cookies and missing or malformed session cookies must fail
   at the transport/session layer without mutating mailbox state.
+- Failure mapping preserves the protocol layer. Authentication, redirection,
+  and exceptional HTTP failures use their HTTP status; ordinary MAPI/HTTP
+  transport failures use HTTP 200 and the exact `X-ResponseCode` from
+  `[MS-OXCMAPIHTTP]` sections 2.2.2.2 and 2.2.3.3.3. In particular, code 4
+  means only `Invalid Header`, code 12 means `Invalid Request Body`, and an
+  unexpected internal request-processing failure uses code 1 `Unknown
+  Failure`. A nonzero `X-ResponseCode` uses `Content-Type: text/html` and a
+  diagnostic body per section 2.2.3.2.2. A defined Execute-method failure
+  instead keeps `X-ResponseCode: 0` and uses the binary failure body from
+  section 2.2.4.2.3; individual ROP failures remain in their ROP
+  `ReturnValue`.
+- Every response associated with a resolved Session Context, including an
+  `Execute` failure, returns the complete associated `Set-Cookie` set per
+  `[MS-OXCMAPIHTTP]` sections 2.2.3.2.3, 3.1.1, 3.1.5.2, and 3.2.5.2. For
+  EMSMDB this includes both `MapiContext` and `MapiSequence`; a request whose
+  context cannot be resolved has no associated cookie set to return.
 
 ### ROP Dispatch
 

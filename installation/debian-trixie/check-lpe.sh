@@ -234,6 +234,12 @@ expected_schema_version="$(
 [[ "$schema_version" == "$expected_schema_version" ]] || fail "Unexpected schema version: $schema_version; expected $expected_schema_version"
 pass "Schema version is $expected_schema_version"
 
+mapi_identity_version_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END;")" \
+  || fail "Unable to inspect MAPI identity version column shapes"
+[[ "$mapi_identity_version_column_count" == "2" ]] \
+  || fail "MAPI identity version column shapes are invalid; expected bigint/bytea NOT NULL. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "MAPI identity version column shapes are current"
+
 mapi_identity_constraint_count="$(mapi_identity_key_constraint_count "$DATABASE_URL")" \
   || fail "Unable to inspect MAPI identity key constraints"
 [[ "$mapi_identity_constraint_count" == "3" ]] \

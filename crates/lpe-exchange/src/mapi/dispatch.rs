@@ -198,37 +198,47 @@ where
 {
     log_session_cookie_lookup(endpoint, principal, headers, "Execute");
     let Some(session_id) = request_cookie(endpoint, headers) else {
-        return execute_failure_response(request_id, 13, "missing MAPI session cookie", None);
+        return execute_transport_failure_response(
+            request_id,
+            13,
+            "missing MAPI session cookie",
+            Vec::new(),
+        );
     };
     if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return execute_failure_response(
+        return execute_transport_failure_response(
             request_id,
             6,
             "invalid MAPI request sequence cookie",
-            None,
+            Vec::new(),
         );
     }
     let Some(_active_request) = acquire_execute_active_session_request(&session_id).await else {
-        return execute_failure_response(
+        return execute_transport_failure_response(
             request_id,
             15,
             "MAPI session already has an active request",
-            None,
+            Vec::new(),
         );
     };
     let Some(mut session) = get_session(&session_id) else {
-        return execute_failure_response(request_id, 10, "MAPI session context not found", None);
+        return execute_transport_failure_response(
+            request_id,
+            10,
+            "MAPI session context not found",
+            Vec::new(),
+        );
     };
     if session.endpoint != endpoint
         || session.tenant_id != principal.tenant_id
         || session.account_id != principal.account_id
         || session.email != principal.email
     {
-        return execute_failure_response(
+        return execute_transport_failure_response(
             request_id,
             10,
             "MAPI authentication context changed",
-            None,
+            Vec::new(),
         );
     }
     session.record_transport_request("Execute", request_id);
@@ -237,20 +247,20 @@ where
         Ok(execute) => execute,
         Err(error) => {
             log_execute_parse_failure_debug(endpoint, principal, headers, request_id, body, &error);
-            return execute_failure_response(
+            return execute_transport_failure_response(
                 request_id,
-                4,
+                12,
                 &format!("invalid Execute request body: {error}"),
-                Some(session_cookie(endpoint, &session_id, false)),
+                session_context_cookies(endpoint, &session_id, false),
             );
         }
     };
     if !session_matches(&session, endpoint, principal) {
-        return execute_failure_response(
+        return execute_transport_failure_response(
             request_id,
             10,
             "MAPI authentication context changed",
-            Some(session_cookie(endpoint, &session_id, false)),
+            session_context_cookies(endpoint, &session_id, false),
         );
     }
     let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
@@ -325,11 +335,11 @@ where
             );
         }
         store_session(session_id.clone(), session);
-        return execute_failure_response(
+        return execute_transport_failure_response(
             request_id,
             12,
             "reused MAPI Execute request id with a different ROP payload",
-            Some(session_cookie(endpoint, &session_id, false)),
+            session_context_cookies(endpoint, &session_id, false),
         );
     }
 
@@ -481,23 +491,23 @@ where
                     Ok(snapshot) => snapshot,
                     Err(fallback_error) => {
                         store_session(session_id.clone(), session);
-                        return execute_failure_response(
+                        return execute_transport_failure_response(
                             request_id,
-                            4,
+                            1,
                             &format!(
                                 "failed to load MAPI mail store view: {error:#}; fallback failed: {fallback_error:#}"
                             ),
-                            Some(session_cookie(endpoint, &session_id, false)),
+                            session_context_cookies(endpoint, &session_id, false),
                         );
                     }
                 }
             } else {
                 store_session(session_id.clone(), session);
-                return execute_failure_response(
+                return execute_transport_failure_response(
                     request_id,
-                    4,
+                    1,
                     &format!("failed to load MAPI mail store view: {error:#}"),
-                    Some(session_cookie(endpoint, &session_id, false)),
+                    session_context_cookies(endpoint, &session_id, false),
                 );
             }
         }
