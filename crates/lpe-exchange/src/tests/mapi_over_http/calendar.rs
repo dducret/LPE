@@ -252,6 +252,107 @@ async fn mapi_over_http_calendar_save_keep_open_returns_change_key_in_same_execu
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    storage
+        .upsert_client_event(UpsertClientEventInput {
+            id: Some(Uuid::parse_str("81818181-8181-4181-9181-818181818181").unwrap()),
+            account_id: fixture.account_id,
+            uid: Uuid::nil().to_string(),
+            date: "2026-07-14".to_string(),
+            time: "18:18".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Existing Outlook appointment".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        })
+        .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Appointment");
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0037_001F,
+        "Second Outlook appointment",
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-07-14", "21:52"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0061_0040,
+        test_filetime("2026-07-14", "22:22"),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 2, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    // Outlook batch 202607142154 omitted both GOID properties. [MS-OXOCAL]
+    // sections 2.2.1.27-28 require a Calendar object's resulting GOID identity
+    // to be unique and stable; the canonical fallback must therefore remain
+    // per-event. Save/keep-open follows [MS-OXCMSG] sections 2.2.3.3.1-2.
+    append_rop_save_changes_message_with_flags(&mut rops, 2, 1, 0x0A);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x65E2_0102]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&response_body);
+    let save_succeeded = contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]);
+    let canonical_events = storage
+        .fetch_accessible_events_in_collection(fixture.account_id, "default")
+        .await?;
+    let new_event = canonical_events
+        .iter()
+        .find(|event| event.title == "Second Outlook appointment")
+        .cloned();
+    fixture.cleanup().await?;
+
+    assert!(
+        save_succeeded,
+        "second RopSaveChangesMessage returned an error: {response_rops:02x?}"
+    );
+    assert_eq!(canonical_events.len(), 2);
+    let new_event = new_event.expect("second appointment must exist in canonical storage");
+    assert_eq!(new_event.uid, new_event.id.to_string());
+    assert_ne!(new_event.uid, Uuid::nil().to_string());
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

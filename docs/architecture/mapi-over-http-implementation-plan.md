@@ -1188,6 +1188,31 @@ canonical save stages succeed. This makes the immediately following
 persistent or parallel Calendar state; the overlay is discarded with the
 request.
 
+The `202607142154` follow-up reproduced a distinct, state-dependent save
+failure after the preceding same-buffer ChangeKey correction was deployed.
+Request `:323` retained pending-event handle `0xC9` and Calendar folder handle
+`0x1F`; both `RopSetProperties` calls succeeded, but
+`RopSaveChangesMessage (0x0C)` with flags `0x0A` returned `0x8004010F` before
+any second canonical event or MAPI identity was committed. Neither this
+request nor the successful `202607141822` create supplied
+`PidLidGlobalObjectId` or `PidLidCleanGlobalObjectId`. The first create had
+therefore persisted the mapping helper's all-zero UUID string as its UID, and
+the second create reused that non-empty value until PostgreSQL rejected the
+`(tenant_id, owner_account_id, calendar_id, uid)` uniqueness violation.
+
+An absent incoming GOID now remains an empty mapping input so canonical event
+creation assigns the new event UUID as its unique UID; a supplied GOID still
+takes precedence through the existing mapping path. This is the canonical
+per-event fallback, not MAPI-only identity state. It follows the uniqueness and
+immutability rules
+for `PidLidGlobalObjectId` and the clean-series identity semantics in
+[MS-OXOCAL] sections 2.2.1.27 and 2.2.1.28. The failing save/keep-open response
+was interpreted according to [MS-OXCMSG] sections 2.2.3.3.1 and 2.2.3.3.2 and
+[MS-OXCROPS] sections 2.2.6.3.1 and 2.2.6.3.2. A PostgreSQL-backed MAPI
+regression preserves the already-created all-zero-UID event, creates a second
+appointment without either GOID property, and requires a successful save plus
+a distinct nonzero canonical UID equal to the second event UUID.
+
 `dispatch/message_save.rs` and `dispatch/properties.rs` are over the production
 line target. Before adding further save/read behavior, split collaboration item
 save branches into `dispatch/collaboration_message_save.rs` and direct property

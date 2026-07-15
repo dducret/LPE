@@ -424,7 +424,7 @@ pub(in crate::mapi) fn default_event_for_mapping(
 ) -> AccessibleEvent {
     AccessibleEvent {
         id: Uuid::nil(),
-        uid: Uuid::nil().to_string(),
+        uid: String::new(),
         collection_id: collection_id.to_string(),
         owner_account_id: account_id,
         owner_email: String::new(),

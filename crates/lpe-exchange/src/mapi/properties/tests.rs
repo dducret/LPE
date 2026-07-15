@@ -3734,6 +3734,7 @@ fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_f
     )
     .unwrap();
 
+    assert!(input.uid.is_empty());
     assert_eq!(input.title, "Updated");
     assert!(input.all_day);
     assert_eq!(input.body_html, "<p>Updated</p>");
