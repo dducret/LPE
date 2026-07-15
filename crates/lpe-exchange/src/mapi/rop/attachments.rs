@@ -18,6 +18,7 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
         | Some(MapiObject::Event {
             folder_id,
             event_id: message_id,
+            ..
         }) => (*folder_id, *message_id),
         _ => return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9),
     };
@@ -35,12 +36,25 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
             !pending_attachment_deletions.contains(&(folder_id, message_id, attachment.attach_num))
         })
         .collect::<Vec<_>>();
+    rop_get_valid_attachment_numbers_response(
+        request,
+        &valid_attachments
+            .into_iter()
+            .map(|attachment| attachment.attach_num)
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub(in crate::mapi) fn rop_get_valid_attachment_numbers_response(
+    request: &RopRequest,
+    attach_nums: &[u32],
+) -> Vec<u8> {
     let mut response = vec![0x52, request.response_handle_index()];
     write_u32(&mut response, 0);
     response
-        .extend_from_slice(&(valid_attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
-    for attachment in valid_attachments.iter().take(u16::MAX as usize) {
-        write_u32(&mut response, attachment.attach_num);
+        .extend_from_slice(&(attach_nums.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for attach_num in attach_nums.iter().take(u16::MAX as usize) {
+        write_u32(&mut response, *attach_num);
     }
     response
 }

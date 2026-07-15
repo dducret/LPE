@@ -71,11 +71,12 @@ impl Storage {
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let exists = sqlx::query_scalar::<_, Uuid>(
+        let event = sqlx::query(
             r#"
-            SELECT id
+            SELECT calendar_id, uid
             FROM calendar_events
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            FOR UPDATE
             "#,
         )
         .bind(&tenant_id)
@@ -84,22 +85,29 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?;
 
-        if exists.is_none() {
+        let Some(event) = event else {
             bail!("event not found");
-        }
+        };
+        let calendar_id = event.get::<Uuid, _>("calendar_id");
+        let event_uid = event.get::<String, _>("uid");
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            &mut tx, &tenant_id, account_id, event_id,
+        )
+        .await?;
 
         self.insert_collaboration_tombstone_in_tx(
             &mut tx,
             &tenant_id,
             CanonicalChangeCategory::Calendar,
             account_id,
-            None,
+            Some(calendar_id),
             "calendar_event",
             event_id,
-            None,
-            &[account_id],
+            Some(&event_uid),
+            &affected_principals,
         )
         .await?;
+        Self::retire_mapi_event_identities_in_tx(&mut tx, &tenant_id, event_id).await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_events

@@ -1383,17 +1383,15 @@ pub(super) async fn append_delete_messages_response<S>(
             }
             continue;
         }
-        if !mapi_calendar_content_items_suppressed(folder_id, snapshot) {
-            if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
-                if store
-                    .delete_accessible_event(principal.account_id, event.canonical_id)
-                    .await
-                    .is_err()
-                {
-                    failed += 1;
-                }
-                continue;
+        if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
+            if store
+                .delete_accessible_event(principal.account_id, event.canonical_id)
+                .await
+                .is_err()
+            {
+                failed += 1;
             }
+            continue;
         }
         if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
             if store

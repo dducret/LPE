@@ -15,6 +15,6 @@ pub(super) fn restriction_matches_event(
     event: &crate::mapi_store::MapiEvent,
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
-        event_property_value(&event.event, event.id, event.folder_id, property_tag)
+        versioned_event_property_value_with_reminder(event, property_tag, None)
     })
 }

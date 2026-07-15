@@ -226,10 +226,24 @@ pub(super) fn special_message_predecessor_change_list(object: &SpecialMessageSyn
         .unwrap_or_else(|| predecessor_change_list(change_number_for_store_id(object.item_id)))
 }
 
+fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
+    object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag, value) {
+            (PID_TAG_CHANGE_NUMBER, SpecialMessagePropertyValue::U64(value)) => Some(*value),
+            _ => None,
+        })
+        .unwrap_or_else(|| change_number_for_store_id(object.item_id))
+}
+
 pub(super) fn special_message_property_is_sync_identity(property_tag: u32) -> bool {
     matches!(
         property_tag,
-        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST
+        PID_TAG_SOURCE_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
     )
 }
 
@@ -342,16 +356,19 @@ pub(crate) fn sync_state_token_with_special_objects(
     let mut object_ids = normal_object_ids;
     object_ids.extend(scoped_special_objects.iter().map(|object| object.item_id));
     let mut normal_change_numbers = normal_change_numbers;
+    // [MS-OXCFXICS] sections 2.2.1.1.2, 2.2.1.1.3, and 3.2.5.3 require
+    // the final CnsetSeen/CnsetSeenFAI to contain the CN of each downloaded
+    // normal/FAI change. Reuse the same durable CN as the object header.
     normal_change_numbers.extend(
         scoped_special_objects
             .iter()
             .filter(|object| !object.associated)
-            .map(|object| change_number_for_store_id(object.item_id)),
+            .map(|object| special_message_change_number(object)),
     );
     let fai_change_numbers = scoped_special_objects
         .iter()
         .filter(|object| object.associated)
-        .map(|object| change_number_for_store_id(object.item_id))
+        .map(|object| special_message_change_number(object))
         .collect::<Vec<_>>();
     final_content_sync_state_stream(
         &object_ids,
@@ -807,7 +824,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     }
 
     for object in &special_objects {
-        let change_number = change_number_for_store_id(object.item_id);
+        let change_number = special_message_change_number(object);
         let source_key = special_message_source_key(object);
         let change_key = special_message_change_key(object);
         let predecessor_change_list = special_message_predecessor_change_list(object);

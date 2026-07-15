@@ -226,6 +226,8 @@ macro_rules! store_impl_public_address_im {
                     log.cursor,
                     log.object_kind,
                     log.object_id,
+                    log.account_id AS owner_account_id,
+                    $3::uuid AS notification_account_id,
                     log.mailbox_id,
                     NULLIF(log.summary_json->>'messageId', '')::uuid AS message_id,
                     log.change_kind,
@@ -245,12 +247,22 @@ macro_rules! store_impl_public_address_im {
                     parent_box.role AS parent_role,
                     source_box.display_name AS source_display_name,
                     message.normalized_subject AS message_subject,
+                    event_calendar.id AS calendar_id,
+                    event_calendar.role AS calendar_role,
+                    NULLIF(log.summary_json->>'oldCollectionId', '')::uuid AS old_calendar_id,
+                    COALESCE(
+                        old_event_calendar.role,
+                        NULLIF(log.summary_json->>'oldCollectionRole', '')
+                    ) AS old_calendar_role,
+                    calendar_event.id AS live_calendar_event_id,
+                    calendar_event.title AS calendar_event_subject,
                     scope_identity.mapi_object_id AS scope_mapi_object_id,
                     scope_parent_identity.mapi_object_id AS scope_parent_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
                     message_identity.mapi_object_id AS message_mapi_object_id,
-                    source_identity.mapi_object_id AS source_mapi_object_id
+                    source_identity.mapi_object_id AS source_mapi_object_id,
+                    calendar_event_identity.mapi_object_id AS calendar_event_mapi_object_id
                 FROM mail_change_log log
                 LEFT JOIN mailboxes scope_box
                   ON scope_box.tenant_id = log.tenant_id
@@ -276,6 +288,32 @@ macro_rules! store_impl_public_address_im {
                 LEFT JOIN messages message
                   ON message.tenant_id = log.tenant_id
                  AND message.id = (log.summary_json->>'messageId')::uuid
+                LEFT JOIN tombstones calendar_tombstone
+                  ON calendar_tombstone.tenant_id = log.tenant_id
+                 AND calendar_tombstone.change_cursor = log.cursor
+                 AND calendar_tombstone.object_kind = 'calendar_event'
+                 AND calendar_tombstone.object_id = log.object_id
+                 AND log.object_kind = 'calendar_event'
+                LEFT JOIN calendar_events calendar_event
+                  ON calendar_event.tenant_id = log.tenant_id
+                 AND calendar_event.owner_account_id = log.account_id
+                 AND calendar_event.id = log.object_id
+                 AND log.object_kind = 'calendar_event'
+                LEFT JOIN calendars event_calendar
+                  ON event_calendar.tenant_id = log.tenant_id
+                 AND event_calendar.owner_account_id = log.account_id
+                 AND event_calendar.id = COALESCE(
+                     NULLIF(log.summary_json->>'collectionId', '')::uuid,
+                     calendar_tombstone.collection_id,
+                     calendar_event.calendar_id
+                 )
+                 AND log.object_kind = 'calendar_event'
+                LEFT JOIN calendars old_event_calendar
+                  ON old_event_calendar.tenant_id = log.tenant_id
+                 AND old_event_calendar.owner_account_id = log.account_id
+                 AND old_event_calendar.id =
+                     NULLIF(log.summary_json->>'oldCollectionId', '')::uuid
+                 AND log.object_kind = 'calendar_event'
                 LEFT JOIN mapi_object_identities scope_identity
                   ON scope_identity.tenant_id = log.tenant_id
                  AND scope_identity.account_id = log.account_id
@@ -312,11 +350,18 @@ macro_rules! store_impl_public_address_im {
                  AND source_identity.object_kind = 'mailbox'
                  AND source_identity.canonical_id = (log.summary_json->>'sourceMailboxId')::uuid
                  AND source_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities calendar_event_identity
+                  ON calendar_event_identity.tenant_id = log.tenant_id
+                 AND calendar_event_identity.account_id = $3
+                 AND calendar_event_identity.object_kind = 'calendar_event'
+                 AND calendar_event_identity.canonical_id = log.object_id
                 WHERE log.tenant_id = $1
                   AND log.cursor > $2
                   AND (log.account_id = $3 OR log.affected_principal_ids @> ARRAY[$3]::uuid[])
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
-                  AND log.object_kind IN ('mailbox', 'mailbox_message', 'attachment')
+                  AND log.object_kind IN (
+                      'mailbox', 'mailbox_message', 'attachment', 'calendar_event'
+                  )
                 ORDER BY log.cursor ASC
                 LIMIT 101
                 "#,
@@ -326,12 +371,91 @@ macro_rules! store_impl_public_address_im {
             .bind(account_id)
             .fetch_all(self.pool())
             .await?;
+            let mut notification_identity_requests = Vec::new();
+            for row in &rows {
+                if row.get::<String, _>("object_kind") != "calendar_event" {
+                    continue;
+                }
+                if row
+                    .try_get::<Option<i64>, _>("calendar_event_mapi_object_id")
+                    .ok()
+                    .flatten()
+                    .is_none()
+                {
+                    if let Some(canonical_id) = row
+                        .try_get::<Option<Uuid>, _>("live_calendar_event_id")
+                        .ok()
+                        .flatten()
+                        .filter(|canonical_id| {
+                            !notification_identity_requests.iter().any(
+                                |request: &MapiIdentityRequest| {
+                                    request.object_kind == MapiIdentityObjectKind::CalendarEvent
+                                        && request.canonical_id == *canonical_id
+                                },
+                            )
+                        })
+                    {
+                        notification_identity_requests.push(MapiIdentityRequest {
+                            object_kind: MapiIdentityObjectKind::CalendarEvent,
+                            canonical_id,
+                            reserved_global_counter: None,
+                            source_key: None,
+                        });
+                    }
+                }
+                for canonical_id in
+                    mapi_calendar_notification_folder_identity_ids_from_row(row)
+                {
+                    if notification_identity_requests.iter().any(
+                        |request: &MapiIdentityRequest| {
+                            request.object_kind == MapiIdentityObjectKind::Mailbox
+                                && request.canonical_id == canonical_id
+                        },
+                    ) {
+                        continue;
+                    }
+                    notification_identity_requests.push(MapiIdentityRequest {
+                        object_kind: MapiIdentityObjectKind::Mailbox,
+                        canonical_id,
+                        reserved_global_counter: None,
+                        source_key: None,
+                    });
+                }
+            }
+            let mut calendar_folder_ids = std::collections::HashMap::new();
+            let mut calendar_event_ids = std::collections::HashMap::new();
+            if !notification_identity_requests.is_empty() {
+                let identities = ExchangeStore::fetch_or_allocate_mapi_identities(
+                    self,
+                    account_id,
+                    &notification_identity_requests,
+                )
+                .await?;
+                for (request, identity) in
+                    notification_identity_requests.iter().zip(identities)
+                {
+                    if request.object_kind == MapiIdentityObjectKind::Mailbox {
+                        calendar_folder_ids.insert(identity.canonical_id, identity.object_id);
+                    } else if request.object_kind == MapiIdentityObjectKind::CalendarEvent {
+                        calendar_event_ids.insert(identity.canonical_id, identity.object_id);
+                    }
+                    crate::mapi::identity::remember_mapi_identity_with_source_key(
+                        identity.canonical_id,
+                        identity.object_id,
+                        Some(identity.source_key),
+                    );
+                }
+            }
             let truncated = rows.len() > 100;
             let mut cursor = None;
             let mut events = Vec::new();
             for row in rows.into_iter().take(100) {
                 cursor = Some(row.get("cursor"));
-                if let Some(event) = mapi_notification_event_from_change_row(row) {
+                if let Some(event) = mapi_notification_event_from_change_row(
+                    row,
+                    &calendar_folder_ids,
+                    &calendar_event_ids,
+                ) {
                     events.push(event);
                 }
             }

@@ -121,6 +121,45 @@ pub(super) fn append_get_valid_attachments_response(
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
+    let parent_handle = input_handle(handle_slots, request);
+    if let (Some(parent_handle), Some(object)) =
+        (parent_handle, input_object(session, handle_slots, request))
+    {
+        let event = match object {
+            MapiObject::Event {
+                folder_id,
+                event_id,
+                ..
+            } => Some((*folder_id, *event_id, false)),
+            MapiObject::PendingEvent { folder_id, .. } => Some((*folder_id, 0, true)),
+            _ => None,
+        };
+        if let Some((folder_id, message_id, is_pending)) = event {
+            if !is_pending && snapshot.event_for_id(folder_id, message_id).is_none() {
+                responses.extend_from_slice(&rop_error_response(
+                    0x52,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+            let attach_nums = event_attachments_for_parent_handle(
+                session,
+                parent_handle,
+                folder_id,
+                message_id,
+                snapshot,
+            )
+            .into_iter()
+            .map(|attachment| attachment.attach_num)
+            .collect::<Vec<_>>();
+            responses.extend_from_slice(&rop_get_valid_attachment_numbers_response(
+                request,
+                &attach_nums,
+            ));
+            return;
+        }
+    }
     responses.extend_from_slice(&rop_get_valid_attachments_response(
         request,
         input_object(session, handle_slots, request),
@@ -145,18 +184,23 @@ pub(super) fn append_get_attachment_table_response(
         ));
         return;
     }
-    let (folder_id, message_id, is_calendar_event) =
+    let parent_handle = input_handle(handle_slots, request);
+    let (folder_id, message_id, is_calendar_event, is_pending_event) =
         match input_object(session, handle_slots, request) {
-            Some(MapiObject::PendingMessage { folder_id, .. }) => (*folder_id, 0, false),
+            Some(MapiObject::PendingMessage { folder_id, .. }) => {
+                (*folder_id, 0, false, false)
+            }
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
                 ..
-            }) => (*folder_id, *message_id, false),
+            }) => (*folder_id, *message_id, false, false),
             Some(MapiObject::Event {
                 folder_id,
                 event_id: message_id,
-            }) => (*folder_id, *message_id, true),
+                ..
+            }) => (*folder_id, *message_id, true, false),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true),
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x21,
@@ -166,7 +210,10 @@ pub(super) fn append_get_attachment_table_response(
                 return;
             }
         };
-    if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
+    if is_calendar_event
+        && !is_pending_event
+        && snapshot.event_for_id(folder_id, message_id).is_none()
+    {
         responses.extend_from_slice(&rop_error_response(
             0x21,
             request.output_handle_index.unwrap_or(0),
@@ -174,10 +221,26 @@ pub(super) fn append_get_attachment_table_response(
         ));
         return;
     }
-    let handle = session.allocate_output_handle(
-        request.output_handle_index,
-        attachment_table_object(folder_id, message_id),
-    );
+    let mut table = attachment_table_object(folder_id, message_id);
+    if is_calendar_event {
+        if let (
+            Some(parent_handle),
+            MapiObject::AttachmentTable {
+                materialized_attachments,
+                ..
+            },
+        ) = (parent_handle, &mut table)
+        {
+            *materialized_attachments = Some(event_attachments_for_parent_handle(
+                session,
+                parent_handle,
+                folder_id,
+                message_id,
+                snapshot,
+            ));
+        }
+    }
+    let handle = session.allocate_output_handle(request.output_handle_index, table);
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     responses.extend_from_slice(&get_attachment_table_response(request));
     output_handles.push(handle);
@@ -199,17 +262,20 @@ pub(super) fn append_open_attachment_response(
         ));
         return;
     }
-    let (folder_id, message_id, is_calendar_event) =
+    let parent_handle = input_handle(handle_slots, request);
+    let (folder_id, message_id, is_calendar_event, is_pending_event) =
         match input_object(session, handle_slots, request) {
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
                 ..
-            }) => (*folder_id, *message_id, false),
+            }) => (*folder_id, *message_id, false, false),
             Some(MapiObject::Event {
                 folder_id,
                 event_id: message_id,
-            }) => (*folder_id, *message_id, true),
+                ..
+            }) => (*folder_id, *message_id, true, false),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, true),
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x22,
@@ -219,7 +285,10 @@ pub(super) fn append_open_attachment_response(
                 return;
             }
         };
-    if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
+    if is_calendar_event
+        && !is_pending_event
+        && snapshot.event_for_id(folder_id, message_id).is_none()
+    {
         responses.extend_from_slice(&rop_error_response(
             0x22,
             request.output_handle_index.unwrap_or(0),
@@ -228,6 +297,64 @@ pub(super) fn append_open_attachment_response(
         return;
     }
     let attach_num = request.attach_num().unwrap_or(u32::MAX);
+    if is_calendar_event {
+        let Some(parent_handle) = parent_handle else {
+            responses.extend_from_slice(&rop_error_response(
+                0x22,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_010F,
+            ));
+            return;
+        };
+        let visible_attachment = event_attachments_for_parent_handle(
+            session,
+            parent_handle,
+            folder_id,
+            message_id,
+            snapshot,
+        )
+        .into_iter()
+        .find(|attachment| attachment.attach_num == attach_num);
+        let Some(attachment) = visible_attachment else {
+            responses.extend_from_slice(&rop_error_response(
+                0x22,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_010F,
+            ));
+            return;
+        };
+        let object = if attachment.canonical_id.is_nil() {
+            let Some(upsert) = session
+                .pending_event_attachment_transactions
+                .get(&parent_handle)
+                .and_then(|changes| {
+                    changes
+                        .upserts
+                        .iter()
+                        .find(|upsert| upsert.attach_num == attach_num)
+                })
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x22,
+                    request.output_handle_index.unwrap_or(0),
+                    0x8004_010F,
+                ));
+                return;
+            };
+            pending_event_attachment_object(folder_id, message_id, upsert)
+        } else {
+            MapiObject::Attachment {
+                folder_id,
+                message_id,
+                attach_num,
+            }
+        };
+        let handle = session.allocate_output_handle(request.output_handle_index, object);
+        set_handle_slot(handle_slots, request.output_handle_index, handle);
+        responses.extend_from_slice(&rop_open_attachment_response(request));
+        output_handles.push(handle);
+        return;
+    }
     if session
         .pending_attachment_deletions
         .contains(&(folder_id, message_id, attach_num))
@@ -274,34 +401,37 @@ pub(super) fn append_create_attachment_response(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let parent_message_handle = input_handle(handle_slots, request).filter(|handle| {
+    let parent_handle = input_handle(handle_slots, request);
+    let parent_message_handle = parent_handle.filter(|handle| {
         matches!(
             session.handles.get(handle),
             Some(MapiObject::PendingMessage { .. })
         )
     });
-    let (folder_id, message_id, is_calendar_event, is_pending_message) =
+    let parent_event_handle = parent_handle.filter(|handle| {
+        matches!(
+            session.handles.get(handle),
+            Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
+        )
+    });
+    let (folder_id, message_id, is_calendar_event, is_pending_message, is_pending_event) =
         match input_object(session, handle_slots, request) {
-            Some(MapiObject::Event { folder_id, .. })
-                if mapi_calendar_content_items_suppressed(*folder_id, snapshot) =>
-            {
-                responses.extend_from_slice(&rop_error_response(
-                    0x23,
-                    request.output_handle_index.unwrap_or(0),
-                    0x8004_010F,
-                ));
-                return;
-            }
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
                 ..
-            }) => (*folder_id, *message_id, false, false),
-            Some(MapiObject::PendingMessage { folder_id, .. }) => (*folder_id, 0, false, true),
+            }) => (*folder_id, *message_id, false, false, false),
+            Some(MapiObject::PendingMessage { folder_id, .. }) => {
+                (*folder_id, 0, false, true, false)
+            }
             Some(MapiObject::Event {
                 folder_id,
                 event_id,
-            }) => (*folder_id, *event_id, true, false),
+                ..
+            }) => (*folder_id, *event_id, true, false, false),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => {
+                (*folder_id, 0, true, false, true)
+            }
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x23,
@@ -322,7 +452,10 @@ pub(super) fn append_create_attachment_response(
         ));
         return;
     }
-    if is_calendar_event && snapshot.event_for_id(folder_id, message_id).is_none() {
+    if is_calendar_event
+        && !is_pending_event
+        && snapshot.event_for_id(folder_id, message_id).is_none()
+    {
         responses.extend_from_slice(&rop_error_response(
             0x23,
             request.output_handle_index.unwrap_or(0),
@@ -342,6 +475,22 @@ pub(super) fn append_create_attachment_response(
         ));
         return;
     }
+    if let Some(MapiObject::Event { transaction, .. }) =
+        parent_event_handle.and_then(|handle| session.handles.get(&handle))
+    {
+        let may_write = snapshot
+            .event_for_id(folder_id, message_id)
+            .map(|event| event.event.rights.may_write)
+            .unwrap_or(false);
+        if !event_handle_is_writable(transaction.open_mode_flags, may_write) {
+            responses.extend_from_slice(&rop_error_response(
+                0x23,
+                request.output_handle_index.unwrap_or(0),
+                0x8007_0005,
+            ));
+            return;
+        }
+    }
 
     let attach_num = if let Some(parent_handle) = parent_message_handle {
         session
@@ -350,6 +499,8 @@ pub(super) fn append_create_attachment_response(
             .and_then(|attachments| attachments.iter().map(|(attach_num, _)| *attach_num).max())
             .unwrap_or(u32::MAX)
             .saturating_add(1)
+    } else if let Some(parent_handle) = parent_event_handle {
+        next_pending_event_attachment_num(session, parent_handle, folder_id, message_id, snapshot)
     } else {
         next_pending_attachment_num(session, folder_id, message_id, snapshot)
     };
@@ -369,7 +520,7 @@ pub(super) fn append_create_attachment_response(
             data: Vec::new(),
         },
     );
-    if let Some(parent_handle) = parent_message_handle {
+    if let Some(parent_handle) = parent_message_handle.or(parent_event_handle) {
         session
             .pending_attachment_parent_messages
             .insert(handle, parent_handle);
@@ -387,18 +538,9 @@ pub(super) fn append_delete_attachment_response(
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
+    let parent_handle = input_handle(handle_slots, request);
     let (folder_id, message_id, is_calendar_event) =
         match input_object(session, handle_slots, request) {
-            Some(MapiObject::Event { folder_id, .. })
-                if mapi_calendar_content_items_suppressed(*folder_id, snapshot) =>
-            {
-                responses.extend_from_slice(&rop_error_response(
-                    0x24,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                ));
-                return;
-            }
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
@@ -407,7 +549,9 @@ pub(super) fn append_delete_attachment_response(
             Some(MapiObject::Event {
                 folder_id,
                 event_id,
+                ..
             }) => (*folder_id, *event_id, true),
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true),
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x24,
@@ -418,15 +562,6 @@ pub(super) fn append_delete_attachment_response(
             }
         };
     let attach_num = request.attach_num().unwrap_or(u32::MAX);
-    let Some(attachment) = snapshot.attachment_for_message(folder_id, message_id, attach_num)
-    else {
-        responses.extend_from_slice(&rop_error_response(
-            0x24,
-            request.response_handle_index(),
-            0x8004_010F,
-        ));
-        return;
-    };
     if !snapshot
         .folder_access_for_principal(folder_id, principal.account_id)
         .map(|access| access.may_write)
@@ -439,8 +574,76 @@ pub(super) fn append_delete_attachment_response(
         ));
         return;
     }
-    let _ = is_calendar_event;
-    let _ = attachment;
+    if is_calendar_event {
+        let Some(parent_handle) = parent_handle else {
+            responses.extend_from_slice(&rop_error_response(
+                0x24,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+            return;
+        };
+        if let Some(MapiObject::Event { transaction, .. }) = session.handles.get(&parent_handle) {
+            let may_write = snapshot
+                .event_for_id(folder_id, message_id)
+                .map(|event| event.event.rights.may_write)
+                .unwrap_or(false);
+            if !event_handle_is_writable(transaction.open_mode_flags, may_write) {
+                responses.extend_from_slice(&rop_error_response(
+                    0x24,
+                    request.response_handle_index(),
+                    0x8007_0005,
+                ));
+                return;
+            }
+        }
+        let Some(attachment) = event_attachments_for_parent_handle(
+            session,
+            parent_handle,
+            folder_id,
+            message_id,
+            snapshot,
+        )
+        .into_iter()
+        .find(|attachment| attachment.attach_num == attach_num)
+        else {
+            responses.extend_from_slice(&rop_error_response(
+                0x24,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+            return;
+        };
+        let changes = session
+            .pending_event_attachment_transactions
+            .entry(parent_handle)
+            .or_default();
+        if attachment.canonical_id.is_nil() {
+            changes
+                .upserts
+                .retain(|upsert| upsert.attach_num != attach_num);
+        } else if !changes
+            .delete_attachment_ids
+            .contains(&attachment.canonical_id)
+        {
+            changes
+                .delete_attachment_ids
+                .push(attachment.canonical_id);
+        }
+        responses.extend_from_slice(&rop_simple_success_response(request));
+        return;
+    }
+    if snapshot
+        .attachment_for_message(folder_id, message_id, attach_num)
+        .is_none()
+    {
+        responses.extend_from_slice(&rop_error_response(
+            0x24,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    }
     session
         .pending_attachment_deletions
         .insert((folder_id, message_id, attach_num));
@@ -655,23 +858,56 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
         .get(&handle)
         .copied()
     {
-        session
-            .pending_message_attachments
-            .entry(parent_handle)
-            .or_default()
-            .retain(|(existing_attach_num, _)| *existing_attach_num != attach_num);
-        session
-            .pending_message_attachments
-            .entry(parent_handle)
-            .or_default()
-            .push((attach_num, attachment.clone()));
+        let parent_is_pending_message = matches!(
+            session.handles.get(&parent_handle),
+            Some(MapiObject::PendingMessage { .. })
+        );
+        let parent_is_event = matches!(
+            session.handles.get(&parent_handle),
+            Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
+        );
+        if parent_is_pending_message {
+            session
+                .pending_message_attachments
+                .entry(parent_handle)
+                .or_default()
+                .retain(|(existing_attach_num, _)| *existing_attach_num != attach_num);
+            session
+                .pending_message_attachments
+                .entry(parent_handle)
+                .or_default()
+                .push((attach_num, attachment.clone()));
+        } else if parent_is_event {
+            let changes = session
+                .pending_event_attachment_transactions
+                .entry(parent_handle)
+                .or_default();
+            changes
+                .upserts
+                .retain(|existing| existing.attach_num != attach_num);
+            changes.upserts.push(MapiEventAttachmentUpsert {
+                attach_num,
+                attachment: attachment.clone(),
+                custom_property_upserts: mapi_event_custom_property_values_from_map(&properties),
+            });
+        } else {
+            responses.extend_from_slice(&rop_error_response(
+                0x25,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+            return;
+        }
         session.handles.insert(
             handle,
             MapiObject::SavedAttachment {
                 folder_id,
                 message_id,
                 attach_num,
-                file_reference: format!("pending-message:{parent_handle}:{attach_num}"),
+                file_reference: format!(
+                    "pending-{}:{parent_handle}:{attach_num}",
+                    if parent_is_event { "event" } else { "message" }
+                ),
                 file_name: attachment.file_name,
                 media_type: attachment.media_type,
                 disposition: attachment.disposition,
@@ -736,74 +972,211 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                 0x8004_010F,
             )),
         }
-    } else if !mapi_calendar_content_items_suppressed(folder_id, snapshot) {
-        if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
-            match store
-                .add_calendar_event_attachment(
-                    principal.account_id,
-                    event.canonical_id,
-                    attachment,
-                    AuditEntryInput {
-                        actor: principal.email.clone(),
-                        action: "mapi-save-calendar-attachment".to_string(),
-                        subject: format!("calendar-event:{}", event.canonical_id),
-                    },
-                )
-                .await
-            {
-                Ok(Some(stored)) => {
-                    if upsert_custom_property_values_from_map(
-                        store,
-                        principal,
-                        MapiCustomPropertyObjectKind::Attachment,
-                        stored.id,
-                        &properties,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x25,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                    session.handles.insert(
-                        handle,
-                        MapiObject::SavedAttachment {
-                            folder_id,
-                            message_id,
-                            attach_num,
-                            file_reference: stored.file_reference,
-                            file_name: stored.file_name,
-                            media_type: stored.media_type,
-                            disposition: None,
-                            content_id: None,
-                            size_octets: stored.size_octets,
-                        },
-                    );
-                    responses.extend_from_slice(&rop_simple_success_response(request));
-                }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x25,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            }
-        } else {
-            responses.extend_from_slice(&rop_error_response(
-                0x25,
-                request.response_handle_index(),
-                0x8004_010F,
-            ));
-        }
     } else {
         responses.extend_from_slice(&rop_error_response(
             0x25,
             request.response_handle_index(),
             0x8004_010F,
         ));
+    }
+}
+
+pub(super) fn event_attachments_for_parent_handle(
+    session: &MapiSession,
+    parent_handle: u32,
+    folder_id: u64,
+    message_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<crate::mapi_store::MapiAttachment> {
+    let mut attachments = snapshot
+        .attachments_for_message(folder_id, message_id)
+        .unwrap_or_default()
+        .to_vec();
+    let Some(changes) = session
+        .pending_event_attachment_transactions
+        .get(&parent_handle)
+    else {
+        return attachments;
+    };
+    attachments.retain(|attachment| {
+        !changes
+            .delete_attachment_ids
+            .contains(&attachment.canonical_id)
+    });
+    attachments.extend(changes.upserts.iter().map(|upsert| {
+        crate::mapi_store::MapiAttachment {
+            attach_num: upsert.attach_num,
+            canonical_id: Uuid::nil(),
+            file_reference: format!("pending-event:{parent_handle}:{}", upsert.attach_num),
+            file_name: upsert.attachment.file_name.clone(),
+            media_type: upsert.attachment.media_type.clone(),
+            disposition: upsert.attachment.disposition.clone(),
+            content_id: upsert.attachment.content_id.clone(),
+            size_octets: upsert.attachment.blob_bytes.len() as u64,
+        }
+    }));
+    attachments.sort_by_key(|attachment| attachment.attach_num);
+    attachments
+}
+
+fn pending_event_attachment_object(
+    folder_id: u64,
+    message_id: u64,
+    upsert: &MapiEventAttachmentUpsert,
+) -> MapiObject {
+    let mut properties = HashMap::from([
+        (
+            PID_TAG_ATTACH_LONG_FILENAME_W,
+            MapiValue::String(upsert.attachment.file_name.clone()),
+        ),
+        (
+            PID_TAG_ATTACH_MIME_TAG_W,
+            MapiValue::String(upsert.attachment.media_type.clone()),
+        ),
+    ]);
+    if let Some(content_id) = &upsert.attachment.content_id {
+        properties.insert(
+            PID_TAG_ATTACH_CONTENT_ID_W,
+            MapiValue::String(content_id.clone()),
+        );
+    }
+    if upsert
+        .attachment
+        .disposition
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("inline"))
+    {
+        properties.insert(PID_TAG_ATTACHMENT_HIDDEN, MapiValue::Bool(true));
+    }
+    MapiObject::PendingAttachment {
+        folder_id,
+        message_id,
+        attach_num: upsert.attach_num,
+        properties,
+        data: upsert.attachment.blob_bytes.clone(),
+    }
+}
+
+pub(super) fn apply_event_attachment_overlay_property(
+    session: &MapiSession,
+    parent_handle: Option<u32>,
+    snapshot: &MapiMailStoreSnapshot,
+    object: &mut MapiObject,
+) {
+    let Some(parent_handle) = parent_handle.filter(|handle| {
+        session
+            .pending_event_attachment_transactions
+            .contains_key(handle)
+    }) else {
+        return;
+    };
+    let (folder_id, message_id) = match object {
+        MapiObject::Event {
+            folder_id,
+            event_id,
+            ..
+        } => (*folder_id, *event_id),
+        MapiObject::PendingEvent { folder_id, .. } => (*folder_id, 0),
+        _ => return,
+    };
+    let has_attachments = !event_attachments_for_parent_handle(
+        session,
+        parent_handle,
+        folder_id,
+        message_id,
+        snapshot,
+    )
+    .is_empty();
+    match object {
+        MapiObject::Event { transaction, .. } => {
+            transaction
+                .pending_properties
+                .insert(PID_TAG_HAS_ATTACHMENTS, MapiValue::Bool(has_attachments));
+        }
+        MapiObject::PendingEvent { properties, .. } => {
+            properties.insert(PID_TAG_HAS_ATTACHMENTS, MapiValue::Bool(has_attachments));
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn attachment_overlay_object(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<MapiObject> {
+    let parent_handle = input_handle(handle_slots, request);
+    let mut object = input_object(session, handle_slots, request).cloned();
+    if let Some(object) = object.as_mut() {
+        apply_event_attachment_overlay_property(session, parent_handle, snapshot, object);
+    }
+    object
+}
+
+fn next_pending_event_attachment_num(
+    session: &MapiSession,
+    parent_handle: u32,
+    folder_id: u64,
+    message_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    let visible_max = event_attachments_for_parent_handle(
+        session,
+        parent_handle,
+        folder_id,
+        message_id,
+        snapshot,
+    )
+    .into_iter()
+    .map(|attachment| attachment.attach_num)
+    .max();
+    let child_max = session
+        .pending_attachment_parent_messages
+        .iter()
+        .filter(|(_, pending_parent)| **pending_parent == parent_handle)
+        .filter_map(|(child_handle, _)| match session.handles.get(child_handle) {
+            Some(
+                MapiObject::PendingAttachment { attach_num, .. }
+                | MapiObject::SavedAttachment { attach_num, .. },
+            ) => Some(*attach_num),
+            _ => None,
+        })
+        .max();
+    visible_max
+        .into_iter()
+        .chain(child_max)
+        .max()
+        .map(|value| value.saturating_add(1))
+        .unwrap_or(0)
+}
+
+pub(super) fn clear_event_attachment_transaction(
+    session: &mut MapiSession,
+    parent_handle: u32,
+) {
+    session
+        .pending_event_attachment_transactions
+        .remove(&parent_handle);
+    session
+        .pending_attachment_parent_messages
+        .retain(|_, pending_parent| *pending_parent != parent_handle);
+}
+
+pub(super) fn abandon_event_attachment_transaction(
+    session: &mut MapiSession,
+    parent_handle: u32,
+) {
+    let child_handles = session
+        .pending_attachment_parent_messages
+        .iter()
+        .filter_map(|(child_handle, pending_parent)| {
+            (*pending_parent == parent_handle).then_some(*child_handle)
+        })
+        .collect::<Vec<_>>();
+    clear_event_attachment_transaction(session, parent_handle);
+    for child_handle in child_handles {
+        session.handles.remove(&child_handle);
     }
 }
 

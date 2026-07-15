@@ -315,9 +315,7 @@ fn rop_query_rows_response_inner(
                 let mut rows = calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
                 sort_events(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|event| {
-                        serialize_event_row(&event.event, event.id, event.folder_id, &columns)
-                    })
+                    .map(|event| serialize_versioned_event_row(event, &columns))
                     .collect::<Vec<_>>()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
@@ -347,14 +345,7 @@ fn rop_query_rows_response_inner(
                             calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
                         sort_events(&mut rows, sort_orders);
                         rows.into_iter()
-                            .map(|event| {
-                                serialize_event_row(
-                                    &event.event,
-                                    event.id,
-                                    event.folder_id,
-                                    &columns,
-                                )
-                            })
+                            .map(|event| serialize_versioned_event_row(event, &columns))
                             .collect::<Vec<_>>()
                     }
                     MapiCollaborationFolderKind::Task => {
@@ -551,6 +542,7 @@ fn rop_query_rows_response_inner(
         Some(MapiObject::AttachmentTable {
             folder_id,
             message_id,
+            materialized_attachments,
             columns,
             sort_orders,
             restriction,
@@ -563,8 +555,9 @@ fn rop_query_rows_response_inner(
             } else {
                 columns.clone()
             };
-            let mut rows = snapshot
-                .attachments_for_message(*folder_id, *message_id)
+            let mut rows = materialized_attachments
+                .as_deref()
+                .or_else(|| snapshot.attachments_for_message(*folder_id, *message_id))
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();

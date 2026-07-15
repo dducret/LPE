@@ -10,7 +10,8 @@ use crate::mapi::identity::{
 };
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiAttachment, MapiCommonViewNamedViewMessage,
-    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
+    MapiConversationActionMessage, MapiEvent, MapiMessage, MapiNavigationShortcutMessage,
+    MapiPublicFolder,
 };
 use anyhow::bail;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -936,7 +937,9 @@ fn navigation_shortcut_property_value_with_store_entry_id(
             crate::mapi::identity::folder_entry_id_from_object_id(account_id, message.folder_id)
                 .map(MapiValue::Binary)
         }
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(mapi_mailstore::change_number_for_store_id(
+            message.id,
+        ))),
         PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(wlink_save_stamp(message))),
         PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
         PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
@@ -1318,7 +1321,9 @@ pub(in crate::mapi) fn conversation_action_property_value(
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(mapi_mailstore::change_number_for_store_id(
+            message.id,
+        ))),
         PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG => {
             action.move_folder_entry_id.clone().map(MapiValue::Binary)
         }

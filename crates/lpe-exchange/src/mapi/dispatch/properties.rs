@@ -131,8 +131,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
             );
         }
     }
-    let object_owned = input_object(session, handle_slots, request).cloned();
-    let object = object_owned.as_ref();
+    let object = attachment_overlay_object(session, handle_slots, request, snapshot);
     let visible_emails;
     let emails_for_request = if created_emails.is_empty() {
         emails
@@ -144,8 +143,8 @@ pub(super) async fn append_get_properties_specific_response<S>(
             mailbox = %principal.email,
             request_type = "Execute",
             request_rop_id = "0x07",
-            object_kind = mapi_object_debug_kind(object),
-            folder_id = %mapi_object_debug_folder_id(object),
+            object_kind = mapi_object_debug_kind(object.as_ref()),
+            folder_id = %mapi_object_debug_folder_id(object.as_ref()),
             same_execute_created_email_count = created_emails.len(),
             base_snapshot_email_count = emails.len(),
             "rca debug mapi same execute created message visibility"
@@ -160,7 +159,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
     let custom_values = fetch_custom_property_values_for_request(
         store,
         principal,
-        object,
+        object.as_ref(),
         mailboxes,
         emails_for_request,
         snapshot,
@@ -171,7 +170,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
     let inbox_folder_type_getprops_context = if let (
         true,
         Some(MapiObject::Folder { properties, .. }),
-    ) = (is_inbox_folder_type_probe, object)
+    ) = (is_inbox_folder_type_probe, object.as_ref())
     {
         Some(format!(
                 "input_index={};input_handle={};requested_tags={};folder_type={};display_name={};container_class={};content_count={};unread_count={};associated_count={}",
@@ -194,7 +193,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
         folder_id: INBOX_FOLDER_ID,
         config_id,
         saved_message,
-    }) = object
+    }) = object.as_ref()
     {
         let (message_class, subject) = saved_message
             .as_ref()
@@ -219,8 +218,8 @@ pub(super) async fn append_get_properties_specific_response<S>(
             request_rop_id = "0x07",
             input_handle_index = request.input_handle_index().unwrap_or(0),
             response_handle_index = request.response_handle_index(),
-            object_kind = mapi_object_debug_kind(object),
-            folder_id = %mapi_object_debug_folder_id(object),
+            object_kind = mapi_object_debug_kind(object.as_ref()),
+            folder_id = %mapi_object_debug_folder_id(object.as_ref()),
             requested_property_tags = %format_debug_property_tags(&request.property_tags()),
             named_property_context = %named_property_context,
             "rca debug mapi get properties named property context"
@@ -229,7 +228,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
     let normalized_request = normalized_get_properties_request(session, request);
     let property_response = rop_get_properties_specific_response_with_custom(
         &normalized_request,
-        object,
+        object.as_ref(),
         principal,
         mailboxes,
         emails_for_request,
@@ -241,7 +240,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
         session,
         request_id,
         request,
-        object,
+        object.as_ref(),
         mailboxes,
         emails_for_request,
         snapshot,
@@ -252,21 +251,21 @@ pub(super) async fn append_get_properties_specific_response<S>(
         session,
         request_id,
         request,
-        object,
+        object.as_ref(),
         &property_response,
     );
     log_get_properties_view_response_debug(
         principal,
         request_id,
         request,
-        object,
+        object.as_ref(),
         &property_response,
     );
     log_get_properties_default_folder_response_debug(
         principal,
         request_id,
         request,
-        object,
+        object.as_ref(),
         mailboxes,
         emails_for_request,
         snapshot,
@@ -277,7 +276,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
         .iter()
         .any(|tag| property_ids_match(*tag, PID_TAG_DEFAULT_VIEW_ENTRY_ID))
     {
-        if let Some(MapiObject::Folder { folder_id, .. }) = object {
+        if let Some(MapiObject::Folder { folder_id, .. }) = object.as_ref() {
             if let Some(view) = debug_advertised_default_named_view(snapshot, *folder_id) {
                 session.record_default_view_advertised(
                     request_id,
@@ -310,23 +309,23 @@ pub(super) async fn append_get_properties_specific_response<S>(
                 request_id,
                 "0x07",
                 "default_view_advertised",
-                object,
+                object.as_ref(),
                 None,
                 snapshot,
             );
         }
     }
     let post_hierarchy_contract =
-        post_hierarchy_getprops_contract(request, object, &property_response);
+        post_hierarchy_getprops_contract(request, object.as_ref(), &property_response);
     let outlook_surface_folder_getprops_trace = format_outlook_surface_folder_getprops_trace(
         request_id,
         request,
-        object,
+        object.as_ref(),
         &property_response,
     );
-    if should_log_outlook_surface_getprops_info(object) {
+    if should_log_outlook_surface_getprops_info(object.as_ref()) {
         let (associated_config_id, associated_config_class, associated_config_subject) =
-            match object {
+            match object.as_ref() {
                 Some(MapiObject::AssociatedConfig {
                     config_id,
                     saved_message,
@@ -345,7 +344,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
             };
         let common_view_descriptor_getprops_contract =
             format_common_view_descriptor_getprops_contract(
-                object,
+                object.as_ref(),
                 principal,
                 &request.property_tags(),
                 snapshot,
@@ -360,8 +359,8 @@ pub(super) async fn append_get_properties_specific_response<S>(
             request_rop_id = "0x07",
             input_handle_index = request.input_handle_index().unwrap_or(0),
             response_handle_index = request.response_handle_index(),
-            object_kind = mapi_object_debug_kind(object),
-            folder_id = %mapi_object_debug_folder_id(object),
+            object_kind = mapi_object_debug_kind(object.as_ref()),
+            folder_id = %mapi_object_debug_folder_id(object.as_ref()),
             associated_config_id = %associated_config_id,
             associated_config_class,
             associated_config_subject,
@@ -463,9 +462,10 @@ pub(super) fn append_get_properties_all_response(
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
+    let object = attachment_overlay_object(session, handle_slots, request, snapshot);
     responses.extend_from_slice(&rop_get_properties_all_response(
         request,
-        input_object(session, handle_slots, request),
+        object.as_ref(),
         principal,
         mailboxes,
         emails,
@@ -1386,8 +1386,7 @@ where
                 .await?;
             }
             MapiObject::Event {
-                folder_id,
-                event_id,
+                folder_id, event_id, ..
             } => {
                 apply_canonical_event_property_values(
                     store,

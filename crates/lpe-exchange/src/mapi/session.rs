@@ -9,7 +9,9 @@ use super::transport::*;
 use super::*;
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiAssociatedConfigMessage;
-use lpe_storage::{AttachmentUploadInput, JmapEmail, SearchFolderDefinition};
+use lpe_storage::{
+    AttachmentUploadInput, JmapEmail, MapiEventAttachmentChanges, SearchFolderDefinition,
+};
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;

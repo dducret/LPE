@@ -15,6 +15,7 @@ pub mod jmap_queries;
 pub mod mail;
 pub mod mail_items;
 pub mod mailboxes;
+pub mod mapi_events;
 mod message_ops;
 pub mod models;
 pub mod notes_journal;
@@ -43,7 +44,8 @@ pub use crate::activesync::{
 };
 pub use crate::attachments::{
     calendar_attachment_file_reference, parse_calendar_attachment_file_reference,
-    CalendarEventAttachment, ClientAttachment,
+    CalendarEventAttachment, ClientAttachment, MapiEventAttachmentChanges,
+    MapiEventAttachmentUpsert,
 };
 pub use crate::auth::{
     AccountAppPassword, AccountAuthFactor, AccountCredentialInput, AccountLogin, AccountOidcClaims,
@@ -73,6 +75,11 @@ pub use crate::jmap_blobs::{JmapQuota, JmapUploadBlob};
 pub use crate::jmap_queries::{JmapEmailQuery, JmapStoredQueryState, JmapThreadQuery};
 pub use crate::mailboxes::{
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
+};
+pub use crate::mapi_events::{
+    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
+    MapiEventCreateResult, MapiEventCustomPropertyValue, MapiEventReminderPatch,
+    MapiEventReminderState, MapiEventVersion,
 };
 pub use crate::notes_journal::{
     ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,

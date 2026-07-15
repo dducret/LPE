@@ -2478,15 +2478,33 @@ fn calendar_end_sort_uses_projected_non_zero_mapi_window() {
     let rows = [
         crate::mapi_store::MapiEvent {
             id: mapi_item_id(&zero_duration.id),
+            source_key: mapi_mailstore::source_key_for_store_id(mapi_item_id(&zero_duration.id)),
             folder_id: CALENDAR_FOLDER_ID,
             canonical_id: zero_duration.id,
+            version: lpe_storage::MapiEventVersion {
+                event_id: zero_id,
+                canonical_modseq: 1,
+                change_number: 1,
+                change_key: mapi_mailstore::change_key_for_change_number(1),
+                predecessor_change_list: mapi_mailstore::predecessor_change_list(1),
+                updated_at: "2026-05-25T14:00:00Z".to_string(),
+            },
             event: zero_duration,
             attachments: Vec::new(),
         },
         crate::mapi_store::MapiEvent {
             id: mapi_item_id(&one_minute.id),
+            source_key: mapi_mailstore::source_key_for_store_id(mapi_item_id(&one_minute.id)),
             folder_id: CALENDAR_FOLDER_ID,
             canonical_id: one_minute.id,
+            version: lpe_storage::MapiEventVersion {
+                event_id: one_minute_id,
+                canonical_modseq: 1,
+                change_number: 2,
+                change_key: mapi_mailstore::change_key_for_change_number(2),
+                predecessor_change_list: mapi_mailstore::predecessor_change_list(2),
+                updated_at: "2026-05-25T14:00:00Z".to_string(),
+            },
             event: one_minute,
             attachments: Vec::new(),
         },

@@ -129,6 +129,46 @@ macro_rules! store_impl_collaboration {
         })
     }
 
+    fn fetch_mapi_event_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiEventVersion>> {
+        Box::pin(async move {
+            self.fetch_mapi_event_versions(principal_account_id, event_ids)
+                .await
+        })
+    }
+
+    fn create_mapi_event<'a>(
+        &'a self,
+        input: MapiEventCreateInput,
+    ) -> StoreFuture<'a, MapiEventCreateOutcome> {
+        Box::pin(async move {
+            let collection = self
+                .fetch_accessible_calendar_collections(input.principal_account_id)
+                .await?
+                .into_iter()
+                .find(|collection| collection.id == input.collection_id);
+            let Some(collection) = collection else {
+                return Ok(MapiEventCreateOutcome::NotFound);
+            };
+            if !collection.rights.may_write {
+                return Ok(MapiEventCreateOutcome::AccessDenied);
+            }
+            self.create_mapi_event(input)
+                .await
+                .map(MapiEventCreateOutcome::Created)
+        })
+    }
+
+    fn commit_mapi_event_update<'a>(
+        &'a self,
+        input: MapiEventCommitInput,
+    ) -> StoreFuture<'a, MapiEventCommitOutcome> {
+        Box::pin(async move { self.commit_mapi_event_update(input).await })
+    }
+
     fn fetch_accessible_tasks_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,

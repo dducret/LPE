@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     blob_store::{DurableBlobKind, PostgresBlobStore, PutBlobRequest, StoredBlobRef},
+    mapi_events::MapiEventCustomPropertyValue,
     submission::AttachmentUploadInput,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AuditEntryInput, CanonicalChangeCategory,
     JmapEmail, JmapUploadBlob, Storage,
@@ -18,7 +19,7 @@ pub struct ClientAttachment {
     pub size: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventAttachment {
     pub id: Uuid,
@@ -29,7 +30,198 @@ pub struct CalendarEventAttachment {
     pub file_reference: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapiEventAttachmentUpsert {
+    pub attach_num: u32,
+    pub attachment: AttachmentUploadInput,
+    pub custom_property_upserts: Vec<MapiEventCustomPropertyValue>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MapiEventAttachmentChanges {
+    pub upserts: Vec<MapiEventAttachmentUpsert>,
+    pub delete_attachment_ids: Vec<Uuid>,
+}
+
 impl Storage {
+    pub(crate) async fn insert_calendar_event_attachment_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        owner_account_id: Uuid,
+        calendar_id: Uuid,
+        event_id: Uuid,
+        ordinal: i32,
+        attachment: &AttachmentUploadInput,
+    ) -> Result<CalendarEventAttachment> {
+        let domain_id = self
+            .load_account_domain_id_in_tx(tx, tenant_id, owner_account_id)
+            .await?;
+        let blob = self
+            .store_attachment_blob_in_tx(
+                tx,
+                tenant_id,
+                domain_id,
+                attachment.media_type.trim(),
+                attachment.file_name.trim(),
+                &attachment.blob_bytes,
+            )
+            .await?;
+        let attachment_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO calendar_event_attachments (
+                id, tenant_id, owner_account_id, calendar_id, event_id, domain_id,
+                blob_id, blob_kind, file_name, media_type, disposition, content_id,
+                ordinal, size_octets
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'attachment', $8, $9, $10, $11, $12, $13)
+            "#,
+        )
+        .bind(attachment_id)
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .bind(calendar_id)
+        .bind(event_id)
+        .bind(blob.domain_id)
+        .bind(blob.id)
+        .bind(attachment.file_name.trim())
+        .bind(attachment.media_type.trim())
+        .bind(attachment_disposition(attachment.disposition.as_deref()))
+        .bind(normalize_attachment_content_id(attachment.content_id.as_deref()).as_deref())
+        .bind(ordinal)
+        .bind(attachment.blob_bytes.len() as i64)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(CalendarEventAttachment {
+            id: attachment_id,
+            event_id,
+            file_name: attachment.file_name.trim().to_string(),
+            media_type: attachment.media_type.trim().to_string(),
+            size_octets: attachment.blob_bytes.len() as u64,
+            file_reference: calendar_attachment_file_reference(event_id, attachment_id),
+        })
+    }
+
+    pub(crate) async fn delete_calendar_event_attachment_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        owner_account_id: Uuid,
+        event_id: Uuid,
+        attachment_id: Uuid,
+    ) -> Result<()> {
+        let deleted = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            DELETE FROM calendar_event_attachments
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND event_id = $3
+              AND id = $4
+            RETURNING id
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .bind(event_id)
+        .bind(attachment_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if deleted.is_none() {
+            anyhow::bail!("calendar Event attachment was not found in the parent transaction");
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn fetch_calendar_event_attachments_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        owner_account_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<Vec<CalendarEventAttachment>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, event_id, file_name, media_type, size_octets
+            FROM calendar_event_attachments
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND event_id = $3
+            ORDER BY ordinal ASC, id ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .bind(event_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        rows.into_iter()
+            .map(calendar_event_attachment_from_row)
+            .collect()
+    }
+
+    pub(crate) async fn apply_mapi_event_attachment_changes_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        owner_account_id: Uuid,
+        calendar_id: Uuid,
+        event_id: Uuid,
+        changes: &MapiEventAttachmentChanges,
+    ) -> Result<Vec<CalendarEventAttachment>> {
+        for upsert in &changes.upserts {
+            let stored = self
+                .insert_calendar_event_attachment_in_tx(
+                    tx,
+                    tenant_id,
+                    owner_account_id,
+                    calendar_id,
+                    event_id,
+                    upsert.attach_num as i32,
+                    &upsert.attachment,
+                )
+                .await?;
+            replace_attachment_custom_properties_in_tx(
+                tx,
+                tenant_id,
+                owner_account_id,
+                stored.id,
+                &upsert.custom_property_upserts,
+            )
+            .await?;
+        }
+        for attachment_id in &changes.delete_attachment_ids {
+            sqlx::query(
+                r#"
+                DELETE FROM mapi_custom_property_values
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = 'attachment'
+                  AND canonical_id = $3
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(owner_account_id)
+            .bind(attachment_id)
+            .execute(&mut **tx)
+            .await?;
+            Self::delete_calendar_event_attachment_in_tx(
+                tx,
+                tenant_id,
+                owner_account_id,
+                event_id,
+                *attachment_id,
+            )
+            .await?;
+        }
+        Self::fetch_calendar_event_attachments_in_tx(
+            tx,
+            tenant_id,
+            owner_account_id,
+            event_id,
+        )
+        .await
+    }
+
     pub(crate) async fn ingest_message_attachments_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -151,18 +343,7 @@ impl Storage {
         .await?;
 
         rows.into_iter()
-            .map(|row| {
-                let id: Uuid = row.try_get("id")?;
-                let event_id: Uuid = row.try_get("event_id")?;
-                Ok(CalendarEventAttachment {
-                    id,
-                    event_id,
-                    file_name: row.try_get("file_name")?,
-                    media_type: row.try_get("media_type")?,
-                    size_octets: row.try_get::<i64, _>("size_octets")?.max(0) as u64,
-                    file_reference: calendar_attachment_file_reference(event_id, id),
-                })
-            })
+            .map(calendar_event_attachment_from_row)
             .collect()
     }
 
@@ -206,6 +387,7 @@ impl Storage {
             FROM calendar_events
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             LIMIT 1
+            FOR UPDATE
             "#,
         )
         .bind(&tenant_id)
@@ -279,6 +461,14 @@ impl Storage {
                 CanonicalChangeCategory::Calendar.as_str(),
             )
             .await?;
+        self.advance_calendar_event_version_in_tx(
+            &mut tx, &tenant_id, account_id, event_id, modseq,
+        )
+        .await?;
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            &mut tx, &tenant_id, account_id, event_id,
+        )
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -288,7 +478,7 @@ impl Storage {
             event_id,
             "updated",
             modseq,
-            &[account_id],
+            &affected_principals,
             serde_json::json!({
                 "objectUid": event_id,
                 "collectionId": calendar_id,
@@ -401,6 +591,25 @@ impl Storage {
         };
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let event_exists = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM calendar_events
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            FOR UPDATE
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if event_exists.is_none() {
+            tx.commit().await?;
+            return Ok(None);
+        }
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_event_attachments
@@ -444,6 +653,14 @@ impl Storage {
                 CanonicalChangeCategory::Calendar.as_str(),
             )
             .await?;
+        self.advance_calendar_event_version_in_tx(
+            &mut tx, &tenant_id, account_id, event_id, modseq,
+        )
+        .await?;
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            &mut tx, &tenant_id, account_id, event_id,
+        )
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -453,7 +670,7 @@ impl Storage {
             event_id,
             "updated",
             modseq,
-            &[account_id],
+            &affected_principals,
             serde_json::json!({
                 "objectUid": event_id,
                 "attachmentChanged": true,
@@ -750,6 +967,85 @@ impl Storage {
 
         Ok(blob)
     }
+}
+
+fn calendar_event_attachment_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<CalendarEventAttachment> {
+    let id: Uuid = row.try_get("id")?;
+    let event_id: Uuid = row.try_get("event_id")?;
+    Ok(CalendarEventAttachment {
+        id,
+        event_id,
+        file_name: row.try_get("file_name")?,
+        media_type: row.try_get("media_type")?,
+        size_octets: row.try_get::<i64, _>("size_octets")?.max(0) as u64,
+        file_reference: calendar_attachment_file_reference(event_id, id),
+    })
+}
+
+async fn replace_attachment_custom_properties_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    attachment_id: Uuid,
+    values: &[MapiEventCustomPropertyValue],
+) -> Result<()> {
+    for value in values {
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_custom_property_values (
+                tenant_id, account_id, object_kind, canonical_id,
+                property_tag, property_type, property_value
+            )
+            VALUES ($1, $2, 'attachment', $3, $4, $5, $6)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(attachment_id)
+        .bind(i64::from(value.property_tag))
+        .bind(i32::from(value.property_type))
+        .bind(&value.property_value)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_mapi_event_attachment_changes(
+    changes: &MapiEventAttachmentChanges,
+) -> Result<()> {
+    let mut attach_nums = std::collections::HashSet::new();
+    for upsert in &changes.upserts {
+        if upsert.attach_num > i32::MAX as u32 {
+            anyhow::bail!("MAPI Event attachment number exceeds the canonical ordinal range");
+        }
+        if !attach_nums.insert(upsert.attach_num) {
+            anyhow::bail!("MAPI Event attachment upserts contain a duplicate attachment number");
+        }
+        if upsert.attachment.file_name.trim().is_empty()
+            || upsert.attachment.media_type.trim().is_empty()
+        {
+            anyhow::bail!("MAPI Event attachment file name and media type are required");
+        }
+        let mut custom_tags = std::collections::HashSet::new();
+        for value in &upsert.custom_property_upserts {
+            if value.property_type != (value.property_tag & 0xFFFF) as u16 {
+                anyhow::bail!("MAPI attachment custom property type does not match its tag");
+            }
+            if !custom_tags.insert(value.property_tag) {
+                anyhow::bail!("MAPI attachment custom properties contain a duplicate tag");
+            }
+        }
+    }
+    let mut deletes = std::collections::HashSet::new();
+    for attachment_id in &changes.delete_attachment_ids {
+        if attachment_id.is_nil() || !deletes.insert(*attachment_id) {
+            anyhow::bail!("MAPI Event attachment deletes contain an invalid attachment id");
+        }
+    }
+    Ok(())
 }
 
 pub fn calendar_attachment_file_reference(event_id: Uuid, attachment_id: Uuid) -> String {

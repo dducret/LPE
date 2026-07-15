@@ -708,6 +708,21 @@ impl Storage {
                 CanonicalChangeCategory::Calendar.as_str(),
             )
             .await?;
+        self.advance_calendar_event_version_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            event_id,
+            modseq,
+        )
+        .await?;
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            event_id,
+        )
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -717,7 +732,7 @@ impl Storage {
             event_id,
             "updated",
             modseq,
-            &[input.account_id],
+            &affected_principals,
             serde_json::json!({
                 "collectionId": calendar_id,
                 "objectUid": row.uid.clone(),

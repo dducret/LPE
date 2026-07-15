@@ -136,6 +136,11 @@ impl MapiNotificationEvent {
         self
     }
 
+    pub(crate) fn with_object_kind(mut self, object_kind: &'static str) -> Self {
+        self.object_kind = Some(object_kind);
+        self
+    }
+
     pub(crate) fn change_cursor(&self) -> Option<i64> {
         self.change_cursor
     }
@@ -150,6 +155,27 @@ impl MapiNotificationEvent {
 
     pub(crate) fn change_kind(&self) -> Option<&str> {
         self.change_kind.as_deref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn notification_test_shape(
+        &self,
+    ) -> (
+        MapiNotificationKind,
+        u16,
+        u64,
+        Option<u64>,
+        Option<u64>,
+        Option<&'static str>,
+    ) {
+        (
+            self.kind,
+            self.event_mask,
+            self.folder_id,
+            self.message_id,
+            self.old_folder_id,
+            self.object_kind,
+        )
     }
 }
 

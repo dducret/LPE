@@ -172,6 +172,7 @@ pub(super) fn property_stream_data(
         MapiObject::Event {
             folder_id,
             event_id,
+            ..
         } if open_mode == 0 => snapshot
             .event_for_id(*folder_id, *event_id)
             .and_then(|event| {
@@ -294,6 +295,49 @@ pub(in crate::mapi) fn message_body_stream_data(
             2 => (String::new(), Some(String::new())),
             _ => return None,
         },
+        MapiObject::Event {
+            folder_id,
+            event_id,
+            transaction,
+        } => {
+            let event = snapshot.event_for_id(*folder_id, *event_id)?;
+            if open_mode != 0
+                && (!matches!(transaction.open_mode_flags & 0x03, 0x01 | 0x03)
+                    || !event.event.rights.may_write)
+            {
+                return None;
+            }
+            match open_mode {
+                0 | 1 => {
+                    let body_text = if transaction.deleted_properties.contains(&PID_TAG_BODY_W) {
+                        String::new()
+                    } else {
+                        optional_pending_text_property(
+                            &transaction.pending_properties,
+                            &[PID_TAG_BODY_W],
+                        )
+                        .unwrap_or_else(|| event.event.notes.clone())
+                    };
+                    let body_html = optional_pending_text_property(
+                        &transaction.pending_properties,
+                        &[PID_TAG_BODY_HTML_W],
+                    )
+                    .or_else(|| pending_html_binary_property(&transaction.pending_properties))
+                    .or_else(|| {
+                        (!transaction
+                            .deleted_properties
+                            .contains(&PID_TAG_BODY_HTML_W)
+                            && !transaction
+                                .deleted_properties
+                                .contains(&PID_TAG_HTML_BINARY))
+                        .then(|| event.event.body_html.clone())
+                    });
+                    (body_text, body_html)
+                }
+                2 => (String::new(), Some(String::new())),
+                _ => return None,
+            }
+        }
         MapiObject::PublicFolderItem {
             folder_id,
             item_id,
@@ -361,6 +405,10 @@ pub(in crate::mapi) fn message_body_stream_data(
                 property_tag,
             })
         }
+        (Some(MapiObject::Event { .. }), 1 | 2) => Some(StreamWriteTarget::EventProperty {
+            handle: input_handle,
+            property_tag,
+        }),
         (Some(MapiObject::PendingAssociatedMessage { .. }), 1 | 2) => {
             Some(StreamWriteTarget::PendingAssociatedMessageProperty {
                 handle: input_handle,
@@ -570,6 +618,20 @@ pub(in crate::mapi) fn sync_stream_target(
                 session.handles.get_mut(&handle)
             {
                 properties.insert(canonical_property_storage_tag(property_tag), value);
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::EventProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::Event { transaction, .. }) = session.handles.get_mut(&handle) {
+                let storage_tag = canonical_property_storage_tag(property_tag);
+                transaction.deleted_properties.remove(&storage_tag);
+                transaction.pending_properties.insert(storage_tag, value);
                 Some(())
             } else {
                 None
@@ -815,6 +877,7 @@ mod tests {
             pending_message_recipient_replacements: HashMap::new(),
             pending_message_attachments: HashMap::new(),
             pending_attachment_parent_messages: HashMap::new(),
+            pending_event_attachment_transactions: HashMap::new(),
             pending_attachment_deletions: HashSet::new(),
             pending_embedded_message_ids: HashMap::new(),
             pending_embedded_message_attachments: HashMap::new(),

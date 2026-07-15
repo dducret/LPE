@@ -1272,6 +1272,7 @@ pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
         pending_message_recipient_replacements: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),
+        pending_event_attachment_transactions: HashMap::new(),
         pending_attachment_deletions: HashSet::new(),
         pending_embedded_message_ids: HashMap::new(),
         pending_embedded_message_attachments: HashMap::new(),
@@ -2267,6 +2268,7 @@ fn calendar_event_getprops_specific_projects_visible_event() {
     let object = MapiObject::Event {
         folder_id: CALENDAR_FOLDER_ID,
         event_id: crate::mapi::identity::mapi_store_id(0x8182),
+        transaction: MapiEventTransaction::new(0, 0x8182),
     };
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());
@@ -2308,6 +2310,7 @@ fn calendar_event_getprops_all_rejects_missing_event_handle() {
     let object = MapiObject::Event {
         folder_id: CALENDAR_FOLDER_ID,
         event_id: crate::mapi::identity::mapi_store_id(0x43),
+        transaction: MapiEventTransaction::new(0, 0x43),
     };
     let request = RopRequest {
         rop_id: RopId::GetPropertiesAll.as_u8(),
@@ -2337,6 +2340,7 @@ fn calendar_event_get_valid_attachments_rejects_missing_event_handle() {
     let object = MapiObject::Event {
         folder_id: CALENDAR_FOLDER_ID,
         event_id: crate::mapi::identity::mapi_store_id(0x43),
+        transaction: MapiEventTransaction::new(0, 0x43),
     };
     let request = RopRequest {
         rop_id: RopId::GetValidAttachments.as_u8(),

@@ -14,6 +14,7 @@ const JMAP_BLOBS_STORAGE: &str = include_str!("jmap_blobs.rs");
 const JMAP_QUERIES_STORAGE: &str = include_str!("jmap_queries.rs");
 const MAIL_ITEMS_STORAGE: &str = include_str!("mail_items.rs");
 const MAILBOXES_STORAGE: &str = include_str!("mailboxes.rs");
+const MAPI_EVENTS_STORAGE: &str = include_str!("mapi_events.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
@@ -708,6 +709,8 @@ fn mapi_identity_mapping_is_store_backed() {
         "mapi_object_id BIGINT NOT NULL",
         "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22)",
         "change_key BYTEA NOT NULL CHECK (octet_length(change_key) = 22)",
+        "mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number > 0 AND mapi_change_number <= 140737488355327)",
+        "predecessor_change_list BYTEA NOT NULL CHECK (octet_length(predecessor_change_list) > 0)",
         "instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 22)",
         "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id)",
         "UNIQUE (tenant_id, account_id, mapi_global_counter)",
@@ -725,6 +728,63 @@ fn mapi_identity_mapping_is_store_backed() {
         "CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx",
         "WHERE deleted_at IS NULL",
     ]);
+}
+
+#[test]
+fn calendar_event_mutations_advance_canonical_and_mapi_versions() {
+    assert_sources_contain_all(
+        "atomic MAPI Event commit helper",
+        &[MAPI_EVENTS_STORAGE],
+        &[
+            "pub async fn fetch_mapi_event_versions",
+            "pub async fn commit_mapi_event_update",
+            "FOR UPDATE OF event",
+            "ObjectModified",
+            "advance_calendar_event_version_in_tx",
+            "rotate_active_mapi_event_identities_in_tx",
+            "mapi_change_number",
+            "predecessor_change_list",
+            "insert_mail_change_log_in_tx",
+            "emit_collaboration_change",
+        ],
+    );
+    for (source, function, behavior) in [
+        (
+            WORKSPACE_STORAGE,
+            "pub(crate) async fn upsert_client_event_in_calendar",
+            "canonical Event core writes",
+        ),
+        (
+            COLLABORATION_STORAGE,
+            "pub async fn update_accessible_event_reminder",
+            "calendar reminder writes",
+        ),
+        (
+            ATTACHMENTS_STORAGE,
+            "pub async fn add_calendar_event_attachment",
+            "calendar attachment creation",
+        ),
+        (
+            ATTACHMENTS_STORAGE,
+            "pub async fn delete_calendar_event_attachment",
+            "calendar attachment deletion",
+        ),
+        (
+            COLLABORATION_STORAGE,
+            "pub async fn delete_accessible_calendar_collection",
+            "calendar deletion Event moves",
+        ),
+    ] {
+        assert!(
+            function_body(source, function).contains("advance_calendar_event_version_in_tx"),
+            "{behavior} must advance calendar_events.modseq and active MAPI Event identities"
+        );
+    }
+    assert!(
+        function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_event")
+            .contains("retire_mapi_event_identities_in_tx"),
+        "calendar Event deletion must retire durable MAPI identities in the deleting transaction"
+    );
 }
 
 #[test]

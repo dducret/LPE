@@ -16,10 +16,61 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
     property_tag: u32,
     reminder: Option<&lpe_storage::ClientReminder>,
 ) -> Option<MapiValue> {
+    event_property_value_with_optional_version(
+        event,
+        item_id,
+        folder_id,
+        property_tag,
+        reminder,
+        None,
+        None,
+    )
+}
+
+pub(in crate::mapi) fn versioned_event_property_value_with_reminder(
+    event: &MapiEvent,
+    property_tag: u32,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> Option<MapiValue> {
+    event_property_value_with_optional_version(
+        &event.event,
+        event.id,
+        event.folder_id,
+        property_tag,
+        reminder,
+        Some(&event.version),
+        Some(&event.source_key),
+    )
+}
+
+fn event_property_value_with_optional_version(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    version: Option<&lpe_storage::MapiEventVersion>,
+    source_key: Option<&[u8]>,
+) -> Option<MapiValue> {
     if let Some(value) = event_reminder_property_value(event, reminder, property_tag) {
         return Some(value);
     }
     let property_tag = canonical_property_storage_tag(property_tag);
+    if let Some(version) = version {
+        match property_tag {
+            PID_TAG_CHANGE_KEY => return Some(MapiValue::Binary(version.change_key.clone())),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => {
+                return Some(MapiValue::Binary(version.predecessor_change_list.clone()))
+            }
+            PID_TAG_CHANGE_NUMBER => return Some(MapiValue::U64(version.change_number)),
+            PID_TAG_LAST_MODIFICATION_TIME => {
+                return Some(MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc(
+                    &version.updated_at,
+                ) as i64))
+            }
+            _ => {}
+        }
+    }
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
         PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(folder_id)),
@@ -87,9 +138,11 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
         )),
-        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
-            &event.id,
-        ))),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(
+            source_key
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| mapi_mailstore::source_key_for_store_id(item_id)),
+        )),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(folder_id),
         )),
@@ -573,18 +626,48 @@ pub(in crate::mapi) fn event_input_from_mapi(
             ],
         )
         .unwrap_or_else(|| existing.title.clone()),
-        location: optional_pending_text_property(
+        location: clearable_pending_text_property(
             properties,
             &[PID_TAG_LOCATION_W, PID_LID_LOCATION_W_TAG],
+            &existing.location,
         )
-        .unwrap_or_else(|| existing.location.clone()),
+        .to_string(),
         organizer_json: participants.organizer_json,
         attendees: participants.attendees,
         attendees_json: participants.attendees_json,
-        notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
-            .unwrap_or_else(|| existing.notes.clone()),
-        body_html: pending_html_property(properties).unwrap_or_else(|| existing.body_html.clone()),
+        notes: clearable_pending_text_property(
+            properties,
+            &[PID_TAG_BODY_W],
+            &existing.notes,
+        )
+        .to_string(),
+        body_html: clearable_pending_html_property(properties, &existing.body_html),
     })
+}
+
+fn clearable_pending_text_property<'a>(
+    properties: &'a HashMap<u32, MapiValue>,
+    tags: &[u32],
+    existing: &'a str,
+) -> Cow<'a, str> {
+    if tags.iter().any(|tag| properties.contains_key(tag)) {
+        Cow::Owned(pending_text_property(properties, tags))
+    } else {
+        Cow::Borrowed(existing)
+    }
+}
+
+fn clearable_pending_html_property(
+    properties: &HashMap<u32, MapiValue>,
+    existing: &str,
+) -> String {
+    if properties.contains_key(&PID_TAG_BODY_HTML_W) {
+        pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+    } else if properties.contains_key(&PID_TAG_HTML_BINARY) {
+        pending_html_binary_property(properties).unwrap_or_default()
+    } else {
+        existing.to_string()
+    }
 }
 
 fn calendar_time_zone_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<String> {
@@ -858,6 +941,13 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<()> {
     reject_unsupported_calendar_message_class(properties)?;
+    // [MS-OXOCAL] section 2.2.1.39 defines a structured binary value. Do not
+    // acknowledge it until that structure can be mapped to canonical IANA state.
+    if properties.contains_key(&PID_LID_TIME_ZONE_STRUCT_TAG) {
+        return Err(anyhow!(
+            "PidLidTimeZoneStruct is not mapped to canonical calendar time-zone state"
+        ));
+    }
     // [MS-OXCMSG] 2.2 permits other Message object properties even when they
     // have no effect on this protocol. Calendar named properties that do not
     // map to first-class canonical fields are persisted by the custom-property
@@ -945,10 +1035,6 @@ pub(in crate::mapi) async fn apply_canonical_event_property_values<S>(
 where
     S: ExchangeStore,
 {
-    if mapi_calendar_event_mutation_suppressed(folder_id, snapshot) {
-        bail!("guarded MAPI calendar event mutation is hidden");
-    }
-
     enum EventPropertyMutation {
         None,
         Delete,
@@ -1001,14 +1087,4 @@ where
             .await?;
     }
     Ok(())
-}
-
-fn mapi_calendar_event_mutation_suppressed(
-    folder_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-) -> bool {
-    folder_id == CALENDAR_FOLDER_ID
-        || snapshot
-            .collaboration_folder_for_id(folder_id)
-            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
 }

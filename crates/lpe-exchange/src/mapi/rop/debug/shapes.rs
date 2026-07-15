@@ -102,6 +102,7 @@ pub(in crate::mapi) fn mapi_object_debug_fields(
         Some(MapiObject::Event {
             folder_id,
             event_id,
+            ..
         }) => (
             "event",
             format!("{folder_id:#018x}"),

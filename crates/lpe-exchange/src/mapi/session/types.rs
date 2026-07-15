@@ -23,6 +23,8 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) pending_message_attachments:
         HashMap<u32, Vec<(u32, AttachmentUploadInput)>>,
     pub(in crate::mapi) pending_attachment_parent_messages: HashMap<u32, u32>,
+    pub(in crate::mapi) pending_event_attachment_transactions:
+        HashMap<u32, MapiEventAttachmentChanges>,
     pub(in crate::mapi) pending_attachment_deletions: HashSet<(u64, u64, u32)>,
     pub(in crate::mapi) pending_embedded_message_ids: HashMap<u32, u64>,
     pub(in crate::mapi) pending_embedded_message_attachments: HashMap<u32, (u64, u64, u32)>,
@@ -226,6 +228,7 @@ pub(in crate::mapi) enum StreamWriteTarget {
     PendingAttachment(u32),
     PendingMessageProperty { handle: u32, property_tag: u32 },
     PendingEventProperty { handle: u32, property_tag: u32 },
+    EventProperty { handle: u32, property_tag: u32 },
     PendingAssociatedMessageProperty { handle: u32, property_tag: u32 },
     AssociatedConfigProperty { handle: u32, property_tag: u32 },
     PublicFolderItemProperty { handle: u32, property_tag: u32 },
@@ -271,6 +274,25 @@ impl PartialEq for MapiSavedSearchFolderDefinition {
 impl Eq for MapiSavedSearchFolderDefinition {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiEventTransaction {
+    pub(in crate::mapi) open_mode_flags: u8,
+    pub(in crate::mapi) base_modseq: i64,
+    pub(in crate::mapi) pending_properties: HashMap<u32, MapiValue>,
+    pub(in crate::mapi) deleted_properties: HashSet<u32>,
+}
+
+impl MapiEventTransaction {
+    pub(in crate::mapi) fn new(open_mode_flags: u8, base_modseq: i64) -> Self {
+        Self {
+            open_mode_flags,
+            base_modseq,
+            pending_properties: HashMap::new(),
+            deleted_properties: HashSet::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiObject {
     Logon,
     PublicFolderLogon,
@@ -291,6 +313,7 @@ pub(in crate::mapi) enum MapiObject {
     Event {
         folder_id: u64,
         event_id: u64,
+        transaction: MapiEventTransaction,
     },
     Task {
         folder_id: u64,
@@ -406,6 +429,7 @@ pub(in crate::mapi) enum MapiObject {
     AttachmentTable {
         folder_id: u64,
         message_id: u64,
+        materialized_attachments: Option<Vec<crate::mapi_store::MapiAttachment>>,
         columns: Vec<u32>,
         columns_set: bool,
         sort_orders: Vec<MapiSortOrder>,

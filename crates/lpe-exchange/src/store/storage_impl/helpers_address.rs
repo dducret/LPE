@@ -142,6 +142,8 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
 
 fn mapi_notification_event_from_change_row(
     row: sqlx::postgres::PgRow,
+    calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
+    calendar_event_ids: &std::collections::HashMap<Uuid, u64>,
 ) -> Option<MapiNotificationEvent> {
     let object_kind = row.get::<String, _>("object_kind");
     let change_kind = row.get::<String, _>("change_kind");
@@ -188,6 +190,93 @@ fn mapi_notification_event_from_change_row(
                 )
             })
         }
+        "calendar_event" => {
+            let event_id = row.try_get::<Uuid, _>("object_id").ok();
+            let owner_account_id = row.try_get::<Uuid, _>("owner_account_id").ok();
+            let notification_account_id = row.try_get::<Uuid, _>("notification_account_id").ok();
+            let calendar_id = row.try_get::<Uuid, _>("calendar_id").ok();
+            let calendar_role = row.try_get::<String, _>("calendar_role").ok();
+            let event_mapi_object_id = mapi_calendar_event_object_id(
+                row.try_get::<Option<i64>, _>("calendar_event_mapi_object_id")
+                    .ok()
+                    .flatten(),
+                event_id,
+                calendar_event_ids,
+            );
+            let (
+                Some(event_id),
+                Some(owner_account_id),
+                Some(notification_account_id),
+                Some(calendar_id),
+                Some(calendar_role_value),
+                Some(event_mapi_object_id),
+            ) = (
+                event_id,
+                owner_account_id,
+                notification_account_id,
+                calendar_id,
+                calendar_role.as_deref(),
+                event_mapi_object_id,
+            )
+            else {
+                tracing::warn!(
+                    adapter = "mapi",
+                    operation = "poll notifications",
+                    cursor,
+                    canonical_event_id = ?event_id,
+                    owner_account_id = ?owner_account_id,
+                    notification_account_id = ?notification_account_id,
+                    calendar_id = ?calendar_id,
+                    calendar_role = ?calendar_role,
+                    event_mapi_object_id = ?event_mapi_object_id,
+                    "skipping calendar notification with incomplete durable identity metadata"
+                );
+                return None;
+            };
+            let old_calendar_role = row
+                .try_get::<Option<String>, _>("old_calendar_role")
+                .ok()
+                .flatten();
+            let old_calendar_id = row
+                .try_get::<Option<Uuid>, _>("old_calendar_id")
+                .ok()
+                .flatten();
+            let notification = mapi_calendar_notification_event(
+                MapiCalendarNotificationData {
+                    cursor,
+                    modseq,
+                    change_kind: &change_kind,
+                    notification_account_id,
+                    owner_account_id,
+                    calendar_id,
+                    calendar_role: calendar_role_value,
+                    old_calendar_id,
+                    old_calendar_role: old_calendar_role.as_deref(),
+                    event_id,
+                    event_mapi_object_id,
+                    subject: row
+                        .try_get::<Option<String>, _>("calendar_event_subject")
+                        .ok()
+                        .flatten(),
+                },
+                calendar_folder_ids,
+            );
+            if notification.is_none() {
+                tracing::warn!(
+                    adapter = "mapi",
+                    operation = "poll notifications",
+                    cursor,
+                    canonical_event_id = %event_id,
+                    change_kind,
+                    calendar_id = %calendar_id,
+                    calendar_role = calendar_role_value,
+                    old_calendar_id = ?old_calendar_id,
+                    old_calendar_role = ?old_calendar_role,
+                    "skipping calendar notification whose folder semantics are incomplete"
+                );
+            }
+            notification
+        }
         "mailbox_message" | "attachment" => {
             let scope_role = row.try_get::<String, _>("scope_role").ok();
             // [MS-OXCNOTIF] 2.2.1.1 and section 4 distinguish a delivered
@@ -204,8 +293,7 @@ fn mapi_notification_event_from_change_row(
                 row.try_get::<String, _>("scope_parent_role")
                     .ok()
                     .as_deref(),
-                row.try_get::<i64, _>("scope_parent_mapi_object_id")
-                    .ok(),
+                row.try_get::<i64, _>("scope_parent_mapi_object_id").ok(),
             )
             .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
             Some(MapiNotificationEvent::canonical(
@@ -239,6 +327,172 @@ fn mapi_notification_event_from_change_row(
     }
 }
 
+fn mapi_calendar_event_object_id(
+    durable_object_id: Option<i64>,
+    event_id: Option<Uuid>,
+    scoped_event_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<u64> {
+    durable_object_id
+        .map(|value| value as u64)
+        .or_else(|| event_id.and_then(|event_id| scoped_event_ids.get(&event_id).copied()))
+}
+
+struct MapiCalendarNotificationData<'a> {
+    cursor: i64,
+    modseq: u64,
+    change_kind: &'a str,
+    notification_account_id: Uuid,
+    owner_account_id: Uuid,
+    calendar_id: Uuid,
+    calendar_role: &'a str,
+    old_calendar_id: Option<Uuid>,
+    old_calendar_role: Option<&'a str>,
+    event_id: Uuid,
+    event_mapi_object_id: u64,
+    subject: Option<String>,
+}
+
+/// [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 model Calendar items as
+/// message objects: ObjectCreated/ObjectDeleted/ObjectModified carry FolderId
+/// followed by MessageId when the message-event flag is set.
+fn mapi_calendar_notification_event(
+    data: MapiCalendarNotificationData<'_>,
+    calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<MapiNotificationEvent> {
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2 defines the destination MessageId and
+    // source OldMessageId fields. [MS-OXCFXICS] section 3.1.5.3 requires a new
+    // internal ID for an inter-folder move, so those two values are distinct.
+    // The durable Calendar change row currently exposes only the destination
+    // identity; fail closed instead of serializing that MID as both values.
+    if data.change_kind == "moved" {
+        return None;
+    }
+    let collection_id = mapi_calendar_collection_id(
+        data.notification_account_id,
+        data.owner_account_id,
+        data.calendar_id,
+        data.calendar_role,
+    );
+    let folder_id = mapi_calendar_notification_folder_id(&collection_id, calendar_folder_ids)?;
+    let old_folder_id = match data.change_kind {
+        "moved" => {
+            let old_collection_id = mapi_calendar_collection_id(
+                data.notification_account_id,
+                data.owner_account_id,
+                data.old_calendar_id?,
+                data.old_calendar_role?,
+            );
+            mapi_calendar_notification_folder_id(&old_collection_id, calendar_folder_ids)
+        }
+        _ => None,
+    };
+    Some(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            mapi_notification_event_mask_for_change(data.change_kind, false),
+            folder_id,
+            Some(data.event_mapi_object_id),
+            old_folder_id,
+            data.cursor,
+            data.modseq,
+            None,
+            None,
+            data.change_kind.to_string(),
+            None,
+            None,
+            data.subject,
+        )
+        .with_canonical_ids(Some(data.calendar_id), Some(data.event_id))
+        .with_object_kind("calendar_event"),
+    )
+}
+
+fn mapi_calendar_notification_folder_id(
+    collection_id: &str,
+    calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<u64> {
+    let kind = crate::mapi_store::MapiCollaborationFolderKind::Calendar;
+    match crate::mapi_store::collaboration_folder_identity_canonical_id_for_collection(
+        kind,
+        collection_id,
+    ) {
+        Some(canonical_id) => calendar_folder_ids.get(&canonical_id).copied(),
+        None => crate::mapi_store::mapi_collaboration_folder_id_for_collection(kind, collection_id),
+    }
+}
+
+fn mapi_calendar_notification_folder_identity_ids_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Vec<Uuid> {
+    let Some(notification_account_id) = row
+        .try_get::<Option<Uuid>, _>("notification_account_id")
+        .ok()
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let Some(owner_account_id) = row
+        .try_get::<Option<Uuid>, _>("owner_account_id")
+        .ok()
+        .flatten()
+    else {
+        return Vec::new();
+    };
+    let mut identity_ids = Vec::new();
+    let mut append_identity = |calendar_id: Uuid, calendar_role: &str| {
+        let collection_id = mapi_calendar_collection_id(
+            notification_account_id,
+            owner_account_id,
+            calendar_id,
+            calendar_role,
+        );
+        if let Some(canonical_id) =
+            crate::mapi_store::collaboration_folder_identity_canonical_id_for_collection(
+                crate::mapi_store::MapiCollaborationFolderKind::Calendar,
+                &collection_id,
+            )
+        {
+            push_unique_uuid(&mut identity_ids, canonical_id);
+        }
+    };
+    if let (Some(calendar_id), Some(calendar_role)) = (
+        row.try_get::<Option<Uuid>, _>("calendar_id").ok().flatten(),
+        row.try_get::<Option<String>, _>("calendar_role")
+            .ok()
+            .flatten(),
+    ) {
+        append_identity(calendar_id, &calendar_role);
+    }
+    if row.get::<String, _>("change_kind") == "moved" {
+        if let (Some(calendar_id), Some(calendar_role)) = (
+            row.try_get::<Option<Uuid>, _>("old_calendar_id")
+                .ok()
+                .flatten(),
+            row.try_get::<Option<String>, _>("old_calendar_role")
+                .ok()
+                .flatten(),
+        ) {
+            append_identity(calendar_id, &calendar_role);
+        }
+    }
+    identity_ids
+}
+
+fn mapi_calendar_collection_id(
+    notification_account_id: Uuid,
+    owner_account_id: Uuid,
+    calendar_id: Uuid,
+    calendar_role: &str,
+) -> String {
+    if calendar_role == "custom" {
+        calendar_id.to_string()
+    } else if notification_account_id == owner_account_id {
+        "default".to_string()
+    } else {
+        format!("shared-calendar-{owner_account_id}")
+    }
+}
+
 fn mapi_folder_id_from_role_or_identity(role: Option<&str>, identity: Option<i64>) -> Option<u64> {
     role.and_then(crate::mapi_store::reserved_folder_counter_for_role)
         .map(crate::mapi::identity::mapi_store_id)
@@ -257,12 +511,135 @@ fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool)
 
 #[cfg(test)]
 mod notification_tests {
-    use super::mapi_notification_event_mask_for_change;
+    use super::{
+        mapi_calendar_event_object_id, mapi_calendar_notification_event,
+        mapi_notification_event_mask_for_change, MapiCalendarNotificationData,
+    };
+    use crate::mapi::notifications::MapiNotificationKind;
+    use std::collections::HashMap;
+    use uuid::Uuid;
 
     #[test]
     fn inbox_delivery_uses_new_mail_notification_mask() {
-        assert_eq!(mapi_notification_event_mask_for_change("created", true), 0x0002);
-        assert_eq!(mapi_notification_event_mask_for_change("created", false), 0x0004);
+        assert_eq!(
+            mapi_notification_event_mask_for_change("created", true),
+            0x0002
+        );
+        assert_eq!(
+            mapi_notification_event_mask_for_change("created", false),
+            0x0004
+        );
+    }
+
+    #[test]
+    fn calendar_create_update_delete_notifications_keep_stable_fid_mid() {
+        let account_id = Uuid::from_u128(0x1020);
+        let calendar_id = Uuid::from_u128(0x3040);
+        let event_id = Uuid::from_u128(0x5060);
+        let event_mapi_object_id = 0x0000_0000_1234_0001;
+        let calendar_folder_ids = HashMap::new();
+        let event = |change_kind| {
+            mapi_calendar_notification_event(
+                MapiCalendarNotificationData {
+                    cursor: 42,
+                    modseq: 7,
+                    change_kind,
+                    notification_account_id: account_id,
+                    owner_account_id: account_id,
+                    calendar_id,
+                    calendar_role: "calendar",
+                    old_calendar_id: None,
+                    old_calendar_role: None,
+                    event_id,
+                    event_mapi_object_id,
+                    subject: Some("Outlook Calendar regression".to_string()),
+                },
+                &calendar_folder_ids,
+            )
+            .expect("default Calendar notification")
+        };
+
+        // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 define the bounded
+        // FolderId/MessageId fields for these non-move object notifications.
+        // The durable principal-scoped Event identity supplies those values.
+        for (change_kind, expected_mask) in [
+            ("created", 0x0004),
+            ("updated", 0x0010),
+            ("destroyed", 0x0008),
+        ] {
+            let notification = event(change_kind);
+            assert_eq!(
+                notification.notification_test_shape(),
+                (
+                    MapiNotificationKind::Content,
+                    expected_mask,
+                    crate::mapi::identity::CALENDAR_FOLDER_ID,
+                    Some(event_mapi_object_id),
+                    None,
+                    Some("calendar_event"),
+                )
+            );
+            assert_eq!(notification.canonical_folder_id(), Some(calendar_id));
+            assert_eq!(notification.canonical_message_id(), Some(event_id));
+        }
+    }
+
+    #[test]
+    fn calendar_move_is_suppressed_without_a_distinct_old_message_id() {
+        let account_id = Uuid::from_u128(0x7080);
+        let default_calendar_id = Uuid::from_u128(0x90a0);
+        let custom_calendar_id = Uuid::from_u128(0xb0c0);
+        let event_mapi_object_id = 0x0000_0000_5678_0001;
+        let expected_custom_folder_id = 0x0000_0000_9abc_0001;
+        let custom_folder_canonical_id =
+            crate::mapi_store::collaboration_folder_identity_canonical_id_for_collection(
+                crate::mapi_store::MapiCollaborationFolderKind::Calendar,
+                &custom_calendar_id.to_string(),
+            )
+            .expect("custom Calendar folder canonical identity");
+        let calendar_folder_ids =
+            HashMap::from([(custom_folder_canonical_id, expected_custom_folder_id)]);
+
+        let notification = mapi_calendar_notification_event(
+            MapiCalendarNotificationData {
+                cursor: 43,
+                modseq: 8,
+                change_kind: "moved",
+                notification_account_id: account_id,
+                owner_account_id: account_id,
+                calendar_id: custom_calendar_id,
+                calendar_role: "custom",
+                old_calendar_id: Some(default_calendar_id),
+                old_calendar_role: Some("calendar"),
+                event_id: Uuid::from_u128(0xd0e0),
+                event_mapi_object_id,
+                subject: Some("Calendar move regression".to_string()),
+            },
+            &calendar_folder_ids,
+        );
+
+        assert!(notification.is_none());
+    }
+
+    #[test]
+    fn calendar_notification_identity_never_falls_back_to_another_principal_cache_entry() {
+        let event_id = Uuid::from_u128(0xe0f0);
+        let foreign_object_id = 0x0000_0000_1111_0001;
+        let scoped_object_id = 0x0000_0000_2222_0001;
+        crate::mapi::identity::remember_mapi_identity(event_id, foreign_object_id);
+
+        let mut scoped_event_ids = HashMap::new();
+        assert_eq!(
+            mapi_calendar_event_object_id(None, Some(event_id), &scoped_event_ids),
+            None
+        );
+
+        scoped_event_ids.insert(event_id, scoped_object_id);
+        assert_eq!(
+            mapi_calendar_event_object_id(None, Some(event_id), &scoped_event_ids),
+            Some(scoped_object_id)
+        );
+        crate::mapi::identity::forget_mapi_identity(&event_id);
     }
 }
 

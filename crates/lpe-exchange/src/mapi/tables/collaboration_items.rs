@@ -124,6 +124,38 @@ pub(in crate::mapi) fn serialize_event_row_with_reminder_and_attachments(
     row
 }
 
+pub(in crate::mapi) fn serialize_versioned_event_row_with_reminder_and_attachments(
+    event: &crate::mapi_store::MapiEvent,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    has_attachments: bool,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
+            Some(MapiValue::Bool(has_attachments))
+        } else {
+            versioned_event_property_value_with_reminder(event, *column, reminder)
+        } {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_versioned_event_row(
+    event: &crate::mapi_store::MapiEvent,
+    columns: &[u32],
+) -> Vec<u8> {
+    serialize_versioned_event_row_with_reminder_and_attachments(
+        event,
+        None,
+        !event.attachments.is_empty(),
+        columns,
+    )
+}
+
 pub(in crate::mapi) fn serialize_task_row(
     task: &ClientTask,
     item_id: u64,

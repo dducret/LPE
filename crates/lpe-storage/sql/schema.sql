@@ -2162,6 +2162,8 @@ CREATE TABLE mapi_object_identities (
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
     source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22),
     change_key BYTEA NOT NULL CHECK (octet_length(change_key) = 22),
+    mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number > 0 AND mapi_change_number <= 140737488355327),
+    predecessor_change_list BYTEA NOT NULL CHECK (octet_length(predecessor_change_list) > 0),
     instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 22),
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

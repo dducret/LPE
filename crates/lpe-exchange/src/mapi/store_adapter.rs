@@ -654,13 +654,24 @@ where
         "allocated non-message identities",
         allocated_non_message_identities.len(),
     );
-    for identity in allocated_non_message_identities {
+    for identity in &allocated_non_message_identities {
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
-            Some(identity.source_key),
+            Some(identity.source_key.clone()),
         );
     }
+    let loaded_event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch durable MAPI event versions",
+        loaded_event_ids.len(),
+    );
+    let event_versions = store
+        .fetch_mapi_event_versions(account_id, &loaded_event_ids)
+        .await
+        .context("fetch durable MAPI Event versions")?;
     let mailbox_ids = mailboxes
         .iter()
         .map(|mailbox| mailbox.id)
@@ -706,7 +717,7 @@ where
             .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
             .count(),
     );
-    Ok(MapiMailStoreSnapshot::new(
+    Ok(MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
         mailboxes,
         emails,
         attachments,
@@ -717,7 +728,10 @@ where
         events,
         tasks,
         folder_permissions,
-    )
+        &allocated_non_message_identities,
+    )?
+    .with_event_versions(event_versions)
+    .context("apply durable MAPI Event versions to selective snapshot")?
     .with_notes_and_journal(notes, journal_entries)
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)

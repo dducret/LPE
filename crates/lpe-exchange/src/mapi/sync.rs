@@ -985,6 +985,10 @@ fn calendar_sync_object(
         PID_LID_CC_ATTENDEES_STRING_W_TAG,
         PID_TAG_ACCESS,
         PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
         PID_LID_REMINDER_SET_TAG,
         PID_LID_REMINDER_DELTA_TAG,
         PID_LID_REMINDER_TIME_TAG,
@@ -998,14 +1002,8 @@ fn calendar_sync_object(
                 !event.attachments.is_empty(),
             ))
         } else {
-            event_property_value_with_reminder(
-                &event.event,
-                event.id,
-                event.folder_id,
-                property_tag,
-                reminder,
-            )
-            .and_then(special_message_property_value)
+            versioned_event_property_value_with_reminder(event, property_tag, reminder)
+                .and_then(special_message_property_value)
         };
         if let Some(value) = value {
             properties.push((property_tag, value));
@@ -1020,7 +1018,9 @@ fn calendar_sync_object(
         subject: event.event.title.clone(),
         body_text: event.event.notes.clone(),
         message_class: "IPM.Appointment".to_string(),
-        last_modified_filetime: event_start_filetime(&event.event),
+        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
+            &event.version.updated_at,
+        ),
         message_size: event_size(&event.event),
         read_state: None,
         named_properties: properties,

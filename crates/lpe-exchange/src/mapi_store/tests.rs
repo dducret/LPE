@@ -105,6 +105,114 @@ fn test_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
     }
 }
 
+fn test_accessible_event(id: Uuid, account_id: Uuid, title: &str) -> AccessibleEvent {
+    AccessibleEvent {
+        id,
+        uid: format!("uid-{id}"),
+        collection_id: "default".to_string(),
+        owner_account_id: account_id,
+        owner_email: "owner@example.test".to_string(),
+        owner_display_name: "Owner".to_string(),
+        rights: CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        },
+        date: "2026-07-15".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: title.to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }
+}
+
+fn test_mapi_event(canonical_id: Uuid, account_id: Uuid, object_id: u64, title: &str) -> MapiEvent {
+    let event = test_accessible_event(canonical_id, account_id, title);
+    let change_number = crate::mapi_mailstore::change_number_for_store_id(object_id);
+    MapiEvent {
+        id: object_id,
+        source_key: crate::mapi_mailstore::source_key_for_store_id(object_id),
+        folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+        canonical_id,
+        version: MapiEventVersion {
+            event_id: canonical_id,
+            canonical_modseq: 1,
+            change_number,
+            change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
+            predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(change_number),
+            updated_at: "2026-07-15T09:00:00Z".to_string(),
+        },
+        event,
+        attachments: Vec::new(),
+    }
+}
+
+#[test]
+fn event_lookup_rejects_another_principals_cached_mid() {
+    let owner_account_id = Uuid::from_u128(0x1100);
+    let canonical_id = Uuid::from_u128(0x2200);
+    let owner_mid = crate::mapi::identity::mapi_store_id(0x3300);
+    let grantee_mid = crate::mapi::identity::mapi_store_id(0x4400);
+    let mut snapshot = MapiMailStoreSnapshot::empty();
+    snapshot.events.push(test_mapi_event(
+        canonical_id,
+        owner_account_id,
+        owner_mid,
+        "Owner-scoped Event",
+    ));
+
+    crate::mapi::identity::remember_mapi_identity(canonical_id, grantee_mid);
+    assert!(snapshot
+        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, grantee_mid)
+        .is_none());
+    assert!(snapshot
+        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, owner_mid)
+        .is_some());
+    crate::mapi::identity::forget_mapi_identity(&canonical_id);
+}
+
+#[test]
+fn exact_event_mid_wins_over_another_events_foreign_cached_alias() {
+    let owner_account_id = Uuid::from_u128(0x5500);
+    let first_id = Uuid::from_u128(0x6600);
+    let second_id = Uuid::from_u128(0x7700);
+    let first_owner_mid = crate::mapi::identity::mapi_store_id(0x8800);
+    let second_owner_mid = crate::mapi::identity::mapi_store_id(0x9900);
+    let mut snapshot = MapiMailStoreSnapshot::empty();
+    snapshot.events.push(test_mapi_event(
+        first_id,
+        owner_account_id,
+        first_owner_mid,
+        "First Event",
+    ));
+    snapshot.events.push(test_mapi_event(
+        second_id,
+        owner_account_id,
+        second_owner_mid,
+        "Second Event",
+    ));
+
+    crate::mapi::identity::remember_mapi_identity(first_id, second_owner_mid);
+    let opened = snapshot
+        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, second_owner_mid)
+        .expect("the exact owner-scoped MID must resolve");
+    assert_eq!(opened.canonical_id, second_id);
+    crate::mapi::identity::forget_mapi_identity(&first_id);
+}
+
 #[test]
 fn content_table_window_emails_reuses_wider_window_slice() {
     let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444444);

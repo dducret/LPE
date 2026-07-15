@@ -444,12 +444,14 @@ pub(in crate::mapi) fn table_position_and_count(
         Some(MapiObject::AttachmentTable {
             folder_id,
             message_id,
+            materialized_attachments,
             position,
             restriction,
             ..
         }) => {
-            let mut rows = snapshot
-                .attachments_for_message(*folder_id, *message_id)
+            let mut rows = materialized_attachments
+                .as_deref()
+                .or_else(|| snapshot.attachments_for_message(*folder_id, *message_id))
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();

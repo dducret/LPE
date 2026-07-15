@@ -124,9 +124,26 @@ pub(in crate::mapi::dispatch) fn open_attachment_flags_are_valid(request: &RopRe
     matches!(request.payload.first().copied(), Some(0x00 | 0x01 | 0x03))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::mapi::dispatch) enum SaveDisposition {
+    Default,
+    KeepOpenReadOnly,
+    KeepOpenReadWrite,
+    ForceSave,
+}
+
+pub(in crate::mapi::dispatch) fn save_disposition(request: &RopRequest) -> Option<SaveDisposition> {
+    match request.payload.first().copied().unwrap_or(0) & 0x07 {
+        0x00 => Some(SaveDisposition::Default),
+        0x01 => Some(SaveDisposition::KeepOpenReadOnly),
+        0x02 => Some(SaveDisposition::KeepOpenReadWrite),
+        0x04 => Some(SaveDisposition::ForceSave),
+        _ => None,
+    }
+}
+
 pub(in crate::mapi::dispatch) fn save_flags_are_supported(request: &RopRequest) -> bool {
-    let flags = request.payload.first().copied().unwrap_or(0);
-    flags & 0x03 != 0x03
+    save_disposition(request).is_some()
 }
 
 pub(in crate::mapi::dispatch) fn table_async_flags_are_valid(request: &RopRequest) -> bool {
@@ -293,6 +310,7 @@ mod property_tag_validation_tests {
         let attachment = MapiObject::AttachmentTable {
             folder_id: INBOX_FOLDER_ID,
             message_id: 1,
+            materialized_attachments: None,
             columns: Vec::new(),
             columns_set: false,
             sort_orders: Vec::new(),
@@ -576,6 +594,8 @@ mod property_tag_validation_tests {
         assert!(save_flags_are_supported(&request(0x04)));
         assert!(save_flags_are_supported(&request(0x0A)));
         assert!(!save_flags_are_supported(&request(0x03)));
+        assert!(!save_flags_are_supported(&request(0x05)));
+        assert!(!save_flags_are_supported(&request(0x06)));
         assert!(!save_flags_are_supported(&request(0x07)));
         assert!(!save_flags_are_supported(&request(0x0B)));
     }

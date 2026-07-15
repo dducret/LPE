@@ -97,6 +97,8 @@ macro_rules! store_impl_mapi_metadata {
                     };
                     let (object_id, default_source_key, change_key, instance_key) =
                         crate::mapi::identity::persisted_identity_material(global_counter);
+                    let predecessor_change_list =
+                        crate::mapi_mailstore::predecessor_change_list(global_counter);
                     let source_key = request.source_key.clone().unwrap_or(default_source_key);
                     let row = sqlx::query(
                         r#"
@@ -109,9 +111,11 @@ macro_rules! store_impl_mapi_metadata {
                             mapi_object_id,
                             source_key,
                             change_key,
-                            instance_key
+                            instance_key,
+                            mapi_change_number,
+                            predecessor_change_list
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                         ON CONFLICT (tenant_id, account_id, object_kind, canonical_id)
                         DO UPDATE SET
                             deleted_at = NULL,
@@ -132,6 +136,8 @@ macro_rules! store_impl_mapi_metadata {
                     .bind(source_key)
                     .bind(change_key)
                     .bind(instance_key)
+                    .bind(global_counter as i64)
+                    .bind(predecessor_change_list)
                     .fetch_one(&mut *tx)
                     .await?;
                     (
@@ -140,6 +146,7 @@ macro_rules! store_impl_mapi_metadata {
                     )
                 };
                 records.push(MapiIdentityRecord {
+                    object_kind: request.object_kind,
                     canonical_id: request.canonical_id,
                     object_id,
                     source_key,

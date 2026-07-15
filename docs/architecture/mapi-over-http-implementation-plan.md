@@ -949,6 +949,17 @@ row: `PidTagEntryId`, `PidTagInstanceKey`, `PidTagSourceKey`,
 `PidTagContainerClass = IPF.Appointment`, and both String8 and Unicode
 `PidTagDefaultPostMessageClass = IPM.Appointment` must describe the same
 canonical folder object.
+Calendar snapshot identity is request-principal scoped. Custom Calendar FIDs
+and Event MIDs/SourceKeys are materialized from that principal's durable SQL
+identity records; a process-global canonical UUID alias cannot resolve an
+Event, populate a direct property read, feed ICS, or supply a notification
+fallback. Event lookup matches the MID stored in the snapshot exactly, and a
+missing principal-scoped custom-folder or Event identity fails closed. This
+implements the server-compatible Folder ID and Message ID rules in
+`[MS-OXCFXICS]` section 3.1.5.3 and the persisted-or-generated
+`PidTagSourceKey` rule in `[MS-OXCFXICS]` section 3.2.5.5. The default Calendar
+continues to use its reserved `CALENDAR_FOLDER_ID`; only custom Calendar FIDs
+require a dynamic principal-scoped identity record.
 `RopGetReceiveFolder(IPM.Appointment)` must likewise resolve to the canonical
 default Calendar FID and that FID must be immediately openable as
 `IPF.Appointment`, even when canonical storage currently contains only custom
@@ -1070,11 +1081,14 @@ open-on-delete, copy, move, and context-menu bits from `[MS-OXCMSG]` section
 2.2.1.16 so Outlook can attach normal item actions to Calendar contents rows.
 Calendar content sync also projects canonical attachment presence from
 `calendar_event_attachments` through `PidTagHasAttachments`; attachment table,
-open, stream, create, and save paths use canonical calendar attachment rows.
-Binary timezone payloads accompanying a mapped `PidLidTimeZoneDescription`
-are accepted during appointment creation; canonical timezone state remains the
-description and read projections regenerate the timezone structures. An
-unsupported standalone timezone definition does not create parallel state.
+open, and read-stream paths use canonical calendar attachment rows. Attachment
+mutations remain fail-closed until they can be staged on the parent Event
+handle and committed only by `RopSaveChangesMessage`.
+Bounded `PidLidTimeZoneDescription` and start/end-display `TZDEFINITION`
+payloads map to canonical IANA timezone state, and reads regenerate the Outlook
+timezone projections. A client write containing `PidLidTimeZoneStruct` remains
+rejected, even when a timezone description accompanies it, until that binary
+structure can be parsed and mapped without opaque or parallel state.
 `PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
 Gregorian daily, weekly, monthly-by-day including month-end, monthly-nth,
 yearly-by-month-day, and yearly-nth recurrence patterns, including supported
@@ -1086,8 +1100,11 @@ FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
-participation status on the existing event; and bounded cancellation payloads
-delete the existing canonical event. Modified exceptions that override body,
+participation status on the existing event; and the bounded import cancellation
+path deletes the existing canonical event. Cancellation submitted as a mutation
+on an already-open Event handle remains fail-closed at parent Save until
+deletion participates in the same staged atomic commit. Modified exceptions
+that override body,
 reminder, busy status, attachment, or other per-instance fields, Hijri
 recurrence, malformed recurrence blobs, unsupported meeting
 response/cancel properties, and other unsupported meeting-response or
@@ -1107,10 +1124,19 @@ canonical `body_html`. Appointment creation accepts the additional named
 properties permitted on Message objects, maps supported fields to canonical
 event columns, and retains the supplied `PidLidGlobalObjectId` in canonical
 `calendar_events.uid` so reads reproduce the identical BLOB without a MAPI-only
-event store. This behavior follows [MS-OXCPRPT] sections 2.2.14 and 3.2.5.13,
-[MS-OXCROPS] sections 2.2.9.1, 2.2.9.3, 2.2.6.3, and 2.2.8.6,
+event store. This behavior follows [MS-OXCPRPT] sections 2.2.14, 2.2.18,
+3.1.4.6, 3.2.5.13, and 3.2.5.15,
+[MS-OXCROPS] sections 2.2.9.1, 2.2.9.3, 2.2.9.5, 2.2.6.3, and 2.2.8.6,
 [MS-OXCMSG] section 2.2, and [MS-OXOCAL] sections 2.2.1.27, 2.2.1.28, and
-4.2.2.1.
+4.2.2.1. `PidTagBody` and `PidTagHtml` are defined in [MS-OXPROPS]
+sections 2.609 and 2.724.
+An existing Event opened read/write now uses the same Body/HTML stream
+surface. `RopCommitStream` fixes the property value in that Event handle's
+transaction; database persistence still waits for the parent
+`RopSaveChangesMessage`. The staged stream is visible on the same handle,
+remains invisible to another handle and PostgreSQL, is discarded by
+`RopRelease`, and reaches canonical `body_text` or `body_html` only through
+that parent Save.
 The same 15:25 request showed that Outlook used the mailbox mappings returned
 by `RopGetPropertyIdsFromNames`, rather than the numeric LIDs, when it wrote the
 appointment. The observed mappings included `0x90E5 -> PSETID_Appointment
@@ -1213,6 +1239,152 @@ regression preserves the already-created all-zero-UID event, creates a second
 appointment without either GOID property, and requires a successful save plus
 a distinct nonzero canonical UID equal to the second event UUID.
 
+The `202607151015` follow-up isolated the first update of an appointment that
+had already been saved while Outlook retained its writable handle.
+`Test 10:11` was committed canonically as
+event `784c0643-32c9-4302-ac32-779505ff404f`, MAPI MID `0x0000000000670001`,
+and ChangeKey/SourceKey
+`741f6fd38e1a654f9d422dfb451c8f10000000000067`. Outlook retained handle
+`0xD9` after the successful first `RopSaveChangesMessage (0x0C)` with
+`SaveFlags=0x0A`; no `RopRelease` targeted that handle. Request `:355` then
+sent `RopSetProperties (0x0A)` for ten coherent appointment/common/start/end
+and reminder times, `RopDeletePropertiesNoReplicate (0x7A)` for the absent
+`PidTagReplyRecipientEntries (0x004F0102)`, and another
+`RopSaveChangesMessage`. LPE returned `0x80040102`, `0x80040102`, and
+`0x8004010F` respectively. PostgreSQL contained the initial event but no
+update journal entry or property change. `OUTLOOK (24).DMP` showed
+`ItemUIHost::HrSaveAndCommitEx` opening the modal error from the normalized
+`0x8004010F`; it was not an Outlook crash or deadlock.
+
+The ten normalized property tags were `PidLidAppointmentStartWhole`
+`0x820D0040` and `PidLidAppointmentEndWhole` `0x820E0040`
+([MS-OXOCAL] sections 2.2.1.5 and 2.2.1.6), `PidLidClipStart`
+`0x82350040` and `PidLidClipEnd` `0x82360040` (sections 2.2.1.14 and
+2.2.1.15), `PidLidReminderTime` `0x85020040` and
+`PidLidReminderSignalTime` `0x85600040` ([MS-OXORMDR] sections 2.2.1.4
+and 2.2.1.2), `PidLidCommonStart` `0x85160040` and `PidLidCommonEnd`
+`0x85170040` ([MS-OXOCAL] sections 2.2.1.32 and 2.2.1.33), and
+`PidTagStartDate` `0x00600040` and `PidTagEndDate` `0x00610040`
+([MS-OXOCAL] sections 2.2.1.30 and 2.2.1.31). The duplicate start/end
+values were coherent. The optional Clip values remain bounded named-property
+values attached to the canonical Event identity; they do not create a second
+calendar item or a session-local appointment model. The same canonical
+property set retains the initial `PidLidReminderDelta` `0x85010003`
+([MS-OXORMDR] section 2.2.1.3), while the reminder signal time is also mapped
+to canonical reminder state.
+
+The failure came from obsolete Calendar-wide core-event mutation guards, not
+from a stale handle, access rights, or an event identity mismatch. Each opened
+writable Event now owns a `MapiEventTransaction` based on the canonical Event
+`modseq`. Property sets, property deletions, and stream writes change only that
+handle's staged state; another handle and PostgreSQL continue to expose the
+committed Event until `RopSaveChangesMessage`, and `RopRelease` abandons the
+staged state. Folder `may_write`/`may_delete` checks remain authoritative, and
+a read-only shared-calendar regression covers property update and item
+deletion. Named properties which do not map to a modeled Event field are
+written to the bounded canonical custom-property store only by the parent
+Save, so they survive a restart without creating session-local Calendar state.
+Deleting an already absent projected property is accepted only
+when the canonical Event projection confirms that every requested property
+has no value; deleting a present canonical property still reports the
+underlying error. This is a general post-state rule, not a special case for
+`0x004F0102`. The Microsoft documents require the property to have no value
+after a successful delete but do not explicitly call repeated deletion
+idempotent, so this acceptance is an Outlook interoperability inference from
+[MS-OXCPRPT] section 3.2.5.5 rather than a quoted normative requirement.
+
+Saving an initial pending Event now creates the canonical Event, its first MAPI
+identity and durable version, reminder state, bounded custom properties, and
+change-log row in one PostgreSQL transaction. A failed transaction leaves none
+of those artifacts, so retry creates one Event rather than exposing a partial
+or duplicate appointment. For shared calendars, the Event, reminder, and
+custom properties remain owned by the canonical calendar owner while the
+client principal receives its scoped MAPI identity.
+
+Saving an existing Event now calls one PostgreSQL transaction that locks the
+canonical row, checks the handle's expected `modseq`, applies the staged core,
+reminder, and custom-property changes, advances the Calendar modseq, writes the
+canonical change log, and rotates every active Event MAPI identity. A stale
+handle returns `ecObjectModified (0x80040109)` without overwriting the newer
+Event or clearing the stale handle's staged state. `ForceSave (0x04)` bypasses
+only that object-modified check and commits the already-staged values as a new
+version. After a successful `KeepOpenReadWrite` save, the retained handle is
+reset to the newly committed `modseq` and exposes the new version immediately.
+
+Calendar Event version metadata is durable rather than synthesized from the
+session. The canonical `calendar_events.modseq` remains the CAS token, while
+`mapi_mailbox_replicas` allocates a new 48-bit change number and the active
+`mapi_object_identities` rows persist `PidTagChangeNumber`, a new
+`PidTagChangeKey`, and the predecessor list merged with that new XID in the same
+transaction. The Event MID and `PidTagSourceKey` remain stable. Direct property
+reads and Calendar ICS/FastTransfer consume this persisted CK/CN/PCL state, so
+the version observed after Save is also the version loaded after restart. This
+implements the identity/version contracts in [MS-OXCFXICS] sections 2.2.1.2.3,
+2.2.1.2.7, 2.2.1.2.8, 2.2.2.1, 2.2.2.2, 2.2.2.3, 2.2.2.3.1,
+2.2.2.5, and 3.1.5.3. Source-key generation follows [MS-OXCFXICS]
+section 3.2.5.5 separately.
+
+Four Calendar mutation paths remain deliberately incomplete:
+
+- Calendar attachment create/save/delete remains fail-closed because attachment
+  changes are not yet staged on the Event handle and atomically committed by
+  the parent `RopSaveChangesMessage`.
+- Meeting cancellation on an existing Event handle remains fail-closed because
+  canonical deletion is not yet part of the staged CAS/version transaction.
+- `PidLidTimeZoneStruct` writes remain fail-closed; LPE can project a structure
+  from canonical timezone state but does not yet parse and round-trip an
+  arbitrary client-supplied structure into that state.
+- Moving an Event between Calendar folders does not yet retire the old internal
+  Message ID and allocate a new destination Message ID. Until the move,
+  notification, and ICS paths share that atomic identity transition, an
+  inter-folder move remains outside the validated Outlook gate required by
+  [MS-OXCFXICS] section 3.1.5.3 and [MS-OXCNOTIF] section 2.2.1.4.1.2.
+
+Event rows in the Reminders search folder still need matching table, ICS,
+delta, and deletion behavior. A successful Event Save queues the live-session
+Calendar `TableModified` event and writes the canonical `calendar_event`
+change-log row. Notification polling translates durable Event create, update,
+and delete rows into `ObjectCreated`, `ObjectModified`, or `ObjectDeleted` data
+with stable Message IDs and the Calendar folder ID scoped to the principal
+receiving the notification. A Calendar `moved` row remains fail-closed until
+the durable transition carries the destination `MessageId` and source
+`OldMessageId` fields defined by [MS-OXCNOTIF] section 2.2.1.4.1.2, with the
+new inter-folder identity required by [MS-OXCFXICS] section 3.1.5.3. It is
+never serialized as `ObjectMoved` by reusing the same MID for both fields.
+Delete tombstones retain the collection, UID,
+affected-principal set, and retired Event identity needed to emit the final
+notification without recreating the Event. This implements the bounded object
+notification data in [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2.
+Registrations remain session-local, so clients still re-register after
+reconnect and use ordinary ICS as the durable convergence path.
+
+The wire and object contracts used here are [MS-OXCROPS] sections 2.2.8.6.1
+through 2.2.8.6.3 (`RopSetProperties`), 2.2.8.9.1 through 2.2.8.9.3
+(`RopDeletePropertiesNoReplicate`), and 2.2.6.3.1 through 2.2.6.3.3
+(`RopSaveChangesMessage`); [MS-OXCPRPT] sections 2.2.5, 2.2.7, 2.2.8,
+3.2.5.4, and 3.2.5.5; and [MS-OXCDATA] sections 2.4.2 and 2.7 for
+`PropertyProblem`. `KeepOpenReadWrite` is bit `0x02` in [MS-OXCMSG] section
+2.2.3.3.1, not the complete value `0x0A`. For Outlook's captured `0x0A`, this
+correction relies on bit `0x02`. The combined value `0x0A` is labeled
+`KeepOpenReadWrite DelayedCall` in [MS-OXOPFFB] section 4.1 and [MS-OXODLGT]
+section 4.1.3.2; no separate `0x08` semantic is relied on.
+`ForceSave` is bit `0x04`; it is used only for the explicit stale-version
+overwrite described above. The retained-handle, conflict, and forced-save
+server behavior follows [MS-OXCMSG] section 3.2.5.3 and is illustrated by
+sections 4.8.1 and 4.8.2.
+`PidTagReplyRecipientEntries` is defined by
+[MS-OXPROPS] section 2.917 and [MS-OXOMSG] section 2.2.1.43 as property ID
+`0x004F`, `PtypBinary (0x0102)`, containing the [MS-OXCDATA] section 2.3.3
+`FlatEntryList`. The semantic regressions are
+`mapi_over_http_calendar_keep_open_handle_accepts_second_update_save`,
+`mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards`,
+and `mapi_over_http_calendar_concurrent_rw_handles_require_force_save`.
+PostgreSQL regressions cover one atomic version, canonical-writer version
+advance, stale-CAS/ForceSave behavior, and rollback when change-number
+allocation fails. The captured JSONL files are diagnostic records, not a
+self-contained HTTP replay, because they do not preserve the complete
+authenticated session and dynamic handle/ChangeKey chain.
+
 `dispatch/message_save.rs` and `dispatch/properties.rs` are over the production
 line target. Before adding further save/read behavior, split collaboration item
 save branches into `dispatch/collaboration_message_save.rs` and direct property
@@ -1221,13 +1393,12 @@ dispatch entry points as thin routing functions. This correction changes only
 the bounded existing branches so that the protocol semantics are fixed before
 that mechanical extraction.
 Calendar attachments are projected only through canonical
-`calendar_event_attachments`:
-`PidTagHasAttachments`, `RopGetValidAttachments`, `RopGetAttachmentTable`, and
-`RopOpenAttachment` read that table, while bounded
-`RopCreateAttachment`/`RopSaveChangesAttachment` writes validated attachment
-blobs into the same canonical event attachment state. `RopDeleteAttachment`
-removes the canonical event attachment row and emits calendar change state.
-Outlook-only attachment state is not stored.
+`calendar_event_attachments`: `PidTagHasAttachments`,
+`RopGetValidAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment`
+read that table. Calendar `RopCreateAttachment`, `RopSaveChangesAttachment`,
+and `RopDeleteAttachment` remain guarded until their changes are staged and
+committed only by the parent `RopSaveChangesMessage`; Outlook-only attachment
+state is not stored.
 
 Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and

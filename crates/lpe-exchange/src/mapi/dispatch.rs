@@ -17,16 +17,19 @@ use crate::mapi::outlook_startup::{
     outlook_startup_gate_summary,
 };
 use crate::store::{
-    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
-    MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
+    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
+    MapiIdentityObjectKind, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
 };
 use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, PublicFolderPermissionInput, SearchFolderDefinition,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
+    JmapMailboxUpdateInput, MapiEventAttachmentChanges, MapiEventAttachmentUpsert,
+    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
+    MapiEventCustomPropertyValue, MapiEventReminderPatch, PublicFolderPermissionInput,
+    SearchFolderDefinition, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertPublicFolderItemInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -39,6 +42,8 @@ mod conversation_actions;
 mod custom_properties;
 mod default_folders;
 mod diagnostics;
+mod event_transactions;
+mod event_save;
 mod execute;
 mod folder_create;
 mod folder_dispatch;
@@ -91,6 +96,8 @@ use conversation_actions::*;
 use custom_properties::*;
 use default_folders::*;
 pub(in crate::mapi) use diagnostics::*;
+use event_transactions::*;
+use event_save::*;
 pub(in crate::mapi) use execute::*;
 use folder_create::*;
 use folder_dispatch::*;

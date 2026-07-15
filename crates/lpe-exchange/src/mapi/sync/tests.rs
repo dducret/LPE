@@ -493,6 +493,7 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     let event_id = Uuid::from_u128(0x71717171717141719171717171717171);
     let event = crate::mapi_store::MapiEvent {
         id: crate::mapi::identity::mapi_store_id(123),
+        source_key: vec![0x53, 0x43, 0x4f, 0x50, 0x45, 0x44],
         folder_id: CALENDAR_FOLDER_ID,
         canonical_id: event_id,
         event: lpe_storage::AccessibleEvent {
@@ -526,6 +527,14 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             notes: String::new(),
             body_html: String::new(),
         },
+        version: lpe_storage::MapiEventVersion {
+            event_id,
+            canonical_modseq: 7,
+            change_number: 124,
+            change_key: mapi_mailstore::change_key_for_change_number(124),
+            predecessor_change_list: mapi_mailstore::predecessor_change_list(124),
+            updated_at: "2026-05-25T14:00:00Z".to_string(),
+        },
         attachments: vec![crate::mapi_store::MapiAttachment {
             canonical_id: Uuid::from_u128(0x81818181818141819181818181818181),
             attach_num: 0,
@@ -547,6 +556,38 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
                 mapi_mailstore::SpecialMessagePropertyValue::Bool(true)
             )
     }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_SOURCE_KEY
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Binary(bytes)
+                    if bytes == &event.source_key
+            )
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_CHANGE_NUMBER
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::U64(124))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_CHANGE_KEY
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Binary(bytes)
+                    if bytes == &mapi_mailstore::change_key_for_change_number(124)
+            )
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_PREDECESSOR_CHANGE_LIST
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Binary(bytes)
+                    if bytes == &mapi_mailstore::predecessor_change_list(124)
+            )
+    }));
+    assert_eq!(
+        sync.last_modified_filetime,
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:00:00Z")
+    );
 }
 
 #[test]

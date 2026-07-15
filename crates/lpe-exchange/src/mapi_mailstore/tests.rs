@@ -2355,6 +2355,141 @@ fn content_sync_state_keeps_normal_and_fai_cnsets_separate() {
 }
 
 #[test]
+fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
+    let normal_canonical_id = Uuid::parse_str("81818181-8181-4181-8181-818181818181").unwrap();
+    let fai_canonical_id = Uuid::parse_str("82828282-8282-4282-8282-828282828282").unwrap();
+    let normal_item_id = crate::mapi::identity::mapi_store_id(81);
+    let fai_item_id = crate::mapi::identity::mapi_store_id(82);
+    let normal_change_number = 501;
+    let fai_change_number = 777;
+    assert_ne!(
+        normal_change_number,
+        change_number_for_store_id(normal_item_id)
+    );
+    assert_ne!(fai_change_number, change_number_for_store_id(fai_item_id));
+    let normal = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+        item_id: normal_item_id,
+        canonical_id: normal_canonical_id,
+        associated: false,
+        subject: "Durable normal Event".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Appointment".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:11:00Z"),
+        message_size: 64,
+        read_state: None,
+        named_properties: vec![
+            (
+                PID_TAG_CHANGE_NUMBER,
+                SpecialMessagePropertyValue::U64(normal_change_number),
+            ),
+            (
+                PID_TAG_CHANGE_KEY,
+                SpecialMessagePropertyValue::Binary(change_key_for_change_number(
+                    normal_change_number,
+                )),
+            ),
+            (
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                SpecialMessagePropertyValue::Binary(predecessor_change_list(normal_change_number)),
+            ),
+        ],
+    };
+    let fai = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        item_id: fai_item_id,
+        canonical_id: fai_canonical_id,
+        associated: true,
+        subject: "Durable FAI".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:12:00Z"),
+        message_size: 64,
+        read_state: None,
+        named_properties: vec![
+            (
+                PID_TAG_CHANGE_NUMBER,
+                SpecialMessagePropertyValue::U64(fai_change_number),
+            ),
+            (
+                PID_TAG_CHANGE_KEY,
+                SpecialMessagePropertyValue::Binary(change_key_for_change_number(
+                    fai_change_number,
+                )),
+            ),
+            (
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                SpecialMessagePropertyValue::Binary(predecessor_change_list(fai_change_number)),
+            ),
+        ],
+    };
+    let special_objects = [normal.clone(), fai];
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL | SYNC_FLAG_FAI,
+        SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+        &[],
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &special_objects,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &special_objects,
+        &[],
+        &[],
+        1,
+    );
+
+    let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+    assert_eq!(summary.fai_items.len(), 1);
+    let fai_header = summary
+        .fai_items
+        .iter()
+        .find(|item| item.item_id == Some(fai_item_id))
+        .unwrap();
+    assert_eq!(fai_header.change_number, Some(fai_change_number));
+    assert!(fai_header.change_number_in_final_cnset_fai);
+    let normal_buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+        &[],
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&normal),
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&normal),
+        &[],
+        &[],
+        1,
+    );
+    assert_change_number_property(&normal_buffer, PID_TAG_CHANGE_NUMBER, normal_change_number);
+    assert_variable_property(
+        &buffer,
+        META_TAG_CNSET_SEEN,
+        &replguid_idset_from_counters(&[normal_change_number]),
+    );
+    assert_variable_property(
+        &buffer,
+        META_TAG_CNSET_SEEN_FAI,
+        &replguid_idset_from_counters(&[fai_change_number]),
+    );
+}
+
+#[test]
 fn deleted_idset_uses_replid_globset_ranges() {
     let idset = replid_idset_from_object_ids(&[
         crate::mapi::identity::mapi_store_id(3),

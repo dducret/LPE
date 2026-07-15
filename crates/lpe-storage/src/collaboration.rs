@@ -420,20 +420,13 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let default_calendar_id =
             Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, principal_account_id).await?;
-        sqlx::query(
-            r#"
-            UPDATE calendar_events
-            SET calendar_id = $4, updated_at = NOW()
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND calendar_id = $3
-            "#,
+        self.move_calendar_events_to_collection_in_tx(
+            &mut tx,
+            &tenant_id,
+            principal_account_id,
+            calendar_id,
+            default_calendar_id,
         )
-        .bind(&tenant_id)
-        .bind(principal_account_id)
-        .bind(calendar_id)
-        .bind(default_calendar_id)
-        .execute(&mut *tx)
         .await?;
         let deleted = sqlx::query(
             r#"
@@ -865,6 +858,21 @@ impl Storage {
                 CanonicalChangeCategory::Calendar.as_str(),
             )
             .await?;
+        self.advance_calendar_event_version_in_tx(
+            &mut tx,
+            &tenant_id,
+            existing.owner_account_id,
+            event_id,
+            modseq,
+        )
+        .await?;
+        let affected_principals = Self::calendar_event_affected_principals_in_tx(
+            &mut tx,
+            &tenant_id,
+            existing.owner_account_id,
+            event_id,
+        )
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -874,7 +882,7 @@ impl Storage {
             event_id,
             "updated",
             modseq,
-            &[existing.owner_account_id],
+            &affected_principals,
             serde_json::json!({
                 "collectionId": existing.collection_id,
                 "objectUid": existing.uid,

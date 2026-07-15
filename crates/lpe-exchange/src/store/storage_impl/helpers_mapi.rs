@@ -749,8 +749,19 @@ async fn repair_stale_mapi_object_identities(
               SELECT 1
               FROM calendar_events event
               WHERE event.tenant_id = identity.tenant_id
-                AND event.owner_account_id = identity.account_id
                 AND event.id = identity.canonical_id
+                AND (
+                    event.owner_account_id = identity.account_id
+                    OR EXISTS (
+                        SELECT 1
+                        FROM calendar_grants grant_row
+                        WHERE grant_row.tenant_id = event.tenant_id
+                          AND grant_row.owner_account_id = event.owner_account_id
+                          AND grant_row.calendar_id = event.calendar_id
+                          AND grant_row.grantee_account_id = identity.account_id
+                          AND grant_row.may_read
+                    )
+                )
           )
         "#,
     )

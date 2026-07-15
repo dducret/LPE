@@ -9,12 +9,14 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput, MapiEventVersion,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState,
+    PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -592,6 +594,22 @@ pub trait ExchangeStore: AccountAuthStore {
         collection_id: &'a str,
     ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
 
+    fn fetch_mapi_event_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiEventVersion>>;
+
+    fn create_mapi_event<'a>(
+        &'a self,
+        input: MapiEventCreateInput,
+    ) -> StoreFuture<'a, MapiEventCreateOutcome>;
+
+    fn commit_mapi_event_update<'a>(
+        &'a self,
+        input: MapiEventCommitInput,
+    ) -> StoreFuture<'a, MapiEventCommitOutcome>;
+
     fn fetch_accessible_tasks_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -993,14 +1011,7 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>>;
 
-    fn add_calendar_event_attachment<'a>(
-        &'a self,
-        account_id: Uuid,
-        event_id: Uuid,
-        attachment: AttachmentUploadInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, Option<CalendarEventAttachment>>;
-
+    #[allow(dead_code)]
     fn delete_calendar_event_attachment<'a>(
         &'a self,
         account_id: Uuid,

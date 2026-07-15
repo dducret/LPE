@@ -1,203 +1,27 @@
 use super::*;
+use crate::mapi_mailstore;
+use anyhow::{anyhow, Result};
+
+mod calendar_identity;
+
+fn calendar_mapi_attachments(attachments: &[CalendarEventAttachment]) -> Vec<MapiAttachment> {
+    attachments
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| MapiAttachment {
+            attach_num: index as u32,
+            canonical_id: attachment.id,
+            file_reference: attachment.file_reference.clone(),
+            file_name: attachment.file_name.clone(),
+            media_type: attachment.media_type.clone(),
+            disposition: None,
+            content_id: None,
+            size_octets: attachment.size_octets,
+        })
+        .collect()
+}
 
 impl MapiMailStoreSnapshot {
-    pub(crate) fn empty() -> Self {
-        Self::new(
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        )
-    }
-
-    pub(crate) fn new(
-        mailboxes: Vec<JmapMailbox>,
-        emails: Vec<JmapEmail>,
-        attachments: Vec<(Uuid, Vec<ActiveSyncAttachment>)>,
-        contact_collections: Vec<CollaborationCollection>,
-        calendar_collections: Vec<CollaborationCollection>,
-        task_collections: Vec<CollaborationCollection>,
-        contacts: Vec<AccessibleContact>,
-        events: Vec<AccessibleEvent>,
-        tasks: Vec<ClientTask>,
-        folder_permissions: Vec<MapiFolderPermission>,
-    ) -> Self {
-        let folders = mailboxes
-            .into_iter()
-            .map(|mailbox| MapiFolder {
-                id: mapi_folder_id(&mailbox),
-                canonical_id: mailbox.id,
-                mailbox,
-            })
-            .collect::<Vec<_>>();
-        let messages = emails
-            .into_iter()
-            .map(|email| {
-                let folder_id = mapi_message_folder_id(&email, &folders);
-                let message_attachments = attachments
-                    .iter()
-                    .find(|(message_id, _)| *message_id == email.id)
-                    .map(|(_, attachments)| attachments.as_slice())
-                    .unwrap_or_default()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, attachment)| MapiAttachment {
-                        attach_num: index as u32,
-                        canonical_id: attachment.id,
-                        file_reference: attachment.file_reference.clone(),
-                        file_name: attachment.file_name.clone(),
-                        media_type: attachment.media_type.clone(),
-                        disposition: attachment.disposition.clone(),
-                        content_id: attachment.content_id.clone(),
-                        size_octets: attachment.size_octets,
-                    })
-                    .collect::<Vec<_>>();
-                MapiMessage {
-                    id: mapi_message_id(&email),
-                    folder_id,
-                    canonical_id: email.id,
-                    email,
-                    attachments: message_attachments,
-                }
-            })
-            .collect();
-        let mut collaboration_folders = Vec::new();
-        collaboration_folders.extend(contact_collections.into_iter().map(|collection| {
-            let id =
-                mapi_collaboration_folder_id(MapiCollaborationFolderKind::Contacts, &collection);
-            let item_count = contacts
-                .iter()
-                .filter(|contact| contact.collection_id == collection.id)
-                .count()
-                .min(u32::MAX as usize) as u32;
-            MapiCollaborationFolder {
-                id,
-                kind: MapiCollaborationFolderKind::Contacts,
-                collection,
-                item_count,
-            }
-        }));
-        collaboration_folders.extend(calendar_collections.into_iter().map(|collection| {
-            let id =
-                mapi_collaboration_folder_id(MapiCollaborationFolderKind::Calendar, &collection);
-            let item_count = events
-                .iter()
-                .filter(|event| event.collection_id == collection.id)
-                .count()
-                .min(u32::MAX as usize) as u32;
-            MapiCollaborationFolder {
-                id,
-                kind: MapiCollaborationFolderKind::Calendar,
-                collection,
-                item_count,
-            }
-        }));
-        collaboration_folders.extend(task_collections.into_iter().map(|collection| {
-            let id = mapi_collaboration_folder_id(MapiCollaborationFolderKind::Task, &collection);
-            let item_count = tasks
-                .iter()
-                .filter(|task| task_collection_matches(task, &collection.id))
-                .count()
-                .min(u32::MAX as usize) as u32;
-            MapiCollaborationFolder {
-                id,
-                kind: MapiCollaborationFolderKind::Task,
-                collection,
-                item_count,
-            }
-        }));
-        let contacts = contacts
-            .into_iter()
-            .filter_map(|contact| {
-                let folder_id = collaboration_folders
-                    .iter()
-                    .find(|folder| {
-                        folder.kind == MapiCollaborationFolderKind::Contacts
-                            && folder.collection.id == contact.collection_id
-                    })
-                    .map(|folder| folder.id)?;
-                Some(MapiContact {
-                    id: mapi_item_id(&contact.id),
-                    folder_id,
-                    canonical_id: contact.id,
-                    contact,
-                })
-            })
-            .collect();
-        let events = events
-            .into_iter()
-            .filter_map(|event| {
-                let folder_id = collaboration_folders
-                    .iter()
-                    .find(|folder| {
-                        folder.kind == MapiCollaborationFolderKind::Calendar
-                            && folder.collection.id == event.collection_id
-                    })
-                    .map(|folder| folder.id)
-                    .or_else(|| {
-                        matches!(event.collection_id.as_str(), "default" | "calendar")
-                            .then_some(crate::mapi::identity::CALENDAR_FOLDER_ID)
-                    })?;
-                Some(MapiEvent {
-                    id: mapi_item_id(&event.id),
-                    folder_id,
-                    canonical_id: event.id,
-                    event,
-                    attachments: Vec::new(),
-                })
-            })
-            .collect();
-        let tasks = tasks
-            .into_iter()
-            .filter_map(|task| {
-                let folder_id = collaboration_folders
-                    .iter()
-                    .find(|folder| {
-                        folder.kind == MapiCollaborationFolderKind::Task
-                            && task_collection_matches(&task, &folder.collection.id)
-                    })
-                    .map(|folder| folder.id)?;
-                Some(MapiTask {
-                    id: mapi_item_id(&task.id),
-                    folder_id,
-                    canonical_id: task.id,
-                    task,
-                })
-            })
-            .collect();
-        Self {
-            folders,
-            public_folders: Vec::new(),
-            public_folder_items: Vec::new(),
-            public_folder_replicas: Vec::new(),
-            collaboration_folders,
-            messages,
-            contacts,
-            events,
-            tasks,
-            notes: Vec::new(),
-            journal_entries: Vec::new(),
-            search_folder_definitions: Vec::new(),
-            rules: Vec::new(),
-            navigation_shortcuts: Vec::new(),
-            associated_configs: Vec::new(),
-            associated_config_identity_ids: Vec::new(),
-            conversation_actions: Vec::new(),
-            delegate_freebusy_messages: Vec::new(),
-            recoverable_items: Vec::new(),
-            reminders: Vec::new(),
-            folder_permissions,
-            public_folder_permissions: Vec::new(),
-            content_windows: Vec::new(),
-        }
-    }
-
     pub(crate) fn with_search_folder_definitions(
         mut self,
         search_folder_definitions: Vec<SearchFolderDefinition>,
@@ -415,19 +239,82 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_event_versions(mut self, versions: Vec<MapiEventVersion>) -> Result<Self> {
+        let versioned_event_ids = versions
+            .iter()
+            .map(|version| version.event_id)
+            .collect::<HashSet<_>>();
+        for version in versions {
+            self.remember_event_version(version);
+        }
+        if let Some(event) = self
+            .events
+            .iter()
+            .find(|event| !versioned_event_ids.contains(&event.canonical_id))
+        {
+            return Err(anyhow!(
+                "durable MAPI Event version is missing for canonical Event {}",
+                event.canonical_id
+            ));
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn remember_event_version(&mut self, version: MapiEventVersion) {
+        if let Some(event) = self
+            .events
+            .iter_mut()
+            .find(|event| event.canonical_id == version.event_id)
+        {
+            event.version = version;
+        }
+    }
+
+    pub(crate) fn remember_event_reminder_state(
+        &mut self,
+        event_id: Uuid,
+        state: MapiEventReminderState,
+    ) {
+        let reminder = state.reminder_set.then(|| {
+            let reminder_at = state.reminder_at?;
+            let event = self
+                .events
+                .iter()
+                .find(|event| event.canonical_id == event_id)?;
+            let dismissed = state.reminder_dismissed_at.is_some();
+            Some(ClientReminder {
+                source_type: "calendar".to_string(),
+                source_id: event_id,
+                occurrence_start_at: None,
+                title: event.event.title.clone(),
+                due_at: None,
+                reminder_at,
+                dismissed_at: state.reminder_dismissed_at,
+                completed_at: None,
+                status: if dismissed { "dismissed" } else { "pending" }.to_string(),
+            })
+        });
+        self.event_reminder_overrides
+            .insert(event_id, reminder.flatten());
+    }
+
     pub(crate) fn remember_created_event(
         &mut self,
         folder_id: u64,
         event_id: u64,
         event: AccessibleEvent,
+        attachments: Vec<CalendarEventAttachment>,
     ) {
         let canonical_id = event.id;
+        let version = fallback_event_version(&event, event_id);
         self.events.push(MapiEvent {
             id: event_id,
+            source_key: mapi_mailstore::source_key_for_store_id(event_id),
             folder_id,
             canonical_id,
             event,
-            attachments: Vec::new(),
+            version,
+            attachments: calendar_mapi_attachments(&attachments),
         });
         if let Some(folder) = self
             .collaboration_folders
@@ -435,6 +322,26 @@ impl MapiMailStoreSnapshot {
             .find(|folder| folder.id == folder_id)
         {
             folder.item_count = folder.item_count.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn remember_updated_event(
+        &mut self,
+        folder_id: u64,
+        event_id: u64,
+        event: AccessibleEvent,
+        version: MapiEventVersion,
+        attachments: Vec<CalendarEventAttachment>,
+    ) {
+        if let Some(current) = self
+            .events
+            .iter_mut()
+            .find(|current| current.folder_id == folder_id && current.id == event_id)
+        {
+            current.canonical_id = event.id;
+            current.event = event;
+            current.version = version;
+            current.attachments = calendar_mapi_attachments(&attachments);
         }
     }
 
@@ -561,24 +468,12 @@ impl MapiMailStoreSnapshot {
         calendar_attachments: Vec<(Uuid, Vec<CalendarEventAttachment>)>,
     ) -> Self {
         for event in &mut self.events {
-            event.attachments = calendar_attachments
+            let attachments = calendar_attachments
                 .iter()
                 .find(|(event_id, _)| *event_id == event.canonical_id)
                 .map(|(_, attachments)| attachments.as_slice())
-                .unwrap_or_default()
-                .iter()
-                .enumerate()
-                .map(|(index, attachment)| MapiAttachment {
-                    attach_num: index as u32,
-                    canonical_id: attachment.id,
-                    file_reference: attachment.file_reference.clone(),
-                    file_name: attachment.file_name.clone(),
-                    media_type: attachment.media_type.clone(),
-                    disposition: None,
-                    content_id: None,
-                    size_octets: attachment.size_octets,
-                })
-                .collect();
+                .unwrap_or_default();
+            event.attachments = calendar_mapi_attachments(attachments);
         }
         self
     }
@@ -962,6 +857,11 @@ impl MapiMailStoreSnapshot {
         source_type: &str,
         source_id: Uuid,
     ) -> Option<&ClientReminder> {
+        if source_type == "calendar" {
+            if let Some(reminder) = self.event_reminder_overrides.get(&source_id) {
+                return reminder.as_ref();
+            }
+        }
         self.reminders
             .iter()
             .find(|reminder| reminder.source_type == source_type && reminder.source_id == source_id)
@@ -1462,5 +1362,17 @@ impl MapiMailStoreSnapshot {
     #[cfg(test)]
     pub(crate) fn messages(&self) -> &[MapiMessage] {
         &self.messages
+    }
+}
+
+fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> MapiEventVersion {
+    let change_number = mapi_mailstore::change_number_for_store_id(event_id);
+    MapiEventVersion {
+        event_id: event.id,
+        canonical_modseq: 1,
+        change_number,
+        change_key: mapi_mailstore::change_key_for_change_number(change_number),
+        predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+        updated_at: format!("{}T{}:00Z", event.date, event.time),
     }
 }

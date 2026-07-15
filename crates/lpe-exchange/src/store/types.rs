@@ -4,6 +4,13 @@ use uuid::Uuid;
 use crate::mapi::notifications::MapiNotificationEvent;
 use crate::mapi::properties::MapiNamedProperty;
 
+#[derive(Debug, Clone)]
+pub(crate) enum MapiEventCreateOutcome {
+    Created(lpe_storage::MapiEventCreateResult),
+    NotFound,
+    AccessDenied,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
     Account,
@@ -107,6 +114,7 @@ pub(crate) struct MapiIdentityRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiIdentityRecord {
+    pub(crate) object_kind: MapiIdentityObjectKind,
     pub(crate) canonical_id: Uuid,
     pub(crate) object_id: u64,
     pub(crate) source_key: Vec<u8>,

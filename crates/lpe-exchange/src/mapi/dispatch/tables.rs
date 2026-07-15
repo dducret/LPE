@@ -179,6 +179,7 @@ pub(super) fn attachment_table_object(folder_id: u64, message_id: u64) -> MapiOb
     MapiObject::AttachmentTable {
         folder_id,
         message_id,
+        materialized_attachments: None,
         columns: Vec::new(),
         columns_set: false,
         sort_orders: Vec::new(),

@@ -201,6 +201,9 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
                 PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID | PID_TAG_MID => {
                     write_object_id(row, value)
                 }
+                PID_TAG_CHANGE_NUMBER => {
+                    write_object_id(row, crate::mapi::identity::mapi_store_id(value))
+                }
                 _ => write_u64(row, value),
             }
         }

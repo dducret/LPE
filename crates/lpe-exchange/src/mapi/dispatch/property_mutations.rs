@@ -100,6 +100,7 @@ where
     .into_iter()
     .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
     .collect::<Vec<_>>();
+    let mut event_property_problems = Vec::new();
     let set_result = if let Some(result) = stage_virtual_conversation_action_property_values(
         session,
         handle_slots,
@@ -112,6 +113,10 @@ where
         match set_properties_object.clone() {
             Some(MapiObject::Message { .. }) => {
                 stage_message_property_values(session, handle_slots, request, values)
+            }
+            Some(MapiObject::Event { .. }) => {
+                stage_event_property_values(session, handle_slots, request, snapshot, values)
+                    .map(|problems| event_property_problems = problems)
             }
             Some(MapiObject::AssociatedConfig {
                 folder_id,
@@ -145,7 +150,6 @@ where
             }
             Some(
                 object @ (MapiObject::Contact { .. }
-                | MapiObject::Event { .. }
                 | MapiObject::Task { .. }
                 | MapiObject::Note { .. }
                 | MapiObject::JournalEntry { .. }
@@ -226,7 +230,13 @@ where
     };
     match set_result {
         Ok(()) => {
-            let response = rop_set_properties_response(request);
+            // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.5: valid properties in
+            // a mixed request succeed while invalid properties are reported.
+            let response = if event_property_problems.is_empty() {
+                rop_set_properties_response(request)
+            } else {
+                rop_set_properties_problem_response(request, &event_property_problems)
+            };
             log_set_properties_default_folder_response_debug(
                 principal,
                 request_id,
@@ -292,6 +302,7 @@ pub(super) async fn append_delete_properties_response<S>(
         .map(|tag| session.normalize_named_property_tag(tag))
         .collect::<Vec<_>>();
     let object = input_object(session, handle_slots, request).cloned();
+    let mut event_property_problems = Vec::new();
     let delete_result = if let Some(result) = stage_virtual_conversation_action_property_delete(
         session,
         handle_slots,
@@ -300,6 +311,9 @@ pub(super) async fn append_delete_properties_response<S>(
         &property_tags,
     ) {
         result
+    } else if matches!(object, Some(MapiObject::Event { .. })) {
+        stage_event_property_deletions(session, handle_slots, request, snapshot, &property_tags)
+            .map(|problems| event_property_problems = problems)
     } else if let Some(MapiObject::ConversationAction {
         folder_id,
         conversation_action_id,
@@ -384,7 +398,11 @@ pub(super) async fn append_delete_properties_response<S>(
                     .or_else(|error| {
                         if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
                             Ok(())
-                        } else if persisted_message_delete_is_best_effort(object.as_ref()) {
+                        } else if persisted_object_property_delete_is_idempotent(
+                            object.as_ref(),
+                            &property_tags,
+                            snapshot,
+                        ) {
                             tracing::info!(
                                 rca_debug = true,
                                 adapter = "mapi",
@@ -410,11 +428,47 @@ pub(super) async fn append_delete_properties_response<S>(
         }
     };
     match delete_result {
-        Ok(()) => responses.extend_from_slice(&rop_delete_properties_response(request)),
+        Ok(()) => {
+            let response = if event_property_problems.is_empty() {
+                rop_delete_properties_response(request)
+            } else {
+                rop_set_properties_problem_response(request, &event_property_problems)
+            };
+            responses.extend_from_slice(&response);
+        }
         Err(_) => responses.extend_from_slice(&rop_error_response(
             request.rop_id,
             request.response_handle_index(),
             0x8004_0102,
         )),
     }
+}
+
+fn persisted_object_property_delete_is_idempotent(
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> bool {
+    let Some(MapiObject::Event {
+        folder_id,
+        event_id,
+        ..
+    }) = object
+    else {
+        return persisted_message_delete_is_best_effort(object);
+    };
+    let Some(event) = snapshot.event_for_id(*folder_id, *event_id) else {
+        return false;
+    };
+    let reminder = snapshot.reminder_for_source("calendar", event.canonical_id);
+    property_tags.iter().all(|property_tag| {
+        event_property_value_with_reminder(
+            &event.event,
+            event.id,
+            event.folder_id,
+            *property_tag,
+            reminder,
+        )
+        .is_none()
+    })
 }

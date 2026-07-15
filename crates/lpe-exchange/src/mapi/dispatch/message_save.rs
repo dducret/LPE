@@ -176,134 +176,19 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             folder_id,
             properties,
         }) => {
-            let collection_id = match snapshot.collaboration_folder_for_id(folder_id) {
-                Some(folder) => folder.collection.id.as_str(),
-                None if folder_id == CALENDAR_FOLDER_ID => DEFAULT_CALENDAR_COLLECTION_ID,
-                None => {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x0C,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                    return;
-                }
-            };
-            let (properties, reminder_set, reminder_at) =
-                match split_reminder_property_values(properties.into_iter().collect()) {
-                    Ok(values) => values,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x0C,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        return;
-                    }
-                };
-            let input = match event_input_from_mapi(
-                principal.account_id,
-                None,
-                &default_event_for_mapping(principal.account_id, collection_id),
-                &properties,
-            ) {
-                Ok(input) => input,
-                Err(_) => {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x0C,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
-                    return;
-                }
-            };
-            match store
-                .create_accessible_event(principal.account_id, Some(collection_id), input)
-                .await
-            {
-                Ok(event) => {
-                    let event_id = match remember_created_mapi_identity(
-                        store,
-                        principal,
-                        MapiIdentityObjectKind::CalendarEvent,
-                        event.id,
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(event_id) => event_id,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0C,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            return;
-                        }
-                    };
-                    if (reminder_set.is_some() || reminder_at.is_some())
-                        && store
-                            .update_accessible_event_reminder(
-                                principal.account_id,
-                                event.id,
-                                reminder_set,
-                                reminder_at,
-                                None,
-                            )
-                            .await
-                            .is_err()
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x0C,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                    if upsert_custom_property_values_from_map(
-                        store,
-                        principal,
-                        MapiCustomPropertyObjectKind::CalendarEvent,
-                        event.id,
-                        &properties,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x0C,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                    snapshot.remember_created_event(folder_id, event_id, event);
-                    session.handles.insert(
-                        handle,
-                        MapiObject::Event {
-                            folder_id,
-                            event_id,
-                        },
-                    );
-                    session.record_notification(MapiNotificationEvent::content(
-                        folder_id,
-                        Some(event_id),
-                    ));
-                    append_save_changes_message_response(
-                        session,
-                        responses,
-                        handle_slots,
-                        &request,
-                        handle,
-                        event_id,
-                    );
-                }
-                Err(_) => responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            }
+            save_pending_event(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                properties,
+            )
+            .await;
             return;
         }
         Some(MapiObject::PendingTask {
@@ -766,16 +651,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             }
             return;
         }
-        Some(MapiObject::Event { folder_id, .. })
-            if mapi_calendar_content_items_suppressed(folder_id, snapshot) =>
-        {
-            responses.extend_from_slice(&rop_error_response(
-                0x0C,
-                request.response_handle_index(),
-                0x8004_010F,
-            ));
-            return;
-        }
         Some(MapiObject::PendingMessage { .. })
             if session.pending_embedded_message_ids.contains_key(&handle) =>
         {
@@ -1001,76 +876,22 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::Event {
             folder_id,
             event_id,
+            transaction,
         }) => {
-            let pending = session
-                .pending_attachment_deletions
-                .iter()
-                .filter_map(|(pending_folder_id, pending_message_id, attach_num)| {
-                    (*pending_folder_id == folder_id && *pending_message_id == event_id)
-                        .then_some(*attach_num)
-                })
-                .collect::<Vec<_>>();
-            let mut delete_failed = false;
-            for attach_num in pending.iter().copied() {
-                let Some(attachment) =
-                    snapshot.attachment_for_message(folder_id, event_id, attach_num)
-                else {
-                    session
-                        .pending_attachment_deletions
-                        .remove(&(folder_id, event_id, attach_num));
-                    continue;
-                };
-                match store
-                    .delete_calendar_event_attachment(
-                        principal.account_id,
-                        &attachment.file_reference,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "mapi-delete-calendar-attachment".to_string(),
-                            subject: attachment.file_reference.clone(),
-                        },
-                    )
-                    .await
-                {
-                    Ok(Some(_)) => {
-                        session
-                            .pending_attachment_deletions
-                            .remove(&(folder_id, event_id, attach_num));
-                    }
-                    _ => {
-                        delete_failed = true;
-                        break;
-                    }
-                }
-            }
-            if delete_failed {
-                responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                ));
-                return;
-            }
-            if !pending.is_empty() {
-                session
-                    .record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
-                record_sync_upload_content_change(
-                    session,
-                    folder_id,
-                    event_id,
-                    mapi_mailstore::change_number_for_store_id(event_id),
-                    false,
-                    true,
-                );
-            }
-            append_save_changes_message_response(
+            save_existing_event(
+                store,
+                principal,
                 session,
-                responses,
                 handle_slots,
-                &request,
+                request,
+                snapshot,
+                responses,
                 handle,
+                folder_id,
                 event_id,
-            );
+                transaction,
+            )
+            .await;
             return;
         }
         Some(MapiObject::Contact { contact_id, .. })

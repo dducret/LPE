@@ -13,7 +13,9 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
+    MapiEventCreateResult, MapiEventReminderState, MapiEventVersion, PublicFolder,
+    PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
     PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights,
     PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
     SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
@@ -63,7 +65,7 @@ use crate::{
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
         MapiFolderProfilePropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
         MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
-        MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        MapiEventCreateOutcome, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
         UpsertEwsUserConfigurationInput,
     },
 };
@@ -1157,9 +1159,10 @@ async fn mapi_identity_allocator_ignores_high_reserved_counters() {
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key
+            mapi_object_id, source_key, change_key, instance_key,
+            mapi_change_number, predecessor_change_list
         )
-        VALUES ($1, $2, 'associated_config', $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, 'associated_config', $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
     )
     .bind(tenant_id)
@@ -1170,6 +1173,8 @@ async fn mapi_identity_allocator_ignores_high_reserved_counters() {
     .bind(source_key)
     .bind(change_key)
     .bind(instance_key)
+    .bind(high_counter as i64)
+    .bind(mapi_mailstore::predecessor_change_list(high_counter))
     .execute(storage.pool())
     .await
     .unwrap();
@@ -1329,12 +1334,15 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key
+            mapi_object_id, source_key, change_key, instance_key,
+            mapi_change_number, predecessor_change_list
         )
         SELECT $1, $2, 'associated_config', $3, 50000, (50000::bigint << 16) | 1,
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex'),
-               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex')
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex'),
+               50000,
+               decode('16', 'hex') || decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50000), 12, '0'), 'hex')
         "#,
     )
     .bind(tenant_id)
@@ -1350,12 +1358,15 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key
+            mapi_object_id, source_key, change_key, instance_key,
+            mapi_change_number, predecessor_change_list
         )
         SELECT $1, $2, 'search_folder_definition', $3, 50002, $4,
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex'),
-               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex')
+               decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex'),
+               50002,
+               decode('16', 'hex') || decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50002), 12, '0'), 'hex')
         "#,
     )
     .bind(tenant_id)
@@ -1437,12 +1448,15 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key, deleted_at
+            mapi_object_id, source_key, change_key, instance_key,
+            mapi_change_number, predecessor_change_list, deleted_at
         )
         SELECT $1, $2, 'mailbox', $3, 50001, $4,
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
+               50001,
+               decode('16', 'hex') || decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50001), 12, '0'), 'hex'),
                NOW()
         "#,
     )
@@ -1459,12 +1473,15 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key, deleted_at
+            mapi_object_id, source_key, change_key, instance_key,
+            mapi_change_number, predecessor_change_list, deleted_at
         )
         SELECT $1, $2, 'search_folder_definition', $3, 50003, $4,
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
                decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
+               50003,
+               decode('16', 'hex') || decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex') || decode(lpad(to_hex(50003), 12, '0'), 'hex'),
                NOW()
         "#,
     )
@@ -1738,6 +1755,7 @@ struct FakeStore {
     ews_im_group_members: Arc<Mutex<Vec<EwsImGroupMember>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
+    mapi_event_identity_versions: Arc<Mutex<HashMap<Uuid, MapiEventVersion>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_folder_profile_property_values:
@@ -1757,6 +1775,7 @@ struct FakeStore {
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
     delegate_freebusy_messages: Arc<Mutex<Vec<DelegateFreeBusyMessageObject>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
+    omitted_reminder_query_source_ids: Arc<Mutex<Vec<Uuid>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
@@ -3490,6 +3509,7 @@ impl ExchangeStore for FakeStore {
                     .or_else(|| source_keys.get(&request.canonical_id).cloned())
                     .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
                 records.push(MapiIdentityRecord {
+                    object_kind: request.object_kind,
                     canonical_id: request.canonical_id,
                     object_id,
                     source_key,
@@ -5067,6 +5087,406 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(events) })
     }
 
+    fn fetch_mapi_event_versions<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiEventVersion>> {
+        let canonical_versions = self.event_versions.lock().unwrap().clone();
+        let identities = self.mapi_identities.lock().unwrap().clone();
+        let mut stored_versions = self.mapi_event_identity_versions.lock().unwrap();
+        let versions = event_ids
+            .iter()
+            .filter_map(|event_id| {
+                if let Some(version) = stored_versions.get(event_id) {
+                    let mut version = version.clone();
+                    version.canonical_modseq =
+                        canonical_versions.get(event_id).copied().unwrap_or(1) as i64;
+                    return Some(version);
+                }
+                let object_id = identities.get(event_id).copied()?;
+                let change_number = mapi_mailstore::change_number_for_store_id(object_id);
+                let version = MapiEventVersion {
+                    event_id: *event_id,
+                    canonical_modseq: canonical_versions.get(event_id).copied().unwrap_or(1) as i64,
+                    change_number,
+                    change_key: mapi_mailstore::change_key_for_change_number(change_number),
+                    predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                    updated_at: "2026-07-15T10:00:00Z".to_string(),
+                };
+                stored_versions.insert(*event_id, version.clone());
+                Some(version)
+            })
+            .collect();
+        Box::pin(async move { Ok(versions) })
+    }
+
+    fn create_mapi_event<'a>(
+        &'a self,
+        input: MapiEventCreateInput,
+    ) -> StoreFuture<'a, MapiEventCreateOutcome> {
+        let account = Self::account();
+        let collection = self
+            .calendar_collections
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|collection| collection.id == input.collection_id)
+            .cloned();
+        if collection
+            .as_ref()
+            .is_some_and(|collection| !collection.rights.may_write)
+        {
+            return Box::pin(async { Ok(MapiEventCreateOutcome::AccessDenied) });
+        }
+        if collection.is_none() && input.collection_id != "default" {
+            return Box::pin(async { Ok(MapiEventCreateOutcome::NotFound) });
+        }
+        let owner_account_id = collection
+            .as_ref()
+            .map(|collection| collection.owner_account_id)
+            .unwrap_or(input.principal_account_id);
+        let owner_email = collection
+            .as_ref()
+            .map(|collection| collection.owner_email.clone())
+            .unwrap_or(account.email);
+        let owner_display_name = collection
+            .as_ref()
+            .map(|collection| collection.owner_display_name.clone())
+            .unwrap_or(account.display_name);
+        let rights = collection
+            .as_ref()
+            .map(|collection| collection.rights.clone())
+            .unwrap_or_else(Self::rights);
+        let event_id = input.event.id.unwrap_or_else(|| {
+            Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
+        });
+        let event = AccessibleEvent {
+            id: event_id,
+            uid: if input.event.uid.is_empty() {
+                event_id.to_string()
+            } else {
+                input.event.uid
+            },
+            collection_id: input.collection_id,
+            owner_account_id,
+            owner_email,
+            owner_display_name,
+            rights,
+            date: input.event.date,
+            time: input.event.time,
+            time_zone: input.event.time_zone,
+            duration_minutes: input.event.duration_minutes,
+            all_day: input.event.all_day,
+            status: input.event.status,
+            sequence: input.event.sequence,
+            recurrence_rule: input.event.recurrence_rule,
+            recurrence_json: input.event.recurrence_json,
+            recurrence_exceptions_json: input.event.recurrence_exceptions_json,
+            title: input.event.title,
+            location: input.event.location,
+            organizer_json: input.event.organizer_json,
+            attendees: input.event.attendees,
+            attendees_json: input.event.attendees_json,
+            notes: input.event.notes,
+            body_html: input.event.body_html,
+        };
+
+        let reminder_set = input.reminder.reminder_set.unwrap_or(false);
+        let reminder = MapiEventReminderState {
+            reminder_set,
+            reminder_at: reminder_set.then(|| input.reminder.reminder_at.clone()).flatten(),
+            reminder_dismissed_at: reminder_set
+                .then(|| input.reminder.reminder_dismissed_at.clone())
+                .flatten(),
+        };
+        if reminder.reminder_set {
+            self.reminders.lock().unwrap().push(ClientReminder {
+                source_type: "calendar".to_string(),
+                source_id: event_id,
+                occurrence_start_at: None,
+                title: event.title.clone(),
+                due_at: Some(format!("{}T{}:00Z", event.date, event.time)),
+                reminder_at: reminder.reminder_at.clone().unwrap_or_default(),
+                dismissed_at: reminder.reminder_dismissed_at.clone(),
+                completed_at: None,
+                status: if reminder.reminder_dismissed_at.is_some() {
+                    "dismissed"
+                } else {
+                    "pending"
+                }
+                .to_string(),
+            });
+        }
+        for value in input.custom_property_upserts {
+            self.mapi_custom_property_values.lock().unwrap().insert(
+                (
+                    owner_account_id,
+                    MapiCustomPropertyObjectKind::CalendarEvent,
+                    event_id,
+                    value.property_tag,
+                    value.property_type,
+                ),
+                value.property_value,
+            );
+        }
+        let attachments = input
+            .attachment_changes
+            .upserts
+            .into_iter()
+            .map(|upsert| {
+                let attachment_id = Uuid::new_v4();
+                for value in upsert.custom_property_upserts {
+                    self.mapi_custom_property_values.lock().unwrap().insert(
+                        (
+                            owner_account_id,
+                            MapiCustomPropertyObjectKind::Attachment,
+                            attachment_id,
+                            value.property_tag,
+                            value.property_type,
+                        ),
+                        value.property_value,
+                    );
+                }
+                CalendarEventAttachment {
+                    id: attachment_id,
+                    event_id,
+                    file_name: upsert.attachment.file_name,
+                    media_type: upsert.attachment.media_type,
+                    size_octets: upsert.attachment.blob_bytes.len() as u64,
+                    file_reference: lpe_storage::calendar_attachment_file_reference(
+                        event_id,
+                        attachment_id,
+                    ),
+                }
+            })
+            .collect::<Vec<_>>();
+        self.calendar_attachments
+            .lock()
+            .unwrap()
+            .insert(event_id, attachments.clone());
+
+        let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+        if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+            *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+        }
+        let change_number = *next_counter;
+        *next_counter = next_counter.saturating_add(1);
+        let mapi_object_id = crate::mapi::identity::mapi_store_id(change_number);
+        self.mapi_identities
+            .lock()
+            .unwrap()
+            .insert(event_id, mapi_object_id);
+        self.event_versions.lock().unwrap().insert(event_id, 1);
+        let version = MapiEventVersion {
+            event_id,
+            canonical_modseq: 1,
+            change_number,
+            change_key: mapi_mailstore::change_key_for_change_number(change_number),
+            predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+            updated_at: "2026-07-15T10:00:00Z".to_string(),
+        };
+        self.mapi_event_identity_versions
+            .lock()
+            .unwrap()
+            .insert(event_id, version.clone());
+        self.events.lock().unwrap().push(event.clone());
+        Box::pin(async move {
+            Ok(MapiEventCreateOutcome::Created(MapiEventCreateResult {
+                event,
+                mapi_object_id,
+                version,
+                reminder,
+                attachments,
+            }))
+        })
+    }
+
+    fn commit_mapi_event_update<'a>(
+        &'a self,
+        input: MapiEventCommitInput,
+    ) -> StoreFuture<'a, MapiEventCommitOutcome> {
+        let mut events = self.events.lock().unwrap();
+        let Some(event) = events.iter_mut().find(|event| event.id == input.event_id) else {
+            return Box::pin(async { Ok(MapiEventCommitOutcome::NotFound) });
+        };
+        if !event.rights.may_write {
+            return Box::pin(async { Ok(MapiEventCommitOutcome::AccessDenied) });
+        }
+        let mut canonical_versions = self.event_versions.lock().unwrap();
+        let current_modseq = canonical_versions
+            .get(&input.event_id)
+            .copied()
+            .unwrap_or(1) as i64;
+        if current_modseq != input.expected_modseq && !input.force_save {
+            return Box::pin(async move {
+                Ok(MapiEventCommitOutcome::ObjectModified { current_modseq })
+            });
+        }
+
+        if let Some(updated) = input.event.as_ref() {
+            event.uid = updated.uid.clone();
+            event.date = updated.date.clone();
+            event.time = updated.time.clone();
+            event.time_zone = updated.time_zone.clone();
+            event.duration_minutes = updated.duration_minutes;
+            event.all_day = updated.all_day;
+            event.status = updated.status.clone();
+            event.sequence = updated.sequence;
+            event.recurrence_rule = updated.recurrence_rule.clone();
+            event.recurrence_json = updated.recurrence_json.clone();
+            event.recurrence_exceptions_json = updated.recurrence_exceptions_json.clone();
+            event.title = updated.title.clone();
+            event.location = updated.location.clone();
+            event.organizer_json = updated.organizer_json.clone();
+            event.attendees = updated.attendees.clone();
+            event.attendees_json = updated.attendees_json.clone();
+            event.notes = updated.notes.clone();
+            event.body_html = updated.body_html.clone();
+        }
+
+        if input.reminder.reminder_set.is_some() || input.reminder.reminder_at.is_some() {
+            let mut reminders = self.reminders.lock().unwrap();
+            let previous = reminders
+                .iter()
+                .find(|reminder| {
+                    reminder.source_type == "calendar" && reminder.source_id == input.event_id
+                })
+                .cloned();
+            reminders.retain(|reminder| {
+                !(reminder.source_type == "calendar" && reminder.source_id == input.event_id)
+            });
+            let reminder_set = input
+                .reminder
+                .reminder_set
+                .unwrap_or_else(|| previous.is_some());
+            if reminder_set {
+                reminders.push(ClientReminder {
+                    source_type: "calendar".to_string(),
+                    source_id: input.event_id,
+                    occurrence_start_at: None,
+                    title: event.title.clone(),
+                    due_at: Some(format!("{}T{}:00Z", event.date, event.time)),
+                    reminder_at: input
+                        .reminder
+                        .reminder_at
+                        .clone()
+                        .or_else(|| {
+                            previous
+                                .as_ref()
+                                .map(|reminder| reminder.reminder_at.clone())
+                        })
+                        .unwrap_or_default(),
+                    dismissed_at: input.reminder.reminder_dismissed_at.clone(),
+                    completed_at: None,
+                    status: "pending".to_string(),
+                });
+            }
+        }
+
+        let owner_account_id = event.owner_account_id;
+        let mut custom_values = self.mapi_custom_property_values.lock().unwrap();
+        for tag in &input.custom_property_deletes {
+            custom_values.retain(|key, _| {
+                !(key.0 == owner_account_id
+                    && key.1 == MapiCustomPropertyObjectKind::CalendarEvent
+                    && key.2 == input.event_id
+                    && key.3 == *tag)
+            });
+        }
+        for value in &input.custom_property_upserts {
+            custom_values.insert(
+                (
+                    owner_account_id,
+                    MapiCustomPropertyObjectKind::CalendarEvent,
+                    input.event_id,
+                    value.property_tag,
+                    value.property_type,
+                ),
+                value.property_value.clone(),
+            );
+        }
+        let mut calendar_attachments = self.calendar_attachments.lock().unwrap();
+        let attachments = calendar_attachments.entry(input.event_id).or_default();
+        attachments.retain(|attachment| {
+            !input
+                .attachment_changes
+                .delete_attachment_ids
+                .contains(&attachment.id)
+        });
+        for upsert in &input.attachment_changes.upserts {
+            let attachment_id = Uuid::new_v4();
+            for value in &upsert.custom_property_upserts {
+                custom_values.insert(
+                    (
+                        owner_account_id,
+                        MapiCustomPropertyObjectKind::Attachment,
+                        attachment_id,
+                        value.property_tag,
+                        value.property_type,
+                    ),
+                    value.property_value.clone(),
+                );
+            }
+            attachments.push(CalendarEventAttachment {
+                id: attachment_id,
+                event_id: input.event_id,
+                file_name: upsert.attachment.file_name.clone(),
+                media_type: upsert.attachment.media_type.clone(),
+                size_octets: upsert.attachment.blob_bytes.len() as u64,
+                file_reference: lpe_storage::calendar_attachment_file_reference(
+                    input.event_id,
+                    attachment_id,
+                ),
+            });
+        }
+        let attachments = attachments.clone();
+        drop(calendar_attachments);
+        drop(custom_values);
+
+        let next_modseq = current_modseq.saturating_add(1);
+        canonical_versions.insert(input.event_id, next_modseq as u64);
+        let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+        if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+            *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+        }
+        let change_number = *next_counter;
+        *next_counter = next_counter.saturating_add(1);
+        let version = MapiEventVersion {
+            event_id: input.event_id,
+            canonical_modseq: next_modseq,
+            change_number,
+            change_key: mapi_mailstore::change_key_for_change_number(change_number),
+            predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+            updated_at: "2026-07-15T10:15:00Z".to_string(),
+        };
+        self.mapi_event_identity_versions
+            .lock()
+            .unwrap()
+            .insert(input.event_id, version.clone());
+        let reminder = self
+            .reminders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|reminder| {
+                reminder.source_type == "calendar" && reminder.source_id == input.event_id
+            })
+            .map(|reminder| MapiEventReminderState {
+                reminder_set: true,
+                reminder_at: Some(reminder.reminder_at.clone()),
+                reminder_dismissed_at: reminder.dismissed_at.clone(),
+            })
+            .unwrap_or_default();
+        Box::pin(async move {
+            Ok(MapiEventCommitOutcome::Saved(MapiEventCommitSuccess {
+                version,
+                reminder,
+                attachments,
+            }))
+        })
+    }
+
     fn fetch_accessible_tasks_in_collection<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -6013,7 +6433,15 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         _query: ReminderQuery,
     ) -> StoreFuture<'a, Vec<ClientReminder>> {
-        let reminders = self.reminders.lock().unwrap().clone();
+        let omitted = self.omitted_reminder_query_source_ids.lock().unwrap();
+        let reminders = self
+            .reminders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|reminder| !omitted.contains(&reminder.source_id))
+            .cloned()
+            .collect();
         Box::pin(async move { Ok(reminders) })
     }
 
@@ -6472,43 +6900,6 @@ impl ExchangeStore for FakeStore {
         );
 
         Box::pin(async move { Ok(Some((email, stored_attachment))) })
-    }
-
-    fn add_calendar_event_attachment<'a>(
-        &'a self,
-        _account_id: Uuid,
-        event_id: Uuid,
-        attachment: AttachmentUploadInput,
-        _audit: lpe_storage::AuditEntryInput,
-    ) -> StoreFuture<'a, Option<CalendarEventAttachment>> {
-        if !self
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event.id == event_id)
-        {
-            return Box::pin(async move { Ok(None) });
-        }
-        let attachment_id = Uuid::parse_str("cececece-cece-cece-cece-cececececece").unwrap();
-        let stored = CalendarEventAttachment {
-            id: attachment_id,
-            event_id,
-            file_name: attachment.file_name,
-            media_type: attachment.media_type,
-            size_octets: attachment.blob_bytes.len() as u64,
-            file_reference: lpe_storage::calendar_attachment_file_reference(
-                event_id,
-                attachment_id,
-            ),
-        };
-        self.calendar_attachments
-            .lock()
-            .unwrap()
-            .entry(event_id)
-            .or_default()
-            .push(stored.clone());
-        Box::pin(async move { Ok(Some(stored)) })
     }
 
     fn delete_message_attachment<'a>(
@@ -10156,10 +10547,21 @@ fn append_rop_open_message(
     folder_id: u64,
     message_id: u64,
 ) {
+    append_rop_open_message_with_flags(rops, input, output, folder_id, message_id, 0);
+}
+
+fn append_rop_open_message_with_flags(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    folder_id: u64,
+    message_id: u64,
+    open_mode_flags: u8,
+) {
     rops.extend_from_slice(&[0x03, 0x00, input, output]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
     append_mapi_wire_id(rops, folder_id);
-    rops.push(0);
+    rops.push(open_mode_flags);
     append_mapi_wire_id(rops, message_id);
 }
 
@@ -10299,6 +10701,7 @@ fn test_mapi_uuid_id(uuid: &Uuid) -> u64 {
 fn append_rop_get_properties_specific(rops: &mut Vec<u8>, input: u8, property_tags: &[u32]) {
     rops.extend_from_slice(&[0x07, 0x00, input]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
     for tag in property_tags {
         rops.extend_from_slice(&tag.to_le_bytes());

@@ -9,6 +9,7 @@ mod attachments;
 mod buffer;
 mod debug;
 mod errors;
+mod event_properties;
 mod logon;
 mod named_properties;
 mod object_ids;
@@ -26,6 +27,7 @@ pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use buffer::*;
 pub(in crate::mapi) use debug::*;
 pub(in crate::mapi) use errors::*;
+pub(in crate::mapi) use event_properties::*;
 pub(in crate::mapi) use logon::*;
 pub(in crate::mapi) use named_properties::*;
 pub(in crate::mapi) use object_ids::*;
@@ -177,6 +179,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::Event {
             folder_id,
             event_id,
+            ..
         }) => {
             let Some(_event) = snapshot.event_for_id(*folder_id, *event_id) else {
                 return rop_error_response(
@@ -529,6 +532,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             &columns,
             &unsupported_tags,
             &size_limited_tags,
+            custom_values,
         );
     }
     response
@@ -633,6 +637,9 @@ fn fallback_default_specific_property(
     snapshot: &MapiMailStoreSnapshot,
     tag: u32,
 ) -> bool {
+    if event_object_property_is_deleted(object, tag) {
+        return true;
+    }
     if let Some(MapiObject::PendingAssociatedMessage { properties, .. }) = object {
         let storage_tag = canonical_property_storage_tag(tag);
         // [MS-OXCMSG] 3.2.5.2 and [MS-OXCDATA] 2.8.1.2: an unwritten
@@ -735,6 +742,7 @@ fn write_flagged_property_row(
     columns: &[u32],
     unsupported_tags: &[u32],
     size_limited_tags: &[u32],
+    custom_values: &HashMap<u32, Vec<u8>>,
 ) {
     response.push(1);
     for tag in columns {
@@ -750,6 +758,9 @@ fn write_flagged_property_row(
                 response,
                 flagged_property_error_code(object, principal, mailboxes, emails, snapshot, *tag),
             );
+        } else if let Some(value) = custom_values.get(tag) {
+            response.push(0);
+            response.extend_from_slice(value);
         } else if let Some((value_tag, property_type)) =
             get_properties_specific_typed_value_tag(object, *tag)
         {
@@ -1023,6 +1034,7 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     if let MapiObject::Event {
         folder_id,
         event_id,
+        ..
     } = object
     {
         if snapshot.event_for_id(*folder_id, *event_id).is_none() {
@@ -1166,26 +1178,9 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingContact { properties, .. }) => {
             serialize_pending_contact_row(principal, properties, &[tag])
         }
-        Some(MapiObject::Event {
-            folder_id,
-            event_id,
-        }) => snapshot
-            .event_for_id(*folder_id, *event_id)
-            .map(|event| {
-                serialize_event_row_with_reminder_and_attachments(
-                    &event.event,
-                    event.id,
-                    event.folder_id,
-                    snapshot.reminder_for_source("calendar", event.canonical_id),
-                    !event.attachments.is_empty(),
-                    &[tag],
-                )
-            })
-            .unwrap_or_else(|| {
-                let mut value = Vec::new();
-                write_property_default(&mut value, tag);
-                value
-            }),
+        Some(object @ MapiObject::Event { .. }) => {
+            serialize_event_object_property(object, snapshot, tag)
+        }
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &[tag])
         }

@@ -250,19 +250,6 @@ macro_rules! store_impl_messages {
         })
     }
 
-    fn add_calendar_event_attachment<'a>(
-        &'a self,
-        account_id: Uuid,
-        event_id: Uuid,
-        attachment: AttachmentUploadInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, Option<CalendarEventAttachment>> {
-        Box::pin(async move {
-            self.add_calendar_event_attachment(account_id, event_id, attachment, audit)
-                .await
-        })
-    }
-
     fn delete_message_attachment<'a>(
         &'a self,
         account_id: Uuid,

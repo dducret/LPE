@@ -349,6 +349,16 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
             "mapi associated config stream release persist failed"
         );
     }
+    if let Some(handle) = released_handle {
+        if matches!(
+            released_object_for_stream_persist.as_ref(),
+            Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. })
+        ) {
+            abandon_event_attachment_transaction(session, handle);
+        } else {
+            session.pending_attachment_parent_messages.remove(&handle);
+        }
+    }
     release_handle_slot(session, handle_slots, &request);
     if let Some(handle) = released_handle {
         same_execute_released_handles.insert(handle);

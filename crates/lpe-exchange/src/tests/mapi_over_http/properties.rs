@@ -219,6 +219,12 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
             "message opaque value",
         ),
         (
+            test_mapi_folder_id(16),
+            test_mapi_uuid_id(&event_id),
+            0x8001_001F,
+            "event opaque value",
+        ),
+        (
             test_mapi_folder_id(19),
             test_mapi_uuid_id(&task_id),
             0x8001_001F,

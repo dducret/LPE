@@ -2065,6 +2065,23 @@ fn object_id_properties_use_mapi_wire_ids() {
 }
 
 #[test]
+fn change_number_properties_use_replid_and_globcnt_wire_ids() {
+    let change_number = 0x0000_0000_0067_0123;
+    let mut encoded = Vec::new();
+    write_mapi_value(
+        &mut encoded,
+        PID_TAG_CHANGE_NUMBER,
+        &MapiValue::U64(change_number),
+    );
+
+    assert_eq!(
+        crate::mapi::identity::object_id_from_wire_id(&encoded)
+            .and_then(crate::mapi::identity::global_counter_from_store_id),
+        Some(change_number)
+    );
+}
+
+#[test]
 fn microsoft_oxprops_message_size_projects_integer32_property() {
     assert_eq!(mapi_message_size_value(512), MapiValue::U32(512));
     assert_eq!(
@@ -3219,6 +3236,27 @@ fn followup_mail_projects_outlook_flag_properties() {
         email_property_value(&email, PID_TAG_NATIVE_BODY),
         Some(MapiValue::U32(1))
     );
+}
+
+#[test]
+fn reminder_signal_time_wins_independently_of_property_order() {
+    let reminder_time =
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:00Z") as i64);
+    let signal_time =
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T09:45:00Z") as i64);
+    for values in [
+        vec![
+            (PID_LID_REMINDER_TIME_TAG, reminder_time.clone()),
+            (PID_LID_REMINDER_SIGNAL_TIME_TAG, signal_time.clone()),
+        ],
+        vec![
+            (PID_LID_REMINDER_SIGNAL_TIME_TAG, signal_time.clone()),
+            (PID_LID_REMINDER_TIME_TAG, reminder_time.clone()),
+        ],
+    ] {
+        let (_, _, reminder_at) = split_reminder_property_values(values).unwrap();
+        assert_eq!(reminder_at.as_deref(), Some("2026-07-15T09:45:00Z"));
+    }
 }
 
 #[test]
@@ -5426,6 +5464,7 @@ fn common_view_named_view_descriptor_opens_as_stream() {
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
+        pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -5535,6 +5574,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
+        pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -5641,6 +5681,7 @@ fn associated_config_missing_binary_property_opens_writable_stream() {
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
+        pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),
@@ -5774,6 +5815,7 @@ fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         pending_message_recipient_replacements: std::collections::HashMap::new(),
         pending_message_attachments: std::collections::HashMap::new(),
         pending_attachment_parent_messages: std::collections::HashMap::new(),
+        pending_event_attachment_transactions: std::collections::HashMap::new(),
         pending_attachment_deletions: std::collections::HashSet::new(),
         pending_embedded_message_ids: std::collections::HashMap::new(),
         pending_embedded_message_attachments: std::collections::HashMap::new(),

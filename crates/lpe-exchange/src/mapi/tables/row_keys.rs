@@ -199,12 +199,14 @@ pub(in crate::mapi) fn table_row_keys(
         MapiObject::AttachmentTable {
             folder_id,
             message_id,
+            materialized_attachments,
             sort_orders,
             restriction,
             ..
         } => {
-            let mut rows = snapshot
-                .attachments_for_message(*folder_id, *message_id)
+            let mut rows = materialized_attachments
+                .as_deref()
+                .or_else(|| snapshot.attachments_for_message(*folder_id, *message_id))
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();

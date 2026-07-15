@@ -1247,16 +1247,6 @@ pub(super) fn changed_special_ids_for_folder(
     changed_ids
 }
 
-pub(super) fn mapi_calendar_content_items_suppressed(
-    folder_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-) -> bool {
-    folder_id == CALENDAR_FOLDER_ID
-        || snapshot
-            .collaboration_folder_for_id(folder_id)
-            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
-}
-
 pub(super) async fn deleted_special_object_ids_for_folder<S>(
     store: &S,
     principal: &AccountPrincipal,

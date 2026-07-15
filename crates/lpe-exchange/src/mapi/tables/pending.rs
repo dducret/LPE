@@ -532,7 +532,22 @@ pub(in crate::mapi) fn serialize_pending_event_row(
         notes: event.notes,
         body_html: event.body_html,
     };
-    serialize_event_row(&event, 0, CALENDAR_FOLDER_ID, columns)
+    let mut row = Vec::new();
+    for column in columns {
+        if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
+            if let Some(value) = properties.get(&PID_TAG_HAS_ATTACHMENTS) {
+                write_mapi_value(&mut row, *column, value);
+                continue;
+            }
+        }
+        row.extend_from_slice(&serialize_event_row(
+            &event,
+            0,
+            CALENDAR_FOLDER_ID,
+            &[*column],
+        ));
+    }
+    row
 }
 
 pub(in crate::mapi) fn serialize_pending_task_row(

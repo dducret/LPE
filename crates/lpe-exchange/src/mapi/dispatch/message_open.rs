@@ -159,6 +159,10 @@ pub(super) fn append_open_message_response(
             MapiObject::Event {
                 folder_id,
                 event_id: message_id,
+                transaction: MapiEventTransaction::new(
+                    request.payload.get(8).copied().unwrap_or(0),
+                    event.version.canonical_modseq,
+                ),
             },
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);

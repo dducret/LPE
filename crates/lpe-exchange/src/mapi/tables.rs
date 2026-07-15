@@ -344,7 +344,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_event_row(&event.event, event.id, event.folder_id, &columns),
+                        &serialize_versioned_event_row(event, &columns),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -398,12 +398,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                             response.push(1);
                             write_standard_property_row(
                                 &mut response,
-                                &serialize_event_row(
-                                    &event.event,
-                                    event.id,
-                                    event.folder_id,
-                                    &columns,
-                                ),
+                                &serialize_versioned_event_row(event, &columns),
                             );
                         } else {
                             return rop_find_row_no_match_response(request);
@@ -718,6 +713,7 @@ pub(in crate::mapi) fn rop_find_row_response(
         MapiObject::AttachmentTable {
             folder_id,
             message_id,
+            materialized_attachments,
             columns,
             sort_orders,
             restriction: table_restriction,
@@ -729,8 +725,9 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else {
                 columns.clone()
             };
-            let mut rows = snapshot
-                .attachments_for_message(*folder_id, *message_id)
+            let mut rows = materialized_attachments
+                .as_deref()
+                .or_else(|| snapshot.attachments_for_message(*folder_id, *message_id))
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();

@@ -82,6 +82,26 @@ where
     upsert_custom_property_values(store, principal, object_kind, canonical_id, values).await
 }
 
+pub(super) fn mapi_event_custom_property_values_from_map(
+    properties: &HashMap<u32, MapiValue>,
+) -> Vec<MapiEventCustomPropertyValue> {
+    let mut values = properties
+        .iter()
+        .filter(|(tag, _)| is_custom_property_tag(**tag))
+        .map(|(property_tag, value)| {
+            let mut property_value = Vec::new();
+            write_mapi_value(&mut property_value, *property_tag, value);
+            MapiEventCustomPropertyValue {
+                property_tag: *property_tag,
+                property_type: MapiPropertyTag::new(*property_tag).property_type_code(),
+                property_value,
+            }
+        })
+        .collect::<Vec<_>>();
+    values.sort_by_key(|value| value.property_tag);
+    values
+}
+
 pub(super) async fn fetch_custom_property_values_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -107,12 +127,26 @@ where
     else {
         return Ok(HashMap::new());
     };
-    Ok(store
-        .fetch_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
+    let account_id = custom_property_storage_account_id(principal, object, snapshot);
+    let mut values = store
+        .fetch_mapi_custom_property_values(account_id, object_kind, canonical_id, &tags)
         .await?
         .into_iter()
         .map(|value| (value.property_tag, value.property_value))
-        .collect())
+        .collect::<HashMap<_, _>>();
+    if let Some(MapiObject::Event { transaction, .. }) = object {
+        for tag in &transaction.deleted_properties {
+            values.remove(tag);
+        }
+        for (tag, value) in &transaction.pending_properties {
+            if tags.contains(tag) && is_custom_property_tag(*tag) {
+                let mut property_value = Vec::new();
+                write_mapi_value(&mut property_value, *tag, value);
+                values.insert(*tag, property_value);
+            }
+        }
+    }
+    Ok(values)
 }
 
 pub(super) async fn copy_custom_property_values_for_request<S>(
@@ -141,13 +175,11 @@ where
     else {
         return Ok(None);
     };
+    let source_account_id = custom_property_storage_account_id(principal, source, snapshot);
+    let destination_account_id =
+        custom_property_storage_account_id(principal, destination, snapshot);
     let source_values = store
-        .fetch_mapi_custom_property_values(
-            principal.account_id,
-            source_kind,
-            source_id,
-            property_tags,
-        )
+        .fetch_mapi_custom_property_values(source_account_id, source_kind, source_id, property_tags)
         .await?
         .into_iter()
         .map(|value| (value.property_tag, value))
@@ -172,7 +204,7 @@ where
     if !copied_values.is_empty() {
         store
             .upsert_mapi_custom_property_values(
-                principal.account_id,
+                destination_account_id,
                 destination_kind,
                 destination_id,
                 &copied_values,
@@ -205,12 +237,15 @@ where
     else {
         return Ok(false);
     };
+    let source_account_id = custom_property_storage_account_id(principal, source, snapshot);
+    let destination_account_id =
+        custom_property_storage_account_id(principal, destination, snapshot);
     let excluded = excluded_property_tags
         .iter()
         .copied()
         .collect::<HashSet<_>>();
     let mut values = store
-        .fetch_all_mapi_custom_property_values(principal.account_id, source_kind, source_id)
+        .fetch_all_mapi_custom_property_values(source_account_id, source_kind, source_id)
         .await?
         .into_iter()
         .chain(staged_custom_property_values(source, None).into_iter())
@@ -225,7 +260,7 @@ where
     }
     store
         .upsert_mapi_custom_property_values(
-            principal.account_id,
+            destination_account_id,
             destination_kind,
             destination_id,
             &values,
@@ -259,9 +294,28 @@ where
     else {
         return Ok(());
     };
+    let account_id = custom_property_storage_account_id(principal, object, snapshot);
     store
-        .delete_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
+        .delete_mapi_custom_property_values(account_id, object_kind, canonical_id, &tags)
         .await
+}
+
+fn custom_property_storage_account_id(
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Uuid {
+    match object {
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            ..
+        }) => snapshot
+            .event_for_id(*folder_id, *event_id)
+            .map(|event| event.event.owner_account_id)
+            .unwrap_or(principal.account_id),
+        _ => principal.account_id,
+    }
 }
 
 pub(super) fn custom_property_object_identity(
@@ -291,14 +345,13 @@ pub(super) fn custom_property_object_identity(
         MapiObject::Event {
             folder_id,
             event_id,
-        } if !mapi_calendar_content_items_suppressed(*folder_id, snapshot) => {
-            snapshot.event_for_id(*folder_id, *event_id).map(|event| {
-                (
-                    MapiCustomPropertyObjectKind::CalendarEvent,
-                    event.canonical_id,
-                )
-            })
-        }
+            ..
+        } => snapshot.event_for_id(*folder_id, *event_id).map(|event| {
+            (
+                MapiCustomPropertyObjectKind::CalendarEvent,
+                event.canonical_id,
+            )
+        }),
         MapiObject::Task { folder_id, task_id } => snapshot
             .task_for_id(*folder_id, *task_id)
             .map(|task| (MapiCustomPropertyObjectKind::Task, task.canonical_id)),

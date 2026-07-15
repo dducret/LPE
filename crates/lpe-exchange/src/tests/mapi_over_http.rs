@@ -1,10 +1,12 @@
 use super::*;
 
 mod calendar;
+mod calendar_identity_scope;
 mod connect;
 mod contacts;
 mod hierarchy;
 mod logon_profile;
+mod notifications;
 mod nspi;
 mod permissions;
 mod properties;
@@ -152,7 +154,7 @@ fn open_embedded_message_response_contains_subject(response_rops: &[u8], subject
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mapi_over_http_set_properties_hides_calendar_event_but_updates_task_reminders() {
+async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminders() {
     let account = FakeStore::account();
     let calendar = FakeStore::collection("default", "calendar", "Calendar");
     let task_list = FakeStore::collection("default", "task", "Tasks");
@@ -296,16 +298,18 @@ async fn mapi_over_http_set_properties_hides_calendar_event_but_updates_task_rem
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &0x8004_0102u32.to_le_bytes()
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
     assert!(contains_bytes(
         &response_rops,
         &[0x0A, 0x04, 0, 0, 0, 0, 0, 0]
     ));
     let reminders = reminders.lock().unwrap();
-    assert!(!reminders
-        .iter()
-        .any(|reminder| { reminder.source_type == "calendar" && reminder.source_id == event_id }));
+    assert!(reminders.iter().any(|reminder| {
+        reminder.source_type == "calendar"
+            && reminder.source_id == event_id
+            && reminder.reminder_at == calendar_reminder_at
+    }));
     assert!(reminders.iter().any(|reminder| {
         reminder.source_type == "task"
             && reminder.source_id == task_id

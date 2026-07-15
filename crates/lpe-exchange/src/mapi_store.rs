@@ -3,12 +3,13 @@ use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule, PublicFolder,
-    PublicFolderItem, PublicFolderPermission, PublicFolderReplica, RecoverableItem, ReminderQuery,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule,
+    MapiEventReminderState, MapiEventVersion, PublicFolder, PublicFolderItem,
+    PublicFolderPermission, PublicFolderReplica, RecoverableItem, ReminderQuery,
     SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::mapi::permissions::{
@@ -17,7 +18,9 @@ use crate::mapi::permissions::{
 };
 use crate::store::ExchangeStore;
 use crate::store::MapiAssociatedConfigRecord;
-use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationShortcutRecord};
+use crate::store::{
+    MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNavigationShortcutRecord,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
@@ -41,6 +44,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     recoverable_items: Vec<MapiRecoverableItemMessage>,
     reminders: Vec<ClientReminder>,
+    event_reminder_overrides: HashMap<Uuid, Option<ClientReminder>>,
     folder_permissions: Vec<MapiFolderPermission>,
     public_folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
@@ -112,9 +116,11 @@ pub(crate) struct MapiContact {
 #[allow(dead_code)]
 pub(crate) struct MapiEvent {
     pub(crate) id: u64,
+    pub(crate) source_key: Vec<u8>,
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) event: AccessibleEvent,
+    pub(crate) version: MapiEventVersion,
     pub(crate) attachments: Vec<MapiAttachment>,
 }
 
@@ -269,7 +275,7 @@ pub(crate) struct MapiRecoverableItemMessage {
     pub(crate) item: RecoverableItem,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) struct MapiAttachment {
     pub(crate) attach_num: u32,
@@ -607,16 +613,20 @@ impl<T: ExchangeStore> MapiStore for T {
                 &public_folders,
                 &public_folder_items,
             );
-            for identity in self
+            let identity_records = self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
-                .await?
-            {
+                .await?;
+            for identity in &identity_records {
                 crate::mapi::identity::remember_mapi_identity_with_source_key(
                     identity.canonical_id,
                     identity.object_id,
-                    Some(identity.source_key),
+                    Some(identity.source_key.clone()),
                 );
             }
+            let event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+            let event_versions = self
+                .fetch_mapi_event_versions(account_id, &event_ids)
+                .await?;
             let mailbox_ids = mailboxes
                 .iter()
                 .map(|mailbox| mailbox.id)
@@ -624,7 +634,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let folder_permissions = self
                 .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
                 .await?;
-            Ok(MapiMailStoreSnapshot::new(
+            MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
                 mailboxes,
                 emails,
                 attachments,
@@ -635,7 +645,9 @@ impl<T: ExchangeStore> MapiStore for T {
                 events,
                 tasks,
                 folder_permissions,
-            ))
+                &identity_records,
+            )
+            .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
             .map(|snapshot| snapshot.with_rules(rules))
@@ -900,7 +912,6 @@ fn mapi_item_id(id: &Uuid) -> u64 {
 
 fn mapi_event_id_matches(event: &MapiEvent, object_id: u64) -> bool {
     event.id == object_id
-        || crate::mapi::identity::object_id_matches(&event.canonical_id, object_id)
 }
 
 fn mapi_public_folder_id(folder: &PublicFolder) -> u64 {
@@ -934,31 +945,39 @@ fn mapi_collaboration_folder_id(
     kind: MapiCollaborationFolderKind,
     collection: &CollaborationCollection,
 ) -> u64 {
-    match (kind, collection.id.as_str()) {
+    mapi_collaboration_folder_id_for_collection(kind, &collection.id)
+        .expect("MAPI collaboration folder identity mapping missing")
+}
+
+pub(crate) fn mapi_collaboration_folder_id_for_collection(
+    kind: MapiCollaborationFolderKind,
+    collection_id: &str,
+) -> Option<u64> {
+    match (kind, collection_id) {
         (MapiCollaborationFolderKind::Contacts, "default" | "contacts") => {
-            crate::mapi::identity::CONTACTS_FOLDER_ID
+            Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
         }
         (MapiCollaborationFolderKind::Contacts, "suggested_contacts") => {
-            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID
+            Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
         }
         (MapiCollaborationFolderKind::Contacts, "quick_contacts") => {
-            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID
+            Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID)
         }
         (MapiCollaborationFolderKind::Contacts, "im_contact_list") => {
-            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID
+            Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID)
         }
         (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => {
-            crate::mapi::identity::CALENDAR_FOLDER_ID
+            Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
         }
         (MapiCollaborationFolderKind::Task, "default" | "tasks") => {
-            crate::mapi::identity::TASKS_FOLDER_ID
+            Some(crate::mapi::identity::TASKS_FOLDER_ID)
         }
-        _ => collaboration_folder_identity_canonical_id(kind, collection)
-            .map(|id| {
+        _ => collaboration_folder_identity_canonical_id_for_collection(kind, collection_id).map(
+            |id| {
                 crate::mapi::identity::mapped_mapi_object_id(&id)
                     .unwrap_or_else(|| crate::mapi::identity::legacy_migration_object_id(&id))
-            })
-            .expect("MAPI collaboration folder identity mapping missing"),
+            },
+        ),
     }
 }
 
@@ -966,10 +985,10 @@ pub(crate) fn collaboration_folder_identity_canonical_id(
     kind: MapiCollaborationFolderKind,
     collection: &CollaborationCollection,
 ) -> Option<Uuid> {
-    collaboration_collection_identity_key(kind, &collection.id)
+    collaboration_folder_identity_canonical_id_for_collection(kind, &collection.id)
 }
 
-fn collaboration_collection_identity_key(
+pub(crate) fn collaboration_folder_identity_canonical_id_for_collection(
     kind: MapiCollaborationFolderKind,
     collection_id: &str,
 ) -> Option<Uuid> {
