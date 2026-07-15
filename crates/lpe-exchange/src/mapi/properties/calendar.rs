@@ -63,7 +63,7 @@ fn event_property_value_with_optional_version(
                 return Some(MapiValue::Binary(version.predecessor_change_list.clone()))
             }
             PID_TAG_CHANGE_NUMBER => return Some(MapiValue::U64(version.change_number)),
-            PID_TAG_LAST_MODIFICATION_TIME => {
+            PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
                 return Some(MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc(
                     &version.updated_at,
                 ) as i64))
