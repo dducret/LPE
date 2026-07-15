@@ -23,6 +23,125 @@ async fn save_staged_calendar_event(
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_same_folder_move_is_idempotent() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("21492149-2149-4149-8149-214921492149").unwrap();
+    let events = Arc::new(Mutex::new(vec![AccessibleEvent {
+        id: event_id,
+        uid: event_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-07-15".to_string(),
+        time: "20:30".to_string(),
+        time_zone: "Europe/Berlin".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Maison 21:40".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "{}".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }]));
+    let store = FakeStore {
+        session: Some(account),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: events.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let calendar_folder_id = test_mapi_folder_id(16);
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (open_response_rops, open_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert_eq!(open_response_rops, [0x02, 0x01, 0, 0, 0, 0, 0, 0]);
+    assert_ne!(open_handles[1], u32::MAX);
+
+    let mut rops = Vec::new();
+    // Outlook can issue RopMoveCopyMessages with the same Calendar Folder object
+    // in SourceHandleIndex and DestHandleIndex while moving an appointment in a
+    // view. The ROP carries no date property, so this step is an idempotent folder
+    // move; the later Message Save remains the canonical date mutation boundary.
+    // [MS-OXCROPS] 2.2.4.6.1; [MS-OXCFOLD] 2.2.1.6.1 and 3.2.5.6.
+    rops.extend_from_slice(&[0x33, 0x00, 0x00, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_uuid_id(&event_id));
+    rops.extend_from_slice(&[0x00, 0x00]); // synchronous move, not copy
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[open_handles[1]])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops, [0x33, 0x00, 0, 0, 0, 0, 0]);
+
+    let absent_event_id = Uuid::parse_str("21502150-2150-4150-8150-215021502150").unwrap();
+    let mut partial_rops = vec![0x33, 0x00, 0x00, 0x00];
+    partial_rops.extend_from_slice(&2u16.to_le_bytes());
+    append_mapi_wire_id(&mut partial_rops, test_mapi_uuid_id(&event_id));
+    append_mapi_wire_id(&mut partial_rops, test_mapi_uuid_id(&absent_event_id));
+    partial_rops.extend_from_slice(&[0x00, 0x00]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&partial_rops, &[open_handles[1]])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops, [0x33, 0x00, 0, 0, 0, 0, 1]);
+
+    let stored = events.lock().unwrap();
+    assert_eq!(
+        stored.len(),
+        1,
+        "same-folder move must not duplicate the event"
+    );
+    assert_eq!(stored[0].id, event_id);
+    assert_eq!(stored[0].date, "2026-07-15");
+    assert_eq!(stored[0].time, "20:30");
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececece1234").unwrap();
