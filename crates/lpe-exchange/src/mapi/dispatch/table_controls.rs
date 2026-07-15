@@ -616,6 +616,20 @@ pub(super) fn append_sort_table_response(
         ),
         _ => None,
     };
+    let mut normalized_sort_orders = request.sort_orders();
+    let normalized_property_tags = normalize_table_property_tags_for_session(
+        session,
+        normalized_sort_orders
+            .iter()
+            .map(|sort_order| sort_order.property_tag)
+            .collect(),
+    );
+    for (sort_order, property_tag) in normalized_sort_orders
+        .iter_mut()
+        .zip(normalized_property_tags)
+    {
+        sort_order.property_tag = property_tag;
+    }
     match input_object_mut(session, handle_slots, request) {
         Some(MapiObject::ContentsTable {
             sort_orders,
@@ -643,7 +657,7 @@ pub(super) fn append_sort_table_response(
                 }
                 return;
             }
-            *sort_orders = request.sort_orders();
+            *sort_orders = normalized_sort_orders;
             *category_count = request.sort_category_count();
             *expanded_count = request.sort_expanded_count();
             collapsed_categories.clear();

@@ -636,6 +636,148 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
 }
 
 #[tokio::test]
+async fn mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids() {
+    let account = FakeStore::account();
+    let older_id = Uuid::parse_str("59595959-5959-4959-8959-595959595959").unwrap();
+    let newer_id = Uuid::parse_str("5e5e5e5e-5e5e-4e5e-8e5e-5e5e5e5e5e5e").unwrap();
+    let older = AccessibleEvent {
+        id: older_id,
+        uid: older_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-07-14".to_string(),
+        time: "17:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Test 18:18".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: String::new(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let newer = AccessibleEvent {
+        id: newer_id,
+        uid: newer_id.to_string(),
+        date: "2026-07-15".to_string(),
+        time: "08:00".to_string(),
+        title: "Test 08:35".to_string(),
+        ..older.clone()
+    };
+    let store = FakeStore {
+        session: Some(account),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![older, newer])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let appointment_guid = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let named_properties = [
+        (appointment_guid, 0x8223u32), // [MS-OXPROPS] 2.216 PidLidRecurring
+        (appointment_guid, 0x820Eu32), // [MS-OXPROPS] 2.14 PidLidAppointmentEndWhole
+    ];
+    let mut named_rops = vec![0x56, 0x00, 0x00, 0x02];
+    named_rops.extend_from_slice(&(named_properties.len() as u16).to_le_bytes());
+    for (guid, lid) in named_properties {
+        named_rops.push(0x00);
+        named_rops.extend_from_slice(&guid);
+        named_rops.extend_from_slice(&lid.to_le_bytes());
+    }
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let property_ids = response_rops[8..8 + named_properties.len() * 2]
+        .chunks_exact(2)
+        .map(|value| u16::from_le_bytes(value.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert!(property_ids.iter().all(
+        |property_id| *property_id >= crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START
+    ));
+    let recurring_tag = (u32::from(property_ids[0]) << 16) | 0x000B;
+    let end_whole_tag = (u32::from(property_ids[1]) << 16) | 0x0040;
+
+    // Batch 202607150838: Outlook sorted non-recurring appointments by
+    // PidLidRecurring DESC, then PidLidAppointmentEndWhole DESC. [MS-OXCDATA]
+    // section 2.13.1 defines 0x01 as descending; per [MS-OXCTABL] sections
+    // 2.2.2.3.1, 2.2.2.5.2, and 3.2.5.3, every subsequent QueryRows result has
+    // to honor the accepted named-property sort order.
+    let mut table_rops = Vec::new();
+    append_rop_open_folder(&mut table_rops, 0, 1, test_mapi_folder_id(16));
+    table_rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
+    table_rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    table_rops.extend_from_slice(&4u16.to_le_bytes());
+    for tag in [0x674A_0014u32, 0x0037_001F, recurring_tag, end_whole_tag] {
+        table_rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    table_rops.extend_from_slice(&[0x13, 0x00, 0x02, 0x00]);
+    table_rops.extend_from_slice(&2u16.to_le_bytes());
+    table_rops.extend_from_slice(&0u16.to_le_bytes());
+    table_rops.extend_from_slice(&0u16.to_le_bytes());
+    table_rops.extend_from_slice(&recurring_tag.to_le_bytes());
+    table_rops.push(0x01);
+    table_rops.extend_from_slice(&end_whole_tag.to_le_bytes());
+    table_rops.push(0x01);
+    table_rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    table_rops.extend_from_slice(&2u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&table_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let newer_subject = utf16z("Test 08:35");
+    let older_subject = utf16z("Test 18:18");
+    let newer_offset = response_rops
+        .windows(newer_subject.len())
+        .position(|window| window == newer_subject)
+        .expect("newer Calendar row");
+    let older_offset = response_rops
+        .windows(older_subject.len())
+        .position(|window| window == older_subject)
+        .expect("older Calendar row");
+
+    assert!(
+        newer_offset < older_offset,
+        "RopQueryRows did not honor Outlook's dynamic named-property DESC sort: {response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
