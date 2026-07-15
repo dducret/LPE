@@ -282,6 +282,15 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     .await?;
     sqlx::query(
         r#"
+        INSERT INTO account_credentials (tenant_id, account_email, password_hash)
+        VALUES ($1, 'delegate@example.test', 'test-hash')
+        "#,
+    )
+    .bind(tenant_id)
+    .execute(storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
         INSERT INTO account_sessions (id, tenant_id, token, account_email, expires_at)
         VALUES ($1, $2, 'delegate-token', 'delegate@example.test', NOW() + INTERVAL '1 hour')
         "#,

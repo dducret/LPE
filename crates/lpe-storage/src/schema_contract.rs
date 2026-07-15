@@ -749,38 +749,51 @@ fn calendar_event_mutations_advance_canonical_and_mapi_versions() {
             "emit_collaboration_change",
         ],
     );
-    for (source, function, behavior) in [
+    for (source, function, versioning_call, behavior) in [
         (
             WORKSPACE_STORAGE,
             "pub(crate) async fn upsert_client_event_in_calendar",
+            "advance_calendar_event_version_in_tx",
             "canonical Event core writes",
         ),
         (
             COLLABORATION_STORAGE,
             "pub async fn update_accessible_event_reminder",
+            "advance_calendar_event_version_in_tx",
             "calendar reminder writes",
         ),
         (
             ATTACHMENTS_STORAGE,
             "pub async fn add_calendar_event_attachment",
+            "advance_calendar_event_version_in_tx",
             "calendar attachment creation",
         ),
         (
             ATTACHMENTS_STORAGE,
             "pub async fn delete_calendar_event_attachment",
+            "advance_calendar_event_version_in_tx",
             "calendar attachment deletion",
         ),
         (
             COLLABORATION_STORAGE,
             "pub async fn delete_accessible_calendar_collection",
+            "move_calendar_events_to_collection_in_tx",
             "calendar deletion Event moves",
         ),
     ] {
         assert!(
-            function_body(source, function).contains("advance_calendar_event_version_in_tx"),
+            function_body(source, function).contains(versioning_call),
             "{behavior} must advance calendar_events.modseq and active MAPI Event identities"
         );
     }
+    assert!(
+        function_body(
+            MAPI_EVENTS_STORAGE,
+            "pub(crate) async fn move_calendar_events_to_collection_in_tx",
+        )
+        .contains("advance_calendar_event_version_in_tx"),
+        "calendar deletion Event moves must advance calendar_events.modseq and active MAPI Event identities"
+    );
     assert!(
         function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_event")
             .contains("retire_mapi_event_identities_in_tx"),
@@ -1174,8 +1187,9 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
+    let core_runtime = CORE_STORAGE.split("#[cfg(test)]").next().unwrap_or(CORE_STORAGE);
     assert!(
-        !CORE_STORAGE.contains("current_schema()"),
+        !core_runtime.contains("current_schema()"),
         "storage startup must validate the canonical public schema regardless of search_path"
     );
 }

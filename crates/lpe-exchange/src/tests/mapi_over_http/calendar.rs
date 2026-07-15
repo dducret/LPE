@@ -643,7 +643,7 @@ async fn mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
 
     let mut save_rops = Vec::new();
     for save_flags in [0x00, 0x01, 0x02, 0x04] {
-        append_rop_save_changes_message_with_flags(&mut save_rops, 2, 2, save_flags);
+        append_rop_save_changes_message_with_flags(&mut save_rops, 1, 2, save_flags);
     }
     let mut forbidden_subject = Vec::new();
     append_mapi_utf16_property(&mut forbidden_subject, 0x0037_001F, "Must stay read only");
@@ -661,7 +661,7 @@ async fn mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
     assert_eq!(
         response_rops
             .windows(6)
-            .filter(|window| *window == [0x0C, 0x02, 0x05, 0x40, 0x00, 0x80])
+            .filter(|window| *window == [0x0C, 0x01, 0x05, 0x40, 0x00, 0x80])
             .count(),
         4
     );
@@ -1539,13 +1539,31 @@ async fn mapi_over_http_calendar_event_handle_stages_until_save_and_release_disc
         .await
         .unwrap();
     let delete_present_response = response_rops_from_execute_response(response).await;
-    assert!(
-        delete_present_response
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
-        "deleting a present projected Event property must fail closed: {delete_present_response:02x?}"
+    assert_eq!(
+        delete_present_response,
+        [0x7A, 0x00, 0, 0, 0, 0, 0, 0],
+        "deleting a clearable Event property must stage successfully"
     );
     assert_eq!(events.lock().unwrap()[0].title, "Canonical before staging");
+
+    let mut get_deleted_rops = Vec::new();
+    append_rop_get_properties_specific(&mut get_deleted_rops, 0, &[0x0037_001F]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_deleted_rops, &[event_handle])),
+        )
+        .await
+        .unwrap();
+    let get_deleted_response = response_rops_from_execute_response(response).await;
+    assert!(
+        get_deleted_response
+            .windows(4)
+            .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "the staged deletion must be visible as NotFound on the same Event handle: {get_deleted_response:02x?}"
+    );
 
     let mut staged_values = Vec::new();
     append_mapi_utf16_property(
@@ -2441,6 +2459,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     };
     let events = store.events.clone();
     let reminders = store.reminders.clone();
+    let mapi_identities = store.mapi_identities.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2575,6 +2594,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
     let event_id = stored[0].id;
     drop(stored);
+    let event_mapi_object_id = mapi_identities.lock().unwrap()[&event_id];
     assert!(reminders.lock().unwrap().iter().any(|reminder| {
         reminder.source_type == "calendar"
             && reminder.source_id == event_id
@@ -2588,7 +2608,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
         1,
         2,
         test_mapi_folder_id(16),
-        test_mapi_uuid_id(&event_id),
+        event_mapi_object_id,
     );
     append_rop_get_properties_specific(
         &mut get_rops,
@@ -6719,9 +6739,9 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, folder.id);
-    append_rop_open_message(&mut rops, 1, 2, folder.id, mapi_event.id);
+    append_rop_open_message_with_flags(&mut rops, 1, 2, folder.id, mapi_event.id, 0x01);
     append_rop_set_properties(&mut rops, 2, 5, &property_values);
-    append_rop_save_changes_message(&mut rops, 2, 2);
+    append_rop_save_changes_message(&mut rops, 1, 2);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,

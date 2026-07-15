@@ -251,17 +251,16 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
         let mut property_values = Vec::new();
         append_mapi_utf16_property(&mut property_values, *tag, value);
         append_rop_open_folder(&mut set_rops, 0, folder_handle, *folder_id);
-        append_rop_open_message(
+        append_rop_open_message_with_flags(
             &mut set_rops,
             folder_handle,
             object_handle,
             *folder_id,
             *object_id,
+            0x01,
         );
         append_rop_set_properties(&mut set_rops, object_handle, 1, &property_values);
-        if index == 0 {
-            append_rop_save_changes_message(&mut set_rops, object_handle, object_handle);
-        }
+        append_rop_save_changes_message(&mut set_rops, folder_handle, object_handle);
     }
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie.clone());
@@ -310,14 +309,16 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
         let folder_handle = 1 + (index as u8) * 2;
         let object_handle = folder_handle + 1;
         append_rop_open_folder(&mut delete_rops, 0, folder_handle, *folder_id);
-        append_rop_open_message(
+        append_rop_open_message_with_flags(
             &mut delete_rops,
             folder_handle,
             object_handle,
             *folder_id,
             *object_id,
+            0x01,
         );
         append_rop_delete_properties(&mut delete_rops, object_handle, &[*tag]);
+        append_rop_save_changes_message(&mut delete_rops, folder_handle, object_handle);
     }
     renew_mapi_request_id(&mut execute_headers);
     let response = service

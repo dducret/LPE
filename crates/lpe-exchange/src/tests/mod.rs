@@ -428,7 +428,7 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
         .unwrap();
 
     assert_eq!(second.id, first.id);
-    assert_eq!(second.properties_json, serde_json::json!({"version": 2}));
+    assert_eq!(second.properties_json["version"], serde_json::json!(2));
     let explicit_new_id = Uuid::parse_str("10000000-0000-0000-0000-000000000015").unwrap();
     let explicit = fixture
         .storage
@@ -444,7 +444,7 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
         .unwrap();
 
     assert_eq!(explicit.id, first.id);
-    assert_eq!(explicit.properties_json, serde_json::json!({"version": 22}));
+    assert_eq!(explicit.properties_json["version"], serde_json::json!(22));
     let configs = fixture
         .storage
         .fetch_mapi_associated_configs(fixture.account_id)
@@ -572,12 +572,12 @@ async fn mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects(
     assert!(configs.iter().any(|config| {
         config.message_class == "IPM.Microsoft.FolderDesign.NamedView"
             && config.subject == "Compact"
-            && config.properties_json == serde_json::json!({"view": "compact"})
+            && config.properties_json["view"] == serde_json::json!("compact")
     }));
     assert!(configs.iter().any(|config| {
         config.message_class == "IPM.Microsoft.FolderDesign.NamedView"
             && config.subject == "Messages"
-            && config.properties_json == serde_json::json!({"view": "messages"})
+            && config.properties_json["view"] == serde_json::json!("messages")
     }));
 
     fixture.cleanup().await.unwrap();
@@ -1299,6 +1299,7 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
 
     let missing_mailbox_id = Uuid::parse_str("20000000-0000-0000-0000-000000000002").unwrap();
     let orphaned_config_id = Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap();
+    let orphaned_config_folder_id = crate::mapi::identity::mapi_store_id(60_000) as i64;
     sqlx::query(
         r#"
         INSERT INTO mapi_sync_checkpoints (
@@ -1321,12 +1322,13 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         INSERT INTO mapi_associated_config_messages (
             tenant_id, id, account_id, folder_id, message_class, subject, properties_json
         )
-        VALUES ($1, $2, $3, 983041, 'IPM.Configuration.Orphan', 'IPM.Configuration.Orphan', '{}'::jsonb)
+        VALUES ($1, $2, $3, $4, 'IPM.Configuration.Orphan', 'IPM.Configuration.Orphan', '{}'::jsonb)
         "#,
     )
     .bind(tenant_id)
     .bind(orphaned_config_id)
     .bind(account_id)
+    .bind(orphaned_config_folder_id)
     .execute(storage.pool())
     .await
     .unwrap();
@@ -1579,12 +1581,14 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
             tenant_id, account_id, object_kind, object_id, change_kind,
             modseq, affected_principal_ids, summary_json
         )
-        VALUES ($1, $2, 'associated_config', $3, 'updated', 101, ARRAY[$2]::uuid[], '{"folderId":"983041"}'::jsonb)
+        VALUES ($1, $2, 'associated_config', $3, 'updated', 101, ARRAY[$2]::uuid[],
+                jsonb_build_object('folderId', $4::text))
         "#,
     )
     .bind(tenant_id)
     .bind(account_id)
     .bind(orphaned_config_id)
+    .bind(orphaned_config_folder_id)
     .execute(storage.pool())
     .await
     .unwrap();

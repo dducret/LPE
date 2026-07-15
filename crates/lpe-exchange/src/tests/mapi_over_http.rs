@@ -264,23 +264,28 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     );
 
     let mut rops = Vec::new();
-    append_rop_open_message(
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_rop_open_message_with_flags(
         &mut rops,
-        0,
         1,
+        2,
         crate::mapi::identity::CALENDAR_FOLDER_ID,
         crate::mapi::identity::legacy_migration_object_id(&event_id),
+        0x01,
     );
-    append_rop_set_properties(&mut rops, 1, 2, &event_values);
+    append_rop_set_properties(&mut rops, 2, 2, &event_values);
+    append_rop_save_changes_message(&mut rops, 1, 2);
     append_rop_open_folder(&mut rops, 0, 3, crate::mapi::identity::TASKS_FOLDER_ID);
-    append_rop_open_message(
+    append_rop_open_message_with_flags(
         &mut rops,
         3,
         4,
         crate::mapi::identity::TASKS_FOLDER_ID,
         test_mapi_uuid_id(&task_id),
+        0x01,
     );
     append_rop_set_properties(&mut rops, 4, 2, &task_values);
+    append_rop_save_changes_message(&mut rops, 3, 4);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie);
@@ -298,7 +303,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+        &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]
     ));
     assert!(contains_bytes(
         &response_rops,
