@@ -24,6 +24,11 @@ before it is advertised.
   readiness failure; LPE must reject it before accepting or advertising a MAPI
   session rather than exposing the database failure through an Outlook
   `Execute` request.
+- The canonical SQL schema for those checks is always `public`, independent of
+  the connection `search_path`; installation pins schema creation to `public`
+  and refuses relations outside it, while `Storage::connect` pins every pooled
+  connection to `public`, so a user-named shadow schema cannot become parallel
+  protocol state.
 - Top-level `EXPR` metadata is permitted only for the later Outlook Anywhere /
   RPC over HTTP path. It must not be used to imply that MAPI over HTTP or RPC
   proxy behavior is complete before the corresponding transport is implemented.

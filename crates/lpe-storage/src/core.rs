@@ -1,5 +1,8 @@
 use anyhow::{bail, Context, Result};
-use sqlx::{Pool, Postgres};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    Pool, Postgres,
+};
 
 use crate::EXPECTED_SCHEMA_VERSION;
 
@@ -18,7 +21,10 @@ impl Storage {
     }
 
     pub async fn connect(database_url: &str) -> Result<Self> {
-        let pool = Pool::<Postgres>::connect(database_url).await?;
+        let connect_options = database_url
+            .parse::<PgConnectOptions>()?
+            .options([("search_path", "public")]);
+        let pool = PgPoolOptions::new().connect_with(connect_options).await?;
         let storage = Self {
             pool,
             database_url: Some(database_url.to_string()),
@@ -39,7 +45,7 @@ impl Storage {
         let schema_version = sqlx::query_scalar::<_, String>(
             r#"
             SELECT schema_version
-            FROM schema_metadata
+            FROM public.schema_metadata
             WHERE singleton = TRUE
             "#,
         )
@@ -55,17 +61,12 @@ impl Storage {
             );
         }
 
-        self.assert_required_schema_objects().await?;
+        self.assert_required_schema_objects("public").await?;
 
         Ok(())
     }
 
-    async fn assert_required_schema_objects(&self) -> Result<()> {
-        let schema_name = sqlx::query_scalar::<_, String>("SELECT current_schema()::text")
-            .fetch_one(&self.pool)
-            .await
-            .context("unable to resolve the active database schema")?;
-
+    async fn assert_required_schema_objects(&self, schema_name: &str) -> Result<()> {
         for table in [
             "accounts",
             "mapi_object_identities",
@@ -208,7 +209,7 @@ mod tests {
             .context("remove required durable MAPI version columns")?;
 
             let error = Storage::new(pool.clone())
-                .assert_schema_version()
+                .assert_required_schema_objects(&schema_name)
                 .await
                 .expect_err("startup must reject an incomplete tagged 0.5.0 schema");
             let message = format!("{error:#}");
@@ -230,7 +231,7 @@ mod tests {
             .await
             .context("restore incompatible MAPI version column shapes")?;
             let error = Storage::new(pool.clone())
-                .assert_schema_version()
+                .assert_required_schema_objects(&schema_name)
                 .await
                 .expect_err("startup must reject incompatible durable MAPI version column shapes");
             let message = format!("{error:#}");
@@ -249,6 +250,102 @@ mod tests {
             .execute(&admin_pool)
             .await
             .with_context(|| format!("drop isolated test schema {schema_name}"));
+        admin_pool.close().await;
+
+        cleanup?;
+        result
+    }
+
+    #[tokio::test]
+    async fn startup_uses_canonical_public_schema_when_search_path_has_shadow_schema() -> Result<()>
+    {
+        let Some(database_url) = env::var("TEST_DATABASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            eprintln!("skipping canonical schema startup validation; TEST_DATABASE_URL is not set");
+            return Ok(());
+        };
+
+        let schema_name = format!("lpe_schema_shadow_{}", Uuid::new_v4().simple());
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(PgConnectOptions::from_str(&database_url)?)
+            .await
+            .context("connect to TEST_DATABASE_URL for canonical schema validation")?;
+        sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
+            .execute(&admin_pool)
+            .await
+            .with_context(|| format!("create shadow test schema {schema_name}"))?;
+
+        let search_path = format!("{schema_name},public");
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                PgConnectOptions::from_str(&database_url)?.options([("search_path", &search_path)]),
+            )
+            .await
+            .with_context(|| format!("connect with search_path={search_path}"))?;
+
+        let result = Storage::new(pool.clone()).assert_schema_version().await;
+        pool.close().await;
+        let cleanup = sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+            .execute(&admin_pool)
+            .await
+            .with_context(|| format!("drop shadow test schema {schema_name}"));
+        admin_pool.close().await;
+
+        cleanup?;
+        result.context("startup must validate public rather than the first search_path schema")
+    }
+
+    #[tokio::test]
+    async fn connect_pins_search_path_to_canonical_public_schema() -> Result<()> {
+        let Some(database_url) = env::var("TEST_DATABASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            eprintln!("skipping canonical connection search_path validation; TEST_DATABASE_URL is not set");
+            return Ok(());
+        };
+
+        let schema_name = format!("lpe_schema_shadow_{}", Uuid::new_v4().simple());
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(PgConnectOptions::from_str(&database_url)?)
+            .await
+            .context("connect to TEST_DATABASE_URL for canonical connection validation")?;
+        sqlx::raw_sql(&format!(
+            "CREATE SCHEMA {schema_name}; CREATE TABLE {schema_name}.accounts (shadow_marker INTEGER)"
+        ))
+        .execute(&admin_pool)
+        .await
+        .with_context(|| format!("create shadow accounts table in {schema_name}"))?;
+
+        let separator = if database_url.contains('?') { '&' } else { '?' };
+        let shadow_url =
+            format!("{database_url}{separator}options=-c%20search_path%3D{schema_name}%2Cpublic");
+        let result = async {
+            let storage = Storage::connect(&shadow_url)
+                .await
+                .with_context(|| format!("connect with shadow schema {schema_name} first"))?;
+            let active_schema = sqlx::query_scalar::<_, String>("SELECT current_schema()::text")
+                .fetch_one(storage.pool())
+                .await
+                .context("read active schema from canonical storage connection")?;
+            storage.pool.close().await;
+            anyhow::ensure!(
+                active_schema == "public",
+                "Storage::connect left non-canonical schema {active_schema} active"
+            );
+            Ok(())
+        }
+        .await;
+
+        let cleanup = sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+            .execute(&admin_pool)
+            .await
+            .with_context(|| format!("drop shadow test schema {schema_name}"));
         admin_pool.close().await;
 
         cleanup?;

@@ -187,9 +187,7 @@ pub(super) fn append_get_attachment_table_response(
     let parent_handle = input_handle(handle_slots, request);
     let (folder_id, message_id, is_calendar_event, is_pending_event) =
         match input_object(session, handle_slots, request) {
-            Some(MapiObject::PendingMessage { folder_id, .. }) => {
-                (*folder_id, 0, false, false)
-            }
+            Some(MapiObject::PendingMessage { folder_id, .. }) => (*folder_id, 0, false, false),
             Some(MapiObject::Message {
                 folder_id,
                 message_id,
@@ -429,9 +427,7 @@ pub(super) fn append_create_attachment_response(
                 event_id,
                 ..
             }) => (*folder_id, *event_id, true, false, false),
-            Some(MapiObject::PendingEvent { folder_id, .. }) => {
-                (*folder_id, 0, true, false, true)
-            }
+            Some(MapiObject::PendingEvent { folder_id, .. }) => (*folder_id, 0, true, false, true),
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x23,
@@ -605,8 +601,7 @@ pub(super) fn append_delete_attachment_response(
             snapshot,
         )
         .into_iter()
-        .find(|attachment| attachment.attach_num == attach_num)
-        else {
+        .find(|attachment| attachment.attach_num == attach_num) else {
             responses.extend_from_slice(&rop_error_response(
                 0x24,
                 request.response_handle_index(),
@@ -626,9 +621,7 @@ pub(super) fn append_delete_attachment_response(
             .delete_attachment_ids
             .contains(&attachment.canonical_id)
         {
-            changes
-                .delete_attachment_ids
-                .push(attachment.canonical_id);
+            changes.delete_attachment_ids.push(attachment.canonical_id);
         }
         responses.extend_from_slice(&rop_simple_success_response(request));
         return;
@@ -1003,18 +996,21 @@ pub(super) fn event_attachments_for_parent_handle(
             .delete_attachment_ids
             .contains(&attachment.canonical_id)
     });
-    attachments.extend(changes.upserts.iter().map(|upsert| {
-        crate::mapi_store::MapiAttachment {
-            attach_num: upsert.attach_num,
-            canonical_id: Uuid::nil(),
-            file_reference: format!("pending-event:{parent_handle}:{}", upsert.attach_num),
-            file_name: upsert.attachment.file_name.clone(),
-            media_type: upsert.attachment.media_type.clone(),
-            disposition: upsert.attachment.disposition.clone(),
-            content_id: upsert.attachment.content_id.clone(),
-            size_octets: upsert.attachment.blob_bytes.len() as u64,
-        }
-    }));
+    attachments.extend(
+        changes
+            .upserts
+            .iter()
+            .map(|upsert| crate::mapi_store::MapiAttachment {
+                attach_num: upsert.attach_num,
+                canonical_id: Uuid::nil(),
+                file_reference: format!("pending-event:{parent_handle}:{}", upsert.attach_num),
+                file_name: upsert.attachment.file_name.clone(),
+                media_type: upsert.attachment.media_type.clone(),
+                disposition: upsert.attachment.disposition.clone(),
+                content_id: upsert.attachment.content_id.clone(),
+                size_octets: upsert.attachment.blob_bytes.len() as u64,
+            }),
+    );
     attachments.sort_by_key(|attachment| attachment.attach_num);
     attachments
 }
@@ -1135,13 +1131,15 @@ fn next_pending_event_attachment_num(
         .pending_attachment_parent_messages
         .iter()
         .filter(|(_, pending_parent)| **pending_parent == parent_handle)
-        .filter_map(|(child_handle, _)| match session.handles.get(child_handle) {
-            Some(
-                MapiObject::PendingAttachment { attach_num, .. }
-                | MapiObject::SavedAttachment { attach_num, .. },
-            ) => Some(*attach_num),
-            _ => None,
-        })
+        .filter_map(
+            |(child_handle, _)| match session.handles.get(child_handle) {
+                Some(
+                    MapiObject::PendingAttachment { attach_num, .. }
+                    | MapiObject::SavedAttachment { attach_num, .. },
+                ) => Some(*attach_num),
+                _ => None,
+            },
+        )
         .max();
     visible_max
         .into_iter()
@@ -1151,10 +1149,7 @@ fn next_pending_event_attachment_num(
         .unwrap_or(0)
 }
 
-pub(super) fn clear_event_attachment_transaction(
-    session: &mut MapiSession,
-    parent_handle: u32,
-) {
+pub(super) fn clear_event_attachment_transaction(session: &mut MapiSession, parent_handle: u32) {
     session
         .pending_event_attachment_transactions
         .remove(&parent_handle);
@@ -1163,10 +1158,7 @@ pub(super) fn clear_event_attachment_transaction(
         .retain(|_, pending_parent| *pending_parent != parent_handle);
 }
 
-pub(super) fn abandon_event_attachment_transaction(
-    session: &mut MapiSession,
-    parent_handle: u32,
-) {
+pub(super) fn abandon_event_attachment_transaction(session: &mut MapiSession, parent_handle: u32) {
     let child_handles = session
         .pending_attachment_parent_messages
         .iter()

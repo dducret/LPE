@@ -213,13 +213,8 @@ impl Storage {
             )
             .await?;
         }
-        Self::fetch_calendar_event_attachments_in_tx(
-            tx,
-            tenant_id,
-            owner_account_id,
-            event_id,
-        )
-        .await
+        Self::fetch_calendar_event_attachments_in_tx(tx, tenant_id, owner_account_id, event_id)
+            .await
     }
 
     pub(crate) async fn ingest_message_attachments_in_tx(

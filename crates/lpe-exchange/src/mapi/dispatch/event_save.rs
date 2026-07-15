@@ -82,8 +82,8 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             );
             snapshot.remember_event_version(version.clone());
             snapshot.remember_event_reminder_state(canonical_event_id, created.reminder);
-            let disposition = save_disposition(request)
-                .expect("SaveFlags were validated before Event creation");
+            let disposition =
+                save_disposition(request).expect("SaveFlags were validated before Event creation");
             remember_saved_event_handle(
                 session,
                 handle,
@@ -93,10 +93,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
                 version.canonical_modseq,
             );
             clear_event_attachment_transaction(session, handle);
-            session.record_notification(MapiNotificationEvent::content(
-                folder_id,
-                Some(event_id),
-            ));
+            session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
             append_save_changes_message_response(
                 session,
                 responses,
@@ -228,10 +225,7 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
                 version.canonical_modseq,
             );
             clear_event_attachment_transaction(session, handle);
-            session.record_notification(MapiNotificationEvent::content(
-                folder_id,
-                Some(event_id),
-            ));
+            session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
             record_sync_upload_content_change(
                 session,
                 folder_id,

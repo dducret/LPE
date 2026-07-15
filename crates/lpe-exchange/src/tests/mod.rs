@@ -63,9 +63,9 @@ use crate::{
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
         MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiFolderProfilePropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
-        MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
-        MapiEventCreateOutcome, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        MapiEventCreateOutcome, MapiFolderProfilePropertyValue, MapiIdentityLookupRecord,
+        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
+        MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
         UpsertEwsUserConfigurationInput,
     },
 };
@@ -5178,9 +5178,10 @@ impl ExchangeStore for FakeStore {
             .as_ref()
             .map(|collection| collection.rights.clone())
             .unwrap_or_else(Self::rights);
-        let event_id = input.event.id.unwrap_or_else(|| {
-            Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
-        });
+        let event_id = input
+            .event
+            .id
+            .unwrap_or_else(|| Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap());
         let event = AccessibleEvent {
             id: event_id,
             uid: if input.event.uid.is_empty() {
@@ -5215,7 +5216,9 @@ impl ExchangeStore for FakeStore {
         let reminder_set = input.reminder.reminder_set.unwrap_or(false);
         let reminder = MapiEventReminderState {
             reminder_set,
-            reminder_at: reminder_set.then(|| input.reminder.reminder_at.clone()).flatten(),
+            reminder_at: reminder_set
+                .then(|| input.reminder.reminder_at.clone())
+                .flatten(),
             reminder_dismissed_at: reminder_set
                 .then(|| input.reminder.reminder_dismissed_at.clone())
                 .flatten(),

@@ -50,6 +50,11 @@ check_command curl
 check_command nginx
 check_command psql
 check_command systemctl
+
+psql() {
+  command psql -X "$@"
+}
+
 check_file "/etc/systemd/system/${SERVICE_NAME}"
 check_file "${NGINX_SITE_PATH}"
 check_file "${ADMIN_WEB_ROOT}/index.html"

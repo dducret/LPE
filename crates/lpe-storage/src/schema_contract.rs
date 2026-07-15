@@ -1060,6 +1060,18 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
         "\"${CARGO_BIN}\" build --release -p lpe-cli",
         "update-lpe.sh must reject missing MAPI identity version columns before building LPE",
     );
+    assert!(
+        UPDATE_LPE_SCRIPT
+            .matches("psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1")
+            .count()
+            >= 2,
+        "update-lpe.sh must ignore .psqlrc for both schema-contract queries"
+    );
+    assert_source_contains_all(
+        "check-lpe.sh deterministic psql wrapper",
+        CHECK_LPE_SCRIPT,
+        &["psql() {", "command psql -X \"$@\""],
+    );
 }
 
 #[test]
@@ -1069,9 +1081,13 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
         INIT_LPE_SCRIPT,
         &[
             "LPE_RESET_SCHEMA",
+            "existing_non_public_objects",
+            "n.nspname <> 'public'",
+            "n.nspname !~ '^pg_'",
             "--single-transaction",
             "DROP SCHEMA IF EXISTS public CASCADE;",
             "CREATE SCHEMA public;",
+            "SET search_path TO public;",
             "expected_schema_version",
             "mapi_identity_version_column_count",
             "FROM information_schema.columns",
@@ -1097,8 +1113,15 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
         &[
             "-c \"DROP SCHEMA IF EXISTS public CASCADE;\"",
             "-c \"CREATE SCHEMA public;\"",
+            "-c \"SET search_path TO public;\"",
             "-f \"${SCHEMA_FILE}\"",
         ],
+    );
+    assert_contains_before(
+        INIT_LPE_SCRIPT,
+        "existing_non_public_objects",
+        "DROP SCHEMA IF EXISTS public CASCADE;",
+        "init-schema.sh must reject non-public database objects before resetting public",
     );
     assert_contains_before(
         INIT_LPE_SCRIPT,
@@ -1132,6 +1155,8 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
         CORE_STORAGE,
         &[
             "assert_required_schema_objects",
+            "options([(\"search_path\", \"public\")])",
+            "FROM public.schema_metadata",
             "\"mapi_object_identities\"",
             "\"mapi_named_properties\"",
             "\"mapi_custom_property_values\"",
@@ -1148,6 +1173,10 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities",
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
+    );
+    assert!(
+        !CORE_STORAGE.contains("current_schema()"),
+        "storage startup must validate the canonical public schema regardless of search_path"
     );
 }
 

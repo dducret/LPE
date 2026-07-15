@@ -147,8 +147,7 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields(
-) {
+async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("71717171-7171-4171-8171-717171717171").unwrap();
     let custom_tag = 0x8002_001F;
@@ -274,7 +273,10 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
         &response_rops,
         &utf16z("Mixed delete remains canonical")
     ));
-    assert_eq!(events.lock().unwrap()[0].title, "Mixed delete remains canonical");
+    assert_eq!(
+        events.lock().unwrap()[0].title,
+        "Mixed delete remains canonical"
+    );
     assert_eq!(events.lock().unwrap()[0].location, "Room to clear");
     assert_eq!(events.lock().unwrap()[0].notes, "Body to clear");
     assert_eq!(
@@ -291,8 +293,7 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
         1
     );
 
-    let save_response =
-        save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
+    let save_response = save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
     assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
     let stored = events.lock().unwrap();
     assert!(stored[0].title.is_empty());
@@ -337,11 +338,7 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
     let mut alias_rops = Vec::new();
     append_rop_delete_properties(&mut alias_rops, 2, &[0x8208_001F]);
     append_rop_set_properties(&mut alias_rops, 2, 1, &alias_value);
-    append_rop_get_properties_specific(
-        &mut alias_rops,
-        2,
-        &[0x8208_001F],
-    );
+    append_rop_get_properties_specific(&mut alias_rops, 2, &[0x8208_001F]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -476,8 +473,7 @@ async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_h
         &test_filetime("2026-07-15", "13:45").to_le_bytes()
     ));
 
-    let save_response =
-        save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
+    let save_response = save_staged_calendar_event(&service, &mut execute_headers, &handles).await;
     assert!(contains_bytes(&save_response, &[0x0C, 0x01, 0, 0, 0, 0]));
     assert_eq!(event_versions.lock().unwrap()[&event_id], 3);
 
@@ -1201,13 +1197,7 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     drop(stored);
 
     let mut reopen_rops = Vec::new();
-    append_rop_open_message(
-        &mut reopen_rops,
-        1,
-        2,
-        test_mapi_folder_id(16),
-        event_id,
-    );
+    append_rop_open_message(&mut reopen_rops, 1, 2, test_mapi_folder_id(16), event_id);
     append_rop_get_properties_specific(&mut reopen_rops, 2, &[0x6709_0040]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -2099,7 +2089,10 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         &stage_second_response,
         &[0x0A, 0x03, 0, 0, 0, 0, 0, 0]
     ));
-    assert_eq!(events.lock().unwrap()[0].title, "Concurrent calendar baseline");
+    assert_eq!(
+        events.lock().unwrap()[0].title,
+        "Concurrent calendar baseline"
+    );
 
     let mut first_values = Vec::new();
     append_mapi_utf16_property(&mut first_values, 0x0037_001F, "Committed by handle A");
@@ -2142,11 +2135,7 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
 
     let mut stale_save_rops = Vec::new();
     append_rop_save_changes_message_with_flags(&mut stale_save_rops, 1, 3, 0x02);
-    append_rop_get_properties_specific(
-        &mut stale_save_rops,
-        3,
-        &[0x0037_001F, 0x8208_001F],
-    );
+    append_rop_get_properties_specific(&mut stale_save_rops, 3, &[0x0037_001F, 0x8208_001F]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -3019,11 +3008,7 @@ async fn mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_v
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
     append_rop_set_properties(&mut rops, 1, 3, &property_values);
-    append_rop_get_properties_specific(
-        &mut rops,
-        1,
-        &[0x0037_001F, 0x0060_0040, 0x8216_0102],
-    );
+    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x8216_0102]);
     append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie);
@@ -3047,7 +3032,10 @@ async fn mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_v
         contains_bytes(&response_rops, &expected_problem),
         "PendingEvent mixed Set response: {response_rops:02x?}"
     );
-    assert!(contains_bytes(&response_rops, &utf16z("Rejected recurrence")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Rejected recurrence")
+    ));
     assert!(contains_bytes(
         &response_rops,
         &test_filetime("2026-05-04", "09:30").to_le_bytes()
@@ -4522,10 +4510,9 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
             panic!("{error}: missing first HasAttachments response: {response_rops:02x?}")
         });
     let second_has_attachments =
-        mapi_get_properties_specific_standard_row_offset(&response_rops, 4)
-            .unwrap_or_else(|error| {
-                panic!("{error}: missing second HasAttachments response: {response_rops:02x?}")
-            });
+        mapi_get_properties_specific_standard_row_offset(&response_rops, 4).unwrap_or_else(
+            |error| panic!("{error}: missing second HasAttachments response: {response_rops:02x?}"),
+        );
     assert_eq!(response_rops[first_has_attachments + 1], 1);
     assert_eq!(response_rops[second_has_attachments + 1], 0);
     assert!(contains_bytes(
@@ -4572,7 +4559,10 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
-    assert_eq!(events.lock().unwrap()[0].title, "Attached Calendar committed");
+    assert_eq!(
+        events.lock().unwrap()[0].title,
+        "Attached Calendar committed"
+    );
     assert_eq!(calendar_attachments.lock().unwrap()[&event_id].len(), 1);
     assert_eq!(event_versions.lock().unwrap()[&event_id], 8);
 }
@@ -4623,11 +4613,7 @@ async fn mapi_over_http_calendar_create_commits_event_and_attachment_together() 
         0x3707_001F,
         "creation-agenda.pdf",
     );
-    append_mapi_utf16_property(
-        &mut attachment_properties,
-        0x370E_001F,
-        "application/pdf",
-    );
+    append_mapi_utf16_property(&mut attachment_properties, 0x370E_001F, "application/pdf");
     append_mapi_binary_property(
         &mut attachment_properties,
         0x3701_0102,
@@ -4999,10 +4985,7 @@ async fn mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_a
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(
-                &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX],
-            )),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();

@@ -47,6 +47,24 @@ existing_public_objects="$(
   "
 )"
 
+existing_non_public_objects="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "
+    SELECT COUNT(*)
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname <> 'public'
+      AND n.nspname <> 'information_schema'
+      AND n.nspname !~ '^pg_'
+      AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f');
+  "
+)"
+
+if [[ "${existing_non_public_objects}" != "0" ]]; then
+  echo "The target database contains objects outside the public schema; init-schema.sh will not delete them." >&2
+  echo "Use a new empty database so non-public objects cannot become parallel LPE state." >&2
+  exit 1
+fi
+
 if [[ "${existing_public_objects}" != "0" && "${LPE_RESET_SCHEMA:-false}" != "true" ]]; then
   echo "The target database is not empty. LPE 0.5.0 requires an empty SQL database." >&2
   echo "Create a new empty database, or set LPE_RESET_SCHEMA=true only for an intentional destructive reset." >&2
@@ -56,6 +74,7 @@ fi
 psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 --single-transaction \
   -c "DROP SCHEMA IF EXISTS public CASCADE;" \
   -c "CREATE SCHEMA public;" \
+  -c "SET search_path TO public;" \
   -f "${SCHEMA_FILE}"
 
 schema_version="$(

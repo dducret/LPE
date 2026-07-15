@@ -51,8 +51,7 @@ pub(in crate::mapi) fn rop_get_valid_attachment_numbers_response(
 ) -> Vec<u8> {
     let mut response = vec![0x52, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response
-        .extend_from_slice(&(attach_nums.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(&(attach_nums.len().min(u16::MAX as usize) as u16).to_le_bytes());
     for attach_num in attach_nums.iter().take(u16::MAX as usize) {
         write_u32(&mut response, *attach_num);
     }

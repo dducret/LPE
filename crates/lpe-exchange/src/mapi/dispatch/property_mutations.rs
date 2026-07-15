@@ -123,16 +123,14 @@ where
                 stage_event_property_values(session, handle_slots, request, snapshot, values)
                     .map(|problems| event_property_problems = problems)
             }
-            Some(MapiObject::PendingEvent { .. }) => {
-                stage_pending_event_property_values(
-                    session,
-                    handle_slots,
-                    request,
-                    principal,
-                    values,
-                )
-                .map(|problems| event_property_problems = problems)
-            }
+            Some(MapiObject::PendingEvent { .. }) => stage_pending_event_property_values(
+                session,
+                handle_slots,
+                request,
+                principal,
+                values,
+            )
+            .map(|problems| event_property_problems = problems),
             Some(MapiObject::AssociatedConfig {
                 folder_id,
                 config_id,

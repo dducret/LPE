@@ -229,7 +229,7 @@ if [[ -z "${EXPECTED_SCHEMA_VERSION}" ]]; then
 fi
 
 INSTALLED_SCHEMA_VERSION="$(
-  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
 )" || {
   echo "Unable to read installed schema metadata. LPE 0.5.0 updates require a database initialized with init-schema.sh from the 0.5.0 source tree." >&2
   exit 1
@@ -242,7 +242,7 @@ if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
 fi
 
 MAPI_IDENTITY_VERSION_COLUMN_COUNT="$(
-  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
 )" || {
   echo "Unable to inspect MAPI identity version column shapes." >&2
   exit 1

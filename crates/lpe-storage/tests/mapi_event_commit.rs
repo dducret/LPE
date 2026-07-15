@@ -577,10 +577,11 @@ async fn mapi_event_attachment_failure_rolls_back_parent_and_blob() -> Result<()
     let result = fixture.storage.commit_mapi_event_update(input).await;
     assert!(result.is_err());
 
-    let event = sqlx::query("SELECT title, reminder_set, modseq FROM calendar_events WHERE id = $1")
-        .bind(fixture.event_id)
-        .fetch_one(fixture.storage.pool())
-        .await?;
+    let event =
+        sqlx::query("SELECT title, reminder_set, modseq FROM calendar_events WHERE id = $1")
+            .bind(fixture.event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?;
     assert_eq!(event.get::<String, _>("title"), "Before");
     assert!(!event.get::<bool, _>("reminder_set"));
     assert_eq!(event.get::<i64, _>("modseq"), 7);
@@ -601,12 +602,10 @@ async fn mapi_event_attachment_failure_rolls_back_parent_and_blob() -> Result<()
         0
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1"
-        )
-        .bind(fixture.event_id)
-        .fetch_one(fixture.storage.pool())
-        .await?,
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(fixture.event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?,
         0
     );
 
@@ -841,7 +840,8 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
 }
 
 #[tokio::test]
-async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties() -> Result<()> {
+async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties() -> Result<()>
+{
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
         return Ok(());
@@ -862,7 +862,10 @@ async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_prope
         "#,
     )
     .bind(delegate_account_id)
-    .bind(format!("delegate-{}@example.test", delegate_account_id.simple()))
+    .bind(format!(
+        "delegate-{}@example.test",
+        delegate_account_id.simple()
+    ))
     .bind(fixture.account_id)
     .execute(fixture.storage.pool())
     .await?;
@@ -906,12 +909,11 @@ async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_prope
     assert_eq!(created.event.owner_account_id, fixture.account_id);
     assert_eq!(created.event.collection_id, fixture.calendar_id.to_string());
     assert_eq!(created.mapi_object_id, mapi_store_id(200));
-    let persisted_owner = sqlx::query_scalar::<_, Uuid>(
-        "SELECT owner_account_id FROM calendar_events WHERE id = $1",
-    )
-    .bind(created_event_id)
-    .fetch_one(fixture.storage.pool())
-    .await?;
+    let persisted_owner =
+        sqlx::query_scalar::<_, Uuid>("SELECT owner_account_id FROM calendar_events WHERE id = $1")
+            .bind(created_event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?;
     assert_eq!(persisted_owner, fixture.account_id);
     let identity_account = sqlx::query_scalar::<_, Uuid>(
         "SELECT account_id FROM mapi_object_identities WHERE object_kind = 'calendar_event' AND canonical_id = $1",

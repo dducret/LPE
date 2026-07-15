@@ -1386,7 +1386,9 @@ where
                 .await?;
             }
             MapiObject::Event {
-                folder_id, event_id, ..
+                folder_id,
+                event_id,
+                ..
             } => {
                 apply_canonical_event_property_values(
                     store,

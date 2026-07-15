@@ -83,9 +83,7 @@ fn event_property_value_with_optional_version(
         PID_TAG_START_DATE
         | PID_LID_COMMON_START_TAG
         | PID_LID_APPOINTMENT_START_WHOLE_TAG
-        | PID_TAG_MESSAGE_DELIVERY_TIME => {
-            Some(MapiValue::I64(event_start_filetime(event) as i64))
-        }
+        | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(event_start_filetime(event) as i64)),
         PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
             Some(MapiValue::I64(event_end_filetime(event) as i64))
         }
@@ -616,10 +614,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .unwrap_or_else(|| existing.recurrence_exceptions_json.clone()),
         title: clearable_pending_text_property(
             properties,
-            &[
-                PID_TAG_SUBJECT_W,
-                PID_TAG_NORMALIZED_SUBJECT_W,
-            ],
+            &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
             &existing.title,
         ),
         location: clearable_pending_text_property(
@@ -630,11 +625,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
         organizer_json: participants.organizer_json,
         attendees: participants.attendees,
         attendees_json: participants.attendees_json,
-        notes: clearable_pending_text_property(
-            properties,
-            &[PID_TAG_BODY_W],
-            &existing.notes,
-        ),
+        notes: clearable_pending_text_property(properties, &[PID_TAG_BODY_W], &existing.notes),
         body_html: clearable_pending_html_property(properties, &existing.body_html),
     })
 }
@@ -651,10 +642,7 @@ fn clearable_pending_text_property(
     }
 }
 
-fn clearable_pending_html_property(
-    properties: &HashMap<u32, MapiValue>,
-    existing: &str,
-) -> String {
+fn clearable_pending_html_property(properties: &HashMap<u32, MapiValue>, existing: &str) -> String {
     if properties.contains_key(&PID_TAG_BODY_HTML_W) {
         pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
     } else if properties.contains_key(&PID_TAG_HTML_BINARY) {

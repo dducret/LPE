@@ -6,14 +6,18 @@ LPE `0.5.0` installations initialize an empty SQL database from the canonical
 schema. Databases from releases before 0.5.0 are not upgraded in place.
 `update-lpe.sh` accepts only the current schema version and performs no SQL
 compatibility mutation. Use `LPE_RESET_SCHEMA=true` only for an intentional
-destructive reset. `init-schema.sh` performs its public-schema reset, canonical
-schema application in one transaction, then validates the installed version
-and MAPI-column shape before announcing success. A failure during reset or
-schema application rolls back that transaction. `init-schema.sh`,
-`update-lpe.sh`, and `check-lpe.sh` validate both the schema label and the
+destructive reset. `init-schema.sh` performs its public-schema reset and
+canonical schema application in one transaction, explicitly pins
+`search_path` to `public`, then validates the installed version and MAPI-column
+shape before announcing success. A failure during reset or schema application
+rolls back that transaction. `init-schema.sh`, `update-lpe.sh`, and
+`check-lpe.sh` ignore user `psql` startup files for their contract queries and
+validate both the schema label and the
 required durable MAPI identity version columns (`mapi_change_number` and
 `predecessor_change_list`), so a database tagged `0.5.0-sql-v1` but physically
-incomplete is rejected.
+incomplete is rejected. Initialization also refuses relations outside
+`public`, even for an intentional public-schema reset, because leaving them in
+place could create parallel state.
 The schema initializer creates the real platform tenant row
 `00000000-0000-0000-0000-000000000001` and the default storage pool/policy
 metadata; runtime bootstrap must not create string pseudo-tenants.
@@ -355,7 +359,7 @@ Files:
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` resets or creates `public` and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version plus the durable MAPI identity version columns before reporting success, and it requires an empty SQL database unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
+- `init-schema.sh` rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version plus the durable MAPI identity version columns before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
 - `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version and required durable MAPI identity version columns, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
