@@ -1187,7 +1187,10 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
-    let core_runtime = CORE_STORAGE.split("#[cfg(test)]").next().unwrap_or(CORE_STORAGE);
+    let core_runtime = CORE_STORAGE
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(CORE_STORAGE);
     assert!(
         !core_runtime.contains("current_schema()"),
         "storage startup must validate the canonical public schema regardless of search_path"

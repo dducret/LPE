@@ -71,6 +71,8 @@ use crate::{
 };
 
 static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+// Ephemeral search_path schemas cannot safely share prepared relation OIDs through a pooled proxy.
+static POSTGRES_MAPI_FIXTURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const STORAGE_SCHEMA_SQL: &str = include_str!("../../../lpe-storage/sql/schema.sql");
 
 struct PostgresMapiFixture {
@@ -78,6 +80,7 @@ struct PostgresMapiFixture {
     admin_pool: PgPool,
     schema_name: String,
     account_id: Uuid,
+    _lock: tokio::sync::MutexGuard<'static, ()>,
 }
 
 impl PostgresMapiFixture {
@@ -102,6 +105,7 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
         eprintln!("skipping PostgreSQL-backed MAPI calendar test; TEST_DATABASE_URL is not set");
         return Ok(None);
     };
+    let fixture_lock = POSTGRES_MAPI_FIXTURE_LOCK.lock().await;
 
     let schema_name = format!("lpe_mapi_calendar_{}", Uuid::new_v4().simple());
     let admin_pool = PgPoolOptions::new()
@@ -119,7 +123,9 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
     let pool = PgPoolOptions::new()
         .max_connections(4)
         .connect_with(
-            PgConnectOptions::from_str(&database_url)?.options([("search_path", &search_path)]),
+            PgConnectOptions::from_str(&database_url)?
+                .statement_cache_capacity(0)
+                .options([("search_path", &search_path)]),
         )
         .await?;
     sqlx::raw_sql(STORAGE_SCHEMA_SQL).execute(&pool).await?;
@@ -178,6 +184,7 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
     .await?;
 
     Ok(Some(PostgresMapiFixture {
+        _lock: fixture_lock,
         storage: Storage::new(pool),
         admin_pool,
         schema_name,
