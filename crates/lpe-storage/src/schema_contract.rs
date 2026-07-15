@@ -36,8 +36,8 @@ const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_STORE_MAPI_METADATA: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
-const EXCHANGE_STORE_HELPERS_MAPI: &str =
-    include_str!("../../lpe-exchange/src/store/storage_impl/helpers_mapi.rs");
+const EXCHANGE_STORE_MAPI_HELPERS: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/mapi_helpers.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
 const EXCHANGE_MAPI_CALENDAR_TESTS: &str =
     include_str!("../../lpe-exchange/src/tests/mapi_over_http/calendar.rs");
@@ -909,7 +909,7 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
         &[
             EXCHANGE_STORE,
             EXCHANGE_STORE_MAPI_METADATA,
-            EXCHANGE_STORE_HELPERS_MAPI,
+            EXCHANGE_STORE_MAPI_HELPERS,
         ],
         &[
             "fn fetch_or_allocate_mapi_named_property_ids",

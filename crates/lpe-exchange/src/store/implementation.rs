@@ -18,5 +18,5 @@ impl ExchangeStore for Storage {
     store_impl_messages!();
 }
 
-include!("storage_impl/helpers_mapi.rs");
-include!("storage_impl/helpers_address.rs");
+include!("storage_impl/address_helpers.rs");
+include!("storage_impl/mapi_helpers.rs");
