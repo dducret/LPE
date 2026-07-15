@@ -8835,6 +8835,16 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
             JMAP_CALENDARS_CAPABILITY.to_string(),
             JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
         ];
+        let (event_start, recurrence_override, reminder_at) =
+            sqlx::query_as::<_, (String, String, String)>(
+                r#"
+                SELECT to_char(CURRENT_DATE + 7, 'YYYY-MM-DD') || 'T14:30:00',
+                       to_char(CURRENT_DATE + 8, 'YYYY-MM-DD'),
+                       to_char(CURRENT_DATE + 7, 'YYYY-MM-DD') || 'T14:00:00Z'
+                "#,
+            )
+            .fetch_one(&fixture.pool)
+            .await?;
 
         let initial = service
             .handle_api_request(
@@ -8918,7 +8928,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                                     "@type": "Event",
                                     "uid": "storage-calendar-lifecycle",
                                     "title": "Lifecycle Planning",
-                                    "start": "2026-05-25T14:30:00",
+                                    "start": event_start,
                                     "duration": "PT0S",
                                     "timeZone": "UTC",
                                     "allDay": true,
@@ -8926,7 +8936,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                                     "sequence": 2,
                                     "recurrenceRule": "FREQ=DAILY;COUNT=2",
                                     "recurrence": {"frequency": "daily", "count": 2},
-                                    "recurrenceOverrides": [{"recurrenceId": "2026-05-26"}],
+                                    "recurrenceOverrides": [{"recurrenceId": recurrence_override}],
                                     "locations": {"main": {"name": "Room 500"}},
                                     "participants": {
                                         "owner": {
@@ -9105,7 +9115,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                                     "reminderA": {
                                         "sourceType": "calendar",
                                         "sourceId": event_id,
-                                        "reminderAt": "2026-05-25T14:00:00Z"
+                                        "reminderAt": reminder_at
                                     }
                                 }
                             }),
