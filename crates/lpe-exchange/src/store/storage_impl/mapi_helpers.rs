@@ -623,7 +623,8 @@ async fn repair_invalid_mapi_identity_material(
 ) -> Result<()> {
     let rows = sqlx::query(
         r#"
-        SELECT object_kind, canonical_id, mapi_global_counter, source_key, change_key, instance_key
+        SELECT object_kind, canonical_id, mapi_global_counter, mapi_change_number,
+               source_key, change_key, predecessor_change_list, instance_key
         FROM mapi_object_identities
         WHERE tenant_id = $1
           AND account_id = $2
@@ -638,15 +639,39 @@ async fn repair_invalid_mapi_identity_material(
     let mut repaired_count = 0u64;
     for row in rows {
         let global_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        let (_, source_key, change_key, instance_key) =
+        let change_number = row.get::<i64, _>("mapi_change_number") as u64;
+        let stored_source_key = row.get::<Vec<u8>, _>("source_key");
+        let stored_change_key = row.get::<Vec<u8>, _>("change_key");
+        let stored_predecessor_change_list =
+            row.get::<Vec<u8>, _>("predecessor_change_list");
+        let stored_instance_key = row.get::<Vec<u8>, _>("instance_key");
+        let (_, source_key, object_change_key, instance_key) =
             crate::mapi::identity::persisted_identity_material(global_counter);
-        if row.get::<Vec<u8>, _>("source_key") == source_key
-            && row.get::<Vec<u8>, _>("change_key") == change_key
-            && row.get::<Vec<u8>, _>("instance_key") == instance_key
+        let current_change_key =
+            crate::mapi::identity::change_key_for_change_number(change_number);
+        // [MS-OXCFXICS] 2.2.1.2.7 and 3.1.5.3: an imported ChangeKey can
+        // intentionally differ from the internal CN. Repair only the exact
+        // stale signature left by the former identity-material repair: the CK
+        // fell back to the immutable object counter while the PCL proves that
+        // the current local CN was already integrated.
+        let change_key = if change_number != global_counter
+            && stored_change_key == object_change_key
+            && predecessor_change_list_contains_exact_xid(
+                &stored_predecessor_change_list,
+                &current_change_key,
+            )
+        {
+            current_change_key
+        } else {
+            stored_change_key.clone()
+        };
+        if stored_source_key == source_key
+            && stored_change_key == change_key
+            && stored_instance_key == instance_key
         {
             continue;
         }
-        sqlx::query(
+        let updated = sqlx::query(
             r#"
             UPDATE mapi_object_identities
             SET source_key = $5,
@@ -657,6 +682,11 @@ async fn repair_invalid_mapi_identity_material(
               AND account_id = $2
               AND object_kind = $3
               AND canonical_id = $4
+              AND mapi_change_number = $8
+              AND source_key = $9
+              AND change_key = $10
+              AND predecessor_change_list = $11
+              AND instance_key = $12
             "#,
         )
         .bind(tenant_id)
@@ -666,9 +696,14 @@ async fn repair_invalid_mapi_identity_material(
         .bind(source_key)
         .bind(change_key)
         .bind(instance_key)
+        .bind(change_number as i64)
+        .bind(stored_source_key)
+        .bind(stored_change_key)
+        .bind(stored_predecessor_change_list)
+        .bind(stored_instance_key)
         .execute(&mut **tx)
         .await?;
-        repaired_count += 1;
+        repaired_count += updated.rows_affected();
     }
 
     if repaired_count > 0 {
@@ -682,6 +717,32 @@ async fn repair_invalid_mapi_identity_material(
     }
 
     Ok(())
+}
+
+fn predecessor_change_list_contains_exact_xid(
+    predecessor_change_list: &[u8],
+    expected_xid: &[u8],
+) -> bool {
+    let mut offset = 0usize;
+    let mut found = false;
+    while offset < predecessor_change_list.len() {
+        let size = usize::from(predecessor_change_list[offset]);
+        offset += 1;
+        if !(17..=24).contains(&size) {
+            return false;
+        }
+        let Some(end) = offset.checked_add(size) else {
+            return false;
+        };
+        let Some(xid) = predecessor_change_list.get(offset..end) else {
+            return false;
+        };
+        if xid == expected_xid {
+            found = true;
+        }
+        offset = end;
+    }
+    found
 }
 
 async fn mapi_collaboration_folder_identity_ids_for_account(

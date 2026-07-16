@@ -1396,8 +1396,13 @@ time with a real clock value at version rotation and keeps it strictly
 monotonic under the Event row lock. Direct property reads and Calendar
 ICS/FastTransfer consume this persisted time and CK/CN/PCL
 state, so the version observed after Save is also the version loaded after
-restart. This implements the identity/version contracts in [MS-OXCFXICS]
-sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, 2.2.2.1, 2.2.2.2, 2.2.2.3,
+restart. Identity-material repair keeps SourceKey/InstanceKey tied to the
+immutable object counter, preserves a structurally valid imported ChangeKey,
+and repairs the former object-counter ChangeKey only when the persisted PCL
+contains the exact XID of the current local CN; optimistic row predicates keep
+that repair from overwriting a concurrent version rotation. This implements
+the identity/version contracts in [MS-OXCFXICS]
+sections 2.2.1.2.3, 2.2.1.2.5, 2.2.1.2.7, 2.2.1.2.8, 2.2.2.1, 2.2.2.2, 2.2.2.3,
 2.2.2.3.1, 2.2.2.5, and 3.1.5.3. Source-key generation follows
 [MS-OXCFXICS] section 3.2.5.5 separately.
 
