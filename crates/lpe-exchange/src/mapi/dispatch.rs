@@ -376,6 +376,7 @@ where
             &mut snapshot,
             validator,
             &execute.rop_buffer,
+            execute.max_rop_out,
             request_debug.all_release,
             request_debug.handle_count,
             &request_debug.handle_table_summary,
@@ -536,6 +537,7 @@ where
         &mut snapshot,
         validator,
         &execute.rop_buffer,
+        execute.max_rop_out,
         request_debug.all_release,
         request_debug.handle_count,
         &request_debug.handle_table_summary,
@@ -860,6 +862,7 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     snapshot: &mut MapiMailStoreSnapshot,
     validator: &Validator<V>,
     rop_buffer: &[u8],
+    max_rop_out: u32,
     request_all_rops_are_release: bool,
     request_handle_count: usize,
     request_handle_table_summary: &str,
@@ -985,6 +988,12 @@ where
                 .await;
             }
             Some(rop_id) if is_property_dispatch_rop(rop_id) => {
+                let response_size_limit = available_execute_rop_response_size(
+                    max_rop_out,
+                    extended,
+                    responses.len(),
+                    handle_slots.len(),
+                );
                 let flow = append_property_dispatch_response(
                     store,
                     principal,
@@ -996,6 +1005,7 @@ where
                     emails,
                     &created_emails,
                     snapshot,
+                    response_size_limit,
                     &mut responses,
                 )
                 .await;

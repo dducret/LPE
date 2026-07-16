@@ -22,35 +22,20 @@ fn execute_max_rop_out_returns_buffer_too_small_response() {
 }
 
 #[test]
-fn execute_max_rop_out_preserves_extended_buffer_for_large_html_property() {
+fn execute_max_rop_out_preserves_extended_buffer_for_generic_overflow() {
     const OUTLOOK_MAX_ROP_OUT: u32 = 32_775;
-    const PID_TAG_HTML: u32 = 0x1013_0102;
 
-    let mut get_properties = vec![RopId::GetPropertiesSpecific.as_u8(), 0x00, 0x00];
-    get_properties.extend_from_slice(&0u16.to_le_bytes());
-    get_properties.extend_from_slice(&1u16.to_le_bytes());
-    get_properties.extend_from_slice(&1u16.to_le_bytes());
-    get_properties.extend_from_slice(&PID_TAG_HTML.to_le_bytes());
+    let query_rows = vec![RopId::QueryRows.as_u8(), 0x00, 0x00, 0x00, 0x01, 0x01, 0x00];
     let request_handle = 0x0000_00D1;
     let request = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(
-        get_properties.clone(),
+        query_rows.clone(),
         &[request_handle],
     ));
 
-    let html = vec![b'A'; 37_315];
-    let mut get_properties_response = vec![
-        RopId::GetPropertiesSpecific.as_u8(),
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    ];
-    get_properties_response.extend_from_slice(&(html.len() as u16).to_le_bytes());
-    get_properties_response.extend_from_slice(&html);
+    let mut query_rows_response = vec![RopId::QueryRows.as_u8(), 0x00, 0, 0, 0, 0, 0, 1, 0];
+    query_rows_response.extend(std::iter::repeat_n(b'A', 37_315));
     let response = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(
-        get_properties_response,
+        query_rows_response,
         &[request_handle],
     ));
     assert!(response.len() > OUTLOOK_MAX_ROP_OUT as usize);
@@ -79,7 +64,7 @@ fn execute_max_rop_out_preserves_extended_buffer_for_large_html_property() {
         u16::from_le_bytes(responses[1..3].try_into().unwrap()) as usize,
         response.len()
     );
-    assert_eq!(&responses[3..], get_properties.as_slice());
+    assert_eq!(&responses[3..], query_rows.as_slice());
     assert_eq!(handles, request_handle.to_le_bytes());
 }
 
@@ -97,6 +82,22 @@ fn parse_execute_request_keeps_max_rop_out() {
 
     assert_eq!(parsed.rop_buffer, rop_buffer);
     assert_eq!(parsed.max_rop_out, 0x1234);
+}
+
+#[test]
+fn execute_response_budget_reserves_extended_framing_and_handle_table() {
+    assert_eq!(
+        available_execute_rop_response_size(32_775, true, 0, 1),
+        32_761
+    );
+    assert_eq!(
+        available_execute_rop_response_size(32_775, true, 128, 3),
+        32_625
+    );
+    assert_eq!(
+        available_execute_rop_response_size(0, true, usize::MAX, usize::MAX),
+        usize::MAX
+    );
 }
 
 #[test]

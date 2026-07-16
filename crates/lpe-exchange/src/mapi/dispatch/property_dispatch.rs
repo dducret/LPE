@@ -53,6 +53,7 @@ pub(super) async fn append_property_dispatch_response<S>(
     emails: &[JmapEmail],
     created_emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    response_size_limit: usize,
     responses: &mut Vec<u8>,
 ) -> PropertyDispatchFlow
 where
@@ -71,6 +72,7 @@ where
                 emails,
                 created_emails,
                 snapshot,
+                response_size_limit,
                 responses,
             )
             .await;

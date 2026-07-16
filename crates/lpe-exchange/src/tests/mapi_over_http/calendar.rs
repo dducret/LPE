@@ -1977,6 +1977,201 @@ async fn mapi_over_http_existing_calendar_body_stream_uses_parent_event_transact
     assert_eq!(stored[0].body_html, "<p>Canonical HTML body</p>");
 }
 
+#[tokio::test]
+async fn mapi_over_http_calendar_large_getprops_uses_flagged_html_and_open_stream() {
+    const OUTLOOK_MAX_ROP_OUT: u32 = 32_775;
+    const OUTLOOK_PROPERTY_COUNT: usize = 466;
+    const OUTLOOK_HTML_INDEX: usize = 325;
+    const PID_TAG_HTML: u32 = 0x1013_0102;
+
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("83838383-8383-4383-8383-838383838383").unwrap();
+    let canonical_html = format!("<p>{}</p>", "A".repeat(37_306));
+    assert_eq!(canonical_html.len(), 37_313);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: FakeStore::rights(),
+            date: "2026-07-16".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Test 08:34".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+            body_html: canonical_html.clone(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut open_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (_, handles) = response_rops_and_handles_from_execute_body(&response_body);
+    let event_handle = handles[2];
+
+    let mut property_tags = (0..OUTLOOK_PROPERTY_COUNT)
+        .map(|index| (((0x9000 + index) as u32) << 16) | 0x0003)
+        .collect::<Vec<_>>();
+    property_tags[OUTLOOK_HTML_INDEX] = PID_TAG_HTML;
+    let mut get_properties_rops = vec![0x07, 0x00, 0x00];
+    get_properties_rops.extend_from_slice(&0u16.to_le_bytes());
+    get_properties_rops.extend_from_slice(&1u16.to_le_bytes());
+    get_properties_rops.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
+    for property_tag in &property_tags {
+        get_properties_rops.extend_from_slice(&property_tag.to_le_bytes());
+    }
+    let get_properties_buffer = rpc_proxy_wrapped_rop_buffer(&get_properties_rops, &[event_handle]);
+    let request = execute_body_with_max_rop_out(&get_properties_buffer, OUTLOOK_MAX_ROP_OUT);
+    assert_eq!(request.len(), 1_903);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let response_rop_buffer_size =
+        u32::from_le_bytes(response_body[12..16].try_into().unwrap()) as usize;
+    assert!(response_rop_buffer_size <= OUTLOOK_MAX_ROP_OUT as usize);
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&response_body);
+
+    // [MS-OXCPRPT] 2.2.2.1 and [MS-OXCDATA] 2.4.2, 2.8.1.2,
+    // and 2.11.5: PropertySizeLimit=0 is still bounded by the ROP response
+    // buffer, so only the oversized streamable value carries ecNotEnoughMemory.
+    assert_eq!(response_rops[0], 0x07, "expected GetPropertiesSpecific");
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rops[6], 0x01);
+    let html_value_offset = 7 + OUTLOOK_HTML_INDEX * 5;
+    assert_eq!(
+        &response_rops[html_value_offset..html_value_offset + 5],
+        &[0x0A, 0x0E, 0x00, 0x07, 0x80]
+    );
+    assert!(!contains_bytes(&response_rops, canonical_html.as_bytes()));
+
+    // [MS-OXCPRPT] 3.1.4.5: after ecNotEnoughMemory the client opens the
+    // property as a stream and reads it in bounded chunks.
+    let mut open_stream_rops = vec![0x2B, 0x00, 0x00, 0x01];
+    open_stream_rops.extend_from_slice(&PID_TAG_HTML.to_le_bytes());
+    open_stream_rops.push(0x00);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body_with_max_rop_out(
+                &rpc_proxy_wrapped_rop_buffer(&open_stream_rops, &[event_handle, u32::MAX]),
+                OUTLOOK_MAX_ROP_OUT,
+            ),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (open_stream_response, handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert_eq!(&open_stream_response[..6], &[0x2B, 0x01, 0, 0, 0, 0]);
+    assert_eq!(
+        u32::from_le_bytes(open_stream_response[6..10].try_into().unwrap()),
+        canonical_html.len() as u32
+    );
+    let stream_handle = handles[1];
+
+    let mut streamed_html = Vec::new();
+    while streamed_html.len() < canonical_html.len() {
+        let requested = (canonical_html.len() - streamed_html.len()).min(16_000) as u16;
+        let mut read_stream_rops = vec![0x2C, 0x00, 0x01];
+        read_stream_rops.extend_from_slice(&requested.to_le_bytes());
+        renew_mapi_request_id(&mut execute_headers);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body_with_max_rop_out(
+                    &rpc_proxy_wrapped_rop_buffer(
+                        &read_stream_rops,
+                        &[event_handle, stream_handle],
+                    ),
+                    OUTLOOK_MAX_ROP_OUT,
+                ),
+            )
+            .await
+            .unwrap();
+        let response_body = response_bytes(response).await;
+        let response_rop_buffer_size =
+            u32::from_le_bytes(response_body[12..16].try_into().unwrap()) as usize;
+        assert!(response_rop_buffer_size <= OUTLOOK_MAX_ROP_OUT as usize);
+        let (read_stream_response, _) = response_rops_and_handles_from_execute_body(&response_body);
+        assert_eq!(&read_stream_response[..6], &[0x2C, 0x01, 0, 0, 0, 0]);
+        let data_size = u16::from_le_bytes(read_stream_response[6..8].try_into().unwrap()) as usize;
+        assert_ne!(data_size, 0);
+        streamed_html.extend_from_slice(&read_stream_response[8..8 + data_size]);
+    }
+    assert_eq!(streamed_html, canonical_html.as_bytes());
+
+    // The same request has enough room at 64 KiB. This rejects a fixed 32 KiB
+    // or PidTagHtml-specific workaround without interrupting the captured
+    // GetPropertiesSpecific -> OpenStream -> ReadStream sequence above.
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body_with_max_rop_out(&get_properties_buffer, 65_536),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&response_body);
+    assert_eq!(response_rops[0], 0x07);
+    assert!(contains_bytes(&response_rops, canonical_html.as_bytes()));
+}
+
 fn calendar_change_key_from_get_properties_response(
     response_rops: &[u8],
     response_handle_index: u8,

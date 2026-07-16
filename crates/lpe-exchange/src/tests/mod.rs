@@ -7848,11 +7848,15 @@ fn mapi_headers_with_content_length(request_type: &str, content_length: &'static
 }
 
 fn execute_body(rop_buffer: &[u8]) -> Vec<u8> {
+    execute_body_with_max_rop_out(rop_buffer, 65_536)
+}
+
+fn execute_body_with_max_rop_out(rop_buffer: &[u8], max_rop_out: u32) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&0u32.to_le_bytes());
     body.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
     body.extend_from_slice(rop_buffer);
-    body.extend_from_slice(&65536u32.to_le_bytes());
+    body.extend_from_slice(&max_rop_out.to_le_bytes());
     body.extend_from_slice(&0u32.to_le_bytes());
     body
 }
@@ -10627,9 +10631,17 @@ async fn response_rops_from_execute_response(response: axum::response::Response)
 fn response_rops_and_handles_from_execute_body(body: &[u8]) -> (Vec<u8>, Vec<u32>) {
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
     let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = rop_buffer[2..2 + response_rop_size].to_vec();
-    let response_handles = rop_buffer[2 + response_rop_size..]
+    let (rop_payload, response_rops_end) = if rop_buffer.get(..4) == Some(&[0, 0, 4, 0]) {
+        let payload_size = u16::from_le_bytes(rop_buffer[4..6].try_into().unwrap()) as usize;
+        let payload = &rop_buffer[8..8 + payload_size];
+        let rop_size = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
+        (payload, rop_size)
+    } else {
+        let rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+        (rop_buffer, 2 + rop_size)
+    };
+    let response_rops = rop_payload[2..response_rops_end].to_vec();
+    let response_handles = rop_payload[response_rops_end..]
         .chunks_exact(4)
         .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
         .collect();

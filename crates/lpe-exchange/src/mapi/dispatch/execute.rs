@@ -201,6 +201,23 @@ pub(super) fn apply_execute_max_rop_out(
     replacement
 }
 
+pub(super) fn available_execute_rop_response_size(
+    max_rop_out: u32,
+    extended: bool,
+    preceding_response_size: usize,
+    response_handle_count: usize,
+) -> usize {
+    if max_rop_out == 0 {
+        return usize::MAX;
+    }
+    let framing_size = if extended { 8usize } else { 0 };
+    (max_rop_out as usize)
+        .saturating_sub(framing_size)
+        .saturating_sub(2)
+        .saturating_sub(preceding_response_size)
+        .saturating_sub(response_handle_count.saturating_mul(4))
+}
+
 pub(super) fn execute_response_handle_table(
     responses: &[u8],
     handle_slots: &[u32],

@@ -92,6 +92,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
     emails: &[JmapEmail],
     created_emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    response_size_limit: usize,
     responses: &mut Vec<u8>,
 ) where
     S: ExchangeStore,
@@ -234,6 +235,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
         emails_for_request,
         snapshot,
         &custom_values,
+        response_size_limit,
     );
     log_message_getprops_response_debug(
         principal,

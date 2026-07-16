@@ -14,6 +14,7 @@ mod logon;
 mod named_properties;
 mod object_ids;
 mod parse;
+mod property_limits;
 mod property_rows;
 mod receive_folders;
 mod recipients;
@@ -32,6 +33,7 @@ pub(in crate::mapi) use logon::*;
 pub(in crate::mapi) use named_properties::*;
 pub(in crate::mapi) use object_ids::*;
 pub(in crate::mapi) use parse::*;
+use property_limits::*;
 pub(in crate::mapi) use receive_folders::*;
 #[cfg(test)]
 pub(in crate::mapi) use recipients::*;
@@ -58,6 +60,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         emails,
         snapshot,
         &HashMap::new(),
+        usize::MAX,
     )
 }
 
@@ -69,6 +72,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     custom_values: &HashMap<u32, Vec<u8>>,
+    response_size_limit: usize,
 ) -> Vec<u8> {
     let mut response = vec![0x07, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -77,7 +81,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         object, principal, mailboxes, emails, snapshot, &columns,
     );
     unsupported_tags.retain(|tag| !custom_values.contains_key(tag));
-    let size_limited_tags = size_limited_specific_property_tags(
+    let size_limited_properties = size_limited_specific_properties(
         request,
         object,
         principal,
@@ -85,7 +89,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         emails,
         snapshot,
         &columns,
+        &unsupported_tags,
         custom_values,
+        response_size_limit,
     );
     let row = match object {
         Some(MapiObject::Logon) => {
@@ -515,7 +521,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         request, object, principal, &columns, mailboxes, emails, snapshot,
     );
     if unsupported_tags.is_empty()
-        && size_limited_tags.is_empty()
+        && !size_limited_properties.iter().any(|value| *value)
         && !columns
             .iter()
             .any(|tag| get_properties_specific_typed_value_tag(object, *tag).is_some())
@@ -531,7 +537,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             snapshot,
             &columns,
             &unsupported_tags,
-            &size_limited_tags,
+            &size_limited_properties,
             custom_values,
         );
     }
@@ -583,50 +589,6 @@ fn unsupported_specific_property_tags(
                 )
         })
         .collect()
-}
-
-fn size_limited_specific_property_tags(
-    request: &RopRequest,
-    object: Option<&MapiObject>,
-    principal: &AccountPrincipal,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-    columns: &[u32],
-    custom_values: &HashMap<u32, Vec<u8>>,
-) -> Vec<u32> {
-    let size_limit = request_property_size_limit(request);
-    if size_limit == 0 {
-        return Vec::new();
-    }
-    columns
-        .iter()
-        .copied()
-        .filter(|tag| {
-            let value_len = custom_values.get(tag).map(Vec::len).unwrap_or_else(|| {
-                serialize_object_property(
-                    object,
-                    principal,
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    get_properties_specific_value_tag(object, *tag),
-                )
-                .len()
-            });
-            value_len > size_limit
-        })
-        .collect()
-}
-
-fn request_property_size_limit(request: &RopRequest) -> usize {
-    request
-        .payload
-        .get(..2)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u16::from_le_bytes)
-        .map(usize::from)
-        .unwrap_or(0)
 }
 
 fn fallback_default_specific_property(
@@ -741,12 +703,12 @@ fn write_flagged_property_row(
     snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
     unsupported_tags: &[u32],
-    size_limited_tags: &[u32],
+    size_limited_properties: &[bool],
     custom_values: &HashMap<u32, Vec<u8>>,
 ) {
     response.push(1);
-    for tag in columns {
-        if size_limited_tags.contains(tag) {
+    for (index, tag) in columns.iter().enumerate() {
+        if size_limited_properties.get(index) == Some(&true) {
             if let Some((_value_tag, property_type)) =
                 get_properties_specific_typed_value_tag(object, *tag)
             {
