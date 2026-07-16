@@ -22,6 +22,68 @@ fn execute_max_rop_out_returns_buffer_too_small_response() {
 }
 
 #[test]
+fn execute_max_rop_out_preserves_extended_buffer_for_large_html_property() {
+    const OUTLOOK_MAX_ROP_OUT: u32 = 32_775;
+    const PID_TAG_HTML: u32 = 0x1013_0102;
+
+    let mut get_properties = vec![RopId::GetPropertiesSpecific.as_u8(), 0x00, 0x00];
+    get_properties.extend_from_slice(&0u16.to_le_bytes());
+    get_properties.extend_from_slice(&1u16.to_le_bytes());
+    get_properties.extend_from_slice(&1u16.to_le_bytes());
+    get_properties.extend_from_slice(&PID_TAG_HTML.to_le_bytes());
+    let request_handle = 0x0000_00D1;
+    let request = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(
+        get_properties.clone(),
+        &[request_handle],
+    ));
+
+    let html = vec![b'A'; 37_315];
+    let mut get_properties_response = vec![
+        RopId::GetPropertiesSpecific.as_u8(),
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    ];
+    get_properties_response.extend_from_slice(&(html.len() as u16).to_le_bytes());
+    get_properties_response.extend_from_slice(&html);
+    let response = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(
+        get_properties_response,
+        &[request_handle],
+    ));
+    assert!(response.len() > OUTLOOK_MAX_ROP_OUT as usize);
+
+    let capped = apply_execute_max_rop_out(
+        "large-html-property",
+        &request,
+        response.clone(),
+        OUTLOOK_MAX_ROP_OUT,
+    );
+
+    // [MS-OXCRPC] 2.2.2.1 and 3.1.4.2.1.1.2 require rgbOut to keep
+    // RPC_HEADER_EXT, including Last, around the ROP response payload.
+    assert!(is_rpc_header_ext_rop_buffer(&capped));
+    assert_eq!(&capped[..4], &[0x00, 0x00, 0x04, 0x00]);
+    let payload_size = u16::from_le_bytes(capped[4..6].try_into().unwrap()) as usize;
+    let payload_size_actual = u16::from_le_bytes(capped[6..8].try_into().unwrap()) as usize;
+    assert_eq!(payload_size, capped.len() - 8);
+    assert_eq!(payload_size_actual, payload_size);
+
+    // [MS-OXCROPS] 2.2.15.1.1 and 3.1.5.1.2 require SizeNeeded plus
+    // every unexecuted request and the input Server object handle table.
+    let (responses, handles) = split_rop_buffer(&capped).unwrap();
+    assert_eq!(responses[0], 0xFF);
+    assert_eq!(
+        u16::from_le_bytes(responses[1..3].try_into().unwrap()) as usize,
+        response.len()
+    );
+    assert_eq!(&responses[3..], get_properties.as_slice());
+    assert_eq!(handles, request_handle.to_le_bytes());
+}
+
+#[test]
 fn parse_execute_request_keeps_max_rop_out() {
     let rop_buffer = [0x02, 0x00];
     let mut body = Vec::new();

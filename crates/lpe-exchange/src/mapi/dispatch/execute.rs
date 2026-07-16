@@ -180,6 +180,13 @@ pub(super) fn apply_execute_max_rop_out(
     };
     let replacement =
         rop_buffer_too_small_response(response_rop_buffer.len(), requests, handle_table);
+    // [MS-OXCRPC] 3.1.4.2 and 3.1.4.2.1.1.2 require an extended rgbOut
+    // response to retain RPC_HEADER_EXT around its ROP response payload.
+    let replacement = if is_rpc_header_ext_rop_buffer(request_rop_buffer) {
+        rpc_header_ext_rop_buffer(replacement)
+    } else {
+        replacement
+    };
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
