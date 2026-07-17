@@ -118,7 +118,9 @@ before it is advertised.
   contact visibility. NSPI mutation and link-table write behavior remain
   deferred.
 - FastTransfer and ICS payloads use the MS-OXCFXICS wire grammar, including
-  lexical value sizes such as two-byte `PtypBoolean` values.
+  lexical value sizes such as two-byte `PtypBoolean` values. A full normal or
+  FAI `messageChange` ends when the following grammar marker begins; LPE must
+  not insert a null property tag as an object terminator.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -581,6 +583,33 @@ not by itself authorize broad client publication.
   information rows for the bounded bootstrap surface, conversation action FAI
   rows, destroyed conversation actions as `IncrSyncDel`, tombstones, read-state
   changes, and final state.
+- A Calendar `RopSynchronizationImportMessageChange` creates a pending canonical
+  Event. Its following property/stream writes and `RopSaveChangesMessage` commit
+  that Event with the imported SourceKey, ChangeKey, and PCL while allocating a
+  distinct internal server change number, as required by `[MS-OXCFXICS]`
+  sections 2.2.3.2.4.2.1, 3.1.5.3, and 3.2.5.9.4.2. It must never fall through
+  to generic mail persistence for an `IPM.Appointment`.
+- The same import ROP for an existing active or deleted Event returns a writable
+  handle for that canonical Event. The imported SourceKey has to match its
+  current identity; the following property writes and Save update the same
+  Event and preserve its MID/SourceKey while persisting the imported ChangeKey
+  and PCL beside a distinct server CN. This includes Outlook's required
+  move-then-modify sequence and is atomic through the parent Save; invalid
+  identity material leaves the Event unchanged. This follows `[MS-OXCFXICS]`
+  sections 3.1.5.3, 3.3.4.3.3.2.1.1, and 3.3.4.3.3.2.2.1 and
+  `[MS-OXCMSG]` sections 2.2.3.3.1 and 3.2.5.3.
+- Existing-Event imports compare the incoming and current PCLs as specified by
+  `[MS-OXCFXICS]` section 3.1.5.6.1. An older or equal client version is
+  acknowledged without mutating the Event. A conflict with `FailOnConflict`
+  returns `SyncConflict (0x80040802)`; an accepted conflict merges both PCLs
+  and applies the section 3.1.5.6.2.2 last-writer-wins rule. The resulting PCL
+  is a successor of both versions as required by sections 3.1.5.6.2 and
+  3.2.5.9.4.2.
+- After a new or changed Calendar import is saved, its collector state records
+  the Event MID in `MetaTagIdsetGiven` and its distinct server CN in
+  `MetaTagCnsetSeen`; it does not add that CN to `MetaTagCnsetSeenFAI` or
+  `MetaTagCnsetRead`. This follows `[MS-OXCFXICS]` sections 2.2.1.1.2-2.2.1.1.4
+  and 3.1.5.3.
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
@@ -621,7 +650,7 @@ not by itself authorize broad client publication.
 | Raw FastTransfer destination upload streams | Partially implemented. Destination configure plus PutBuffer / PutBufferExtended accepts bounded FastTransfer property streams on pending canonical objects and routes them through the existing save/import paths. Exchange marker/subobject stream shapes are not implemented yet and return parseable ROP errors without creating protocol-local state. |
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` is bounded to hard-deleting visible memberships in the target canonical mailbox folder through the canonical tombstone/change-log path. `RopHardDeleteMessagesAndSubfolders` recurses only through canonical mailbox descendants and does not delete non-mailbox objects. Public-folder whole-folder purge returns a parseable not-supported ROP error; public-folder item delete/move/copy remains item-scoped through canonical public-folder APIs. |
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. `RopMoveCopyMessages` move from a concrete recoverable subfolder uses canonical recoverable restore, `RopMoveCopyMessages` copy returns a parseable not-supported error, `RopDeleteMessages` on recoverable folders returns partial completion without purging because LPE does not yet implement Exchange's Deletions-to-Purges soft-delete progression, purge and empty-folder on Deletions, Versions, or Purges use canonical recoverable purge, Recoverable Items Root message mutation and purge calls return parseable not-supported errors, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `RopGetContentsTable` with `SoftDeletes` (`0x20`) returns a parseable not-supported ROP error because canonical LPE hard delete/Trash purge removes normal folder membership and writes `recoverable_items` rows instead of keeping folder-local soft-deleted rows. `OpenSoftDeleted` and complete Exchange dumpster folder parity remain gated on canonical lifecycle semantics; any MAPI-local dumpster store is forbidden. Versions and Purges are bounded virtual projections over canonical lifecycle rows; LPE does not claim Exchange copy-on-write Versions behavior or full Purges post-recovery parity. |
-| Sync move import | `RopSynchronizationImportMessageMove` uses the documented length-prefixed source folder/source message request shape. LPE derives the destination mailbox from the synchronization collector folder and ignores client-supplied destination message-id/change-number values as durable identifiers, so imported moves converge through canonical mailbox membership move state instead of creating MAPI-local identity truth. |
+| Sync move import | `RopSynchronizationImportMessageMove` parses all five documented length-prefixed fields as GID/XID/PCL values. A no-conflict Calendar-to-Deleted-Items import moves the canonical Event to its deleted lifecycle and atomically rekeys the principal identity with the supplied destination SourceKey, ChangeKey, and PCL while allocating a distinct internal server change number; it does not create a generic `IPM.Appointment` mail row. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.4.1, 3.1.5.3, 3.2.5.9.4.4, and 3.3.4.3.3.2.1.1 and `[MS-OXCROPS]` sections 2.2.13.6.1-2.2.13.6.3. Concurrent-move conflict handling and the `NewerClientChange` (`0x00040821`) response remain a separate interoperability gate. |
 | Sync hierarchy import | `RopSynchronizationImportHierarchyChange` creates canonical custom mailbox folders only. Imported system-folder rows are acknowledged as no-op reconciliation so Outlook hierarchy sync does not surface `MAPI_E_NO_SUPPORT` for Inbox, Deleted Items, Sent Items, Drafts, Sync Issues, and other built-in folders. Imported parent source keys are resolved against existing canonical mailbox MAPI identities so Outlook-created child folders keep their canonical parent; if the parent source key is absent or not canonical, the synchronization collector folder is used when it maps to a canonical mailbox, otherwise the folder is created at the account root. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, `PidNameKeywords` category property equality, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` are not implemented yet because their canonical rule/deferred-action model is still missing; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
@@ -1366,11 +1395,13 @@ calendars, the Event, reminder, custom properties, and attachments remain
 owned by the canonical calendar owner while the client principal receives its
 scoped MAPI identity.
 
-Saving an existing Event now calls one PostgreSQL transaction that locks the
-canonical row, checks the handle's expected `modseq`, applies the staged core,
+Saving an existing active or deleted Event now calls one PostgreSQL transaction
+that locks the canonical row, checks the handle's expected `modseq`, applies
+the staged core,
 reminder, custom-property, and attachment changes, advances the Calendar
-modseq, writes the canonical change log, and rotates every active Event MAPI
-identity. A stale handle returns `ecObjectModified (0x80040109)` without
+modseq, writes the canonical change log, and rotates every principal-scoped
+Event MAPI identity for that lifecycle. A stale handle returns
+`ecObjectModified (0x80040109)` without
 overwriting the newer Event or clearing the stale handle's staged state.
 `ForceSave (0x04)` bypasses only that object-modified check and commits the
 already-staged values as a new version. After a successful
@@ -1379,7 +1410,7 @@ already-staged values as a new version. After a successful
 
 Calendar Event version metadata is durable rather than synthesized from the
 session. The canonical `calendar_events.modseq` remains the CAS token, while
-`mapi_mailbox_replicas` allocates a new 48-bit change number and the active
+`mapi_mailbox_replicas` allocates a new 48-bit change number and the current
 `mapi_object_identities` rows persist `PidTagChangeNumber`, a new
 `PidTagChangeKey`, and the predecessor list merged with that new XID in the same
 transaction. Each principal-scoped Event MID and `PidTagSourceKey` remains
@@ -1388,7 +1419,7 @@ which requires a new destination MID. `PidTagLocalCommitTime (0x67090040)` is
 projected from the durable version's UTC update time immediately after Save
 and after reopen, rather than from the appointment start time, as defined by
 [MS-OXPROPS] section 2.774 and [MS-OXCMSG] section 2.2.1.49. Direct property
-mutation rejects the server-managed `PidTagChangeKey`,
+mutation rejects the server-managed `PidTagSourceKey`, `PidTagChangeKey`,
 `PidTagPredecessorChangeList`, `PidTagChangeNumber`,
 `PidTagLastModificationTime`, and `PidTagLocalCommitTime` values with exact
 `PropertyProblem` indexes and client tags. PostgreSQL assigns the Event update

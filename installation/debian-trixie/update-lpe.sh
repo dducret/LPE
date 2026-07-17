@@ -277,6 +277,24 @@ if [[ "${CALENDAR_EVENT_LIFECYCLE_COLUMN_COUNT}" != "2" \
   echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
+MAPI_IDENTITY_KEY_CONSTRAINT_COUNT="$(
+  mapi_identity_key_constraint_count "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect MAPI identity key constraints." >&2
+  exit 1
+}
+MAPI_CALENDAR_EVENT_MOVE_CHANGE_KEY_CONSTRAINT_COUNT="$(
+  mapi_calendar_event_move_change_key_constraint_count "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect Calendar Event move ChangeKey constraints." >&2
+  exit 1
+}
+if [[ "${MAPI_IDENTITY_KEY_CONSTRAINT_COUNT}" != "3" \
+  || "${MAPI_CALENDAR_EVENT_MOVE_CHANGE_KEY_CONSTRAINT_COUNT}" != "2" ]]; then
+  echo "MAPI identity ChangeKey constraints are incomplete despite schema label ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"

@@ -143,6 +143,51 @@ impl Storage {
             );
         }
 
+        let mapi_change_key_constraint_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM pg_constraint constraint_row
+            JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+            JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+            WHERE namespace_row.nspname = $1
+              AND constraint_row.contype = 'c'
+              AND (
+                    (
+                        table_row.relname = 'mapi_object_identities'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(change_key) >= 17%'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(change_key) <= 24%'
+                    )
+                    OR (
+                        table_row.relname = 'mapi_calendar_event_identity_moves'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(old_change_key) >= 17%'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(old_change_key) <= 24%'
+                    )
+                    OR (
+                        table_row.relname = 'mapi_calendar_event_identity_moves'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(new_change_key) >= 17%'
+                        AND pg_get_constraintdef(constraint_row.oid)
+                            LIKE '%octet_length(new_change_key) <= 24%'
+                    )
+              )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect MAPI ChangeKey XID constraints in schema {schema_name}")
+        })?;
+        if mapi_change_key_constraint_count != 3 {
+            bail!(
+                "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
         let mut invalid_calendar_lifecycle_columns = Vec::new();
         for (column, data_type, is_nullable) in [
             ("lifecycle_state", "text", "NO"),
@@ -223,7 +268,7 @@ mod tests {
     const SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
     #[tokio::test]
-    async fn startup_rejects_tagged_schema_without_mapi_identity_version_columns() -> Result<()> {
+    async fn startup_rejects_tagged_schema_without_required_mapi_identity_shape() -> Result<()> {
         let Some(database_url) = env::var("TEST_DATABASE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -262,7 +307,7 @@ mod tests {
                 .execute(&pool)
                 .await
                 .context("apply crates/lpe-storage/sql/schema.sql")?;
-            sqlx::query(
+            sqlx::raw_sql(
                 r#"
                 ALTER TABLE mapi_object_identities
                     DROP COLUMN mapi_change_number,
@@ -304,6 +349,35 @@ mod tests {
                 message.contains("mapi_change_number bigint NOT NULL")
                     && message.contains("predecessor_change_list bytea NOT NULL"),
                 "startup rejection must identify both required durable MAPI version shapes: {message}"
+            );
+
+            sqlx::raw_sql(
+                r#"
+                ALTER TABLE mapi_object_identities
+                    ALTER COLUMN mapi_change_number TYPE BIGINT,
+                    ALTER COLUMN mapi_change_number SET NOT NULL,
+                    ALTER COLUMN predecessor_change_list SET NOT NULL;
+                ALTER TABLE mapi_object_identities
+                    DROP CONSTRAINT mapi_object_identities_change_key_check,
+                    ADD CHECK (octet_length(change_key) = 22);
+                ALTER TABLE mapi_calendar_event_identity_moves
+                    DROP CONSTRAINT mapi_calendar_event_identity_moves_old_change_key_check,
+                    DROP CONSTRAINT mapi_calendar_event_identity_moves_new_change_key_check,
+                    ADD CHECK (octet_length(old_change_key) = 22),
+                    ADD CHECK (octet_length(new_change_key) = 22)
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("replace current MAPI ChangeKey XID constraints with stale 22-byte checks")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject stale MAPI ChangeKey XID constraints");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("17-24-byte MAPI ChangeKey XID constraints"),
+                "startup rejection must identify stale ChangeKey XID constraints: {message}"
             );
 
             Ok(())

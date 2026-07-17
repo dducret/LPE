@@ -20,7 +20,7 @@ pub use types::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ContactNameFields,
     ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
-    MapiEventIdentityMove, MoveAccessibleEventToDeletedItemsResult,
+    MapiEventIdentityMove, MapiEventImportedMoveIdentity, MoveAccessibleEventToDeletedItemsResult,
 };
 
 use types::{

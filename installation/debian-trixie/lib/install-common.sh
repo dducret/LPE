@@ -156,7 +156,7 @@ render_template() {
 mapi_identity_key_constraint_count() {
   local database_url="$1"
 
-  psql "${database_url}" -v ON_ERROR_STOP=1 -At <<'SQL'
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
 SELECT COUNT(*)::int
 FROM pg_constraint c
 JOIN pg_class r ON r.oid = c.conrelid
@@ -171,11 +171,36 @@ WHERE n.nspname = 'public'
     )
     OR (
       c.conname = 'mapi_object_identities_change_key_check'
-      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(change_key) = 22%'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(change_key) >= 17%'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(change_key) <= 24%'
     )
     OR (
       c.conname = 'mapi_object_identities_instance_key_check'
       AND pg_get_constraintdef(c.oid) LIKE '%octet_length(instance_key) = 22%'
+    )
+  );
+SQL
+}
+
+mapi_calendar_event_move_change_key_constraint_count() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT COUNT(*)::int
+FROM pg_constraint c
+JOIN pg_class r ON r.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = r.relnamespace
+WHERE n.nspname = 'public'
+  AND r.relname = 'mapi_calendar_event_identity_moves'
+  AND c.contype = 'c'
+  AND (
+    (
+      pg_get_constraintdef(c.oid) LIKE '%octet_length(old_change_key) >= 17%'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(old_change_key) <= 24%'
+    )
+    OR (
+      pg_get_constraintdef(c.oid) LIKE '%octet_length(new_change_key) >= 17%'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(new_change_key) <= 24%'
     )
   );
 SQL

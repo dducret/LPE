@@ -218,6 +218,14 @@ pub struct MapiEventIdentityMove {
     pub new_change_key: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapiEventImportedMoveIdentity {
+    pub expected_source_key: Vec<u8>,
+    pub destination_source_key: Vec<u8>,
+    pub change_key: Vec<u8>,
+    pub predecessor_change_list: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveAccessibleEventToDeletedItemsResult {

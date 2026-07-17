@@ -9,14 +9,14 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput, MapiEventVersion,
-    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
+    MapiEventImportedMoveIdentity, MapiEventVersion, MoveAccessibleEventToDeletedItemsResult,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -692,6 +692,7 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal_account_id: Uuid,
         event_id: Uuid,
+        imported_identity: Option<MapiEventImportedMoveIdentity>,
     ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult>;
 
     fn fetch_accessible_tasks_by_ids<'a>(

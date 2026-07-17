@@ -324,10 +324,15 @@ macro_rules! store_impl_collaboration {
         &'a self,
         principal_account_id: Uuid,
         event_id: Uuid,
+        imported_identity: Option<MapiEventImportedMoveIdentity>,
     ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult> {
         Box::pin(async move {
-            self.move_accessible_event_to_deleted_items(principal_account_id, event_id)
-                .await
+            self.move_accessible_event_to_deleted_items(
+                principal_account_id,
+                event_id,
+                imported_identity,
+            )
+            .await
         })
     }
 

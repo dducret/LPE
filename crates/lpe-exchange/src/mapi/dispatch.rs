@@ -27,9 +27,9 @@ use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, MapiEventAttachmentChanges, MapiEventAttachmentUpsert,
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventCustomPropertyValue, MapiEventReminderPatch, PublicFolderPermissionInput,
-    SearchFolderDefinition, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertPublicFolderItemInput,
+    MapiEventCustomPropertyValue, MapiEventImportedIdentity, MapiEventImportedMoveIdentity,
+    MapiEventReminderPatch, PublicFolderPermissionInput, SearchFolderDefinition,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -74,6 +74,7 @@ mod search_folders;
 mod stream_dispatch;
 mod submission;
 mod sync_configure;
+mod sync_conflicts;
 mod sync_get_buffer;
 mod sync_import;
 mod sync_import_deletes;
@@ -130,6 +131,7 @@ use search_folders::*;
 use stream_dispatch::*;
 use submission::*;
 use sync_configure::*;
+use sync_conflicts::*;
 use sync_get_buffer::*;
 use sync_import::*;
 use sync_import_deletes::*;

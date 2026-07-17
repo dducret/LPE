@@ -315,9 +315,21 @@ Protocol adapters store only cursor rows:
   keys. These rows map canonical UUIDs to protocol identifiers; they do not
   store mailbox content, folder replicas, message bodies, attachments, `Sent`,
   drafts, outbox, or search state.
-  The source, change, and instance key columns persist 22-byte REPLGUID-scoped
-  XID/GID-compatible values. The 24-byte `LongTermID` form remains a protocol
-  conversion value with the two-byte pad and is not stored in these columns.
+  Source and instance keys persist 22-byte REPLGUID-scoped GID values. Change
+  keys persist XIDs from 17 through 24 bytes, including client ChangeKeys
+  retained during ICS import. Per [MS-OXCFXICS] sections 2.2.1.2.7,
+  2.2.1.2.8, and 3.1.5.3, an imported Event keeps its local SourceKey, client
+  ChangeKey, and canonical client PCL containing that ChangeKey, while the
+  server assigns a distinct internal change number. This also permits the
+  multi-replica PCL required by [MS-OXCFXICS] sections 3.1.5.6.1 and
+  3.1.5.6.2. The 24-byte `LongTermID` form with its two-byte pad remains a
+  protocol conversion value and is not stored as a SourceKey.
+  An ICS Calendar move to Deleted Items updates the canonical Event lifecycle,
+  its active `mapi_object_identities` row, and the corresponding
+  `mapi_calendar_event_identity_moves` audit row in one transaction. The
+  destination SourceKey/ChangeKey/PCL supplied by the client are retained for
+  that principal, while `mapi_change_number` remains a separately allocated
+  server CN. Delegated identities continue to receive server-assigned rekeys.
 - `mapi_named_properties` stores durable per-account named-property mappings
   for Outlook-cached property ids. `mapi_custom_property_values` stores opaque
   Outlook-specific property values by canonical object identity, property tag,

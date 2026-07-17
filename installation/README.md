@@ -19,7 +19,9 @@ required durable MAPI identity version columns (`mapi_change_number` and
 `mapi_calendar_event_identity_moves` table used to preserve old/new MAPI
 identity lineage for Calendar moves to Deleted Items. They also verify that
 the canonical change log and MAPI identity constraints accept the
-`deleted_calendar_event` object kind. A database tagged
+`deleted_calendar_event` object kind, that SourceKey and InstanceKey remain
+22-byte GIDs, and that Event identity and move ChangeKeys accept 17- through
+24-byte XIDs. A database tagged
 `0.5.0-sql-v1` but physically incomplete is therefore rejected.
 Initialization also refuses relations outside
 `public`, even for an intentional public-schema reset, because leaving them in

@@ -65,7 +65,7 @@ pub use crate::collaboration::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ContactNameFields,
     ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
-    MapiEventIdentityMove, MoveAccessibleEventToDeletedItemsResult,
+    MapiEventIdentityMove, MapiEventImportedMoveIdentity, MoveAccessibleEventToDeletedItemsResult,
 };
 pub use crate::conversation_actions::{
     ConversationAction, UpsertConversationActionInput, CONVERSATION_ACTION_VERSION,
@@ -79,8 +79,8 @@ pub use crate::mailboxes::{
 };
 pub use crate::mapi_events::{
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
-    MapiEventCreateResult, MapiEventCustomPropertyValue, MapiEventReminderPatch,
-    MapiEventReminderState, MapiEventVersion,
+    MapiEventCreateResult, MapiEventCustomPropertyValue, MapiEventImportedIdentity,
+    MapiEventReminderPatch, MapiEventReminderState, MapiEventVersion,
 };
 pub use crate::notes_journal::{
     ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,

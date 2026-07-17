@@ -62,6 +62,8 @@ const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs")
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
 const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
 const INIT_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/init-schema.sh");
+const INSTALL_COMMON_SCRIPT: &str =
+    include_str!("../../../installation/debian-trixie/lib/install-common.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -711,7 +713,7 @@ fn mapi_identity_mapping_is_store_backed() {
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
         "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22)",
-        "change_key BYTEA NOT NULL CHECK (octet_length(change_key) = 22)",
+        "change_key BYTEA NOT NULL CHECK (octet_length(change_key) BETWEEN 17 AND 24)",
         "mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number > 0 AND mapi_change_number <= 140737488355327)",
         "predecessor_change_list BYTEA NOT NULL CHECK (octet_length(predecessor_change_list) > 0)",
         "instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 22)",
@@ -740,8 +742,8 @@ fn mapi_identity_mapping_is_store_backed() {
         "new_source_key BYTEA NOT NULL CHECK (octet_length(new_source_key) = 22)",
         "old_change_number BIGINT NOT NULL",
         "new_change_number BIGINT NOT NULL",
-        "old_change_key BYTEA NOT NULL CHECK (octet_length(old_change_key) = 22)",
-        "new_change_key BYTEA NOT NULL CHECK (octet_length(new_change_key) = 22)",
+        "old_change_key BYTEA NOT NULL CHECK (octet_length(old_change_key) BETWEEN 17 AND 24)",
+        "new_change_key BYTEA NOT NULL CHECK (octet_length(new_change_key) BETWEEN 17 AND 24)",
         "PRIMARY KEY (tenant_id, account_id, event_id)",
     ] {
         assert!(
@@ -1153,6 +1155,63 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
 }
 
 #[test]
+fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
+    assert_source_contains_all(
+        "shared MAPI identity constraint validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mapi_identity_key_constraint_count",
+            "octet_length(change_key) >= 17",
+            "octet_length(change_key) <= 24",
+            "mapi_calendar_event_move_change_key_constraint_count",
+            "octet_length(old_change_key) >= 17",
+            "octet_length(old_change_key) <= 24",
+            "octet_length(new_change_key) >= 17",
+            "octet_length(new_change_key) <= 24",
+        ],
+    );
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                "mapi_identity_key_constraint_count",
+                "mapi_calendar_event_move_change_key_constraint_count",
+                "Initialize a fresh LPE 0.5.0 database",
+            ],
+        );
+    }
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_IDENTITY_KEY_CONSTRAINT_COUNT",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "update-lpe.sh must reject stale MAPI ChangeKey constraints before stopping LPE",
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_IDENTITY_KEY_CONSTRAINT_COUNT",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "update-lpe.sh must reject stale MAPI ChangeKey constraints before building LPE",
+    );
+    assert_source_contains_all(
+        "storage startup MAPI ChangeKey constraint guard",
+        CORE_STORAGE,
+        &[
+            "mapi_change_key_constraint_count",
+            "octet_length(change_key) >= 17",
+            "octet_length(change_key) <= 24",
+            "octet_length(old_change_key) >= 17",
+            "octet_length(new_change_key) <= 24",
+            "required 17-24-byte MAPI ChangeKey XID constraints",
+        ],
+    );
+}
+
+#[test]
 fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
     assert_source_contains_all(
         "init-schema.sh",
@@ -1168,6 +1227,8 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
             "SET search_path TO public;",
             "expected_schema_version",
             "mapi_identity_version_column_count",
+            "mapi_identity_key_constraint_count",
+            "mapi_calendar_event_move_change_key_constraint_count",
             "FROM information_schema.columns",
             "table_name = 'mapi_object_identities'",
             "column_name IN ('mapi_change_number', 'predecessor_change_list')",
@@ -1256,6 +1317,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "(\"deleted_at\", \"timestamp with time zone\", \"YES\")",
             "pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'",
             "required deleted_calendar_event object-kind constraints are missing or incompatible",
+            "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible",
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );

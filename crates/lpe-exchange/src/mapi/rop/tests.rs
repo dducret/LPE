@@ -4914,31 +4914,23 @@ pub(in crate::mapi) fn expand_row_payload_never_decodes_as_message_ids() {
 }
 
 #[test]
-pub(in crate::mapi) fn sync_import_message_move_uses_length_prefixed_source_ids() {
-    let source_folder_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0507);
-    let source_message_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0508);
-    let destination_message_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0509);
-    let change_number = crate::mapi::identity::mapi_store_id(0x0102_0304_0510);
-    let source_folder_wire =
-        crate::mapi::identity::wire_id_bytes_from_object_id(source_folder_id).unwrap();
-    let source_message_wire =
-        crate::mapi::identity::wire_id_bytes_from_object_id(source_message_id).unwrap();
-    let destination_message_wire =
-        crate::mapi::identity::wire_id_bytes_from_object_id(destination_message_id).unwrap();
-    let change_number_wire =
-        crate::mapi::identity::wire_id_bytes_from_object_id(change_number).unwrap();
-    let predecessor_change_list = [0x01, 0x02, 0x03, 0x04];
-    let mut golden = vec![RopId::SynchronizationImportMessageMove.as_u8(), 0x00, 0x00];
-    for field in [
-        source_folder_wire.as_slice(),
-        source_message_wire.as_slice(),
-        predecessor_change_list.as_slice(),
-        destination_message_wire.as_slice(),
-        change_number_wire.as_slice(),
-    ] {
-        golden.extend_from_slice(&(field.len() as u32).to_le_bytes());
-        golden.extend_from_slice(field);
-    }
+pub(in crate::mapi) fn outlook_sync_import_message_move_decodes_length_prefixed_gids() {
+    // Outlook 16.0.20131 request captured on 2026-07-17. [MS-OXCFXICS]
+    // section 2.2.3.2.4.4.1 encodes SourceFolderId and SourceMessageId as
+    // length-prefixed 22-byte GIDs, not as the 8-byte ROP ID wire shape.
+    let source_folder_id = 0x0000_0000_0010_0001;
+    let source_message_id = 0x0df8_974b_7f66_0001;
+    let golden = [
+        0x78, 0x00, 0x01, 0x16, 0x00, 0x00, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f,
+        0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x16,
+        0x00, 0x00, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb,
+        0x45, 0x1c, 0x8f, 0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x66, 0x15, 0x00, 0x00, 0x00, 0x14,
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57, 0x16, 0x00, 0x00, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a,
+        0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x77,
+        0x6d, 0x14, 0x00, 0x00, 0x00, 0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80,
+        0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
 
     let mut cursor = Cursor::new(&golden);
     let request = read_rop_request(&mut cursor).unwrap();
@@ -4947,11 +4939,15 @@ pub(in crate::mapi) fn sync_import_message_move_uses_length_prefixed_source_ids(
         RopId::from_u8(request.rop_id),
         Some(RopId::SynchronizationImportMessageMove)
     );
-    assert_eq!(
-        request.import_move(),
-        Some((source_folder_id, source_message_id))
-    );
     assert_eq!(cursor.remaining(), 0);
+    let import_move = request.import_move().expect("valid ImportMessageMove");
+    assert_eq!(import_move.source_folder_id, source_folder_id);
+    assert_eq!(import_move.source_message_id, source_message_id);
+    assert_eq!(import_move.destination_message_id, 0x0df8_974b_776d_0001);
+    assert_eq!(import_move.source_message_key.len(), 22);
+    assert_eq!(import_move.predecessor_change_list, &golden[59..80]);
+    assert_eq!(import_move.destination_message_key, &golden[84..106]);
+    assert_eq!(import_move.change_key, &golden[110..130]);
 
     let mut truncated = Cursor::new(&golden[..golden.len() - 1]);
     assert!(read_rop_request(&mut truncated).is_err());

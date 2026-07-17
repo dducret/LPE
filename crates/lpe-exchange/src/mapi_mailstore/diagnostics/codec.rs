@@ -194,15 +194,6 @@ pub(crate) fn decode_content_transfer_fai_debug_summary(
     let mut summary = ContentTransferFaiDebugSummary::default();
 
     while offset < bytes.len() {
-        if current_message.is_some()
-            && bytes
-                .get(offset..offset.saturating_add(4))
-                .is_some_and(|tail| tail == [0, 0, 0, 0])
-        {
-            offset += 4;
-            continue;
-        }
-
         let tag = read_debug_u32(bytes, offset)?;
         if content_debug_marker(tag) {
             match tag {

@@ -7,7 +7,10 @@ use crate::{
     CanonicalChangeCategory, Storage,
 };
 
-use super::{AccessibleEvent, MapiEventIdentityMove, MoveAccessibleEventToDeletedItemsResult};
+use super::{
+    AccessibleEvent, MapiEventIdentityMove, MapiEventImportedMoveIdentity,
+    MoveAccessibleEventToDeletedItemsResult,
+};
 
 const MAX_MAPI_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
 const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
@@ -26,6 +29,7 @@ impl Storage {
         &self,
         principal_account_id: Uuid,
         event_id: Uuid,
+        imported_identity: Option<MapiEventImportedMoveIdentity>,
     ) -> Result<MoveAccessibleEventToDeletedItemsResult> {
         let event = self
             .fetch_accessible_events_by_ids(principal_account_id, &[event_id])
@@ -142,8 +146,14 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        let identity_moves =
-            rekey_active_event_identities_in_tx(&mut tx, &tenant_id, event_id).await?;
+        let identity_moves = rekey_active_event_identities_in_tx(
+            &mut tx,
+            &tenant_id,
+            principal_account_id,
+            event_id,
+            imported_identity.as_ref(),
+        )
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -182,7 +192,9 @@ impl Storage {
 async fn rekey_active_event_identities_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &Uuid,
+    principal_account_id: Uuid,
     event_id: Uuid,
+    imported_identity: Option<&MapiEventImportedMoveIdentity>,
 ) -> Result<Vec<MapiEventIdentityMove>> {
     let identities = sqlx::query(
         r#"
@@ -208,6 +220,7 @@ async fn rekey_active_event_identities_in_tx(
     .fetch_all(&mut **tx)
     .await?;
     let mut moves = Vec::with_capacity(identities.len());
+    let mut imported_identity_applied = false;
     for identity in identities {
         let account_id = identity.get::<Uuid, _>("account_id");
         let old_mapi_object_id = checked_positive_u64(
@@ -222,15 +235,63 @@ async fn rekey_active_event_identities_in_tx(
         let old_change_key = identity.get::<Vec<u8>, _>("change_key");
         let old_instance_key = identity.get::<Vec<u8>, _>("instance_key");
         let predecessor_change_list = identity.get::<Vec<u8>, _>("predecessor_change_list");
-        let (replica_guid, global_counter) =
-            allocate_global_counter_in_tx(tx, tenant_id, account_id).await?;
-        let new_mapi_object_id = mapi_store_id(global_counter);
-        let new_source_key = mapi_change_key(replica_guid, global_counter);
-        let new_change_number = global_counter;
-        let new_change_key = new_source_key.clone();
-        let new_instance_key = new_source_key.clone();
-        let new_predecessor_change_list =
-            merge_predecessor_change_list(&predecessor_change_list, &new_change_key)?;
+        let principal_imported_identity =
+            imported_identity.filter(|_| account_id == principal_account_id);
+        let imported_destination_counter = principal_imported_identity
+            .map(imported_move_destination_global_counter)
+            .transpose()?;
+        let minimum_change_number = imported_destination_counter
+            .and_then(|counter| counter.checked_add(1))
+            .unwrap_or(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER);
+        let (replica_guid, allocated_change_number) =
+            allocate_global_counter_in_tx(tx, tenant_id, account_id, minimum_change_number).await?;
+        let (
+            new_global_counter,
+            new_mapi_object_id,
+            new_source_key,
+            new_change_key,
+            new_instance_key,
+            new_predecessor_change_list,
+        ) = if let (Some(imported), Some(destination_counter)) =
+            (principal_imported_identity, imported_destination_counter)
+        {
+            if old_source_key != imported.expected_source_key {
+                bail!("active MAPI Event SourceKey changed before the imported move");
+            }
+            if imported.destination_source_key.get(..16) != Some(replica_guid.as_bytes().as_slice())
+            {
+                bail!("imported Event move destination must use the local mailbox replica GUID");
+            }
+            let normalized_predecessors = merge_predecessor_change_list(
+                &imported.predecessor_change_list,
+                &imported.change_key,
+            )?;
+            if normalized_predecessors != imported.predecessor_change_list {
+                bail!("imported Event move PCL must canonically contain its ChangeKey");
+            }
+            imported_identity_applied = true;
+            (
+                destination_counter,
+                mapi_store_id(destination_counter),
+                imported.destination_source_key.clone(),
+                imported.change_key.clone(),
+                imported.destination_source_key.clone(),
+                imported.predecessor_change_list.clone(),
+            )
+        } else {
+            let new_source_key = mapi_change_key(replica_guid, allocated_change_number);
+            let new_predecessor_change_list =
+                merge_predecessor_change_list(&predecessor_change_list, &new_source_key)?;
+            (
+                allocated_change_number,
+                mapi_store_id(allocated_change_number),
+                new_source_key.clone(),
+                new_source_key.clone(),
+                new_source_key,
+                new_predecessor_change_list,
+            )
+        };
+        let new_change_number = allocated_change_number;
 
         sqlx::query(
             r#"
@@ -281,8 +342,8 @@ async fn rekey_active_event_identities_in_tx(
                 source_key = $7,
                 change_key = $8,
                 instance_key = $7,
-                mapi_change_number = $5,
-                predecessor_change_list = $9,
+                mapi_change_number = $9,
+                predecessor_change_list = $10,
                 deleted_at = NULL,
                 created_at = NOW(),
                 updated_at = NOW()
@@ -298,10 +359,11 @@ async fn rekey_active_event_identities_in_tx(
         .bind(account_id)
         .bind(event_id)
         .bind(old_mapi_object_id as i64)
-        .bind(global_counter as i64)
+        .bind(new_global_counter as i64)
         .bind(new_mapi_object_id as i64)
         .bind(&new_source_key)
         .bind(&new_change_key)
+        .bind(new_change_number as i64)
         .bind(&new_predecessor_change_list)
         .execute(&mut **tx)
         .await?;
@@ -320,13 +382,37 @@ async fn rekey_active_event_identities_in_tx(
             new_change_key,
         });
     }
+    if imported_identity.is_some() && !imported_identity_applied {
+        bail!("principal active MAPI Event identity was not found for the imported move");
+    }
     Ok(moves)
+}
+
+fn imported_move_destination_global_counter(
+    identity: &MapiEventImportedMoveIdentity,
+) -> Result<u64> {
+    if identity.expected_source_key.len() != 22 {
+        bail!("imported Event move source GID must be exactly 22 bytes");
+    }
+    if identity.destination_source_key.len() != 22 {
+        bail!("imported Event move destination GID must be exactly 22 bytes");
+    }
+    let mut counter_bytes = [0u8; 8];
+    counter_bytes[2..].copy_from_slice(&identity.destination_source_key[16..]);
+    let global_counter = u64::from_be_bytes(counter_bytes);
+    if !(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER..FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .contains(&global_counter)
+    {
+        bail!("imported Event move destination GLOBCNT is outside the dynamic local range");
+    }
+    Ok(global_counter)
 }
 
 async fn allocate_global_counter_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &Uuid,
     account_id: Uuid,
+    minimum_global_counter: u64,
 ) -> Result<(Uuid, u64)> {
     sqlx::query(
         r#"
@@ -356,7 +442,7 @@ async fn allocate_global_counter_in_tx(
     )
     .bind(tenant_id)
     .bind(account_id)
-    .bind(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER as i64)
+    .bind(minimum_global_counter as i64)
     .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
     .execute(&mut **tx)
     .await?;
@@ -374,7 +460,7 @@ async fn allocate_global_counter_in_tx(
     )
     .bind(tenant_id)
     .bind(account_id)
-    .bind(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER as i64)
+    .bind(minimum_global_counter as i64)
     .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
     .fetch_optional(&mut **tx)
     .await?

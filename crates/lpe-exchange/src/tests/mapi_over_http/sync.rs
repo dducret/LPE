@@ -7920,6 +7920,1029 @@ async fn mapi_over_http_reads_empty_associated_config_body_stream() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
+    // Outlook trace 202607171012, requests :257 and :261.
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and 3.3.4.3.3.2.2.1 require the
+    // ImportMessageChange -> SetProperties -> SaveChangesMessage upload sequence.
+    // [MS-OXCROPS] section 2.2.6.3 and [MS-OXCMSG] section 3.2.5.3 require a
+    // successful save to commit the Message object and return its imported MID.
+    let imported_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_7f66);
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let change_xid = [
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let mut predecessor_change_list = vec![change_xid.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_xid);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let emails = store.emails.clone();
+    let imported_emails = store.imported_emails.clone();
+    let mapi_identities = store.mapi_identities.clone();
+    let mapi_event_identity_versions = store.mapi_event_identity_versions.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7e, 0x02, 0, 0, 0, 0]
+    ));
+    assert_ne!(collector_handles[2], u32::MAX);
+
+    // Exact uncompressed ROP sequence from request :257, excluding its handle table.
+    let import_rops = [
+        0x75, 0x00, 0x00, 0x02, 0x01, 0x96, 0x67, 0x00, 0x00, 0x00, 0x00, 0x77, 0x00, 0x00, 0x75,
+        0x00, 0x00, 0x02, 0x01, 0xda, 0x67, 0x1e, 0x00, 0x00, 0x00, 0x76, 0x00, 0x00, 0x1e, 0x00,
+        0x00, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45,
+        0x1c, 0x8f, 0x10, 0x52, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x63, 0x0d, 0xf8, 0x97, 0x4b, 0x7f,
+        0x65, 0x00, 0x77, 0x00, 0x00, 0x75, 0x00, 0x00, 0x02, 0x01, 0xd2, 0x67, 0x00, 0x00, 0x00,
+        0x00, 0x77, 0x00, 0x00, 0x72, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x02, 0x01, 0xe0, 0x65,
+        0x16, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45,
+        0x1c, 0x8f, 0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x66, 0x40, 0x00, 0x08, 0x30, 0x00, 0x49,
+        0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01, 0x02, 0x01, 0xe2, 0x65, 0x14, 0x00, 0x67, 0x45, 0x48,
+        0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00,
+        0x04, 0x57, 0x02, 0x01, 0xe3, 0x65, 0x15, 0x00, 0x14, 0x67, 0x45, 0x48, 0x20, 0x69, 0x60,
+        0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]),
+        "RopSynchronizationImportMessageChange 0x72 failed: {import_response:02x?}"
+    );
+    assert_ne!(import_handles[1], u32::MAX);
+
+    let mut appointment_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Appointment",
+    );
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        PID_TAG_SUBJECT_W,
+        "Delete 20:52 - été",
+    );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        0x0060_0040,
+        test_filetime("2026-07-16", "20:52"),
+    );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        0x0061_0040,
+        test_filetime("2026-07-16", "21:22"),
+    );
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 4, &appointment_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&save_response, &[0x0a, 0x01, 0, 0, 0, 0]));
+    let mut expected_save = vec![0x0c, 0x01, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(imported_message_id));
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "RopSaveChangesMessage 0x0c must commit the imported Calendar MID; expected {expected_save:02x?}, got {save_response:02x?}"
+    );
+
+    let events = events.lock().unwrap();
+    assert_eq!(
+        events.len(),
+        1,
+        "one canonical Calendar event must be saved"
+    );
+    assert_eq!(events[0].title, "Delete 20:52 - été");
+    let event_id = events[0].id;
+    drop(events);
+    assert!(emails.lock().unwrap().is_empty());
+    assert!(imported_emails.lock().unwrap().is_empty());
+    let canonical_message_id = mapi_identities.lock().unwrap()[&event_id];
+    assert_eq!(canonical_message_id, imported_message_id);
+    assert_eq!(
+        crate::mapi::identity::source_key_for_object_id(canonical_message_id),
+        imported_source_key
+    );
+    let canonical_version = mapi_event_identity_versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(canonical_version.change_key, change_xid);
+    assert_eq!(
+        canonical_version.predecessor_change_list,
+        predecessor_change_list
+    );
+
+    // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: the upload
+    // collector acknowledges the imported MID with the fresh server CN. A
+    // Calendar content save is neither an FAI nor a read-state mutation.
+    let mut transfer_state_rops = vec![
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4e, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ];
+    transfer_state_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &transfer_state_rops,
+                &[1, u32::MAX, collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let transfer_state = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&transfer_state, &[0x82, 0x03, 0, 0, 0, 0]));
+    let imported_message_counter = mapi_mailstore::change_number_for_store_id(imported_message_id);
+    assert_ne!(
+        imported_message_counter, canonical_version.change_number,
+        "the imported MID and fresh server CN exercise distinct ICS sets"
+    );
+    assert_content_final_state_records_normal_change_counters(
+        &transfer_state,
+        &[imported_message_counter],
+        &[canonical_version.change_number],
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_replays_outlook_calendar_import_move_to_deleted_items() {
+    // Outlook trace 202607171012, request :268. [MS-OXCFXICS] sections
+    // 2.2.3.2.4.4.1, 3.2.5.9.4.4, and 3.3.4.3.3.2.1.1 define the five
+    // length-prefixed fields used to import the Calendar move into Deleted Items.
+    let source_folder_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    ];
+    let source_message_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x66,
+    ];
+    let change_xid = [
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let mut predecessor_change_list = vec![change_xid.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_xid);
+    let destination_message_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x77, 0x6d,
+    ];
+    let source_message_id =
+        crate::mapi::identity::object_id_from_source_key(&source_message_gid).unwrap();
+    let destination_message_id =
+        crate::mapi::identity::object_id_from_source_key(&destination_message_gid).unwrap();
+    assert_eq!(
+        crate::mapi::identity::object_id_from_source_key(&source_folder_gid),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("20260716-2052-4078-8000-000000000268").unwrap();
+    let trash_id = Uuid::parse_str("77777777-7777-4777-8777-777777777268").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-16".to_string(),
+            time: "20:52".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Delete 20:52 - été".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        event_versions: Arc::new(Mutex::new(HashMap::from([(event_id, 1)]))),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, source_message_id)]))),
+        mapi_identity_source_keys: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            source_message_gid.to_vec(),
+        )]))),
+        mapi_event_identity_versions: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            MapiEventVersion {
+                event_id,
+                canonical_modseq: 1,
+                change_number: mapi_mailstore::change_number_for_store_id(source_message_id),
+                change_key: change_xid.to_vec(),
+                predecessor_change_list: predecessor_change_list.clone(),
+                updated_at: "2026-07-16T20:52:00Z".to_string(),
+            },
+        )]))),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let deleted_calendar_events = store.deleted_calendar_events.clone();
+    let emails = store.emails.clone();
+    let imported_emails = store.imported_emails.clone();
+    let moved_emails = store.moved_emails.clone();
+    let mapi_identities = store.mapi_identities.clone();
+    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
+    let mapi_event_identity_versions = store.mapi_event_identity_versions.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7e, 0x02, 0, 0, 0, 0]
+    ));
+    assert_ne!(collector_handles[2], u32::MAX);
+
+    // Exact five length-prefixed fields from Outlook request :268. The input
+    // handle index is also kept at 1, as observed in the captured ROP.
+    let mut import_move_rops = vec![0x78, 0x00, 0x01];
+    for field in [
+        source_folder_gid.as_slice(),
+        source_message_gid.as_slice(),
+        predecessor_change_list.as_slice(),
+        destination_message_gid.as_slice(),
+        change_xid.as_slice(),
+    ] {
+        import_move_rops.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        import_move_rops.extend_from_slice(field);
+    }
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_move_rops, &[1, collector_handles[2]])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x78, 0x01, 0, 0, 0, 0]),
+        "RopSynchronizationImportMessageMove 0x78 failed: {response_rops:02x?}"
+    );
+
+    assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+    let deleted = deleted_calendar_events.lock().unwrap();
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].id, event_id);
+    assert_eq!(deleted[0].title, "Delete 20:52 - été");
+    drop(deleted);
+    assert!(emails.lock().unwrap().is_empty());
+    assert!(imported_emails.lock().unwrap().is_empty());
+    assert!(moved_emails.lock().unwrap().is_empty());
+    assert_eq!(
+        mapi_identities.lock().unwrap()[&event_id],
+        destination_message_id
+    );
+    assert_eq!(
+        mapi_identity_source_keys.lock().unwrap()[&event_id],
+        destination_message_gid
+    );
+    let destination_version = mapi_event_identity_versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(destination_version.change_key, change_xid);
+    assert_eq!(
+        destination_version.predecessor_change_list,
+        predecessor_change_list
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_event() {
+    // Outlook first imports the inter-folder move into Deleted Items, then can
+    // upload another version against the destination MID. [MS-OXCFXICS]
+    // section 3.3.4.3.3.2.1.1 defines the successful 0x78 transition, while
+    // section 3.1.5.3 requires the destination GID to remain stable and the
+    // imported CK/PCL to coexist with a newly allocated server-internal CN.
+    let source_folder_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    ];
+    let source_message_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x66,
+    ];
+    let destination_message_gid = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x77, 0x6d,
+    ];
+    let move_change_xid = [
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let mut move_predecessor_change_list = vec![move_change_xid.len() as u8];
+    move_predecessor_change_list.extend_from_slice(&move_change_xid);
+    let update_change_xid = [
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x58,
+    ];
+    let mut update_predecessor_change_list = vec![update_change_xid.len() as u8];
+    update_predecessor_change_list.extend_from_slice(&update_change_xid);
+    let source_message_id =
+        crate::mapi::identity::object_id_from_source_key(&source_message_gid).unwrap();
+    let destination_message_id =
+        crate::mapi::identity::object_id_from_source_key(&destination_message_gid).unwrap();
+    assert_eq!(
+        crate::mapi::identity::object_id_from_source_key(&source_folder_gid),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("20260716-2052-4078-8000-000000000272").unwrap();
+    let trash_id = Uuid::parse_str("77777777-7777-4777-8777-777777777272").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-16".to_string(),
+            time: "20:52".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Delete 20:52 - été".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        event_versions: Arc::new(Mutex::new(HashMap::from([(event_id, 1)]))),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, source_message_id)]))),
+        mapi_identity_source_keys: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            source_message_gid.to_vec(),
+        )]))),
+        mapi_event_identity_versions: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            MapiEventVersion {
+                event_id,
+                canonical_modseq: 1,
+                change_number: mapi_mailstore::change_number_for_store_id(source_message_id),
+                change_key: move_change_xid.to_vec(),
+                predecessor_change_list: move_predecessor_change_list.clone(),
+                updated_at: "2026-07-16T20:52:00Z".to_string(),
+            },
+        )]))),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let deleted_calendar_events = store.deleted_calendar_events.clone();
+    let emails = store.emails.clone();
+    let imported_emails = store.imported_emails.clone();
+    let moved_emails = store.moved_emails.clone();
+    let mapi_identities = store.mapi_identities.clone();
+    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
+    let mapi_event_identity_versions = store.mapi_event_identity_versions.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7e, 0x02, 0, 0, 0, 0]
+    ));
+    assert_ne!(collector_handles[2], u32::MAX);
+
+    let mut import_move_rops = vec![0x78, 0x00, 0x01];
+    for field in [
+        source_folder_gid.as_slice(),
+        source_message_gid.as_slice(),
+        move_predecessor_change_list.as_slice(),
+        destination_message_gid.as_slice(),
+        move_change_xid.as_slice(),
+    ] {
+        import_move_rops.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        import_move_rops.extend_from_slice(field);
+    }
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_move_rops, &[1, collector_handles[2]])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let move_response = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&move_response, &[0x78, 0x01, 0, 0, 0, 0]),
+        "RopSynchronizationImportMessageMove 0x78 failed: {move_response:02x?}"
+    );
+    let moved_change_number = mapi_event_identity_versions.lock().unwrap()[&event_id].change_number;
+
+    let mut import_values = Vec::new();
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_SOURCE_KEY,
+        &destination_message_gid,
+    );
+    append_mapi_i64_property(
+        &mut import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-17", "08:35"),
+    );
+    append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, &update_change_xid);
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &update_predecessor_change_list,
+    );
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Appointment",
+    );
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_SUBJECT_W,
+        "Deleted event modified after move",
+    );
+    append_mapi_i64_property(
+        &mut update_values,
+        0x0060_0040,
+        test_filetime("2026-07-17", "08:35"),
+    );
+    append_mapi_i64_property(
+        &mut update_values,
+        0x0061_0040,
+        test_filetime("2026-07-17", "09:05"),
+    );
+    let mut update_rops = vec![
+        0x72, 0x00, 0x01, 0x02, // RopSynchronizationImportMessageChange.
+        0x00, // ImportFlag.
+    ];
+    update_rops.extend_from_slice(&4u16.to_le_bytes());
+    update_rops.extend_from_slice(&import_values);
+    append_rop_set_properties(&mut update_rops, 2, 4, &update_values);
+    append_rop_save_changes_message_with_flags(&mut update_rops, 2, 2, 0x08);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &update_rops,
+                &[1, collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let update_response = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&update_response, &[0x72, 0x02, 0, 0, 0, 0]),
+        "RopSynchronizationImportMessageChange 0x72 failed: {update_response:02x?}"
+    );
+    assert!(contains_bytes(&update_response, &[0x0a, 0x02, 0, 0, 0, 0]));
+    let mut expected_save = vec![0x0c, 0x02, 0, 0, 0, 0, 0x02];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(destination_message_id));
+    assert!(
+        contains_bytes(&update_response, &expected_save),
+        "RopSaveChangesMessage 0x0c must keep the destination Calendar MID; expected {expected_save:02x?}, got {update_response:02x?}"
+    );
+
+    assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+    assert!(
+        emails.lock().unwrap().is_empty(),
+        "updating a deleted Calendar event must not create a parallel generic email"
+    );
+    assert!(imported_emails.lock().unwrap().is_empty());
+    assert!(moved_emails.lock().unwrap().is_empty());
+    let deleted = deleted_calendar_events.lock().unwrap();
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].id, event_id);
+    assert_eq!(deleted[0].title, "Deleted event modified after move");
+    assert_eq!(deleted[0].date, "2026-07-17");
+    assert_eq!(deleted[0].time, "08:35");
+    assert_eq!(deleted[0].duration_minutes, 30);
+    drop(deleted);
+    assert_eq!(
+        mapi_identities.lock().unwrap()[&event_id],
+        destination_message_id
+    );
+    assert_eq!(
+        mapi_identity_source_keys.lock().unwrap()[&event_id],
+        destination_message_gid
+    );
+    let updated_version = mapi_event_identity_versions.lock().unwrap()[&event_id].clone();
+    assert!(
+        updated_version.change_number > moved_change_number,
+        "the server must allocate a fresh internal CN for the imported update"
+    );
+    assert_eq!(updated_version.change_key, update_change_xid);
+    assert_eq!(
+        updated_version.predecessor_change_list,
+        update_predecessor_change_list
+    );
+}
+
+fn calendar_sync_conflict_xid(replica_byte: u8, counter: u64) -> Vec<u8> {
+    let mut xid = vec![replica_byte; 16];
+    xid.extend_from_slice(&counter.to_be_bytes()[2..]);
+    xid
+}
+
+fn calendar_sync_conflict_pcl(xids: &[&[u8]]) -> Vec<u8> {
+    let mut pcl = Vec::new();
+    for xid in xids {
+        pcl.push(xid.len() as u8);
+        pcl.extend_from_slice(xid);
+    }
+    pcl
+}
+
+fn calendar_sync_conflict_store(
+    event_id: Uuid,
+    message_id: u64,
+    change_key: Vec<u8>,
+    predecessor_change_list: Vec<u8>,
+    updated_at: &str,
+) -> FakeStore {
+    let account = FakeStore::account();
+    FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-17".to_string(),
+            time: "10:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Server version".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        event_versions: Arc::new(Mutex::new(HashMap::from([(event_id, 1)]))),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, message_id)]))),
+        mapi_identity_source_keys: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            crate::mapi::identity::source_key_for_object_id(message_id),
+        )]))),
+        mapi_event_identity_versions: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            MapiEventVersion {
+                event_id,
+                canonical_modseq: 1,
+                change_number: mapi_mailstore::change_number_for_store_id(message_id),
+                change_key,
+                predecessor_change_list,
+                updated_at: updated_at.to_string(),
+            },
+        )]))),
+        ..Default::default()
+    }
+}
+
+async fn execute_existing_calendar_sync_import(
+    store: FakeStore,
+    source_key: &[u8],
+    last_modification_time: i64,
+    change_key: &[u8],
+    predecessor_change_list: &[u8],
+    import_flag: u8,
+    subject: Option<&str>,
+    request_transfer_state: bool,
+) -> Vec<u8> {
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (_, collector_handles) = response_rops_and_handles_from_execute_body(&body);
+
+    let mut import_values = Vec::new();
+    append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, source_key);
+    append_mapi_i64_property(
+        &mut import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        last_modification_time,
+    );
+    append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, change_key);
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        predecessor_change_list,
+    );
+    let mut rops = vec![
+        0x72,
+        0x00,
+        0x01,
+        0x02, // RopSynchronizationImportMessageChange.
+        import_flag,
+    ];
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(&import_values);
+    if let Some(subject) = subject {
+        let mut update_values = Vec::new();
+        append_mapi_utf16_property(&mut update_values, PID_TAG_SUBJECT_W, subject);
+        append_rop_set_properties(&mut rops, 2, 1, &update_values);
+        append_rop_save_changes_message_with_flags(&mut rops, 2, 2, 0x08);
+    }
+    if request_transfer_state {
+        rops.extend_from_slice(&[
+            0x82, 0x00, 0x01, 0x03, // RopSynchronizationGetTransferState.
+            0x4e, 0x00, 0x03, // RopFastTransferSourceGetBuffer.
+        ]);
+        rops.extend_from_slice(&4096u16.to_le_bytes());
+    }
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut request_handles = vec![1, collector_handles[2], u32::MAX];
+    if request_transfer_state {
+        request_handles.push(u32::MAX);
+    }
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &request_handles)),
+        )
+        .await
+        .unwrap();
+    response_rops_from_execute_response(response).await
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save() {
+    // [MS-OXCFXICS] section 3.1.5.6.1: when the server PCL includes the
+    // client PCL, the imported version is older and MUST be ignored.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000301").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8031);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let client_change_key = calendar_sync_conflict_xid(0x31, 10);
+    let server_change_key = calendar_sync_conflict_xid(0x31, 11);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key.clone(),
+        server_pcl.clone(),
+        "2026-07-17T10:00:00Z",
+    );
+    let events = store.events.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &source_key,
+        test_filetime("2026-07-17", "09:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some("Older client version"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].title, "Server version");
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(version.change_key, server_change_key);
+    assert_eq!(version.predecessor_change_list, server_pcl);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict() {
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.2 and 3.2.5.9.4.2 require
+    // SyncConflict (0x80040802) and no imported data when FailOnConflict is set.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000302").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8032);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let server_change_key = calendar_sync_conflict_xid(0x11, 5);
+    let client_change_key = calendar_sync_conflict_xid(0x22, 7);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key,
+        server_pcl,
+        "2026-07-17T10:00:00Z",
+    );
+    let events = store.events.clone();
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &source_key,
+        test_filetime("2026-07-17", "11:00"),
+        &client_change_key,
+        &client_pcl,
+        0x40,
+        None,
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(
+        &response,
+        &[0x72, 0x02, 0x02, 0x08, 0x04, 0x80]
+    ));
+    assert_eq!(events.lock().unwrap()[0].title, "Server version");
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists() {
+    // [MS-OXCFXICS] sections 3.1.5.6.1, 3.1.5.6.2 and 3.2.5.9.4.2:
+    // an accepted conflict resolves to a PCL that succeeds both replicas.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000303").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8033);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let server_change_key = calendar_sync_conflict_xid(0x11, 5);
+    let client_change_key = calendar_sync_conflict_xid(0x22, 7);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let merged_pcl = calendar_sync_conflict_pcl(&[&server_change_key, &client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key,
+        server_pcl,
+        "2026-07-17T10:00:00Z",
+    );
+    let events = store.events.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+    let previous_change_number = versions.lock().unwrap()[&event_id].change_number;
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &source_key,
+        test_filetime("2026-07-17", "11:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some("Resolved client version"),
+        true,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].title, "Resolved client version");
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert!(version.change_number > previous_change_number);
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(version.predecessor_change_list, merged_pcl);
+    // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: an Event content
+    // update advances the normal CNSET, not the FAI or read-state CNSET.
+    assert_content_final_state_records_normal_change_counters(
+        &response,
+        &[mapi_mailstore::change_number_for_store_id(message_id)],
+        &[version.change_number],
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_content() {
+    // [MS-OXCFXICS] sections 3.1.5.6.2 and 3.1.5.6.2.2: LWW can keep
+    // the server contents, but the resolved PCL still succeeds both versions.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000304").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8034);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let server_change_key = calendar_sync_conflict_xid(0x11, 5);
+    let client_change_key = calendar_sync_conflict_xid(0x22, 7);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let merged_pcl = calendar_sync_conflict_pcl(&[&server_change_key, &client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key.clone(),
+        server_pcl,
+        "2026-07-17T10:00:00.000000Z",
+    );
+    let events = store.events.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+    let previous_change_number = versions.lock().unwrap()[&event_id].change_number;
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &source_key,
+        test_filetime("2026-07-17", "09:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some("Losing client version"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].title, "Server version");
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert!(version.change_number > previous_change_number);
+    assert_eq!(version.change_key, server_change_key);
+    assert_eq!(version.predecessor_change_list, merged_pcl);
+}
+
+#[tokio::test]
 async fn mapi_over_http_save_message_acknowledges_foreign_trash_sync_upload_without_persisting() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let imported_source_key =
@@ -8580,6 +9603,20 @@ async fn mapi_over_http_sync_import_delete_from_trash_child_hard_deletes() {
 #[tokio::test]
 async fn mapi_over_http_sync_import_move_uses_canonical_store() {
     let message_id = "44444444-4444-4444-4444-444444444444";
+    let source_folder_id = test_mapi_folder_id(5);
+    let source_message_id = test_mapi_message_id(message_id);
+    let destination_message_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x178,
+    );
+    let source_folder_gid = crate::mapi::identity::source_key_for_object_id(source_folder_id);
+    let source_message_gid = crate::mapi::identity::source_key_for_object_id(source_message_id);
+    let destination_message_gid =
+        crate::mapi::identity::source_key_for_object_id(destination_message_id);
+    let destination_change_number =
+        mapi_mailstore::change_number_for_store_id(destination_message_id);
+    let predecessor_change_list =
+        mapi_mailstore::predecessor_change_list(destination_change_number);
+    let change_xid = mapi_mailstore::change_key_for_change_number(destination_change_number);
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let archive = FakeStore::mailbox("66666666-6666-6666-6666-666666666666", "archive", "Archive");
     let store = FakeStore {
@@ -8619,13 +9656,19 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
         0x78, 0x00, 0x02, // RopSynchronizationImportMessageMove
     ]);
-    rops.extend_from_slice(&8u32.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.extend_from_slice(&8u32.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
+    // [MS-OXCFXICS] section 2.2.3.2.4.4.1: SourceFolderId,
+    // SourceMessageId, PCL, DestinationMessageId, and ChangeNumber are five
+    // non-empty length-prefixed fields. The first, second, and fourth are GIDs.
+    for field in [
+        source_folder_gid.as_slice(),
+        source_message_gid.as_slice(),
+        predecessor_change_list.as_slice(),
+        destination_message_gid.as_slice(),
+        change_xid.as_slice(),
+    ] {
+        rops.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        rops.extend_from_slice(field);
+    }
     rops.extend_from_slice(&[
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer

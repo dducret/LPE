@@ -12,6 +12,17 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     folder_id: u64,
     properties: HashMap<u32, MapiValue>,
 ) {
+    let imported_identity = match imported_event_identity_from_properties(&properties) {
+        Ok(identity) => identity,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return;
+        }
+    };
     let attachment_changes = session
         .pending_event_attachment_transactions
         .get(&handle)
@@ -61,6 +72,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
         principal_account_id: principal.account_id,
         collection_id,
         event: input,
+        imported_identity,
         reminder: MapiEventReminderPatch {
             reminder_set,
             reminder_at,
@@ -94,6 +106,17 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             );
             clear_event_attachment_transaction(session, handle);
             session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
+            // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: after the
+            // imported Event is persisted, acknowledge its MID and fresh
+            // server CN in the content upload collector transfer state.
+            record_sync_upload_content_change(
+                session,
+                folder_id,
+                event_id,
+                version.change_number,
+                false,
+                false,
+            );
             append_save_changes_message_response(
                 session,
                 responses,
@@ -184,6 +207,7 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
         }
     };
     let Some(mut commit_input) = commit_input else {
+        clear_event_attachment_transaction(session, handle);
         remember_saved_event_handle(
             session,
             handle,
@@ -202,7 +226,9 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
         );
         return;
     };
-    commit_input.attachment_changes = attachment_changes;
+    if transaction.import_disposition == MapiEventImportDisposition::Apply {
+        commit_input.attachment_changes = attachment_changes;
+    }
     let event_input = commit_input.event.clone();
     match store.commit_mapi_event_update(commit_input).await {
         Ok(MapiEventCommitOutcome::Saved(saved)) => {
@@ -226,13 +252,15 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
             );
             clear_event_attachment_transaction(session, handle);
             session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
+            // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: saving Event
+            // content changes the normal CNSET, not the read-state CNSET.
             record_sync_upload_content_change(
                 session,
                 folder_id,
                 event_id,
                 version.change_number,
                 false,
-                true,
+                false,
             );
             append_save_changes_message_response(
                 session,

@@ -16,6 +16,17 @@ pub(in crate::mapi) struct RopRequest {
     pub(in crate::mapi) payload: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct ImportMessageMove<'a> {
+    pub(in crate::mapi) source_folder_id: u64,
+    pub(in crate::mapi) source_message_id: u64,
+    pub(in crate::mapi) source_message_key: &'a [u8],
+    pub(in crate::mapi) predecessor_change_list: &'a [u8],
+    pub(in crate::mapi) destination_message_id: u64,
+    pub(in crate::mapi) destination_message_key: &'a [u8],
+    pub(in crate::mapi) change_key: &'a [u8],
+}
+
 impl RopRequest {
     pub(in crate::mapi) fn input_handle_index(&self) -> Option<u8> {
         self.input_handle_index
@@ -459,7 +470,7 @@ impl RopRequest {
             .collect()
     }
 
-    pub(in crate::mapi) fn import_move(&self) -> Option<(u64, u64)> {
+    pub(in crate::mapi) fn import_move(&self) -> Option<ImportMessageMove<'_>> {
         if !matches!(
             RopId::from_u8(self.rop_id),
             Some(RopId::SynchronizationImportMessageMove)
@@ -467,13 +478,30 @@ impl RopRequest {
             return None;
         }
         let mut cursor = Cursor::new(&self.payload);
-        let source_folder_id_size = cursor.read_u32().ok()? as usize;
-        let source_folder_id = cursor.read_bytes(source_folder_id_size).ok()?;
-        let source_folder_id = crate::mapi::identity::object_id_from_wire_id(source_folder_id)?;
-        let source_message_id_size = cursor.read_u32().ok()? as usize;
-        let source_message_id = cursor.read_bytes(source_message_id_size).ok()?;
-        let source_message_id = crate::mapi::identity::object_id_from_wire_id(source_message_id)?;
-        Some((source_folder_id, source_message_id))
+        let source_folder_key = read_nonempty_u32_prefixed_bytes(&mut cursor)?;
+        // [MS-OXCFXICS] section 2.2.3.2.4.4.1: these identifiers are GIDs,
+        // whose 22-byte shape matches a replica-scoped SourceKey.
+        let source_folder_id = crate::mapi::identity::object_id_from_source_key(source_folder_key)?;
+        let source_message_key = read_nonempty_u32_prefixed_bytes(&mut cursor)?;
+        let source_message_id =
+            crate::mapi::identity::object_id_from_source_key(source_message_key)?;
+        let predecessor_change_list = read_nonempty_u32_prefixed_bytes(&mut cursor)?;
+        let destination_message_key = read_nonempty_u32_prefixed_bytes(&mut cursor)?;
+        let destination_message_id =
+            crate::mapi::identity::object_id_from_source_key(destination_message_key)?;
+        let change_key = read_nonempty_u32_prefixed_bytes(&mut cursor)?;
+        if cursor.remaining() != 0 {
+            return None;
+        }
+        Some(ImportMessageMove {
+            source_folder_id,
+            source_message_id,
+            source_message_key,
+            predecessor_change_list,
+            destination_message_id,
+            destination_message_key,
+            change_key,
+        })
     }
 
     pub(in crate::mapi) fn import_read_state_changes(&self) -> Vec<(u64, bool)> {
@@ -1235,6 +1263,11 @@ impl RopRequest {
         }
         Ok(values)
     }
+}
+
+fn read_nonempty_u32_prefixed_bytes<'a>(cursor: &mut Cursor<'a>) -> Option<&'a [u8]> {
+    let size = cursor.read_u32().ok()? as usize;
+    (size != 0).then(|| cursor.read_bytes(size).ok()).flatten()
 }
 impl TypedRopRequest {
     pub(in crate::mapi) fn rop_id(&self) -> u8 {

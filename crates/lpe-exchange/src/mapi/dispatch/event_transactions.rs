@@ -20,6 +20,44 @@ const EVENT_REMINDER_PROPERTIES: &[u32] = &[
     PID_LID_REMINDER_DELTA_TAG,
 ];
 
+pub(super) fn imported_event_identity_from_properties(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<Option<MapiEventImportedIdentity>> {
+    let Some(source_key) = properties.get(&PID_TAG_SOURCE_KEY) else {
+        return Ok(None);
+    };
+    let MapiValue::Binary(source_key) = source_key else {
+        bail!("imported Event SourceKey is not binary");
+    };
+    if persistable_import_source_key_global_counter(source_key).is_none() {
+        bail!("imported Event SourceKey is outside the local dynamic identity range");
+    }
+    let change_key = match properties.get(&PID_TAG_CHANGE_KEY) {
+        Some(MapiValue::Binary(change_key)) => change_key.clone(),
+        _ => bail!("imported Event ChangeKey is missing or not binary"),
+    };
+    let predecessor_change_list = match properties.get(&PID_TAG_PREDECESSOR_CHANGE_LIST) {
+        Some(MapiValue::Binary(predecessor_change_list)) => predecessor_change_list.clone(),
+        _ => bail!("imported Event PCL is missing or not binary"),
+    };
+    Ok(Some(MapiEventImportedIdentity {
+        source_key: source_key.clone(),
+        change_key,
+        predecessor_change_list,
+    }))
+}
+
+pub(super) fn imported_event_last_modification_filetime(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<u64> {
+    let value = properties
+        .get(&PID_TAG_LAST_MODIFICATION_TIME)
+        .and_then(MapiValue::as_i64)
+        .ok_or_else(|| anyhow!("imported Event LastModificationTime is missing or invalid"))?;
+    u64::try_from(value)
+        .map_err(|_| anyhow!("imported Event LastModificationTime cannot be negative"))
+}
+
 pub(super) fn stage_event_property_values(
     session: &mut MapiSession,
     handle_slots: &[u32],
@@ -40,6 +78,9 @@ pub(super) fn stage_event_property_values(
         .ok_or_else(|| anyhow!("canonical MAPI calendar event was not found"))?;
     if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
         bail!("MAPI Event handle is not writable");
+    }
+    if transaction.import_disposition != MapiEventImportDisposition::Apply {
+        return Ok(Vec::new());
     }
 
     let values = values
@@ -298,6 +339,7 @@ fn event_property_is_server_managed(tag: u32) -> bool {
         tag,
         PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_SOURCE_KEY
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
@@ -353,6 +395,9 @@ pub(super) fn stage_event_property_deletions(
         .ok_or_else(|| anyhow!("canonical MAPI calendar event was not found"))?;
     if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
         bail!("MAPI Event handle is not writable");
+    }
+    if transaction.import_disposition != MapiEventImportDisposition::Apply {
+        return Ok(Vec::new());
     }
 
     let reminder = snapshot.reminder_for_source("calendar", event.canonical_id);
@@ -483,9 +528,17 @@ pub(super) fn staged_event_commit_input(
     reminder: Option<&lpe_storage::ClientReminder>,
     force_save: bool,
 ) -> Result<Option<MapiEventCommitInput>> {
-    let (property_values, reminder_set, mut reminder_at) = split_reminder_property_values(
-        transaction.pending_properties.clone().into_iter().collect(),
-    )?;
+    if transaction.import_disposition == MapiEventImportDisposition::IgnoreOlderOrSame {
+        return Ok(None);
+    }
+    let keep_server_content =
+        transaction.import_disposition == MapiEventImportDisposition::KeepServerContent;
+    let (property_values, reminder_set, mut reminder_at) =
+        split_reminder_property_values(if keep_server_content {
+            Vec::new()
+        } else {
+            transaction.pending_properties.clone().into_iter().collect()
+        })?;
     if reminder_set == Some(true) && reminder_at.is_none() {
         reminder_at = reminder.map(|reminder| reminder.reminder_at.clone());
     }
@@ -529,12 +582,16 @@ pub(super) fn staged_event_commit_input(
         })
         .collect::<Vec<_>>();
     custom_property_upserts.sort_by_key(|value| value.property_tag);
-    let mut custom_property_deletes = transaction
-        .deleted_properties
-        .iter()
-        .copied()
-        .filter(|tag| is_custom_property_tag(*tag))
-        .collect::<Vec<_>>();
+    let mut custom_property_deletes = if keep_server_content {
+        Vec::new()
+    } else {
+        transaction
+            .deleted_properties
+            .iter()
+            .copied()
+            .filter(|tag| is_custom_property_tag(*tag))
+            .collect::<Vec<_>>()
+    };
     custom_property_deletes.sort_unstable();
 
     let reminder = MapiEventReminderPatch {
@@ -551,6 +608,7 @@ pub(super) fn staged_event_commit_input(
         event_id: event.canonical_id,
         expected_modseq: transaction.base_modseq,
         force_save,
+        imported_identity: transaction.imported_identity.clone(),
         event: event_input,
         reminder,
         custom_property_upserts,

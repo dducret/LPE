@@ -69,7 +69,7 @@ impl Storage {
     }
 
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
-        self.move_accessible_event_to_deleted_items(account_id, event_id)
+        self.move_accessible_event_to_deleted_items(account_id, event_id, None)
             .await?;
         Ok(())
     }

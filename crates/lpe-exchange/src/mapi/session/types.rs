@@ -273,10 +273,19 @@ impl PartialEq for MapiSavedSearchFolderDefinition {
 
 impl Eq for MapiSavedSearchFolderDefinition {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::mapi) enum MapiEventImportDisposition {
+    Apply,
+    IgnoreOlderOrSame,
+    KeepServerContent,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiEventTransaction {
     pub(in crate::mapi) open_mode_flags: u8,
     pub(in crate::mapi) base_modseq: i64,
+    pub(in crate::mapi) import_disposition: MapiEventImportDisposition,
+    pub(in crate::mapi) imported_identity: Option<MapiEventImportedIdentity>,
     pub(in crate::mapi) pending_properties: HashMap<u32, MapiValue>,
     pub(in crate::mapi) deleted_properties: HashSet<u32>,
 }
@@ -286,6 +295,8 @@ impl MapiEventTransaction {
         Self {
             open_mode_flags,
             base_modseq,
+            import_disposition: MapiEventImportDisposition::Apply,
+            imported_identity: None,
             pending_properties: HashMap::new(),
             deleted_properties: HashSet::new(),
         }

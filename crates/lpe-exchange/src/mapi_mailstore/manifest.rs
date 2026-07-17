@@ -248,26 +248,39 @@ pub(super) fn special_message_property_is_sync_identity(property_tag: u32) -> bo
 }
 
 pub(crate) fn filetime_from_rfc3339_utc(value: &str) -> u64 {
-    parse_rfc3339_utc_seconds(value)
-        .map(windows_filetime_from_signed_unix_seconds)
-        .unwrap_or_default()
+    parse_rfc3339_utc_filetime(value).unwrap_or_default()
 }
 
 pub(crate) fn filetime_from_change_number(change_number: u64) -> u64 {
     FILETIME_2026_01_01 + (change_number % 31_536_000) * WINDOWS_FILETIME_TICKS_PER_SECOND
 }
 
-fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
+fn parse_rfc3339_utc_filetime(value: &str) -> Option<u64> {
     let bytes = value.as_bytes();
-    if bytes.len() < 20 || bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+    {
         return None;
     }
-    if bytes.get(10) != Some(&b'T') || bytes.get(13) != Some(&b':') {
-        return None;
-    }
-    if bytes.get(16) != Some(&b':') || bytes.get(19) != Some(&b'Z') {
-        return None;
-    }
+    let fractional_ticks = match bytes.get(19..) {
+        Some(b"Z") => 0,
+        Some(suffix)
+            if suffix.first() == Some(&b'.')
+                && suffix.last() == Some(&b'Z')
+                && (3..=11).contains(&suffix.len()) =>
+        {
+            let fraction = suffix.get(1..suffix.len() - 1)?;
+            parse_digits(fraction)?;
+            let retained_precision = fraction.len().min(7);
+            let retained_digits = parse_digits(fraction.get(..retained_precision)?)? as u64;
+            retained_digits.checked_mul(10u64.pow(7u32.checked_sub(retained_precision as u32)?))?
+        }
+        _ => return None,
+    };
     let year = parse_digits(bytes.get(0..4)?)? as i32;
     let month = parse_digits(bytes.get(5..7)?)? as i32;
     let day = parse_digits(bytes.get(8..10)?)? as i32;
@@ -275,19 +288,28 @@ fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
     let minute = parse_digits(bytes.get(14..16)?)? as i64;
     let second = parse_digits(bytes.get(17..19)?)? as i64;
     if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
+        || !(1..=days_in_month(year, month)?).contains(&day)
         || hour > 23
         || minute > 59
         || second > 60
     {
         return None;
     }
-    Some(
-        days_from_civil(i64::from(year), i64::from(month), i64::from(day)) * 86_400
-            + hour * 3_600
-            + minute * 60
-            + second,
-    )
+    let unix_seconds = days_from_civil(i64::from(year), i64::from(month), i64::from(day)) * 86_400
+        + hour * 3_600
+        + minute * 60
+        + second;
+    windows_filetime_from_signed_unix_seconds(unix_seconds).checked_add(fractional_ticks)
+}
+
+fn days_in_month(year: i32, month: i32) -> Option<i32> {
+    Some(match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        _ => return None,
+    })
 }
 
 fn parse_digits(bytes: &[u8]) -> Option<u32> {
@@ -970,8 +992,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             // to canonical mail and must not be reduced to PidTagHasAttachments.
             write_fast_transfer_attachments(&mut buffer, attachments);
         }
-        buffer.extend_from_slice(&0u16.to_le_bytes());
-        buffer.extend_from_slice(&0u16.to_le_bytes());
     }
 
     if !deleted_message_ids.is_empty() {

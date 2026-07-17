@@ -172,7 +172,7 @@ async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from
         .unwrap_or(0);
 
     let moved = storage
-        .move_accessible_event_to_deleted_items(account_id, event_id)
+        .move_accessible_event_to_deleted_items(account_id, event_id, None)
         .await?;
     let identity = moved.principal_identity.expect("owner Event move identity");
     assert_eq!(identity.old_mapi_object_id, old_message_id);

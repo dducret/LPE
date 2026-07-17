@@ -162,6 +162,129 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         output_handles.push(handle);
         return;
     }
+    if message_id != 0 {
+        if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
+            let properties = property_values.into_iter().collect::<HashMap<_, _>>();
+            let mut imported_identity = match imported_event_identity_from_properties(&properties) {
+                Ok(Some(identity)) => identity,
+                Ok(None) | Err(_) => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x72,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    return;
+                }
+            };
+            let imported_last_modification_time =
+                match imported_event_last_modification_filetime(&properties) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
+            if imported_identity.source_key != event.source_key {
+                responses.extend_from_slice(&rop_error_response(
+                    0x72,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+            let relation = match sync_import_version_relation(
+                &imported_identity.predecessor_change_list,
+                &event.version.predecessor_change_list,
+            ) {
+                Ok(relation) => relation,
+                Err(_) => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x72,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    return;
+                }
+            };
+            let import_disposition = match relation {
+                SyncImportVersionRelation::Newer => MapiEventImportDisposition::Apply,
+                SyncImportVersionRelation::OlderOrSame => {
+                    MapiEventImportDisposition::IgnoreOlderOrSame
+                }
+                SyncImportVersionRelation::Conflict if import_flag & 0x40 != 0 => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x72,
+                        request.response_handle_index(),
+                        0x8004_0802,
+                    ));
+                    return;
+                }
+                SyncImportVersionRelation::Conflict => {
+                    let merged_pcl = match merge_sync_predecessor_change_lists(
+                        &event.version.predecessor_change_list,
+                        &imported_identity.predecessor_change_list,
+                    ) {
+                        Ok(pcl) => pcl,
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x72,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            return;
+                        }
+                    };
+                    let current_last_modification_time =
+                        mapi_mailstore::filetime_from_rfc3339_utc(&event.version.updated_at);
+                    let imported_wins = match imported_version_wins_last_writer(
+                        imported_last_modification_time,
+                        &imported_identity.change_key,
+                        current_last_modification_time,
+                        &event.version.change_key,
+                    ) {
+                        Ok(imported_wins) => imported_wins,
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x72,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            return;
+                        }
+                    };
+                    imported_identity.predecessor_change_list = merged_pcl;
+                    if imported_wins {
+                        MapiEventImportDisposition::Apply
+                    } else {
+                        imported_identity.change_key = event.version.change_key.clone();
+                        MapiEventImportDisposition::KeepServerContent
+                    }
+                }
+            };
+            let mut transaction = MapiEventTransaction::new(0x01, event.version.canonical_modseq);
+            transaction.import_disposition = import_disposition;
+            if import_disposition != MapiEventImportDisposition::IgnoreOlderOrSame {
+                transaction.imported_identity = Some(imported_identity);
+            }
+            let handle = session.allocate_output_handle(
+                request.output_handle_index,
+                MapiObject::Event {
+                    folder_id,
+                    event_id: message_id,
+                    transaction,
+                },
+            );
+            set_handle_slot(handle_slots, request.output_handle_index, handle);
+            responses
+                .extend_from_slice(&rop_synchronization_import_message_change_response(request));
+            output_handles.push(handle);
+            return;
+        }
+    }
     if message_id != 0 && message_for_id(folder_id, message_id, mailboxes, emails).is_some() {
         let change_number = message_for_id(folder_id, message_id, mailboxes, emails)
             .map(mapi_mailstore::canonical_message_change_number)
@@ -344,12 +467,23 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         ));
         output_handles.push(handle);
     } else {
-        let pending_object = match folder_id {
-            NOTES_FOLDER_ID => MapiObject::PendingNote {
+        let pending_object = match snapshot
+            .collaboration_folder_for_id(folder_id)
+            .map(|folder| folder.kind)
+        {
+            Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),
             },
-            JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
+            None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
+                folder_id,
+                properties: property_values.into_iter().collect(),
+            },
+            _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
+                folder_id,
+                properties: property_values.into_iter().collect(),
+            },
+            _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
                 folder_id,
                 properties: property_values.into_iter().collect(),
             },

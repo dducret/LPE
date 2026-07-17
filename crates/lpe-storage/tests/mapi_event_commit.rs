@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use lpe_storage::{
     AttachmentUploadInput, MapiEventAttachmentChanges, MapiEventAttachmentUpsert,
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventCustomPropertyValue, MapiEventReminderPatch, Storage, UpsertClientEventInput,
+    MapiEventCustomPropertyValue, MapiEventImportedIdentity, MapiEventImportedMoveIdentity,
+    MapiEventReminderPatch, Storage, UpsertClientEventInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -305,6 +306,7 @@ fn commit_input(fixture: &EventFixture, title: &str) -> MapiEventCommitInput {
         event_id: fixture.event_id,
         expected_modseq: 7,
         force_save: false,
+        imported_identity: None,
         event: Some(updated_event(fixture, title)),
         reminder: MapiEventReminderPatch {
             reminder_set: Some(true),
@@ -352,6 +354,7 @@ fn create_input(
             notes: "Création Outlook atomique".to_string(),
             body_html: "<p>Création Outlook atomique</p>".to_string(),
         },
+        imported_identity: None,
         reminder: MapiEventReminderPatch {
             reminder_set: Some(true),
             reminder_at: Some("2027-01-15T08:56:00Z".to_string()),
@@ -945,6 +948,590 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
 }
 
 #[tokio::test]
+async fn microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn() -> Result<()>
+{
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let event_id = Uuid::new_v4();
+    let source_counter = 0x0df8_974b_7f66;
+    let source_key = change_key(source_counter);
+    let client_change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let client_pcl = predecessor_change_list(&client_change_key);
+    let mut input = create_input(
+        fixture.account_id,
+        "default",
+        event_id,
+        "Import ICS Outlook réaliste",
+    );
+    input.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: source_key.clone(),
+        change_key: client_change_key.clone(),
+        predecessor_change_list: client_pcl.clone(),
+    });
+
+    let created = fixture.storage.create_mapi_event(input).await?;
+
+    assert_eq!(created.mapi_object_id, mapi_store_id(source_counter));
+    assert_ne!(created.version.change_number, source_counter);
+    assert_eq!(created.version.change_key, client_change_key);
+    assert_eq!(created.version.predecessor_change_list, client_pcl);
+    let identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, change_key,
+               mapi_change_number, predecessor_change_list, instance_key
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'calendar_event'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        identity.get::<i64, _>("mapi_global_counter") as u64,
+        source_counter
+    );
+    assert_eq!(
+        identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(source_counter) as i64
+    );
+    assert_eq!(identity.get::<Vec<u8>, _>("source_key"), source_key);
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("change_key"),
+        created.version.change_key
+    );
+    assert_eq!(
+        identity.get::<i64, _>("mapi_change_number") as u64,
+        created.version.change_number
+    );
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        created.version.predecessor_change_list
+    );
+    assert_eq!(identity.get::<Vec<u8>, _>("instance_key"), source_key);
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
+async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destination_xids(
+) -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let event_id = Uuid::new_v4();
+    let source_counter = 0x0df8_974b_7f66;
+    let destination_counter = 0x0df8_974b_776d;
+    let source_key = change_key(source_counter);
+    let destination_source_key = change_key(destination_counter);
+    let client_change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let client_pcl = predecessor_change_list(&client_change_key);
+    let mut input = create_input(
+        fixture.account_id,
+        "default",
+        event_id,
+        "Delete 20:52 - été",
+    );
+    input.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: source_key.clone(),
+        change_key: client_change_key.clone(),
+        predecessor_change_list: client_pcl.clone(),
+    });
+    fixture.storage.create_mapi_event(input).await?;
+
+    let invalid_move = MapiEventImportedMoveIdentity {
+        expected_source_key: source_key.clone(),
+        destination_source_key: destination_source_key.clone(),
+        change_key: client_change_key.clone(),
+        predecessor_change_list: vec![0],
+    };
+    fixture
+        .storage
+        .move_accessible_event_to_deleted_items(fixture.account_id, event_id, Some(invalid_move))
+        .await
+        .expect_err("an invalid imported PCL must roll back the canonical move");
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT lifecycle_state FROM calendar_events WHERE id = $1"
+        )
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "active"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT object_kind FROM mapi_object_identities \
+             WHERE account_id = $1 AND canonical_id = $2"
+        )
+        .bind(fixture.account_id)
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "calendar_event"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tombstones WHERE object_id = $1")
+            .bind(event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?,
+        0
+    );
+
+    let moved = fixture
+        .storage
+        .move_accessible_event_to_deleted_items(
+            fixture.account_id,
+            event_id,
+            Some(MapiEventImportedMoveIdentity {
+                expected_source_key: source_key.clone(),
+                destination_source_key: destination_source_key.clone(),
+                change_key: client_change_key.clone(),
+                predecessor_change_list: client_pcl.clone(),
+            }),
+        )
+        .await?;
+    let moved_identity = moved.principal_identity.expect("owner move identity");
+    assert_eq!(
+        moved_identity.old_mapi_object_id,
+        mapi_store_id(source_counter)
+    );
+    assert_eq!(
+        moved_identity.new_mapi_object_id,
+        mapi_store_id(destination_counter)
+    );
+    assert_eq!(moved_identity.old_source_key, source_key);
+    assert_eq!(moved_identity.new_source_key, destination_source_key);
+    assert_eq!(moved_identity.new_change_key, client_change_key);
+    assert_ne!(moved_identity.new_change_number, destination_counter);
+    assert!(moved_identity.new_change_number > source_counter);
+
+    let identity = sqlx::query(
+        r#"
+        SELECT object_kind, mapi_global_counter, mapi_object_id, source_key,
+               change_key, mapi_change_number, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE account_id = $1 AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        identity.get::<String, _>("object_kind"),
+        "deleted_calendar_event"
+    );
+    assert_eq!(
+        identity.get::<i64, _>("mapi_global_counter") as u64,
+        destination_counter
+    );
+    assert_eq!(
+        identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(destination_counter) as i64
+    );
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("source_key"),
+        moved_identity.new_source_key
+    );
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("change_key"),
+        moved_identity.new_change_key
+    );
+    assert_eq!(
+        identity.get::<i64, _>("mapi_change_number") as u64,
+        moved_identity.new_change_number
+    );
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        client_pcl
+    );
+    let move_row = sqlx::query(
+        r#"
+        SELECT new_mapi_object_id, new_source_key, new_change_number,
+               new_change_key, new_predecessor_change_list
+        FROM mapi_calendar_event_identity_moves
+        WHERE account_id = $1 AND event_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        move_row.get::<i64, _>("new_mapi_object_id"),
+        mapi_store_id(destination_counter) as i64
+    );
+    assert_eq!(
+        move_row.get::<Vec<u8>, _>("new_source_key"),
+        moved_identity.new_source_key
+    );
+    assert_eq!(
+        move_row.get::<i64, _>("new_change_number") as u64,
+        moved_identity.new_change_number
+    );
+    assert_eq!(
+        move_row.get::<Vec<u8>, _>("new_change_key"),
+        moved_identity.new_change_key
+    );
+    assert_eq!(
+        move_row.get::<Vec<u8>, _>("new_predecessor_change_list"),
+        client_pcl
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT lifecycle_state FROM calendar_events WHERE id = $1"
+        )
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "deleted"
+    );
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
+async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_atomic(
+) -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let event_id = Uuid::new_v4();
+    let source_counter = 0x0df8_974b_7f66;
+    let destination_counter = 0x0df8_974b_776d;
+    let source_key = change_key(source_counter);
+    let destination_source_key = change_key(destination_counter);
+    let move_change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let move_pcl = predecessor_change_list(&move_change_key);
+    let mut create = create_input(
+        fixture.account_id,
+        "default",
+        event_id,
+        "Maison 21:49 déplacée",
+    );
+    create.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: source_key.clone(),
+        change_key: move_change_key.clone(),
+        predecessor_change_list: move_pcl.clone(),
+    });
+    fixture.storage.create_mapi_event(create).await?;
+    fixture
+        .storage
+        .move_accessible_event_to_deleted_items(
+            fixture.account_id,
+            event_id,
+            Some(MapiEventImportedMoveIdentity {
+                expected_source_key: source_key,
+                destination_source_key: destination_source_key.clone(),
+                change_key: move_change_key,
+                predecessor_change_list: move_pcl,
+            }),
+        )
+        .await?;
+
+    let before_event = sqlx::query(
+        r#"
+        SELECT title, lifecycle_state, modseq,
+               to_char(reminder_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS reminder_at,
+               to_char(updated_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let before_identity = sqlx::query(
+        r#"
+        SELECT object_kind, mapi_global_counter, mapi_object_id, source_key,
+               change_key, instance_key, mapi_change_number, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE account_id = $1 AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let before_replica_counter = sqlx::query_scalar::<_, i64>(
+        "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let before_account_modseq = sqlx::query_scalar::<_, i64>(
+        "SELECT current_modseq FROM account_sync_state \
+         WHERE account_id = $1 AND category = 'calendar'",
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let before_change_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?;
+
+    let update_change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x58,
+    ];
+    let update_pcl = predecessor_change_list(&update_change_key);
+    let mut invalid_update = commit_input(&fixture, "Maison modifiée après déplacement");
+    invalid_update.event_id = event_id;
+    invalid_update.expected_modseq = before_event.get::<i64, _>("modseq");
+    let invalid_event = invalid_update.event.as_mut().expect("event update");
+    invalid_event.id = Some(event_id);
+    invalid_event.uid = format!("mapi-goid:{}", event_id.simple());
+    invalid_update.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: change_key(destination_counter + 1),
+        change_key: update_change_key.clone(),
+        predecessor_change_list: update_pcl.clone(),
+    });
+    let error = fixture
+        .storage
+        .commit_mapi_event_update(invalid_update)
+        .await
+        .expect_err("a stale imported SourceKey must roll back the complete Event update");
+    assert!(error
+        .to_string()
+        .contains("MAPI Event SourceKey changed before the imported update"));
+
+    let rolled_back_event = sqlx::query(
+        r#"
+        SELECT title, lifecycle_state, modseq,
+               to_char(reminder_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS reminder_at,
+               to_char(updated_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        rolled_back_event.get::<String, _>("title"),
+        before_event.get::<String, _>("title")
+    );
+    assert_eq!(
+        rolled_back_event.get::<String, _>("lifecycle_state"),
+        "deleted"
+    );
+    assert_eq!(
+        rolled_back_event.get::<i64, _>("modseq"),
+        before_event.get::<i64, _>("modseq")
+    );
+    assert_eq!(
+        rolled_back_event.get::<Option<String>, _>("reminder_at"),
+        before_event.get::<Option<String>, _>("reminder_at")
+    );
+    assert_eq!(
+        rolled_back_event.get::<String, _>("updated_at"),
+        before_event.get::<String, _>("updated_at")
+    );
+    let rolled_back_identity = sqlx::query(
+        r#"
+        SELECT object_kind, mapi_global_counter, mapi_object_id, source_key,
+               change_key, instance_key, mapi_change_number, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE account_id = $1 AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        rolled_back_identity.get::<String, _>("object_kind"),
+        before_identity.get::<String, _>("object_kind")
+    );
+    for column in [
+        "mapi_global_counter",
+        "mapi_object_id",
+        "mapi_change_number",
+    ] {
+        assert_eq!(
+            rolled_back_identity.get::<i64, _>(column),
+            before_identity.get::<i64, _>(column)
+        );
+    }
+    for column in [
+        "source_key",
+        "change_key",
+        "instance_key",
+        "predecessor_change_list",
+    ] {
+        assert_eq!(
+            rolled_back_identity.get::<Vec<u8>, _>(column),
+            before_identity.get::<Vec<u8>, _>(column)
+        );
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1"
+        )
+        .bind(fixture.account_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        before_replica_counter
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT current_modseq FROM account_sync_state \
+             WHERE account_id = $1 AND category = 'calendar'"
+        )
+        .bind(fixture.account_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        before_account_modseq
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?,
+        before_change_count
+    );
+
+    let mut valid_update = commit_input(&fixture, "Maison modifiée après déplacement");
+    valid_update.event_id = event_id;
+    valid_update.expected_modseq = before_event.get::<i64, _>("modseq");
+    let valid_event = valid_update.event.as_mut().expect("event update");
+    valid_event.id = Some(event_id);
+    valid_event.uid = format!("mapi-goid:{}", event_id.simple());
+    valid_update.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: destination_source_key.clone(),
+        change_key: update_change_key.clone(),
+        predecessor_change_list: update_pcl.clone(),
+    });
+    let saved = fixture
+        .storage
+        .commit_mapi_event_update(valid_update)
+        .await?;
+    let MapiEventCommitOutcome::Saved(saved) = saved else {
+        panic!("expected imported deleted Event update to be saved");
+    };
+    assert_eq!(saved.version.event_id, event_id);
+    assert_eq!(
+        saved.version.canonical_modseq,
+        before_event.get::<i64, _>("modseq") + 1
+    );
+    assert_eq!(saved.version.change_key, update_change_key);
+    assert_eq!(saved.version.predecessor_change_list, update_pcl);
+    assert!(
+        saved.version.change_number > before_identity.get::<i64, _>("mapi_change_number") as u64
+    );
+    assert_ne!(saved.version.change_number, destination_counter);
+
+    let persisted = sqlx::query(
+        r#"
+        SELECT event.id, event.title, event.lifecycle_state,
+               identity.object_kind, identity.mapi_global_counter,
+               identity.mapi_object_id, identity.source_key, identity.change_key,
+               identity.instance_key, identity.mapi_change_number,
+               identity.predecessor_change_list
+        FROM calendar_events event
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = event.tenant_id
+         AND identity.account_id = $2
+         AND identity.canonical_id = event.id
+         AND identity.deleted_at IS NULL
+        WHERE event.id = $1
+        "#,
+    )
+    .bind(event_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(persisted.get::<Uuid, _>("id"), event_id);
+    assert_eq!(
+        persisted.get::<String, _>("title"),
+        "Maison modifiée après déplacement"
+    );
+    assert_eq!(persisted.get::<String, _>("lifecycle_state"), "deleted");
+    assert_eq!(
+        persisted.get::<String, _>("object_kind"),
+        "deleted_calendar_event"
+    );
+    assert_eq!(
+        persisted.get::<i64, _>("mapi_global_counter") as u64,
+        destination_counter
+    );
+    assert_eq!(
+        persisted.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(destination_counter) as i64
+    );
+    assert_eq!(
+        persisted.get::<Vec<u8>, _>("source_key"),
+        destination_source_key
+    );
+    assert_eq!(
+        persisted.get::<Vec<u8>, _>("instance_key"),
+        persisted.get::<Vec<u8>, _>("source_key")
+    );
+    assert_eq!(
+        persisted.get::<Vec<u8>, _>("change_key"),
+        saved.version.change_key
+    );
+    assert_eq!(
+        persisted.get::<Vec<u8>, _>("predecessor_change_list"),
+        saved.version.predecessor_change_list
+    );
+    assert_eq!(
+        persisted.get::<i64, _>("mapi_change_number") as u64,
+        saved.version.change_number
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_calendar_event_identity_moves WHERE event_id = $1"
+        )
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mail_change_log \
+             WHERE object_id = $1 AND object_kind = 'deleted_calendar_event' \
+               AND change_kind = 'updated'"
+        )
+        .bind(event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages")
+            .fetch_one(fixture.storage.pool())
+            .await?,
+        0
+    );
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
 async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties() -> Result<()>
 {
     let _guard = database_test_lock().lock().await;
@@ -1119,7 +1706,7 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
 
     let denied = fixture
         .storage
-        .move_accessible_event_to_deleted_items(delegate_account_id, fixture.event_id)
+        .move_accessible_event_to_deleted_items(delegate_account_id, fixture.event_id, None)
         .await
         .expect_err("delegate without may_delete must not move an event");
     assert!(denied
@@ -1184,7 +1771,7 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
 
     let moved = fixture
         .storage
-        .move_accessible_event_to_deleted_items(fixture.account_id, fixture.event_id)
+        .move_accessible_event_to_deleted_items(fixture.account_id, fixture.event_id, None)
         .await?;
     assert_eq!(moved.event.id, fixture.event_id);
     assert_eq!(moved.event.title, "Rendez-vous à Genève 🌍");

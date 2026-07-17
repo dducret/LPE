@@ -92,13 +92,22 @@ mapi_calendar_event_identity_moves_table="$(
 deleted_calendar_event_constraint_count="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'"
 )"
+mapi_identity_constraint_count="$(
+  mapi_identity_key_constraint_count "${DATABASE_URL}"
+)"
+mapi_calendar_event_move_change_key_constraint_count="$(
+  mapi_calendar_event_move_change_key_constraint_count "${DATABASE_URL}"
+)"
 
 if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_version_column_count}" != "2" \
   || "${calendar_event_lifecycle_column_count}" != "2" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
-  || "${deleted_calendar_event_constraint_count}" != "2" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}." >&2
+  || "${deleted_calendar_event_constraint_count}" != "2" \
+  || "${mapi_identity_constraint_count}" != "3" \
+  || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" ]]; then
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database after correcting the canonical schema source." >&2
   exit 1
 fi
 

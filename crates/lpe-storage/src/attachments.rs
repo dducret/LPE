@@ -154,7 +154,7 @@ impl Storage {
               ON event.tenant_id = attachment.tenant_id
              AND event.owner_account_id = attachment.owner_account_id
              AND event.id = attachment.event_id
-             AND event.lifecycle_state = 'active'
+             AND event.lifecycle_state IN ('active', 'deleted')
             WHERE attachment.tenant_id = $1
               AND attachment.owner_account_id = $2
               AND attachment.event_id = $3

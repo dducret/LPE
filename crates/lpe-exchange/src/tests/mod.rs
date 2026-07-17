@@ -14,16 +14,16 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
-    MapiEventCreateResult, MapiEventIdentityMove, MapiEventReminderState, MapiEventVersion,
-    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    MapiEventCreateResult, MapiEventIdentityMove, MapiEventImportedMoveIdentity,
+    MapiEventReminderState, MapiEventVersion, MoveAccessibleEventToDeletedItemsResult,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights,
+    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -2666,6 +2666,41 @@ impl AccountAuthStore for FakeStore {
     }
 }
 
+fn test_mapi_pcl_includes_change_key(predecessor_change_list: &[u8], change_key: &[u8]) -> bool {
+    if !(17..=24).contains(&change_key.len()) {
+        return false;
+    }
+    let mut offset = 0usize;
+    let mut includes_change_key = false;
+    while offset < predecessor_change_list.len() {
+        let Some(size) = predecessor_change_list
+            .get(offset)
+            .copied()
+            .map(usize::from)
+        else {
+            return false;
+        };
+        offset += 1;
+        let Some(end) = offset.checked_add(size) else {
+            return false;
+        };
+        let Some(xid) = predecessor_change_list.get(offset..end) else {
+            return false;
+        };
+        offset = end;
+        if !(17..=24).contains(&xid.len()) {
+            return false;
+        }
+        if xid.len() == change_key.len()
+            && xid[..16] == change_key[..16]
+            && xid[16..] >= change_key[16..]
+        {
+            includes_change_key = true;
+        }
+    }
+    includes_change_key
+}
+
 impl ExchangeStore for FakeStore {
     fn fetch_ews_user_configuration<'a>(
         &'a self,
@@ -5290,6 +5325,7 @@ impl ExchangeStore for FakeStore {
         if self.miss_mapi_event_create {
             return Box::pin(async { Ok(MapiEventCreateOutcome::NotFound) });
         }
+        let imported_identity = input.imported_identity.clone();
         let account = Self::account();
         let collection = self
             .calendar_collections
@@ -5440,18 +5476,35 @@ impl ExchangeStore for FakeStore {
         }
         let change_number = *next_counter;
         *next_counter = next_counter.saturating_add(1);
-        let mapi_object_id = crate::mapi::identity::mapi_store_id(change_number);
+        let mapi_object_id = imported_identity
+            .as_ref()
+            .and_then(|identity| {
+                crate::mapi::identity::object_id_from_source_key(&identity.source_key)
+            })
+            .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(change_number));
         self.mapi_identities
             .lock()
             .unwrap()
             .insert(event_id, mapi_object_id);
+        if let Some(identity) = imported_identity.as_ref() {
+            self.mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .insert(event_id, identity.source_key.clone());
+        }
         self.event_versions.lock().unwrap().insert(event_id, 1);
         let version = MapiEventVersion {
             event_id,
             canonical_modseq: 1,
             change_number,
-            change_key: mapi_mailstore::change_key_for_change_number(change_number),
-            predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+            change_key: imported_identity
+                .as_ref()
+                .map(|identity| identity.change_key.clone())
+                .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(change_number)),
+            predecessor_change_list: imported_identity
+                .as_ref()
+                .map(|identity| identity.predecessor_change_list.clone())
+                .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number)),
             updated_at: "2026-07-15T10:00:00Z".to_string(),
         };
         self.mapi_event_identity_versions
@@ -5474,8 +5527,51 @@ impl ExchangeStore for FakeStore {
         &'a self,
         input: MapiEventCommitInput,
     ) -> StoreFuture<'a, MapiEventCommitOutcome> {
+        let imported_identity = input.imported_identity.clone();
+        if let Some(identity) = imported_identity.as_ref() {
+            let expected_source_key = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .get(&input.event_id)
+                .cloned()
+                .or_else(|| {
+                    self.mapi_identities
+                        .lock()
+                        .unwrap()
+                        .get(&input.event_id)
+                        .copied()
+                        .map(crate::mapi::identity::source_key_for_object_id)
+                });
+            if expected_source_key.as_deref() != Some(identity.source_key.as_slice()) {
+                return Box::pin(async {
+                    Err(anyhow::anyhow!(
+                        "imported Event update SourceKey does not match its current identity"
+                    ))
+                });
+            }
+            if !test_mapi_pcl_includes_change_key(
+                &identity.predecessor_change_list,
+                &identity.change_key,
+            ) {
+                return Box::pin(async {
+                    Err(anyhow::anyhow!(
+                        "invalid imported Event update ChangeKey or PCL"
+                    ))
+                });
+            }
+        }
         let mut events = self.events.lock().unwrap();
-        let Some(event) = events.iter_mut().find(|event| event.id == input.event_id) else {
+        let mut deleted_events = self.deleted_calendar_events.lock().unwrap();
+        let Some(event) = events
+            .iter_mut()
+            .find(|event| event.id == input.event_id)
+            .or_else(|| {
+                deleted_events
+                    .iter_mut()
+                    .find(|event| event.id == input.event_id)
+            })
+        else {
             return Box::pin(async { Ok(MapiEventCommitOutcome::NotFound) });
         };
         if !event.rights.may_write {
@@ -5614,18 +5710,39 @@ impl ExchangeStore for FakeStore {
 
         let next_modseq = current_modseq.saturating_add(1);
         canonical_versions.insert(input.event_id, next_modseq as u64);
+        let current_change_number = self
+            .mapi_event_identity_versions
+            .lock()
+            .unwrap()
+            .get(&input.event_id)
+            .map(|version| version.change_number)
+            .unwrap_or_default();
+        let imported_source_counter = imported_identity
+            .as_ref()
+            .and_then(|identity| {
+                crate::mapi::identity::object_id_from_source_key(&identity.source_key)
+            })
+            .and_then(crate::mapi::identity::global_counter_from_store_id)
+            .unwrap_or_default();
         let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
-        if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
-            *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
-        }
+        *next_counter = (*next_counter)
+            .max(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+            .max(current_change_number.saturating_add(1))
+            .max(imported_source_counter.saturating_add(1));
         let change_number = *next_counter;
         *next_counter = next_counter.saturating_add(1);
         let version = MapiEventVersion {
             event_id: input.event_id,
             canonical_modseq: next_modseq,
             change_number,
-            change_key: mapi_mailstore::change_key_for_change_number(change_number),
-            predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+            change_key: imported_identity
+                .as_ref()
+                .map(|identity| identity.change_key.clone())
+                .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(change_number)),
+            predecessor_change_list: imported_identity
+                .as_ref()
+                .map(|identity| identity.predecessor_change_list.clone())
+                .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number)),
             updated_at: "2026-07-15T10:15:00Z".to_string(),
         };
         self.mapi_event_identity_versions
@@ -5966,13 +6083,14 @@ impl ExchangeStore for FakeStore {
         &'a self,
         principal_account_id: Uuid,
         event_id: Uuid,
+        imported_identity: Option<MapiEventImportedMoveIdentity>,
     ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult> {
         let event = {
-            let mut events = self.events.lock().unwrap();
-            let Some(index) = events.iter().position(|event| event.id == event_id) else {
+            let events = self.events.lock().unwrap();
+            let Some(event) = events.iter().find(|event| event.id == event_id).cloned() else {
                 return Box::pin(async { Err(anyhow::anyhow!("event not found")) });
             };
-            events.remove(index)
+            event
         };
         let (old_mapi_object_id, old_source_key) = {
             let identities = self.mapi_identities.lock().unwrap();
@@ -5990,16 +6108,58 @@ impl ExchangeStore for FakeStore {
                 });
             (old_mapi_object_id, old_source_key)
         };
-        let old_change_number = self
+        let (old_change_number, old_change_key) = self
             .mapi_event_identity_versions
             .lock()
             .unwrap()
             .get(&event_id)
-            .map(|version| version.change_number)
-            .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(old_mapi_object_id));
-        let old_change_key = mapi_mailstore::change_key_for_change_number(old_change_number);
-
-        let new_mapi_object_id = {
+            .map(|version| (version.change_number, version.change_key.clone()))
+            .unwrap_or_else(|| {
+                let change_number = mapi_mailstore::change_number_for_store_id(old_mapi_object_id);
+                (
+                    change_number,
+                    mapi_mailstore::change_key_for_change_number(change_number),
+                )
+            });
+        let imported_destination = match imported_identity.as_ref() {
+            Some(identity) => {
+                if identity.expected_source_key != old_source_key {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!(
+                            "active MAPI Event SourceKey changed before the imported move"
+                        ))
+                    });
+                }
+                let Some(object_id) = crate::mapi::identity::object_id_from_source_key(
+                    &identity.destination_source_key,
+                ) else {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!(
+                            "invalid imported Event destination SourceKey"
+                        ))
+                    });
+                };
+                if !test_mapi_pcl_includes_change_key(
+                    &identity.predecessor_change_list,
+                    &identity.change_key,
+                ) {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!(
+                            "invalid imported Event move ChangeKey or PCL"
+                        ))
+                    });
+                }
+                Some((object_id, identity))
+            }
+            None => None,
+        };
+        let (
+            new_mapi_object_id,
+            new_change_number,
+            new_source_key,
+            new_change_key,
+            new_predecessor_change_list,
+        ) = {
             let mut identities = self.mapi_identities.lock().unwrap();
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
             *next_counter = (*next_counter)
@@ -6009,18 +6169,52 @@ impl ExchangeStore for FakeStore {
                         .unwrap_or_default()
                         .saturating_add(1),
                 );
+            if let Some((destination_object_id, _)) = imported_destination {
+                *next_counter = (*next_counter).max(
+                    crate::mapi::identity::global_counter_from_store_id(destination_object_id)
+                        .unwrap_or_default()
+                        .saturating_add(1),
+                );
+            }
             while identities
                 .values()
                 .any(|identity| *identity == crate::mapi::identity::mapi_store_id(*next_counter))
             {
                 *next_counter = next_counter.saturating_add(1);
             }
-            let object_id = crate::mapi::identity::mapi_store_id(*next_counter);
+            let change_number = *next_counter;
             *next_counter = next_counter.saturating_add(1);
+            let object_id = imported_destination
+                .map(|(object_id, _)| object_id)
+                .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(change_number));
+            if identities
+                .iter()
+                .any(|(id, identity)| *id != event_id && *identity == object_id)
+            {
+                return Box::pin(async {
+                    Err(anyhow::anyhow!(
+                        "imported Event destination identity is already used"
+                    ))
+                });
+            }
             identities.insert(event_id, object_id);
-            object_id
+            let source_key = imported_destination
+                .map(|(_, identity)| identity.destination_source_key.clone())
+                .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
+            let change_key = imported_destination
+                .map(|(_, identity)| identity.change_key.clone())
+                .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(change_number));
+            let predecessor_change_list = imported_destination
+                .map(|(_, identity)| identity.predecessor_change_list.clone())
+                .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number));
+            (
+                object_id,
+                change_number,
+                source_key,
+                change_key,
+                predecessor_change_list,
+            )
         };
-        let new_source_key = crate::mapi::identity::source_key_for_object_id(new_mapi_object_id);
         self.mapi_identity_source_keys
             .lock()
             .unwrap()
@@ -6034,14 +6228,17 @@ impl ExchangeStore for FakeStore {
                 object_id: old_mapi_object_id,
                 source_key: old_source_key.clone(),
             });
+        self.events
+            .lock()
+            .unwrap()
+            .retain(|event| event.id != event_id);
         self.deleted_events.lock().unwrap().push(event_id);
         self.deleted_calendar_events
             .lock()
             .unwrap()
             .push(event.clone());
+        self.event_versions.lock().unwrap().insert(event_id, 2);
 
-        let new_change_number = mapi_mailstore::change_number_for_store_id(new_mapi_object_id);
-        let new_change_key = mapi_mailstore::change_key_for_change_number(new_change_number);
         self.mapi_event_identity_versions.lock().unwrap().insert(
             event_id,
             MapiEventVersion {
@@ -6049,7 +6246,7 @@ impl ExchangeStore for FakeStore {
                 canonical_modseq: 2,
                 change_number: new_change_number,
                 change_key: new_change_key.clone(),
-                predecessor_change_list: mapi_mailstore::predecessor_change_list(new_change_number),
+                predecessor_change_list: new_predecessor_change_list,
                 updated_at: "2026-07-16T20:52:00Z".to_string(),
             },
         );
@@ -8458,6 +8655,40 @@ fn assert_content_final_state_includes_counters(
     }
 }
 
+fn assert_content_final_state_records_normal_change_counters(
+    bytes: &[u8],
+    message_counters: &[u64],
+    change_numbers: &[u64],
+) {
+    let idset_given = mapi_binary_property_value(bytes, META_TAG_IDSET_GIVEN);
+    for message_counter in message_counters {
+        assert!(
+            strict_replguid_globset_contains_counter(idset_given, &globcnt_bytes(*message_counter))
+                .unwrap(),
+            "final MetaTagIdsetGiven missing message counter {message_counter}"
+        );
+    }
+
+    let cnset_seen = mapi_binary_property_value(bytes, META_TAG_CNSET_SEEN);
+    let cnset_seen_fai = mapi_binary_property_value(bytes, META_TAG_CNSET_SEEN_FAI);
+    let cnset_read = mapi_binary_property_value(bytes, META_TAG_CNSET_READ);
+    for change_number in change_numbers {
+        let counter = globcnt_bytes(*change_number);
+        assert!(
+            strict_replguid_globset_contains_counter(cnset_seen, &counter).unwrap(),
+            "final MetaTagCnsetSeen missing normal change {change_number}"
+        );
+        assert!(
+            !strict_replguid_globset_contains_counter(cnset_seen_fai, &counter).unwrap(),
+            "normal change {change_number} must not be in MetaTagCnsetSeenFAI"
+        );
+        assert!(
+            !strict_replguid_globset_contains_counter(cnset_read, &counter).unwrap(),
+            "content-only change {change_number} must not be in MetaTagCnsetRead"
+        );
+    }
+}
+
 fn mapi_binary_property_value(bytes: &[u8], property_tag: u32) -> &[u8] {
     let tag = property_tag.to_le_bytes();
     let offset = bytes
@@ -8763,8 +8994,8 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     strict_validate_replguid_globset(&idset_given)?;
     strict_validate_replguid_globset(&cnset_seen)?;
     for folder in &folder_changes {
-        strict_validate_source_or_change_key(&folder.source_key)?;
-        strict_validate_source_or_change_key(&folder.change_key)?;
+        strict_validate_store_xid(&folder.source_key)?;
+        strict_validate_store_xid(&folder.change_key)?;
         if !strict_replguid_globset_contains_counter(&idset_given, &folder.source_key[16..22])? {
             return Err(format!(
                 "final MetaTagIdsetGiven does not include folder {}",
@@ -9060,10 +9291,10 @@ fn strict_finish_folder_change(
     let display_name = folder
         .display_name
         .ok_or("folderChange missing PidTagDisplayName")?;
-    strict_validate_source_or_change_key(&source_key)?;
-    strict_validate_source_or_change_key(&change_key)?;
+    strict_validate_store_xid(&source_key)?;
+    strict_validate_store_xid(&change_key)?;
     if !parent_source_key.is_empty() {
-        strict_validate_source_or_change_key(&parent_source_key)?;
+        strict_validate_store_xid(&parent_source_key)?;
         if !seen_source_keys
             .iter()
             .any(|source_key| source_key.as_slice() == parent_source_key.as_slice())
@@ -9229,12 +9460,22 @@ fn hierarchy_query_calendar_contract_rows(
     Ok(rows)
 }
 
-fn strict_validate_source_or_change_key(value: &[u8]) -> Result<(), String> {
+fn strict_validate_store_xid(value: &[u8]) -> Result<(), String> {
     if value.len() != 22 || !value.starts_with(&mapi_mailstore::STORE_REPLICA_GUID) {
-        return Err("source/change key is not a 22-byte REPLGUID-scoped XID".into());
+        return Err("source key is not a 22-byte store REPLGUID-scoped XID".into());
     }
     if value[16..22] == [0; 6] {
-        return Err("source/change key contains a zero GLOBCNT".into());
+        return Err("source key contains a zero GLOBCNT".into());
+    }
+    Ok(())
+}
+
+fn strict_validate_change_key_xid(value: &[u8]) -> Result<(), String> {
+    if !(17..=24).contains(&value.len()) {
+        return Err("change key is not a 17-to-24-byte XID".into());
+    }
+    if value[16..].iter().all(|byte| *byte == 0) {
+        return Err("change key contains a zero LocalId".into());
     }
     Ok(())
 }
@@ -9299,11 +9540,6 @@ fn strict_globcnt_to_u64(bytes: &[u8]) -> Result<u64, String> {
 fn read_strict_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
     let slice = read_strict_slice(bytes, offset, 4)?;
     Ok(u32::from_le_bytes(slice.try_into().unwrap()))
-}
-
-fn read_strict_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
-    let slice = read_strict_slice(bytes, offset, 2)?;
-    Ok(u16::from_le_bytes(slice.try_into().unwrap()))
 }
 
 fn read_strict_slice(bytes: &[u8], offset: usize, len: usize) -> Result<&[u8], String> {
@@ -9582,17 +9818,6 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
             continue;
         }
 
-        if section == StrictContentSection::MessageBody
-            && current_message
-                .as_ref()
-                .and_then(|message| message.subject.as_ref())
-                .is_some()
-            && !strict_supported_property_type(tag)
-        {
-            offset = strict_skip_content_message_tail(bytes, offset)?;
-            continue;
-        }
-
         let property = strict_parse_fast_transfer_property(bytes, offset)?;
         offset = property.next_offset;
         match section {
@@ -9730,9 +9955,9 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
         strict_validate_replid_globset(value)?;
     }
     for message in &message_changes {
-        strict_validate_source_or_change_key(&message.source_key)?;
-        strict_validate_source_or_change_key(&message.parent_source_key)?;
-        strict_validate_source_or_change_key(&message.change_key)?;
+        strict_validate_store_xid(&message.source_key)?;
+        strict_validate_store_xid(&message.parent_source_key)?;
+        strict_validate_change_key_xid(&message.change_key)?;
         if !strict_replguid_globset_contains_counter(&idset_given, &message.source_key[16..22])? {
             return Err(format!(
                 "final MetaTagIdsetGiven does not include message {}",
@@ -9744,14 +9969,32 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
         } else {
             &cnset_seen
         };
-        if !strict_replguid_globset_contains_counter(cnset, &message.change_key[16..22])? {
+        let change_number = message
+            .change_number
+            .or_else(|| {
+                (message.change_key.len() == 22
+                    && message
+                        .change_key
+                        .starts_with(&mapi_mailstore::STORE_REPLICA_GUID))
+                .then(|| {
+                    crate::mapi::identity::global_counter_from_globcnt(&message.change_key[16..22])
+                })
+                .flatten()
+            })
+            .ok_or_else(|| {
+                format!(
+                    "messageChange for {} is missing PidTagChangeNumber",
+                    message.subject
+                )
+            })?;
+        if !strict_replguid_globset_contains_counter(cnset, &globcnt_bytes(change_number))? {
             let cnset_name = if message.associated {
                 "MetaTagCnsetSeenFAI"
             } else {
                 "MetaTagCnsetSeen"
             };
             return Err(format!(
-                "final {cnset_name} does not include message {} change key",
+                "final {cnset_name} does not include message {} change number",
                 message.subject
             ));
         }
@@ -9787,13 +10030,6 @@ fn strict_content_marker(tag: u32) -> bool {
             | FX_INCR_SYNC_STATE_BEGIN
             | FX_INCR_SYNC_STATE_END
             | FX_INCR_SYNC_END
-    )
-}
-
-fn strict_supported_property_type(tag: u32) -> bool {
-    matches!(
-        tag & 0x0000_FFFF,
-        0x0002 | 0x0003 | 0x000B | 0x0014 | 0x001E | 0x001F | 0x0040 | 0x0048 | 0x0102 | 0x101F
     )
 }
 
@@ -9918,38 +10154,6 @@ fn strict_finish_content_message(
         subject,
     });
     Ok(())
-}
-
-fn strict_skip_content_message_tail(bytes: &[u8], offset: usize) -> Result<usize, String> {
-    let mut offset = offset;
-    let recipient_count = read_strict_u16(bytes, offset)? as usize;
-    offset += 2;
-    for _ in 0..recipient_count {
-        let _recipient_type = *read_strict_slice(bytes, offset, 1)?
-            .first()
-            .ok_or("recipient type missing")?;
-        offset += 1;
-        offset = strict_skip_prefixed_bytes(bytes, offset)?;
-        offset = strict_skip_prefixed_bytes(bytes, offset)?;
-    }
-    let attachment_count = read_strict_u16(bytes, offset)? as usize;
-    offset += 2;
-    for _ in 0..attachment_count {
-        offset = strict_skip_prefixed_bytes(bytes, offset)?;
-        offset = strict_skip_prefixed_bytes(bytes, offset)?;
-        let _size = read_strict_slice(bytes, offset, 8)?;
-        offset += 8;
-        offset = strict_skip_prefixed_bytes(bytes, offset)?;
-    }
-    Ok(offset)
-}
-
-fn strict_skip_prefixed_bytes(bytes: &[u8], offset: usize) -> Result<usize, String> {
-    let len = read_strict_u16(bytes, offset)? as usize;
-    let start = offset + 2;
-    let end = start.saturating_add(len);
-    let _ = read_strict_slice(bytes, start, len)?;
-    Ok(end)
 }
 
 fn strict_validate_replid_globset(value: &[u8]) -> Result<(), String> {
@@ -10172,6 +10376,83 @@ fn strict_push_final_hierarchy_state(bytes: &mut Vec<u8>, source_ids: &[u64], ch
     );
     bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
     bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+}
+
+#[test]
+fn strict_content_decoder_accepts_imported_change_key_with_server_change_number() {
+    const SOURCE_COUNTER: u64 = 0x0df8_974b_7f66;
+    const PARENT_COUNTER: u64 = 50;
+    const SERVER_CHANGE_NUMBER: u64 = 777;
+    // MS-OXCFXICS 2.2.1.2.7 and 2.2.2.3: a ChangeKey is an XID whose LocalId is 1-8 bytes.
+    // MS-OXCFXICS 3.1.5.3: the server allocates its own CN for an imported client change.
+    let imported_change_key = [
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let mut predecessor_change_list = vec![imported_change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&imported_change_key);
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&FX_INCR_SYNC_CHG.to_le_bytes());
+    strict_push_binary_property(
+        &mut bytes,
+        PID_TAG_SOURCE_KEY,
+        &strict_test_xid(SOURCE_COUNTER),
+    );
+    strict_push_i64_property(&mut bytes, PID_TAG_LAST_MODIFICATION_TIME, 1);
+    strict_push_binary_property(&mut bytes, PID_TAG_CHANGE_KEY, &imported_change_key);
+    strict_push_binary_property(
+        &mut bytes,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    bytes.extend_from_slice(&PID_TAG_ASSOCIATED.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&PID_TAG_CHANGE_NUMBER.to_le_bytes());
+    bytes.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(crate::mapi::identity::mapi_store_id(
+            SERVER_CHANGE_NUMBER,
+        ))
+        .unwrap(),
+    );
+    bytes.extend_from_slice(&FX_INCR_SYNC_MESSAGE.to_le_bytes());
+    strict_push_binary_property(
+        &mut bytes,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &strict_test_xid(PARENT_COUNTER),
+    );
+    strict_push_utf16_property(&mut bytes, PID_TAG_SUBJECT_W, "Imported FAI");
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_IDSET_GIVEN,
+        &strict_test_replguid_globset(&[SOURCE_COUNTER]),
+    );
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_CNSET_SEEN,
+        &strict_test_replguid_globset(&[]),
+    );
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_CNSET_SEEN_FAI,
+        &strict_test_replguid_globset(&[SERVER_CHANGE_NUMBER]),
+    );
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_CNSET_READ,
+        &strict_test_replguid_globset(&[]),
+    );
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
+    bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+
+    let stream = strict_decode_content_sync_stream(&bytes).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(stream.message_changes[0].change_key, imported_change_key);
+    assert_eq!(
+        stream.message_changes[0].change_number,
+        Some(SERVER_CHANGE_NUMBER)
+    );
 }
 
 #[test]

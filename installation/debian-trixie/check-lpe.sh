@@ -264,8 +264,14 @@ pass "Deleted Calendar object-kind constraints are current"
 mapi_identity_constraint_count="$(mapi_identity_key_constraint_count "$DATABASE_URL")" \
   || fail "Unable to inspect MAPI identity key constraints"
 [[ "$mapi_identity_constraint_count" == "3" ]] \
-  || fail "MAPI identity key constraints do not match the current 22-byte schema. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
-pass "MAPI identity key constraints match the current 22-byte schema"
+  || fail "MAPI identity key constraints do not require 22-byte SourceKey/InstanceKey and 17-24-byte ChangeKey XIDs. LPE 0.5.0 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "MAPI identity key constraints match the current GID/XID schema"
+
+mapi_calendar_event_move_change_key_constraint_count="$(mapi_calendar_event_move_change_key_constraint_count "$DATABASE_URL")" \
+  || fail "Unable to inspect Calendar Event move ChangeKey constraints"
+[[ "$mapi_calendar_event_move_change_key_constraint_count" == "2" ]] \
+  || fail "Calendar Event move ChangeKey constraints do not accept 17-24-byte XIDs. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Calendar Event move ChangeKey constraints match the current XID schema"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_object_identities_active_source_key_uidx');" | grep -qx 'mapi_object_identities_active_source_key_uidx' \
   || fail "MAPI active source-key uniqueness index is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."

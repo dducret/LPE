@@ -59,7 +59,7 @@ where
             continue;
         };
         let Ok(moved) = store
-            .move_accessible_event_to_deleted_items(principal.account_id, event.canonical_id)
+            .move_accessible_event_to_deleted_items(principal.account_id, event.canonical_id, None)
             .await
         else {
             partial_completion = true;

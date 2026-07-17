@@ -93,9 +93,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         if let Some(message_id) = request.import_message_id() {
             push_unique(&mut plan.object_ids, message_id);
         }
-        if let Some((message_id, target_folder_id)) = request.import_move() {
-            push_unique(&mut plan.object_ids, message_id);
-            push_unique(&mut plan.object_ids, target_folder_id);
+        if let Some(import_move) = request.import_move() {
+            push_unique(&mut plan.object_ids, import_move.source_folder_id);
+            push_unique(&mut plan.object_ids, import_move.source_message_id);
         }
         if let Some(folder_id) = request.delete_folder_id() {
             push_unique(&mut plan.object_ids, folder_id);

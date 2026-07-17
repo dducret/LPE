@@ -6,6 +6,34 @@ fn wire_id_bytes(object_id: u64) -> [u8; 8] {
 }
 
 #[test]
+fn rfc3339_filetime_accepts_postgresql_microseconds_and_preserves_100ns_ticks() {
+    let whole_second = filetime_from_rfc3339_utc("2026-07-17T10:00:00Z");
+    assert_ne!(whole_second, 0);
+    assert_eq!(
+        filetime_from_rfc3339_utc("2026-07-17T10:00:00.000000Z"),
+        whole_second
+    );
+    assert_eq!(
+        filetime_from_rfc3339_utc("2026-07-17T10:00:00.123456Z"),
+        whole_second + 1_234_560
+    );
+    assert_eq!(
+        filetime_from_rfc3339_utc("2026-07-17T10:00:00.1234567Z"),
+        whole_second + 1_234_567
+    );
+    assert_eq!(
+        filetime_from_rfc3339_utc("2026-07-17T10:00:00.12345678Z"),
+        whole_second + 1_234_567
+    );
+    assert_eq!(
+        filetime_from_rfc3339_utc("2026-07-17T10:00:00.123456789Z"),
+        whole_second + 1_234_567
+    );
+    assert_eq!(filetime_from_rfc3339_utc("2026-02-30T10:00:00Z"), 0);
+    assert_eq!(filetime_from_rfc3339_utc("2026-07-17T10:00:00Zjunk"), 0);
+}
+
+#[test]
 fn message_change_number_excludes_bcc_recipients() {
     let mut email = test_email();
     let baseline = canonical_message_change_number(&email);
@@ -1789,6 +1817,98 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
     assert_eq!(item.message_class, "IPM.Microsoft.WunderBar.Link");
     assert!(item.source_key_len > 0);
     assert!(item.parent_source_key_len > 0);
+}
+
+#[test]
+fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next_marker() {
+    let first_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999395").unwrap();
+    let second_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999396").unwrap();
+    let first_item_id = crate::mapi::identity::mapi_store_id(395);
+    let second_item_id = crate::mapi::identity::mapi_store_id(396);
+    crate::mapi::identity::remember_mapi_identity(first_canonical_id, first_item_id);
+    crate::mapi::identity::remember_mapi_identity(second_canonical_id, second_item_id);
+    let final_property_tag = 0x8B00_0003;
+    let first_property_value = 3i32;
+    let second_property_value = 4i32;
+    let specials = [
+        SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            item_id: first_item_id,
+            canonical_id: first_canonical_id,
+            associated: true,
+            subject: "Compact".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 2_048,
+            read_state: None,
+            named_properties: vec![(
+                final_property_tag,
+                SpecialMessagePropertyValue::I32(first_property_value),
+            )],
+        },
+        SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            item_id: second_item_id,
+            canonical_id: second_canonical_id,
+            associated: true,
+            subject: "Sent To".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:01:00Z"),
+            message_size: 1_984,
+            read_state: None,
+            named_properties: vec![(
+                final_property_tag,
+                SpecialMessagePropertyValue::I32(second_property_value),
+            )],
+        },
+    ];
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_FAI | SYNC_FLAG_PROGRESS,
+        SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+        &[],
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &specials,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &specials,
+        &[],
+        &[],
+        1,
+    );
+
+    // [MS-OXCFXICS] sections 2.2.4.2 and 2.2.4.3.11-2.2.4.3.14:
+    // the next marker follows the FAI message property list directly; a null
+    // property tag is not an item terminator in the FastTransfer grammar.
+    let first_expected_boundary = [
+        final_property_tag.to_le_bytes(),
+        first_property_value.to_le_bytes(),
+        INCR_SYNC_PROGRESS_PER_MSG.to_le_bytes(),
+    ]
+    .concat();
+    let second_expected_boundary = [
+        final_property_tag.to_le_bytes(),
+        second_property_value.to_le_bytes(),
+        INCR_SYNC_STATE_BEGIN.to_le_bytes(),
+    ]
+    .concat();
+    assert!(
+        contains_bytes(&buffer, &first_expected_boundary),
+        "first FAI message must be followed directly by IncrSyncProgressPerMsg"
+    );
+    assert!(
+        contains_bytes(&buffer, &second_expected_boundary),
+        "last FAI message must be followed directly by IncrSyncStateBegin"
+    );
 }
 
 #[test]
