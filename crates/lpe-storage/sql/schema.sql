@@ -1623,6 +1623,7 @@ CREATE TABLE mail_change_log (
         'contact',
         'calendar',
         'calendar_event',
+        'deleted_calendar_event',
         'task_list',
         'task',
         'note',
@@ -1717,6 +1718,7 @@ CREATE TABLE mail_change_log (
                 'contact',
                 'calendar',
                 'calendar_event',
+                'deleted_calendar_event',
                 'task_list',
                 'task',
                 'note',
@@ -1765,6 +1767,7 @@ CREATE INDEX mail_change_log_collaboration_idx
         'contact',
         'calendar',
         'calendar_event',
+        'deleted_calendar_event',
         'task_list',
         'task',
         'note',
@@ -2156,7 +2159,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'deleted_calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
@@ -2183,6 +2186,34 @@ CREATE INDEX mapi_object_identities_source_key_idx
 CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx
     ON mapi_object_identities (tenant_id, account_id, source_key)
     WHERE deleted_at IS NULL;
+
+CREATE TABLE mapi_calendar_event_identity_moves (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    event_id UUID NOT NULL,
+    old_mapi_object_id BIGINT NOT NULL CHECK ((old_mapi_object_id & 65535) = 1),
+    new_mapi_object_id BIGINT NOT NULL CHECK ((new_mapi_object_id & 65535) = 1),
+    old_source_key BYTEA NOT NULL CHECK (octet_length(old_source_key) = 22),
+    new_source_key BYTEA NOT NULL CHECK (octet_length(new_source_key) = 22),
+    old_change_number BIGINT NOT NULL CHECK (old_change_number > 0 AND old_change_number <= 140737488355327),
+    new_change_number BIGINT NOT NULL CHECK (new_change_number > 0 AND new_change_number <= 140737488355327),
+    old_change_key BYTEA NOT NULL CHECK (octet_length(old_change_key) = 22),
+    new_change_key BYTEA NOT NULL CHECK (octet_length(new_change_key) = 22),
+    old_instance_key BYTEA NOT NULL CHECK (octet_length(old_instance_key) = 22),
+    new_instance_key BYTEA NOT NULL CHECK (octet_length(new_instance_key) = 22),
+    new_predecessor_change_list BYTEA NOT NULL CHECK (octet_length(new_predecessor_change_list) > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, event_id),
+    CHECK (old_mapi_object_id <> new_mapi_object_id),
+    CHECK (old_source_key <> new_source_key),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_calendar_event_identity_moves_old_id_idx
+    ON mapi_calendar_event_identity_moves (tenant_id, account_id, old_mapi_object_id);
+
+CREATE INDEX mapi_calendar_event_identity_moves_old_source_key_idx
+    ON mapi_calendar_event_identity_moves (tenant_id, account_id, old_source_key);
 
 CREATE TABLE mapi_named_properties (
     tenant_id UUID NOT NULL,
@@ -2698,6 +2729,8 @@ CREATE TABLE calendar_events (
     source_uid TEXT,
     source_etag TEXT,
     source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'deleted')),
+    deleted_at TIMESTAMPTZ,
     modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -2711,6 +2744,10 @@ CREATE TABLE calendar_events (
     CHECK (jsonb_typeof(recurrence_json) = 'object'),
     CHECK (jsonb_typeof(recurrence_exceptions_json) = 'array'),
     CHECK (jsonb_typeof(source_payload_json) = 'object'),
+    CHECK (
+        (lifecycle_state = 'active' AND deleted_at IS NULL)
+        OR (lifecycle_state = 'deleted' AND deleted_at IS NOT NULL)
+    ),
     FOREIGN KEY (tenant_id, owner_account_id, calendar_id)
         REFERENCES calendars (tenant_id, owner_account_id, id)
         ON DELETE CASCADE,
@@ -2720,11 +2757,16 @@ CREATE TABLE calendar_events (
 );
 
 CREATE INDEX calendar_events_owner_time_idx
-    ON calendar_events (tenant_id, owner_account_id, starts_at, ends_at);
+    ON calendar_events (tenant_id, owner_account_id, starts_at, ends_at)
+    WHERE lifecycle_state = 'active';
 
 CREATE INDEX calendar_events_owner_reminder_idx
     ON calendar_events (tenant_id, owner_account_id, reminder_set, reminder_at)
-    WHERE reminder_set;
+    WHERE lifecycle_state = 'active' AND reminder_set;
+
+CREATE INDEX calendar_events_owner_deleted_idx
+    ON calendar_events (tenant_id, owner_account_id, deleted_at DESC, id)
+    WHERE lifecycle_state = 'deleted';
 
 CREATE TABLE calendar_event_attachments (
     id UUID PRIMARY KEY,

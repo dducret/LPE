@@ -454,6 +454,7 @@ impl<T: ExchangeStore> MapiStore for T {
                     );
                 }
             }
+            let deleted_events = self.fetch_accessible_deleted_events(account_id).await?;
             let mut tasks = Vec::new();
             for collection in &task_collections {
                 tasks.extend(
@@ -601,6 +602,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &task_collections,
                 &contacts,
                 &events,
+                &deleted_events,
                 &tasks,
                 &notes,
                 &journal_entries,
@@ -623,10 +625,20 @@ impl<T: ExchangeStore> MapiStore for T {
                     Some(identity.source_key.clone()),
                 );
             }
-            let event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+            let event_ids = events
+                .iter()
+                .chain(deleted_events.iter())
+                .map(|event| event.id)
+                .collect::<Vec<_>>();
             let event_versions = self
                 .fetch_mapi_event_versions(account_id, &event_ids)
                 .await?;
+            let calendar_attachments = if event_ids.is_empty() {
+                Vec::new()
+            } else {
+                self.fetch_calendar_attachments_for_events(account_id, &event_ids)
+                    .await?
+            };
             let mailbox_ids = mailboxes
                 .iter()
                 .map(|mailbox| mailbox.id)
@@ -643,10 +655,12 @@ impl<T: ExchangeStore> MapiStore for T {
                 task_collections,
                 contacts,
                 events,
+                deleted_events,
                 tasks,
                 folder_permissions,
                 &identity_records,
             )
+            .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
@@ -691,6 +705,7 @@ fn mapi_identity_requests(
     task_collections: &[CollaborationCollection],
     contacts: &[AccessibleContact],
     events: &[AccessibleEvent],
+    deleted_events: &[AccessibleEvent],
     tasks: &[ClientTask],
     notes: &[ClientNote],
     journal_entries: &[JournalEntry],
@@ -734,6 +749,12 @@ fn mapi_identity_requests(
     }));
     requests.extend(events.iter().map(|event| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::CalendarEvent,
+        canonical_id: event.id,
+        reserved_global_counter: None,
+        source_key: None,
+    }));
+    requests.extend(deleted_events.iter().map(|event| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::DeletedCalendarEvent,
         canonical_id: event.id,
         reserved_global_counter: None,
         source_key: None,

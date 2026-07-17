@@ -1406,6 +1406,47 @@ sections 2.2.1.2.3, 2.2.1.2.5, 2.2.1.2.7, 2.2.1.2.8, 2.2.2.1, 2.2.2.2, 2.2.2.3,
 2.2.2.3.1, 2.2.2.5, and 3.1.5.3. Source-key generation follows
 [MS-OXCFXICS] section 3.2.5.5 separately.
 
+The `202607162052` real Outlook delete capture isolated a distinct
+`RopMoveCopyMessages (0x33)` path. Outlook 16.0.20131 opened Event MID
+`0x0000000000460001` with ChangeKey suffix `0x56`, then issued a synchronous
+move (`WantAsynchronous=FALSE`, `WantCopy=FALSE`) from Calendar FID
+`0x0000000000100001` to Deleted Items FID `0x0000000000080001`. LPE routed the
+Event MID through the generic `JmapEmail` lookup, returned `ReturnValue=0` with
+`PartialCompletion=TRUE`, and made no PostgreSQL mutation. Outlook correctly
+surfaced that partial result as `MAPI_E_EXTENDED_ERROR (0x80040119)` and an
+`Unknown Error` dialog.
+
+Calendar-to-Deleted-Items moves now preserve one canonical Event row while
+changing its lifecycle from `active` to `deleted`. The inter-folder move
+allocates a new principal-scoped MID, SourceKey, ChangeNumber, ChangeKey, and
+InstanceKey for the destination object, records the old/new identity lineage,
+and retains the old MID for the source-folder ICS deletion. Deleted Items
+projects that same Event as `IPM.Appointment` beside canonical mail rows; it
+does not create a parallel or synthetic message. The response returns
+`PartialCompletion=FALSE`, the source emits a deletion, and the destination
+emits a moved/created notification and ICS change with the new identity.
+Deleted Items merges mail and Calendar rows in one bounded, globally sorted
+table window, including categorized expand/collapse views. A restarted session
+reloads the durable destination CN/ChangeKey/PCL and emits Event attachments in
+the destination FastTransfer stream. Live notifications are reconstructed from
+the canonical change log and the identity-move lineage, so the author session
+and other active sessions observe the same old/new FID/MID pair.
+
+This identity transition follows [MS-OXCFXICS] section 3.1.5.3, which requires
+a new internal identifier for an inter-folder move, and source-key generation
+follows sections 2.2.1.2.5 and 3.2.5.5. The request/response and
+partial-completion contracts are [MS-OXCROPS] sections 2.2.4.6.1 and
+2.2.4.6.2 and [MS-OXCFOLD] sections 2.2.1.6.1, 2.2.1.6.2, 3.1.4.6, and
+3.2.5.6. FID/MID pairs follow [MS-OXCDATA] sections 2.2.1.1 and 2.2.1.2, and
+the Deleted Items role follows [MS-OXOSFLD] section 2.2.1. Moved-object
+notification identities follow [MS-OXCNOTIF] sections
+2.2.1.1, 2.2.1.4.1.2, and 3.1.4.3. Calendar copies, moves to unrelated mailbox
+folders, restore from Deleted Items, and final deletion from Deleted Items
+remain separate interoperability work. The captured regression is
+`mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event`.
+The mixed table regression also applies [MS-OXCTABL] sections 2.2.2.3,
+2.2.2.5, 2.2.2.17, 2.2.2.19, 2.2.2.20, and 4.5.
+
 Three Calendar mutation paths remain deliberately incomplete:
 
 - Meeting cancellation on an existing Event handle remains fail-closed because

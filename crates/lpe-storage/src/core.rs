@@ -69,6 +69,8 @@ impl Storage {
     async fn assert_required_schema_objects(&self, schema_name: &str) -> Result<()> {
         for table in [
             "accounts",
+            "calendar_events",
+            "mapi_calendar_event_identity_moves",
             "mapi_object_identities",
             "mapi_named_properties",
             "mapi_custom_property_values",
@@ -138,6 +140,69 @@ impl Storage {
             bail!(
                 "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_columns.join(", ")
+            );
+        }
+
+        let mut invalid_calendar_lifecycle_columns = Vec::new();
+        for (column, data_type, is_nullable) in [
+            ("lifecycle_state", "text", "NO"),
+            ("deleted_at", "timestamp with time zone", "YES"),
+        ] {
+            let present = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'calendar_events'
+                      AND column_name = $2
+                      AND data_type = $3
+                      AND is_nullable = $4
+                )
+                "#,
+            )
+            .bind(&schema_name)
+            .bind(column)
+            .bind(data_type)
+            .bind(is_nullable)
+            .fetch_one(&self.pool)
+            .await
+            .with_context(|| {
+                format!("unable to inspect required column {schema_name}.calendar_events.{column}")
+            })?;
+            if !present {
+                invalid_calendar_lifecycle_columns
+                    .push(format!("{column} {data_type} nullable={is_nullable}"));
+            }
+        }
+        if !invalid_calendar_lifecycle_columns.is_empty() {
+            bail!(
+                "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                invalid_calendar_lifecycle_columns.join(", ")
+            );
+        }
+
+        let deleted_object_kind_tables = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(DISTINCT table_row.relname)
+            FROM pg_constraint constraint_row
+            JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+            JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+            WHERE namespace_row.nspname = $1
+              AND table_row.relname IN ('mail_change_log', 'mapi_object_identities')
+              AND constraint_row.contype = 'c'
+              AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect deleted_calendar_event constraints in schema {schema_name}")
+        })?;
+        if deleted_object_kind_tables != 2 {
+            bail!(
+                "required deleted_calendar_event object-kind constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 

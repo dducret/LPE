@@ -122,6 +122,7 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "message" => MapiIdentityObjectKind::Message,
         "contact" => MapiIdentityObjectKind::Contact,
         "calendar_event" => MapiIdentityObjectKind::CalendarEvent,
+        "deleted_calendar_event" => MapiIdentityObjectKind::DeletedCalendarEvent,
         "task" => MapiIdentityObjectKind::Task,
         "note" => MapiIdentityObjectKind::Note,
         "journal_entry" => MapiIdentityObjectKind::JournalEntry,
@@ -276,6 +277,60 @@ fn mapi_notification_event_from_change_row(
                 );
             }
             notification
+        }
+        "deleted_calendar_event" => {
+            let event_id = row.try_get::<Uuid, _>("object_id").ok()?;
+            let owner_account_id = row.try_get::<Uuid, _>("owner_account_id").ok()?;
+            let notification_account_id =
+                row.try_get::<Uuid, _>("notification_account_id").ok()?;
+            let old_calendar_id = row
+                .try_get::<Option<Uuid>, _>("old_calendar_id")
+                .ok()
+                .flatten()?;
+            let old_calendar_role = row
+                .try_get::<Option<String>, _>("old_calendar_role")
+                .ok()
+                .flatten()?;
+            let new_message_id = row
+                .try_get::<Option<i64>, _>("calendar_event_mapi_object_id")
+                .ok()
+                .flatten()? as u64;
+            let old_message_id = row
+                .try_get::<Option<i64>, _>("old_calendar_event_mapi_object_id")
+                .ok()
+                .flatten()? as u64;
+            let old_collection_id = mapi_calendar_collection_id(
+                notification_account_id,
+                owner_account_id,
+                old_calendar_id,
+                &old_calendar_role,
+            );
+            let old_folder_id = mapi_calendar_notification_folder_id(
+                &old_collection_id,
+                calendar_folder_ids,
+            )?;
+            Some(
+                MapiNotificationEvent::canonical(
+                    MapiNotificationKind::Content,
+                    mapi_notification_event_mask_for_change("moved", false),
+                    crate::mapi::identity::TRASH_FOLDER_ID,
+                    Some(new_message_id),
+                    Some(old_folder_id),
+                    cursor,
+                    modseq,
+                    None,
+                    None,
+                    "moved".to_string(),
+                    None,
+                    None,
+                    row.try_get::<Option<String>, _>("calendar_event_subject")
+                        .ok()
+                        .flatten(),
+                )
+                .with_old_message_id(Some(old_message_id))
+                .with_canonical_ids(None, Some(event_id))
+                .with_object_kind("deleted_calendar_event"),
+            )
         }
         "mailbox_message" | "attachment" => {
             let scope_role = row.try_get::<String, _>("scope_role").ok();
@@ -463,7 +518,9 @@ fn mapi_calendar_notification_folder_identity_ids_from_row(
     ) {
         append_identity(calendar_id, &calendar_role);
     }
-    if row.get::<String, _>("change_kind") == "moved" {
+    if row.get::<String, _>("change_kind") == "moved"
+        || row.get::<String, _>("object_kind") == "deleted_calendar_event"
+    {
         if let (Some(calendar_id), Some(calendar_role)) = (
             row.try_get::<Option<Uuid>, _>("old_calendar_id")
                 .ok()
@@ -575,6 +632,7 @@ mod notification_tests {
                     expected_mask,
                     crate::mapi::identity::CALENDAR_FOLDER_ID,
                     Some(event_mapi_object_id),
+                    None,
                     None,
                     Some("calendar_event"),
                 )

@@ -126,7 +126,14 @@ pub(in crate::mapi) fn special_sync_objects_for(
         return Vec::new();
     }
     let mut objects = Vec::new();
-    if folder_id == CALENDAR_FOLDER_ID
+    if folder_id == TRASH_FOLDER_ID {
+        objects.extend(
+            snapshot
+                .events_for_folder(folder_id)
+                .into_iter()
+                .map(|event| calendar_sync_object(event, None)),
+        );
+    } else if folder_id == CALENDAR_FOLDER_ID
         || snapshot
             .collaboration_folder_for_id(folder_id)
             .is_some_and(|folder| {
@@ -1032,7 +1039,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<mapi_mailstore::MessageAttachmentSyncFacts> {
-    emails
+    let mut facts = emails
         .iter()
         .filter_map(|email| {
             let message_id = mapi_message_id(email);
@@ -1063,7 +1070,29 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
                     .collect(),
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    facts.extend(
+        snapshot
+            .events_for_folder(folder_id)
+            .into_iter()
+            .filter(|event| !event.attachments.is_empty())
+            .map(|event| mapi_mailstore::MessageAttachmentSyncFacts {
+                message_id: event.canonical_id,
+                attachments: event
+                    .attachments
+                    .iter()
+                    .map(|attachment| mapi_mailstore::AttachmentSyncFact {
+                        id: attachment.canonical_id,
+                        file_reference: attachment.file_reference.clone(),
+                        file_name: attachment.file_name.clone(),
+                        media_type: attachment.media_type.clone(),
+                        size_octets: attachment.size_octets,
+                        embedded_message_blob: None,
+                    })
+                    .collect(),
+            }),
+    );
+    facts
 }
 
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(

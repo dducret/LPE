@@ -31,6 +31,7 @@ pub(super) fn debug_object_scope_for_id(
     if snapshot
         .event_for_id(CALENDAR_FOLDER_ID, object_id)
         .is_some()
+        || snapshot.event_for_id(TRASH_FOLDER_ID, object_id).is_some()
         || snapshot
             .event_for_id(REMINDERS_FOLDER_ID, object_id)
             .is_some()

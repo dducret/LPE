@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use serde::Serialize;
 use sqlx::{Postgres, Row};
@@ -141,12 +143,22 @@ impl Storage {
     ) -> Result<Vec<CalendarEventAttachment>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, event_id, file_name, media_type, size_octets
-            FROM calendar_event_attachments
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND event_id = $3
-            ORDER BY ordinal ASC, id ASC
+            SELECT
+                attachment.id,
+                attachment.event_id,
+                attachment.file_name,
+                attachment.media_type,
+                attachment.size_octets
+            FROM calendar_event_attachments attachment
+            JOIN calendar_events event
+              ON event.tenant_id = attachment.tenant_id
+             AND event.owner_account_id = attachment.owner_account_id
+             AND event.id = attachment.event_id
+             AND event.lifecycle_state = 'active'
+            WHERE attachment.tenant_id = $1
+              AND attachment.owner_account_id = $2
+              AND attachment.event_id = $3
+            ORDER BY attachment.ordinal ASC, attachment.id ASC
             "#,
         )
         .bind(tenant_id)
@@ -323,12 +335,22 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT id, event_id, file_name, media_type, size_octets
-            FROM calendar_event_attachments
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND event_id = $3
-            ORDER BY ordinal ASC, id ASC
+            SELECT
+                attachment.id,
+                attachment.event_id,
+                attachment.file_name,
+                attachment.media_type,
+                attachment.size_octets
+            FROM calendar_event_attachments attachment
+            JOIN calendar_events event
+              ON event.tenant_id = attachment.tenant_id
+             AND event.owner_account_id = attachment.owner_account_id
+             AND event.id = attachment.event_id
+             AND event.lifecycle_state = 'active'
+            WHERE attachment.tenant_id = $1
+              AND attachment.owner_account_id = $2
+              AND attachment.event_id = $3
+            ORDER BY attachment.ordinal ASC, attachment.id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -347,15 +369,52 @@ impl Storage {
         account_id: Uuid,
         event_ids: &[Uuid],
     ) -> Result<Vec<(Uuid, Vec<CalendarEventAttachment>)>> {
-        let mut result = Vec::with_capacity(event_ids.len());
-        for event_id in event_ids {
-            result.push((
-                *event_id,
-                self.fetch_calendar_event_attachments(account_id, *event_id)
-                    .await?,
-            ));
+        if event_ids.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(result)
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                attachment.id,
+                attachment.event_id,
+                attachment.file_name,
+                attachment.media_type,
+                attachment.size_octets
+            FROM calendar_event_attachments attachment
+            JOIN calendar_events event
+              ON event.tenant_id = attachment.tenant_id
+             AND event.owner_account_id = attachment.owner_account_id
+             AND event.id = attachment.event_id
+             AND event.lifecycle_state IN ('active', 'deleted')
+            WHERE attachment.tenant_id = $1
+              AND attachment.owner_account_id = $2
+              AND attachment.event_id = ANY($3)
+            ORDER BY attachment.event_id, attachment.ordinal, attachment.id
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut attachments_by_event = HashMap::new();
+        for row in rows {
+            let attachment = calendar_event_attachment_from_row(row)?;
+            attachments_by_event
+                .entry(attachment.event_id)
+                .or_insert_with(Vec::new)
+                .push(attachment);
+        }
+        Ok(event_ids
+            .iter()
+            .map(|event_id| {
+                (
+                    *event_id,
+                    attachments_by_event.remove(event_id).unwrap_or_default(),
+                )
+            })
+            .collect())
     }
 
     pub async fn add_calendar_event_attachment(
@@ -380,7 +439,10 @@ impl Storage {
             r#"
             SELECT calendar_id
             FROM calendar_events
-            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+              AND lifecycle_state = 'active'
             LIMIT 1
             FOR UPDATE
             "#,
@@ -517,6 +579,11 @@ impl Storage {
             r#"
             SELECT a.id, a.file_name, a.media_type, a.domain_id, a.blob_id
             FROM calendar_event_attachments a
+            JOIN calendar_events event
+              ON event.tenant_id = a.tenant_id
+             AND event.owner_account_id = a.owner_account_id
+             AND event.id = a.event_id
+             AND event.lifecycle_state = 'active'
             WHERE a.tenant_id = $1
               AND a.owner_account_id = $2
               AND a.event_id = $3
@@ -593,6 +660,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = $3
+              AND lifecycle_state = 'active'
             FOR UPDATE
             "#,
         )
@@ -631,7 +699,10 @@ impl Storage {
             r#"
             UPDATE calendar_events
             SET updated_at = NOW()
-            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+              AND lifecycle_state = 'active'
             "#,
         )
         .bind(&tenant_id)

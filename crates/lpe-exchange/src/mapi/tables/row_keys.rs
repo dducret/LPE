@@ -28,11 +28,21 @@ pub(in crate::mapi) fn table_row_keys(
         .collect(),
         MapiObject::ContentsTable {
             folder_id,
+            associated,
             sort_orders,
             restriction,
             position,
             ..
         } => {
+            if !*associated && *folder_id == TRASH_FOLDER_ID {
+                let mut rows =
+                    deleted_items_content_rows(mailboxes, emails, snapshot, restriction.as_ref());
+                sort_deleted_items_content_rows(&mut rows, sort_orders);
+                return rows
+                    .into_iter()
+                    .map(|row| deleted_items_content_row_id(&row))
+                    .collect();
+            }
             if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows = calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
                 sort_events(&mut rows, sort_orders);

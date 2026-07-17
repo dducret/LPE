@@ -22,6 +22,7 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) parent_folder_id: Option<u64>,
     pub(in crate::mapi) message_id: Option<u64>,
     pub(in crate::mapi) old_folder_id: Option<u64>,
+    pub(in crate::mapi) old_message_id: Option<u64>,
     pub(in crate::mapi) canonical_folder_id: Option<uuid::Uuid>,
     pub(in crate::mapi) canonical_message_id: Option<uuid::Uuid>,
     pub(in crate::mapi) kind: MapiNotificationKind,
@@ -44,6 +45,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id,
             old_folder_id: None,
+            old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
             kind: MapiNotificationKind::Content,
@@ -66,6 +68,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id: changed_folder_id,
             old_folder_id: None,
+            old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
             kind: MapiNotificationKind::Hierarchy,
@@ -102,6 +105,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id,
             old_folder_id,
+            old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
             kind,
@@ -136,6 +140,11 @@ impl MapiNotificationEvent {
         self
     }
 
+    pub(crate) fn with_old_message_id(mut self, old_message_id: Option<u64>) -> Self {
+        self.old_message_id = old_message_id;
+        self
+    }
+
     pub(crate) fn with_object_kind(mut self, object_kind: &'static str) -> Self {
         self.object_kind = Some(object_kind);
         self
@@ -166,6 +175,7 @@ impl MapiNotificationEvent {
         u64,
         Option<u64>,
         Option<u64>,
+        Option<u64>,
         Option<&'static str>,
     ) {
         (
@@ -174,6 +184,7 @@ impl MapiNotificationEvent {
             self.folder_id,
             self.message_id,
             self.old_folder_id,
+            self.old_message_id,
             self.object_kind,
         )
     }
@@ -284,7 +295,13 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
             }
             append_wire_id(response, event.old_folder_id.unwrap_or(object_id));
             if message_event {
-                append_wire_id(response, event.message_id.unwrap_or_default());
+                append_wire_id(
+                    response,
+                    event
+                        .old_message_id
+                        .or(event.message_id)
+                        .unwrap_or_default(),
+                );
             } else {
                 append_wire_id(response, event.old_folder_id.unwrap_or(event.folder_id));
             }

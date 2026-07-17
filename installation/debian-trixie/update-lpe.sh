@@ -252,6 +252,31 @@ if [[ "${MAPI_IDENTITY_VERSION_COLUMN_COUNT}" != "2" ]]; then
   echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
+CALENDAR_EVENT_LIFECYCLE_COLUMN_COUNT="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END"
+)" || {
+  echo "Unable to inspect Calendar Event lifecycle column shapes." >&2
+  exit 1
+}
+MAPI_CALENDAR_EVENT_IDENTITY_MOVES_TABLE="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
+)" || {
+  echo "Unable to inspect the Calendar Event identity-move table." >&2
+  exit 1
+}
+DELETED_CALENDAR_EVENT_CONSTRAINT_COUNT="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'"
+)" || {
+  echo "Unable to inspect deleted Calendar object-kind constraints." >&2
+  exit 1
+}
+if [[ "${CALENDAR_EVENT_LIFECYCLE_COLUMN_COUNT}" != "2" \
+  || "${MAPI_CALENDAR_EVENT_IDENTITY_MOVES_TABLE}" != "mapi_calendar_event_identity_moves" \
+  || "${DELETED_CALENDAR_EVENT_CONSTRAINT_COUNT}" != "2" ]]; then
+  echo "Calendar Event Deleted Items lifecycle shape is incomplete despite schema label ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"

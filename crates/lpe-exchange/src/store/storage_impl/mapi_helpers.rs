@@ -44,14 +44,19 @@ fn split_ews_recipient_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn mapi_special_object_kind_for_checkpoint_mailbox(
+async fn mapi_special_object_kind_for_checkpoint_mailbox(
+    storage: &Storage,
+    tenant_id: &Uuid,
+    account_id: Uuid,
     checkpoint_kind: MapiCheckpointKind,
     mailbox_id: Option<Uuid>,
-) -> Option<&'static str> {
+) -> Result<Option<&'static str>> {
     if checkpoint_kind == MapiCheckpointKind::Hierarchy {
-        return None;
+        return Ok(None);
     }
-    let mailbox_id = mailbox_id?;
+    let Some(mailbox_id) = mailbox_id else {
+        return Ok(None);
+    };
     let matches_virtual_folder = |folder_id| {
         crate::mapi_mailstore::virtual_special_mailbox(folder_id)
             .map(|mailbox| mailbox.id == mailbox_id)
@@ -67,10 +72,13 @@ fn mapi_special_object_kind_for_checkpoint_mailbox(
     .into_iter()
     .any(matches_virtual_folder)
     {
-        return Some("contact");
+        return Ok(Some("contact"));
     }
     if matches_virtual_folder(crate::mapi::identity::CALENDAR_FOLDER_ID) {
-        return Some("calendar_event");
+        return Ok(Some("calendar_event"));
+    }
+    if matches_virtual_folder(crate::mapi::identity::TRASH_FOLDER_ID) {
+        return Ok(Some("deleted_calendar_event"));
     }
     if [
         crate::mapi::identity::TASKS_FOLDER_ID,
@@ -80,21 +88,36 @@ fn mapi_special_object_kind_for_checkpoint_mailbox(
     .into_iter()
     .any(matches_virtual_folder)
     {
-        return Some("task");
+        return Ok(Some("task"));
     }
     if matches_virtual_folder(crate::mapi::identity::NOTES_FOLDER_ID) {
-        return Some("note");
+        return Ok(Some("note"));
     }
     if matches_virtual_folder(crate::mapi::identity::JOURNAL_FOLDER_ID) {
-        return Some("journal_entry");
+        return Ok(Some("journal_entry"));
     }
     if matches_virtual_folder(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID) {
-        return Some("conversation_action");
+        return Ok(Some("conversation_action"));
     }
     if matches_virtual_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID) {
-        return Some("navigation_shortcut");
+        return Ok(Some("navigation_shortcut"));
     }
-    None
+    let mailbox_role = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT role
+        FROM mailboxes
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND id = $3
+        LIMIT 1
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(mailbox_id)
+    .fetch_optional(storage.pool())
+    .await?;
+    Ok((mailbox_role.as_deref() == Some("trash")).then_some("deleted_calendar_event"))
 }
 
 async fn advance_mapi_replica_counter_past_allocated(

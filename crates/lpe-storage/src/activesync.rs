@@ -528,7 +528,9 @@ impl Storage {
                 id,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
             FROM calendar_events
-            WHERE tenant_id = $1 AND owner_account_id = $2
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND lifecycle_state = 'active'
             ORDER BY starts_at ASC, id ASC
             "#,
         )
@@ -566,6 +568,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = ANY($3)
+              AND lifecycle_state = 'active'
             "#,
         )
         .bind(&tenant_id)

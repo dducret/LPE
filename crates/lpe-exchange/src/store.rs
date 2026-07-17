@@ -10,12 +10,13 @@ use lpe_storage::{
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput, MapiEventVersion,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -587,6 +588,11 @@ pub trait ExchangeStore: AccountAuthStore {
         collection_id: &'a str,
     ) -> StoreFuture<'a, Vec<AccessibleEvent>>;
 
+    fn fetch_accessible_deleted_events<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<AccessibleEvent>>;
+
     fn fetch_event_sync_versions<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -681,6 +687,12 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         event_id: Uuid,
     ) -> StoreFuture<'a, ()>;
+
+    fn move_accessible_event_to_deleted_items<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult>;
 
     fn fetch_accessible_tasks_by_ids<'a>(
         &'a self,

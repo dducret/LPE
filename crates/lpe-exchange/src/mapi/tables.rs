@@ -26,6 +26,7 @@ mod columns;
 mod contents;
 mod controls;
 mod counts;
+mod deleted_items;
 mod diagnostics;
 mod filters;
 mod find;
@@ -55,6 +56,7 @@ pub(super) use columns::*;
 pub(in crate::mapi) use contents::*;
 pub(in crate::mapi) use controls::*;
 pub(in crate::mapi) use counts::*;
+use deleted_items::*;
 pub(in crate::mapi) use diagnostics::outlook_bootstrap_row_invariant_summaries;
 use diagnostics::*;
 pub(in crate::mapi) use filters::is_unrestricted_common_views_navigation_projection;
@@ -331,6 +333,29 @@ pub(in crate::mapi) fn rop_find_row_response(
                 }
             } else if normal_contents_suppressed_for_associated_only_folder(*folder_id) {
                 return rop_find_row_no_match_response(request);
+            } else if !*associated && *folder_id == TRASH_FOLDER_ID {
+                let mut rows = deleted_items_content_rows(
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    table_restriction.as_ref(),
+                );
+                sort_deleted_items_content_rows(&mut rows, sort_orders);
+                let row_refs = rows.iter().collect::<Vec<_>>();
+                if let Some((index, row)) =
+                    find_row(row_refs.as_slice(), *position, request, |row| {
+                        deleted_items_content_row_matches(row, Some(&restriction), snapshot)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_deleted_items_content_row(*row, &columns),
+                    );
+                } else {
+                    return rop_find_row_no_match_response(request);
+                }
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows =
                     calendar_content_rows(snapshot, *folder_id, table_restriction.as_ref());

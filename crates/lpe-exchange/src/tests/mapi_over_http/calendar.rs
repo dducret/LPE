@@ -142,6 +142,328 @@ async fn mapi_over_http_calendar_same_folder_move_is_idempotent() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("6da5b701-32c1-49ca-87a3-78ecad0ad440").unwrap();
+    let attachment_id = Uuid::parse_str("6da5b702-32c1-49ca-87a3-78ecad0ad440").unwrap();
+    let event_mapi_id = 0x0000_0000_0046_0001;
+    let trash_id = Uuid::parse_str("70707070-7070-4070-8070-707070707070").unwrap();
+    let trash_message_id = Uuid::parse_str("71717171-7171-4171-8171-717171717171").unwrap();
+    let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
+    trash.total_emails = 1;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-17".to_string(),
+            time: "07:45".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Test 08:34".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        calendar_attachments: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            vec![CalendarEventAttachment {
+                id: attachment_id,
+                event_id,
+                file_reference: format!("calendar-attachment:{event_id}:{attachment_id}"),
+                file_name: "move-agenda.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 2048,
+            }],
+        )]))),
+        mailboxes: Arc::new(Mutex::new(vec![trash])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &trash_message_id.to_string(),
+            &trash_id.to_string(),
+            "trash",
+            "Existing deleted mail",
+        )])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, event_mapi_id)]))),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(1))),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let deleted_calendar_events = store.deleted_calendar_events.clone();
+    let emails = store.emails.clone();
+    let calendar_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap()
+            .id;
+    for mailbox_id in [calendar_checkpoint_id, trash_id] {
+        store
+            .store_mapi_sync_checkpoint(
+                account.account_id,
+                Some(mailbox_id),
+                MapiCheckpointKind::Content,
+                0,
+                1,
+                serde_json::json!({"source": "before-calendar-trash-move"}),
+            )
+            .await
+            .unwrap();
+    }
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(
+        &mut open_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_open_folder(&mut open_rops, 0, 2, crate::mapi::identity::TRASH_FOLDER_ID);
+    // The source and destination subscriptions make the regression exercise
+    // the ObjectDeleted/ObjectMoved wire identities used by cached Outlook.
+    // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2.
+    open_rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x03]);
+    open_rops.extend_from_slice(&0x0108u16.to_le_bytes());
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    open_rops.extend_from_slice(&0u64.to_le_bytes());
+    open_rops.extend_from_slice(&[0x29, 0x00, 0x02, 0x04]);
+    open_rops.extend_from_slice(&0x0124u16.to_le_bytes());
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    open_rops.extend_from_slice(&0u64.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &open_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (_, open_handles) = response_rops_and_handles_from_execute_body(&response_body);
+    assert_ne!(open_handles[1], u32::MAX);
+    assert_ne!(open_handles[2], u32::MAX);
+    assert_ne!(open_handles[3], u32::MAX);
+    assert_ne!(open_handles[4], u32::MAX);
+
+    // Outlook 16.0.20131 uses this exact synchronous RopMoveCopyMessages shape
+    // for a normal Calendar delete: source Calendar, destination Deleted Items,
+    // one Event MID, WantAsynchronous=FALSE, WantCopy=FALSE.
+    // [MS-OXCROPS] sections 2.2.4.6.1 and 2.2.4.6.2;
+    // [MS-OXCFOLD] sections 2.2.1.6 and 3.2.5.6.
+    let mut move_rops = vec![0x33, 0x00, 0x00, 0x01];
+    move_rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut move_rops, event_mapi_id);
+    move_rops.extend_from_slice(&[0x00, 0x00]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&move_rops, &[open_handles[1], open_handles[2]])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(response_rops.starts_with(&[0x33, 0x00, 0, 0, 0, 0, 0]));
+    assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+    assert_eq!(deleted_calendar_events.lock().unwrap()[0].id, event_id);
+    assert_eq!(
+        deleted_calendar_events.lock().unwrap()[0].title,
+        "Test 08:34"
+    );
+    assert_eq!(emails.lock().unwrap().as_slice().len(), 1);
+    assert_eq!(emails.lock().unwrap()[0].id, trash_message_id);
+
+    let new_mapi_id = store.mapi_identities.lock().unwrap()[&event_id];
+    let new_source_key = store.mapi_identity_source_keys.lock().unwrap()[&event_id].clone();
+    assert_ne!(new_mapi_id, event_mapi_id);
+    assert_ne!(
+        new_source_key,
+        crate::mapi::identity::source_key_for_object_id(event_mapi_id)
+    );
+
+    let mut source_notification = vec![0x2A];
+    source_notification.extend_from_slice(&open_handles[3].to_le_bytes());
+    source_notification.push(0);
+    source_notification.extend_from_slice(&0x8008u16.to_le_bytes());
+    source_notification.extend_from_slice(&mapi_wire_id_bytes(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    ));
+    source_notification.extend_from_slice(&mapi_wire_id_bytes(event_mapi_id));
+    assert!(contains_bytes(&response_rops, &source_notification));
+
+    let mut destination_notification = vec![0x2A];
+    destination_notification.extend_from_slice(&open_handles[4].to_le_bytes());
+    destination_notification.push(0);
+    destination_notification.extend_from_slice(&0x8020u16.to_le_bytes());
+    destination_notification
+        .extend_from_slice(&mapi_wire_id_bytes(crate::mapi::identity::TRASH_FOLDER_ID));
+    destination_notification.extend_from_slice(&mapi_wire_id_bytes(new_mapi_id));
+    destination_notification.extend_from_slice(&mapi_wire_id_bytes(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    ));
+    destination_notification.extend_from_slice(&mapi_wire_id_bytes(event_mapi_id));
+    assert!(contains_bytes(&response_rops, &destination_notification));
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 100)
+        .await
+        .unwrap();
+    assert!(snapshot
+        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, event_mapi_id)
+        .is_none());
+    let deleted_event = snapshot
+        .event_for_id(crate::mapi::identity::TRASH_FOLDER_ID, new_mapi_id)
+        .expect("deleted appointment projected in Deleted Items");
+    assert_eq!(deleted_event.canonical_id, event_id);
+    assert_eq!(deleted_event.source_key, new_source_key);
+    assert_eq!(deleted_event.event.title, "Test 08:34");
+    assert_eq!(deleted_event.version.updated_at, "2026-07-16T20:52:00Z");
+    assert_eq!(deleted_event.attachments.len(), 1);
+    assert_eq!(deleted_event.attachments[0].canonical_id, attachment_id);
+
+    // A fresh MAPI session must open the re-keyed appointment and enumerate it
+    // beside ordinary deleted mail, without synthesizing an IPM.Note copy.
+    let reopened_service = ExchangeService::new(store.clone());
+    let reopened_connect = reopened_service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut reopened_headers = mapi_headers("Execute");
+    reopened_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&reopened_connect)).unwrap(),
+    );
+    let mut reopen_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reopen_rops,
+        0,
+        1,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut reopen_rops,
+        1,
+        2,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+        new_mapi_id,
+    );
+    append_rop_get_properties_specific(
+        &mut reopen_rops,
+        2,
+        &[0x674A_0014, 0x65E0_0102, 0x001A_001F, 0x0037_001F],
+    );
+    append_rop_query_subject_rows(&mut reopen_rops, 1, 3, 50);
+    let response = reopened_service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopened_headers,
+            &execute_body(&rop_buffer(
+                &reopen_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let reopened_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &reopened_response,
+        &[0x03, 0x02, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &reopened_response,
+        &[0x05, 0x03, 0, 0, 0, 0, 2, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &reopened_response,
+        &utf16z("IPM.Appointment")
+    ));
+    assert!(contains_bytes(&reopened_response, &utf16z("Test 08:34")));
+    assert!(contains_bytes(
+        &reopened_response,
+        &utf16z("Existing deleted mail")
+    ));
+    assert!(contains_bytes(&reopened_response, &new_source_key));
+
+    // [MS-OXCFXICS] sections 2.2.4.3 and 2.2.4.4: the source hierarchy emits
+    // the retired MID as a deletion while Deleted Items emits a new message
+    // change with the destination MID and SourceKey.
+    let source_sync = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        b"client-content-state",
+    )
+    .await;
+    let source_stream = strict_content_sync_transfer_from_response(&source_sync).unwrap();
+    assert!(strict_replid_globset_contains_counter(
+        source_stream.deleted_idset.as_deref().unwrap(),
+        &globcnt_bytes(event_mapi_id >> 16),
+    )
+    .unwrap());
+
+    let destination_sync = content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+        b"client-content-state",
+    )
+    .await;
+    assert!(contains_bytes(
+        &destination_sync,
+        &crate::mapi::wire::FastTransferMarker::NewAttach
+            .as_u32()
+            .to_le_bytes(),
+    ));
+    assert!(contains_bytes(
+        &destination_sync,
+        &utf16z("move-agenda.pdf")
+    ));
+    let destination_stream = strict_content_sync_transfer_from_response(&destination_sync).unwrap();
+    let destination_change = destination_stream
+        .message_changes
+        .iter()
+        .find(|change| change.subject == "Test 08:34")
+        .expect("Deleted Items ICS creation for moved appointment");
+    assert_eq!(
+        destination_change.mid,
+        Some(u64::from_le_bytes(mapi_wire_id_bytes(new_mapi_id)))
+    );
+    assert_eq!(destination_change.source_key, new_source_key);
+    assert!(!destination_change.associated);
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececece1234").unwrap();

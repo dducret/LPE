@@ -470,6 +470,61 @@ impl Storage {
         object_uid: Option<&str>,
         affected_principal_ids: &[Uuid],
     ) -> Result<()> {
+        self.insert_collaboration_tombstone_with_reason_in_tx(
+            tx,
+            tenant_id,
+            category,
+            owner_account_id,
+            collection_id,
+            object_kind,
+            object_id,
+            object_uid,
+            affected_principal_ids,
+            "delete",
+        )
+        .await
+    }
+
+    pub(crate) async fn insert_collaboration_move_tombstone_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        category: CanonicalChangeCategory,
+        owner_account_id: Uuid,
+        collection_id: Option<Uuid>,
+        object_kind: &str,
+        object_id: Uuid,
+        object_uid: Option<&str>,
+        affected_principal_ids: &[Uuid],
+    ) -> Result<()> {
+        self.insert_collaboration_tombstone_with_reason_in_tx(
+            tx,
+            tenant_id,
+            category,
+            owner_account_id,
+            collection_id,
+            object_kind,
+            object_id,
+            object_uid,
+            affected_principal_ids,
+            "move",
+        )
+        .await
+    }
+
+    async fn insert_collaboration_tombstone_with_reason_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        category: CanonicalChangeCategory,
+        owner_account_id: Uuid,
+        collection_id: Option<Uuid>,
+        object_kind: &str,
+        object_id: Uuid,
+        object_uid: Option<&str>,
+        affected_principal_ids: &[Uuid],
+        reason: &str,
+    ) -> Result<()> {
         let modseq = self
             .allocate_account_modseq_in_tx(tx, tenant_id, owner_account_id, category.as_str())
             .await?;
@@ -496,7 +551,7 @@ impl Storage {
                 id, tenant_id, account_id, collection_id, object_kind, object_id,
                 object_uid, deleted_modseq, change_cursor, reason
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'delete')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
         .bind(Uuid::new_v4())
@@ -508,6 +563,7 @@ impl Storage {
         .bind(object_uid)
         .bind(modseq)
         .bind(cursor)
+        .bind(reason)
         .execute(&mut **tx)
         .await?;
 

@@ -1096,6 +1096,12 @@ pub(super) fn sync_mailboxes_with_collaboration_counts(
             mailbox.total_emails = folder.item_count;
             mailbox.unread_emails = 0;
         }
+        if folder_id == TRASH_FOLDER_ID {
+            let deleted_event_count =
+                u32::try_from(snapshot.events_for_folder(TRASH_FOLDER_ID).len())
+                    .unwrap_or(u32::MAX);
+            mailbox.total_emails = mailbox.total_emails.saturating_add(deleted_event_count);
+        }
     }
     if sync_type == MapiSyncType::Hierarchy.as_u8() {
         let mut folder_ids = mailboxes
@@ -1167,29 +1173,44 @@ pub(super) async fn mapi_object_ids_for_deleted_changes<S>(
 where
     S: ExchangeStore,
 {
-    let requests = object_ids
-        .iter()
-        .map(|object_id| MapiIdentityRequest {
+    let mut deleted_object_ids = Vec::with_capacity(object_ids.len());
+    for canonical_id in object_ids {
+        let existing = store
+            .fetch_mapi_object_ids_for_deleted_changes(
+                principal.account_id,
+                object_kind,
+                std::slice::from_ref(canonical_id),
+            )
+            .await?;
+        if let Some(object_id) = existing.first().copied() {
+            deleted_object_ids.push(object_id);
+            continue;
+        }
+
+        // A legacy tombstone can predate durable identity allocation. Keep the
+        // deterministic fallback for that case, but never replace an existing
+        // retired MID: [MS-OXCFXICS] section 2.2.4.4 identifies a deletion with
+        // the source object's original IDSET member.
+        let request = [MapiIdentityRequest {
             object_kind,
-            canonical_id: *object_id,
+            canonical_id: *canonical_id,
             reserved_global_counter: None,
             source_key: None,
-        })
-        .collect::<Vec<_>>();
-    let identities = store
-        .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
-        .await?;
-    for identity in &identities {
+        }];
+        let identity = store
+            .fetch_or_allocate_mapi_identities(principal.account_id, &request)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
             Some(identity.source_key.clone()),
         );
+        deleted_object_ids.push(identity.object_id);
     }
-    Ok(identities
-        .into_iter()
-        .map(|identity| identity.object_id)
-        .collect())
+    Ok(deleted_object_ids)
 }
 
 pub(super) fn changed_special_ids_for_folder(
@@ -1223,6 +1244,10 @@ pub(super) fn changed_special_ids_for_folder(
             .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
         changed_ids.extend(changes.changed_calendar_event_ids.iter().copied());
+        return changed_ids;
+    }
+    if folder_id == TRASH_FOLDER_ID {
+        changed_ids.extend(changes.changed_deleted_calendar_event_ids.iter().copied());
         return changed_ids;
     }
     if snapshot
@@ -1270,6 +1295,11 @@ where
         Some((
             MapiIdentityObjectKind::Contact,
             changes.deleted_contact_ids.clone(),
+        ))
+    } else if folder_id == TRASH_FOLDER_ID {
+        Some((
+            MapiIdentityObjectKind::DeletedCalendarEvent,
+            changes.deleted_deleted_calendar_event_ids.clone(),
         ))
     } else if folder_id == CALENDAR_FOLDER_ID
         || snapshot

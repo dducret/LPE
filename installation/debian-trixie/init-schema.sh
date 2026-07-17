@@ -83,9 +83,22 @@ schema_version="$(
 mapi_identity_version_column_count="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
 )"
+calendar_event_lifecycle_column_count="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END"
+)"
+mapi_calendar_event_identity_moves_table="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
+)"
+deleted_calendar_event_constraint_count="$(
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'"
+)"
 
-if [[ "${schema_version}" != "${expected_schema_version}" || "${mapi_identity_version_column_count}" != "2" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}." >&2
+if [[ "${schema_version}" != "${expected_schema_version}" \
+  || "${mapi_identity_version_column_count}" != "2" \
+  || "${calendar_event_lifecycle_column_count}" != "2" \
+  || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
+  || "${deleted_calendar_event_constraint_count}" != "2" ]]; then
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}." >&2
   exit 1
 fi
 

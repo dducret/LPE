@@ -37,6 +37,13 @@ pub(in crate::mapi) fn folder_message_count(
     if normal_contents_suppressed_for_associated_only_folder(folder_id) {
         return 0;
     }
+    if folder_id == TRASH_FOLDER_ID {
+        let message_count = folder_row_for_id(folder_id, mailboxes)
+            .map(|mailbox| mailbox.total_emails as usize)
+            .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len());
+        let count = message_count + snapshot.events_for_folder(folder_id).len();
+        return count.min(u32::MAX as usize) as u32;
+    }
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return match folder.kind {
             MapiCollaborationFolderKind::Contacts => snapshot
@@ -253,6 +260,22 @@ pub(in crate::mapi) fn table_position_and_count(
                     restriction.as_ref(),
                     mailbox_guid,
                 )
+            } else if *folder_id == TRASH_FOLDER_ID {
+                let mut rows =
+                    deleted_items_content_rows(mailboxes, emails, snapshot, restriction.as_ref());
+                sort_deleted_items_content_rows(&mut rows, sort_orders);
+                if *category_count > 0 {
+                    categorized_deleted_items_content_rows(
+                        rows,
+                        &default_contents_columns(),
+                        sort_orders,
+                        *expanded_count,
+                        collapsed_categories,
+                    )
+                    .len()
+                } else {
+                    rows.len()
+                }
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 calendar_content_rows(snapshot, *folder_id, restriction.as_ref()).len()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {

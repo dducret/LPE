@@ -6,7 +6,7 @@ use super::sync::{
     IM_CONTACT_LIST_FOLDER_ID, INBOX_FOLDER_ID, JOURNAL_FOLDER_ID, NOTES_FOLDER_ID,
     QUICK_CONTACTS_FOLDER_ID, REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, SENT_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID,
 };
 use super::tables::*;
 use super::*;
@@ -148,13 +148,31 @@ where
             continue;
         };
         log_mapi_store_load_step(account_id, plan, "query content table ids", query_index);
+        // Deleted Items is a heterogeneous MAPI table: normal canonical mail
+        // rows and deleted Calendar rows share one sort/cursor space. Its
+        // global first K rows cannot contain a mail row after the Kth mail row,
+        // so offset+limit mail candidates are sufficient before merging and
+        // slicing with all Calendar candidates.
+        let mixed_deleted_items = query.folder_id == TRASH_FOLDER_ID;
+        let mixed_deleted_items_mail_limit = query
+            .offset
+            .saturating_add(query.limit)
+            .min(i64::MAX as usize) as u64;
         let result = store
             .query_mapi_content_table_ids(
                 account_id,
                 MapiContentTableQuery {
                     mailbox_id,
-                    position: query.offset as u64,
-                    limit: query.limit as u64,
+                    position: if mixed_deleted_items {
+                        0
+                    } else {
+                        query.offset as u64
+                    },
+                    limit: if mixed_deleted_items {
+                        mixed_deleted_items_mail_limit
+                    } else {
+                        query.limit as u64
+                    },
                     sort_orders: query.sort_orders.clone(),
                 },
             )
@@ -169,7 +187,7 @@ where
         content_windows.push(mapi_store::MapiContentTableWindow {
             folder_id: query.folder_id,
             view_signature: query.view_signature,
-            offset: query.offset,
+            offset: if mixed_deleted_items { 0 } else { query.offset },
             total: result.total.min(usize::MAX as u64) as usize,
             message_ids: result.ids,
         });
@@ -437,7 +455,27 @@ where
                 .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
         }
     };
-    let calendar_event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+    let needs_deleted_events = plan.object_ids.contains(&TRASH_FOLDER_ID)
+        || plan
+            .content_queries
+            .iter()
+            .any(|query| query.folder_id == TRASH_FOLDER_ID)
+        || identities
+            .iter()
+            .any(|identity| identity.object_kind == MapiIdentityObjectKind::DeletedCalendarEvent);
+    let deleted_events = if needs_deleted_events {
+        store
+            .fetch_accessible_deleted_events(account_id)
+            .await
+            .context("fetch deleted Calendar events")?
+    } else {
+        Vec::new()
+    };
+    let calendar_event_ids = events
+        .iter()
+        .chain(deleted_events.iter())
+        .map(|event| event.id)
+        .collect::<Vec<_>>();
     let calendar_attachments = if calendar_event_ids.is_empty() {
         Vec::new()
     } else {
@@ -564,6 +602,12 @@ where
             reserved_global_counter: None,
             source_key: None,
         }))
+        .chain(deleted_events.iter().map(|event| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::DeletedCalendarEvent,
+            canonical_id: event.id,
+            reserved_global_counter: None,
+            source_key: None,
+        }))
         .chain(tasks.iter().map(|task| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Task,
             canonical_id: task.id,
@@ -661,7 +705,11 @@ where
             Some(identity.source_key.clone()),
         );
     }
-    let loaded_event_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+    let loaded_event_ids = events
+        .iter()
+        .chain(deleted_events.iter())
+        .map(|event| event.id)
+        .collect::<Vec<_>>();
     log_mapi_store_load_step(
         account_id,
         plan,
@@ -726,6 +774,7 @@ where
         task_collections,
         contacts,
         events,
+        deleted_events,
         tasks,
         folder_permissions,
         &allocated_non_message_identities,
@@ -1104,6 +1153,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::Message => "message",
         MapiIdentityObjectKind::Contact => "contact",
         MapiIdentityObjectKind::CalendarEvent => "calendar_event",
+        MapiIdentityObjectKind::DeletedCalendarEvent => "deleted_calendar_event",
         MapiIdentityObjectKind::Task => "task",
         MapiIdentityObjectKind::Rule => "sieve_script",
         MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",

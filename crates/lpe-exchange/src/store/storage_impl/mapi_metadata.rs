@@ -261,12 +261,22 @@ macro_rules! store_impl_mapi_metadata {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let rows = sqlx::query(
                 r#"
-                SELECT mapi_object_id
-                FROM mapi_object_identities
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND object_kind = $3
-                  AND canonical_id = ANY($4)
+                SELECT identity.mapi_object_id
+                FROM mapi_object_identities identity
+                WHERE identity.tenant_id = $1
+                  AND identity.account_id = $2
+                  AND identity.object_kind = $3
+                  AND identity.canonical_id = ANY($4)
+
+                UNION
+
+                SELECT move.old_mapi_object_id AS mapi_object_id
+                FROM mapi_calendar_event_identity_moves move
+                WHERE $3 = 'calendar_event'
+                  AND move.tenant_id = $1
+                  AND move.account_id = $2
+                  AND move.event_id = ANY($4)
+
                 ORDER BY mapi_object_id
                 "#,
             )
@@ -944,8 +954,14 @@ macro_rules! store_impl_mapi_metadata {
                 current_modseq: cursor.get::<i64, _>("current_modseq") as u64,
                 ..Default::default()
             };
-            let special_object_kind =
-                mapi_special_object_kind_for_checkpoint_mailbox(checkpoint_kind, mailbox_id);
+            let special_object_kind = mapi_special_object_kind_for_checkpoint_mailbox(
+                self,
+                &tenant_id,
+                account_id,
+                checkpoint_kind,
+                mailbox_id,
+            )
+            .await?;
 
             let rows = sqlx::query(
                 r#"
@@ -967,6 +983,7 @@ macro_rules! store_impl_mapi_metadata {
                             OR ($5::uuid IS NULL AND object_kind IN (
                                 'contact',
                                 'calendar_event',
+                                'deleted_calendar_event',
                                 'task',
                                 'note',
                                 'journal_entry',
@@ -1088,6 +1105,20 @@ macro_rules! store_impl_mapi_metadata {
                             push_unique_uuid(&mut changes.deleted_calendar_event_ids, object_id);
                         } else {
                             push_unique_uuid(&mut changes.changed_calendar_event_ids, object_id);
+                        }
+                    }
+                    "deleted_calendar_event" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(
+                                &mut changes.deleted_deleted_calendar_event_ids,
+                                object_id,
+                            );
+                        } else {
+                            push_unique_uuid(
+                                &mut changes.changed_deleted_calendar_event_ids,
+                                object_id,
+                            );
                         }
                     }
                     "task" => {
@@ -1266,6 +1297,7 @@ macro_rules! store_impl_mapi_metadata {
                       AND object_kind IN (
                           'contact',
                           'calendar_event',
+                          'deleted_calendar_event',
                           'task',
                           'note',
                           'journal_entry',
@@ -1292,6 +1324,10 @@ macro_rules! store_impl_mapi_metadata {
                         }
                         "calendar_event" => push_unique_uuid(
                             &mut changes.deleted_calendar_event_ids,
+                            row.get("object_id"),
+                        ),
+                        "deleted_calendar_event" => push_unique_uuid(
+                            &mut changes.deleted_deleted_calendar_event_ids,
                             row.get("object_id"),
                         ),
                         "task" => {

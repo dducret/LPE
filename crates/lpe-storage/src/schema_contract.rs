@@ -4,6 +4,7 @@ const ATTACHMENTS_STORAGE: &str = include_str!("attachments.rs");
 const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
+const COLLABORATION_DELETED_EVENTS_STORAGE: &str = include_str!("collaboration/deleted_events.rs");
 const COLLABORATION_GRANTS_STORAGE: &str = include_str!("collaboration/grants.rs");
 const COLLABORATION_TYPES_STORAGE: &str = include_str!("collaboration/types.rs");
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
@@ -103,6 +104,7 @@ fn submission_storage_contains(needle: &str) -> bool {
 fn collaboration_storage_contains(needle: &str) -> bool {
     [
         COLLABORATION_STORAGE,
+        COLLABORATION_DELETED_EVENTS_STORAGE,
         COLLABORATION_GRANTS_STORAGE,
         COLLABORATION_TYPES_STORAGE,
     ]
@@ -704,7 +706,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'deleted_calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
@@ -729,6 +731,57 @@ fn mapi_identity_mapping_is_store_backed() {
         "CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx",
         "WHERE deleted_at IS NULL",
     ]);
+
+    let deleted_moves = table_definition("mapi_calendar_event_identity_moves");
+    for required in [
+        "old_mapi_object_id BIGINT NOT NULL",
+        "new_mapi_object_id BIGINT NOT NULL",
+        "old_source_key BYTEA NOT NULL CHECK (octet_length(old_source_key) = 22)",
+        "new_source_key BYTEA NOT NULL CHECK (octet_length(new_source_key) = 22)",
+        "old_change_number BIGINT NOT NULL",
+        "new_change_number BIGINT NOT NULL",
+        "old_change_key BYTEA NOT NULL CHECK (octet_length(old_change_key) = 22)",
+        "new_change_key BYTEA NOT NULL CHECK (octet_length(new_change_key) = 22)",
+        "PRIMARY KEY (tenant_id, account_id, event_id)",
+    ] {
+        assert!(
+            deleted_moves.contains(required),
+            "Deleted Items identity moves must preserve old/new MAPI identity metadata: {required}"
+        );
+    }
+}
+
+#[test]
+fn deleted_calendar_events_remain_canonical_and_are_hidden_from_active_reads() {
+    let events = table_definition("calendar_events");
+    for required in [
+        "lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'deleted'))",
+        "deleted_at TIMESTAMPTZ",
+        "(lifecycle_state = 'active' AND deleted_at IS NULL)",
+        "(lifecycle_state = 'deleted' AND deleted_at IS NOT NULL)",
+    ] {
+        assert!(
+            events.contains(required),
+            "calendar_events must keep coherent canonical Deleted Items state: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE INDEX calendar_events_owner_deleted_idx",
+        "'deleted_calendar_event'",
+        "CREATE TABLE mapi_calendar_event_identity_moves",
+    ]);
+    for (name, source) in [
+        ("ActiveSync", ACTIVESYNC_STORAGE),
+        ("workspace", WORKSPACE_STORAGE),
+        ("reminders", NOTES_JOURNAL_STORAGE),
+        ("JMAP replay expansion", PROTOCOLS_STORAGE),
+        ("MAPI Event", MAPI_EVENTS_STORAGE),
+    ] {
+        assert!(
+            source.contains("lifecycle_state = 'active'"),
+            "{name} calendar reads must exclude deleted events"
+        );
+    }
 }
 
 #[test]
@@ -796,8 +849,20 @@ fn calendar_event_mutations_advance_canonical_and_mapi_versions() {
     );
     assert!(
         function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_event")
-            .contains("retire_mapi_event_identities_in_tx"),
-        "calendar Event deletion must retire durable MAPI identities in the deleting transaction"
+            .contains("move_accessible_event_to_deleted_items"),
+        "calendar Event deletion must use the canonical Deleted Items lifecycle"
+    );
+    assert_source_contains_all(
+        "canonical calendar Deleted Items lifecycle",
+        COLLABORATION_DELETED_EVENTS_STORAGE,
+        &[
+            "pub async fn fetch_accessible_deleted_events",
+            "pub async fn move_accessible_event_to_deleted_items",
+            "insert_collaboration_move_tombstone_in_tx",
+            "rekey_active_event_identities_in_tx",
+            "lifecycle_state = 'deleted'",
+            "\"deleted_calendar_event\"",
+        ],
     );
 }
 
@@ -1170,6 +1235,8 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "assert_required_schema_objects",
             "options([(\"search_path\", \"public\")])",
             "FROM public.schema_metadata",
+            "\"calendar_events\"",
+            "\"mapi_calendar_event_identity_moves\"",
             "\"mapi_object_identities\"",
             "\"mapi_named_properties\"",
             "\"mapi_custom_property_values\"",
@@ -1184,6 +1251,11 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "AND is_nullable = 'NO'",
             "required table {schema_name}.{table} is missing",
             "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities",
+            "required column shapes {} are missing or incompatible in {schema_name}.calendar_events",
+            "(\"lifecycle_state\", \"text\", \"NO\")",
+            "(\"deleted_at\", \"timestamp with time zone\", \"YES\")",
+            "pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'",
+            "required deleted_calendar_event object-kind constraints are missing or incompatible",
             "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
@@ -1210,15 +1282,16 @@ fn mapi_folder_properties_are_not_protocol_local_state() {
 fn collaboration_deletes_write_tombstones() {
     assert!(
         CHANGE_STORAGE.contains("pub(crate) async fn insert_collaboration_tombstone_in_tx")
+            && CHANGE_STORAGE
+                .contains("pub(crate) async fn insert_collaboration_move_tombstone_in_tx")
             && CHANGE_STORAGE.contains("INSERT INTO tombstones")
             && SHARED_STORAGE.contains("pub(crate) async fn allocate_account_modseq_in_tx"),
         "storage must provide category-aware collaboration tombstone writes"
     );
     assert!(
-        MESSAGE_OPS_STORAGE
-            .matches("insert_collaboration_tombstone_in_tx")
-            .count()
-            >= 2
+        MESSAGE_OPS_STORAGE.contains("insert_collaboration_tombstone_in_tx")
+            && COLLABORATION_DELETED_EVENTS_STORAGE
+                .contains("insert_collaboration_move_tombstone_in_tx")
             && TASKS_STORAGE.contains("insert_collaboration_tombstone_in_tx"),
         "contact, event, and task deletes must write collaboration tombstones"
     );
@@ -1238,10 +1311,13 @@ fn collaboration_deletes_write_tombstones() {
         "contact delete must write a tombstone before physical deletion",
     );
     assert_contains_before(
-        function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_event"),
-        "insert_collaboration_tombstone_in_tx",
-        "DELETE FROM calendar_events",
-        "calendar event delete must write a tombstone before physical deletion",
+        function_body(
+            COLLABORATION_DELETED_EVENTS_STORAGE,
+            "pub async fn move_accessible_event_to_deleted_items",
+        ),
+        "insert_collaboration_move_tombstone_in_tx",
+        "lifecycle_state = 'deleted'",
+        "calendar event move must write its source tombstone before entering Deleted Items",
     );
     assert_contains_before(
         function_body(TASKS_STORAGE, "pub async fn delete_client_task"),

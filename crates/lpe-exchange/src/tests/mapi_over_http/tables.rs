@@ -1114,6 +1114,232 @@ async fn mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows()
 }
 
 #[tokio::test]
+async fn mapi_over_http_deleted_items_mixed_categorized_sort_query_rows() {
+    let account = FakeStore::account();
+    let trash_id = Uuid::parse_str("70707070-7070-4070-8070-707070707071").unwrap();
+    let mail_id = Uuid::parse_str("71717171-7171-4171-8171-717171717172").unwrap();
+    let event_id = Uuid::parse_str("72727272-7272-4272-8272-727272727273").unwrap();
+    let event_mapi_id = 0x0000_0000_0050_0001;
+    let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
+    trash.total_emails = 1;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![trash])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &mail_id.to_string(),
+            &trash_id.to_string(),
+            "trash",
+            "Deleted mail",
+        )])),
+        deleted_calendar_events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-17".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Deleted appointment".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, event_mapi_id)]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    // A categorized Deleted Items view must keep mail and appointments in the
+    // same MS-OXCTABL row space. Grouping by MessageClass makes both canonical
+    // object types observable without relying on trace-specific subjects.
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    let columns: [u32; 7] = [
+        0x674D_0014, // PidTagInstID
+        0x674E_0003, // PidTagInstanceNum
+        0x0FF5_0003, // PidTagRowType
+        0x3005_0003, // PidTagDepth
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+    ];
+    rops.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for property_tag in columns {
+        rops.extend_from_slice(&property_tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x13, 0x00, 0x02, 0x00]); // RopSortTable
+    rops.extend_from_slice(&2u16.to_le_bytes()); // SortOrderCount
+    rops.extend_from_slice(&1u16.to_le_bytes()); // CategoryCount
+    rops.extend_from_slice(&1u16.to_le_bytes()); // ExpandedCount
+    rops.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+    rops.push(0); // TABLE_SORT_ASCEND
+    rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    rops.push(0); // TABLE_SORT_ASCEND
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
+    rops.extend_from_slice(&50u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x05, 0x02, 0, 0, 0, 0, 2, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x13, 0x02, 0, 0, 0, 0, 0]));
+    // Two expanded categories produce two headers plus two leaf rows.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x04, 0]
+    ));
+    assert_eq!(
+        response_rops
+            .windows(utf16z("IPM.Appointment").len())
+            .filter(|window| *window == utf16z("IPM.Appointment"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        response_rops
+            .windows(utf16z("IPM.Note").len())
+            .filter(|window| *window == utf16z("IPM.Note"))
+            .count(),
+        2
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Deleted appointment")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Deleted mail")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_deleted_items_mixed_offset_page_keeps_global_sort_order() {
+    let account = FakeStore::account();
+    let trash_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
+    let event_id = Uuid::parse_str("74747474-7474-4474-8474-747474747474").unwrap();
+    let event_mapi_id = 0x0000_0000_0051_0001;
+    let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
+    trash.total_emails = 3;
+    let emails = [
+        ("75757575-7575-4575-8575-757575757571", "Alpha mail"),
+        ("75757575-7575-4575-8575-757575757572", "Delta mail"),
+        ("75757575-7575-4575-8575-757575757573", "Echo mail"),
+    ]
+    .into_iter()
+    .map(|(id, subject)| FakeStore::email(id, &trash_id.to_string(), "trash", subject))
+    .collect();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![trash])),
+        emails: Arc::new(Mutex::new(emails)),
+        deleted_calendar_events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-17".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Bravo appointment".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, event_mapi_id)]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    rops.extend_from_slice(&[0x13, 0x00, 0x02, 0x00]); // RopSortTable
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x18, 0x00, 0x02, 0x00]); // RopSeekRow, beginning + 2
+    rops.extend_from_slice(&2i32.to_le_bytes());
+    rops.push(1);
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
+    rops.extend_from_slice(&1u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("Delta mail")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Alpha mail")));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Bravo appointment")
+    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("Echo mail")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_query_rows_no_advance_preserves_table_position() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 2;

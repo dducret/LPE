@@ -311,6 +311,27 @@ fn rop_query_rows_response_inner(
                 rows.into_iter()
                     .map(|email| serialize_message_property_row(email, &columns))
                     .collect::<Vec<_>>()
+            } else if *folder_id == TRASH_FOLDER_ID {
+                rows_are_serialized_property_rows = *category_count == 0;
+                let mut rows =
+                    deleted_items_content_rows(mailboxes, emails, snapshot, restriction.as_ref());
+                sort_deleted_items_content_rows(&mut rows, sort_orders);
+                if *category_count > 0 {
+                    categorized_deleted_items_content_rows(
+                        rows,
+                        &columns,
+                        sort_orders,
+                        *expanded_count,
+                        collapsed_categories,
+                    )
+                    .into_iter()
+                    .map(|row| row.row)
+                    .collect::<Vec<_>>()
+                } else {
+                    rows.into_iter()
+                        .map(|row| serialize_deleted_items_content_property_row(row, &columns))
+                        .collect::<Vec<_>>()
+                }
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows = calendar_content_rows(snapshot, *folder_id, restriction.as_ref());
                 sort_events(&mut rows, sort_orders);

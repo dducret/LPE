@@ -249,7 +249,10 @@ macro_rules! store_impl_public_address_im {
                     message.normalized_subject AS message_subject,
                     event_calendar.id AS calendar_id,
                     event_calendar.role AS calendar_role,
-                    NULLIF(log.summary_json->>'oldCollectionId', '')::uuid AS old_calendar_id,
+                    COALESCE(
+                        NULLIF(log.summary_json->>'oldCollectionId', '')::uuid,
+                        NULLIF(log.summary_json->>'sourceCollectionId', '')::uuid
+                    ) AS old_calendar_id,
                     COALESCE(
                         old_event_calendar.role,
                         NULLIF(log.summary_json->>'oldCollectionRole', '')
@@ -262,7 +265,16 @@ macro_rules! store_impl_public_address_im {
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
                     message_identity.mapi_object_id AS message_mapi_object_id,
                     source_identity.mapi_object_id AS source_mapi_object_id,
-                    calendar_event_identity.mapi_object_id AS calendar_event_mapi_object_id
+                    COALESCE(
+                        calendar_event_identity.mapi_object_id,
+                        CASE
+                            WHEN log.object_kind = 'calendar_event'
+                                THEN calendar_event_move.old_mapi_object_id
+                            WHEN log.object_kind = 'deleted_calendar_event'
+                                THEN calendar_event_move.new_mapi_object_id
+                        END
+                    ) AS calendar_event_mapi_object_id,
+                    calendar_event_move.old_mapi_object_id AS old_calendar_event_mapi_object_id
                 FROM mail_change_log log
                 LEFT JOIN mailboxes scope_box
                   ON scope_box.tenant_id = log.tenant_id
@@ -293,27 +305,30 @@ macro_rules! store_impl_public_address_im {
                  AND calendar_tombstone.change_cursor = log.cursor
                  AND calendar_tombstone.object_kind = 'calendar_event'
                  AND calendar_tombstone.object_id = log.object_id
-                 AND log.object_kind = 'calendar_event'
+                 AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 LEFT JOIN calendar_events calendar_event
                   ON calendar_event.tenant_id = log.tenant_id
                  AND calendar_event.owner_account_id = log.account_id
                  AND calendar_event.id = log.object_id
-                 AND log.object_kind = 'calendar_event'
+                 AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 LEFT JOIN calendars event_calendar
                   ON event_calendar.tenant_id = log.tenant_id
                  AND event_calendar.owner_account_id = log.account_id
                  AND event_calendar.id = COALESCE(
                      NULLIF(log.summary_json->>'collectionId', '')::uuid,
+                     NULLIF(log.summary_json->>'sourceCollectionId', '')::uuid,
                      calendar_tombstone.collection_id,
                      calendar_event.calendar_id
                  )
-                 AND log.object_kind = 'calendar_event'
+                 AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 LEFT JOIN calendars old_event_calendar
                   ON old_event_calendar.tenant_id = log.tenant_id
                  AND old_event_calendar.owner_account_id = log.account_id
-                 AND old_event_calendar.id =
-                     NULLIF(log.summary_json->>'oldCollectionId', '')::uuid
-                 AND log.object_kind = 'calendar_event'
+                 AND old_event_calendar.id = COALESCE(
+                     NULLIF(log.summary_json->>'oldCollectionId', '')::uuid,
+                     NULLIF(log.summary_json->>'sourceCollectionId', '')::uuid
+                 )
+                 AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 LEFT JOIN mapi_object_identities scope_identity
                   ON scope_identity.tenant_id = log.tenant_id
                  AND scope_identity.account_id = log.account_id
@@ -353,14 +368,24 @@ macro_rules! store_impl_public_address_im {
                 LEFT JOIN mapi_object_identities calendar_event_identity
                   ON calendar_event_identity.tenant_id = log.tenant_id
                  AND calendar_event_identity.account_id = $3
-                 AND calendar_event_identity.object_kind = 'calendar_event'
+                 AND calendar_event_identity.object_kind = CASE
+                     WHEN log.object_kind = 'deleted_calendar_event'
+                         THEN 'deleted_calendar_event'
+                     ELSE 'calendar_event'
+                 END
                  AND calendar_event_identity.canonical_id = log.object_id
+                LEFT JOIN mapi_calendar_event_identity_moves calendar_event_move
+                  ON calendar_event_move.tenant_id = log.tenant_id
+                 AND calendar_event_move.account_id = $3
+                 AND calendar_event_move.event_id = log.object_id
+                 AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 WHERE log.tenant_id = $1
                   AND log.cursor > $2
                   AND (log.account_id = $3 OR log.affected_principal_ids @> ARRAY[$3]::uuid[])
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
                   AND log.object_kind IN (
-                      'mailbox', 'mailbox_message', 'attachment', 'calendar_event'
+                      'mailbox', 'mailbox_message', 'attachment', 'calendar_event',
+                      'deleted_calendar_event'
                   )
                 ORDER BY log.cursor ASC
                 LIMIT 101
@@ -373,10 +398,12 @@ macro_rules! store_impl_public_address_im {
             .await?;
             let mut notification_identity_requests = Vec::new();
             for row in &rows {
-                if row.get::<String, _>("object_kind") != "calendar_event" {
+                let object_kind = row.get::<String, _>("object_kind");
+                if object_kind != "calendar_event" && object_kind != "deleted_calendar_event" {
                     continue;
                 }
-                if row
+                if object_kind == "calendar_event"
+                    && row
                     .try_get::<Option<i64>, _>("calendar_event_mapi_object_id")
                     .ok()
                     .flatten()

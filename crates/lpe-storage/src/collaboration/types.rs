@@ -204,6 +204,27 @@ pub struct AccessibleEvent {
     pub body_html: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MapiEventIdentityMove {
+    pub account_id: Uuid,
+    pub old_mapi_object_id: u64,
+    pub new_mapi_object_id: u64,
+    pub old_source_key: Vec<u8>,
+    pub new_source_key: Vec<u8>,
+    pub old_change_number: u64,
+    pub new_change_number: u64,
+    pub old_change_key: Vec<u8>,
+    pub new_change_key: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveAccessibleEventToDeletedItemsResult {
+    pub event: AccessibleEvent,
+    pub principal_identity: Option<MapiEventIdentityMove>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollaborationGrant {

@@ -26,7 +26,7 @@ pub(super) fn category_id_for_value(folder_id: u64, property_tag: u32, value: &s
     hash | 0x8000_0000_0000_0000
 }
 
-fn category_values_for_email(email: &JmapEmail, property_tag: u32) -> Vec<String> {
+pub(super) fn category_values_for_email(email: &JmapEmail, property_tag: u32) -> Vec<String> {
     let storage_tag = canonical_property_storage_tag(property_tag);
     if named_property_id_matches(storage_tag, PID_NAME_KEYWORDS_TAG) {
         let values = email
@@ -136,7 +136,7 @@ fn message_table_property_is_present(email: &JmapEmail, property_tag: u32) -> bo
     ) || email_property_value(email, property_tag).is_some()
 }
 
-fn serialize_categorized_message_row(
+pub(super) fn serialize_categorized_message_row(
     email: &JmapEmail,
     columns: &[u32],
     category_property_tag: u32,
@@ -330,7 +330,7 @@ pub(super) fn categorized_email_rows(
     rows
 }
 
-fn serialize_category_header_row(
+pub(super) fn serialize_category_header_row(
     category_id: u64,
     value: &str,
     leaf_count: usize,

@@ -129,6 +129,16 @@ macro_rules! store_impl_collaboration {
         })
     }
 
+    fn fetch_accessible_deleted_events<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<AccessibleEvent>> {
+        Box::pin(async move {
+            self.fetch_accessible_deleted_events(principal_account_id)
+                .await
+        })
+    }
+
     fn fetch_mapi_event_versions<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -306,6 +316,17 @@ macro_rules! store_impl_collaboration {
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.delete_accessible_event(principal_account_id, event_id)
+                .await
+        })
+    }
+
+    fn move_accessible_event_to_deleted_items<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult> {
+        Box::pin(async move {
+            self.move_accessible_event_to_deleted_items(principal_account_id, event_id)
                 .await
         })
     }

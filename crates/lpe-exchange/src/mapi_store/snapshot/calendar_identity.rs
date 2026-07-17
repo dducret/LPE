@@ -18,7 +18,8 @@ impl ScopedCalendarIdentities {
                 MapiIdentityObjectKind::Mailbox => {
                     folders.insert(record.canonical_id, record.object_id);
                 }
-                MapiIdentityObjectKind::CalendarEvent => {
+                MapiIdentityObjectKind::CalendarEvent
+                | MapiIdentityObjectKind::DeletedCalendarEvent => {
                     events.insert(
                         record.canonical_id,
                         (record.object_id, record.source_key.clone()),
@@ -135,6 +136,7 @@ impl MapiMailStoreSnapshot {
             task_collections,
             contacts,
             events,
+            Vec::new(),
             tasks,
             folder_permissions,
             None,
@@ -152,6 +154,7 @@ impl MapiMailStoreSnapshot {
         task_collections: Vec<CollaborationCollection>,
         contacts: Vec<AccessibleContact>,
         events: Vec<AccessibleEvent>,
+        deleted_events: Vec<AccessibleEvent>,
         tasks: Vec<ClientTask>,
         folder_permissions: Vec<MapiFolderPermission>,
         identity_records: &[MapiIdentityRecord],
@@ -166,6 +169,7 @@ impl MapiMailStoreSnapshot {
             task_collections,
             contacts,
             events,
+            deleted_events,
             tasks,
             folder_permissions,
             Some(&calendar_identities),
@@ -182,6 +186,7 @@ impl MapiMailStoreSnapshot {
         task_collections: Vec<CollaborationCollection>,
         contacts: Vec<AccessibleContact>,
         events: Vec<AccessibleEvent>,
+        deleted_events: Vec<AccessibleEvent>,
         tasks: Vec<ClientTask>,
         folder_permissions: Vec<MapiFolderPermission>,
         calendar_identities: Option<&ScopedCalendarIdentities>,
@@ -292,7 +297,7 @@ impl MapiMailStoreSnapshot {
                 })
             })
             .collect();
-        let events = events
+        let mut events = events
             .into_iter()
             .filter_map(|event| {
                 let folder_id = collaboration_folders
@@ -327,6 +332,31 @@ impl MapiMailStoreSnapshot {
                 }))
             })
             .collect::<Result<Vec<_>>>()?;
+        events.extend(
+            deleted_events
+                .into_iter()
+                .map(|event| {
+                    let identity = match calendar_identities {
+                        Some(identities) => identities.event(event.id),
+                        None => {
+                            let id = mapi_item_id(&event.id);
+                            Ok((id, mapi_mailstore::source_key_for_store_id(id)))
+                        }
+                    }?;
+                    let (id, source_key) = identity;
+                    let version = fallback_event_version(&event, id);
+                    Ok(MapiEvent {
+                        id,
+                        source_key,
+                        folder_id: crate::mapi::identity::TRASH_FOLDER_ID,
+                        canonical_id: event.id,
+                        event,
+                        version,
+                        attachments: Vec::new(),
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?,
+        );
         let tasks = tasks
             .into_iter()
             .filter_map(|task| {

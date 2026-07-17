@@ -65,6 +65,7 @@ pub use crate::collaboration::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ContactNameFields,
     ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
+    MapiEventIdentityMove, MoveAccessibleEventToDeletedItemsResult,
 };
 pub use crate::conversation_actions::{
     ConversationAction, UpsertConversationActionInput, CONVERSATION_ACTION_VERSION,

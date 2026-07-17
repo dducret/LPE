@@ -824,6 +824,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     }
 
     for object in &special_objects {
+        let attachments = attachments_for_message(object.canonical_id, attachment_facts);
         let change_number = special_message_change_number(object);
         let source_key = special_message_source_key(object);
         let change_key = special_message_change_key(object);
@@ -918,7 +919,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             };
             write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
         }
-        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W) {
+        let subject_in_scope =
+            content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W);
+        if subject_in_scope {
             write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
         }
         let normalized_subject_tag = normalized_subject_tag(sync_flags);
@@ -959,6 +962,13 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             {
                 write_special_message_property(&mut buffer, *tag, value);
             }
+        }
+        if subject_in_scope && (sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty()) {
+            // [MS-OXCFXICS] section 2.2.4.3 carries the complete FastTransfer
+            // message after IncrSyncMessage. Calendar objects are special
+            // projections, but their NewAttach/EndAttach stream is identical
+            // to canonical mail and must not be reduced to PidTagHasAttachments.
+            write_fast_transfer_attachments(&mut buffer, attachments);
         }
         buffer.extend_from_slice(&0u16.to_le_bytes());
         buffer.extend_from_slice(&0u16.to_le_bytes());

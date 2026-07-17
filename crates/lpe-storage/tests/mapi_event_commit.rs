@@ -944,6 +944,399 @@ async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_prope
 }
 
 #[tokio::test]
+async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_rekeys_identity(
+) -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let delegate_account_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (
+            id, tenant_id, primary_domain_id, primary_email, display_name
+        )
+        SELECT $1, tenant_id, primary_domain_id, $2, 'Zoë Müller'
+        FROM accounts
+        WHERE id = $3
+        "#,
+    )
+    .bind(delegate_account_id)
+    .bind(format!("zoe-{}@example.test", delegate_account_id.simple()))
+    .bind(fixture.account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO calendar_grants (
+            id, tenant_id, calendar_id, owner_account_id, grantee_account_id,
+            may_read, may_write, may_delete, may_share
+        )
+        VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, FALSE, FALSE)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.tenant_id)
+    .bind(fixture.calendar_id)
+    .bind(fixture.account_id)
+    .bind(delegate_account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        "INSERT INTO mapi_mailbox_replicas \
+         (tenant_id, account_id, replica_guid, next_global_counter) \
+         VALUES ($1, $2, $3, 200)",
+    )
+    .bind(fixture.tenant_id)
+    .bind(delegate_account_id)
+    .bind(Uuid::from_bytes(REPLICA_GUID))
+    .execute(fixture.storage.pool())
+    .await?;
+    let delegate_source_key = change_key(60);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list
+        )
+        VALUES ($1, $2, 'calendar_event', $3, 60, $4, $5, $5, $5, 60, $6)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(delegate_account_id)
+    .bind(fixture.event_id)
+    .bind(mapi_store_id(60) as i64)
+    .bind(&delegate_source_key)
+    .bind(predecessor_change_list(&delegate_source_key))
+    .execute(fixture.storage.pool())
+    .await?;
+
+    let denied = fixture
+        .storage
+        .move_accessible_event_to_deleted_items(delegate_account_id, fixture.event_id)
+        .await
+        .expect_err("delegate without may_delete must not move an event");
+    assert!(denied
+        .to_string()
+        .contains("delete access is not granted on this calendar"));
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT lifecycle_state FROM calendar_events WHERE id = $1"
+        )
+        .bind(fixture.event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "active"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mail_change_log WHERE object_id = $1")
+            .bind(fixture.event_id)
+            .fetch_one(fixture.storage.pool())
+            .await?,
+        0
+    );
+    sqlx::query(
+        "UPDATE calendar_grants SET may_delete = TRUE \
+         WHERE calendar_id = $1 AND grantee_account_id = $2",
+    )
+    .bind(fixture.calendar_id)
+    .bind(delegate_account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+
+    let mut update = commit_input(&fixture, "Rendez-vous à Genève 🌍");
+    let event = update.event.as_mut().expect("event update");
+    event.recurrence_rule = "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6".to_string();
+    event.recurrence_json = serde_json::json!({
+        "frequency": "weekly",
+        "byDay": ["mo", "we"],
+        "count": 6
+    })
+    .to_string();
+    event.organizer_json = serde_json::json!({
+        "email": "alice@example.test",
+        "common_name": "Alice Élodie"
+    })
+    .to_string();
+    event.attendees_json = serde_json::json!({
+        "organizer": {
+            "email": "alice@example.test",
+            "common_name": "Alice Élodie"
+        },
+        "attendees": [{
+            "email": "zoe@example.test",
+            "common_name": "Zoë Müller",
+            "role": "REQ-PARTICIPANT",
+            "partstat": "accepted",
+            "rsvp": true
+        }]
+    })
+    .to_string();
+    update.attachment_changes.upserts = vec![attachment_upsert(0, "ordre-du-jour-été.pdf")];
+    let saved = fixture.storage.commit_mapi_event_update(update).await?;
+    assert!(matches!(saved, MapiEventCommitOutcome::Saved(_)));
+
+    let moved = fixture
+        .storage
+        .move_accessible_event_to_deleted_items(fixture.account_id, fixture.event_id)
+        .await?;
+    assert_eq!(moved.event.id, fixture.event_id);
+    assert_eq!(moved.event.title, "Rendez-vous à Genève 🌍");
+    assert_eq!(
+        moved.event.recurrence_rule,
+        "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=6"
+    );
+    assert!(moved.event.attendees_json.contains("Zoë Müller"));
+    let identity = moved
+        .principal_identity
+        .expect("the principal had an active MAPI identity");
+    assert_eq!(identity.account_id, fixture.account_id);
+    assert_eq!(identity.old_mapi_object_id, mapi_store_id(50));
+    assert_eq!(identity.new_mapi_object_id, mapi_store_id(101));
+    assert_eq!(identity.old_source_key, change_key(50));
+    assert_eq!(identity.new_source_key, change_key(101));
+    assert_eq!(identity.old_change_number, 100);
+    assert_eq!(identity.new_change_number, 101);
+    assert_eq!(identity.old_change_key, change_key(100));
+    assert_eq!(identity.new_change_key, change_key(101));
+
+    let owner_deleted_versions = fixture
+        .storage
+        .fetch_mapi_event_versions(fixture.account_id, &[fixture.event_id])
+        .await?;
+    assert_eq!(owner_deleted_versions.len(), 1);
+    assert_eq!(owner_deleted_versions[0].event_id, fixture.event_id);
+    assert_eq!(owner_deleted_versions[0].change_number, 101);
+    assert_eq!(owner_deleted_versions[0].change_key, change_key(101));
+    assert_eq!(
+        owner_deleted_versions[0].predecessor_change_list,
+        predecessor_change_list(&change_key(101))
+    );
+    let persisted_deleted_version = sqlx::query(
+        r#"
+        SELECT
+            modseq,
+            to_char(
+                updated_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ) AS updated_at
+        FROM calendar_events
+        WHERE id = $1
+        "#,
+    )
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        owner_deleted_versions[0].canonical_modseq,
+        persisted_deleted_version.get::<i64, _>("modseq")
+    );
+    assert_eq!(
+        owner_deleted_versions[0].updated_at,
+        persisted_deleted_version.get::<String, _>("updated_at")
+    );
+
+    let delegate_deleted_versions = fixture
+        .storage
+        .fetch_mapi_event_versions(delegate_account_id, &[fixture.event_id])
+        .await?;
+    assert_eq!(delegate_deleted_versions.len(), 1);
+    assert_eq!(delegate_deleted_versions[0].event_id, fixture.event_id);
+    assert_eq!(delegate_deleted_versions[0].change_number, 201);
+    assert_eq!(delegate_deleted_versions[0].change_key, change_key(201));
+    assert_eq!(
+        delegate_deleted_versions[0].predecessor_change_list,
+        predecessor_change_list(&change_key(201))
+    );
+    assert_eq!(
+        delegate_deleted_versions[0].updated_at,
+        owner_deleted_versions[0].updated_at
+    );
+
+    sqlx::query(
+        "DELETE FROM calendar_grants \
+         WHERE calendar_id = $1 AND grantee_account_id = $2",
+    )
+    .bind(fixture.calendar_id)
+    .bind(delegate_account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    assert!(fixture
+        .storage
+        .fetch_mapi_event_versions(delegate_account_id, &[fixture.event_id])
+        .await?
+        .is_empty());
+
+    assert!(fixture
+        .storage
+        .fetch_accessible_events(fixture.account_id)
+        .await?
+        .is_empty());
+    let deleted = fixture
+        .storage
+        .fetch_accessible_deleted_events(fixture.account_id)
+        .await?;
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0].id, fixture.event_id);
+    assert_eq!(deleted[0].title, "Rendez-vous à Genève 🌍");
+    assert!(deleted[0].attendees_json.contains("Zoë Müller"));
+
+    let lifecycle = sqlx::query(
+        "SELECT lifecycle_state, deleted_at IS NOT NULL AS has_deleted_at, reminder_set, \
+                reminder_at IS NOT NULL AS has_reminder_at \
+         FROM calendar_events WHERE id = $1",
+    )
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(lifecycle.get::<String, _>("lifecycle_state"), "deleted");
+    assert!(lifecycle.get::<bool, _>("has_deleted_at"));
+    assert!(lifecycle.get::<bool, _>("reminder_set"));
+    assert!(lifecycle.get::<bool, _>("has_reminder_at"));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM calendar_event_attachments WHERE event_id = $1"
+        )
+        .bind(fixture.event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        1
+    );
+    assert!(fixture
+        .storage
+        .fetch_calendar_event_attachments(fixture.account_id, fixture.event_id)
+        .await?
+        .is_empty());
+    let deleted_attachments = fixture
+        .storage
+        .fetch_calendar_attachments_for_events(fixture.account_id, &[fixture.event_id])
+        .await?;
+    assert_eq!(deleted_attachments.len(), 1);
+    assert_eq!(deleted_attachments[0].1.len(), 1);
+    assert_eq!(
+        deleted_attachments[0].1[0].file_name,
+        "ordre-du-jour-été.pdf"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_custom_property_values \
+             WHERE object_kind = 'calendar_event' AND canonical_id = $1"
+        )
+        .bind(fixture.event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        1
+    );
+
+    let changes = sqlx::query(
+        r#"
+        SELECT object_kind, change_kind
+        FROM mail_change_log
+        WHERE object_id = $1
+          AND object_kind IN ('calendar_event', 'deleted_calendar_event')
+        ORDER BY cursor DESC
+        LIMIT 2
+        "#,
+    )
+    .bind(fixture.event_id)
+    .fetch_all(fixture.storage.pool())
+    .await?;
+    assert_eq!(changes.len(), 2);
+    assert_eq!(
+        changes[0].get::<String, _>("object_kind"),
+        "deleted_calendar_event"
+    );
+    assert_eq!(changes[0].get::<String, _>("change_kind"), "created");
+    assert_eq!(changes[1].get::<String, _>("object_kind"), "calendar_event");
+    assert_eq!(changes[1].get::<String, _>("change_kind"), "destroyed");
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT reason FROM tombstones \
+             WHERE object_kind = 'calendar_event' AND object_id = $1"
+        )
+        .bind(fixture.event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "move"
+    );
+
+    let persisted_mapping = sqlx::query(
+        r#"
+        SELECT old_mapi_object_id, new_mapi_object_id, old_source_key, new_source_key
+        FROM mapi_calendar_event_identity_moves
+        WHERE account_id = $1 AND event_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        persisted_mapping.get::<i64, _>("old_mapi_object_id"),
+        mapi_store_id(50) as i64
+    );
+    assert_eq!(
+        persisted_mapping.get::<i64, _>("new_mapi_object_id"),
+        mapi_store_id(101) as i64
+    );
+    assert_eq!(
+        persisted_mapping.get::<Vec<u8>, _>("old_source_key"),
+        change_key(50)
+    );
+    assert_eq!(
+        persisted_mapping.get::<Vec<u8>, _>("new_source_key"),
+        change_key(101)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_calendar_event_identity_moves WHERE event_id = $1"
+        )
+        .bind(fixture.event_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        2
+    );
+    let delegate_mapping = sqlx::query(
+        r#"
+        SELECT
+            old_mapi_object_id,
+            new_mapi_object_id,
+            old_change_number,
+            new_change_number
+        FROM mapi_calendar_event_identity_moves
+        WHERE account_id = $1 AND event_id = $2
+        "#,
+    )
+    .bind(delegate_account_id)
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        delegate_mapping.get::<i64, _>("old_mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(
+        delegate_mapping.get::<i64, _>("new_mapi_object_id"),
+        mapi_store_id(201) as i64
+    );
+    assert_eq!(delegate_mapping.get::<i64, _>("old_change_number"), 200);
+    assert_eq!(delegate_mapping.get::<i64, _>("new_change_number"), 201);
+
+    assert!(fixture
+        .storage
+        .update_accessible_event(
+            fixture.account_id,
+            fixture.event_id,
+            updated_event(&fixture, "must not resurrect"),
+        )
+        .await
+        .is_err());
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
 async fn event_delete_preserves_custom_shared_calendar_tombstone_scope() -> Result<()> {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
@@ -996,7 +1389,7 @@ async fn event_delete_preserves_custom_shared_calendar_tombstone_scope() -> Resu
 
     let tombstone = sqlx::query(
         r#"
-        SELECT account_id, collection_id, object_uid
+        SELECT account_id, collection_id, object_uid, reason
         FROM tombstones
         WHERE object_kind = 'calendar_event' AND object_id = $1
         "#,
@@ -1010,6 +1403,7 @@ async fn event_delete_preserves_custom_shared_calendar_tombstone_scope() -> Resu
         fixture.calendar_id
     );
     assert_eq!(tombstone.get::<String, _>("object_uid"), "event-uid");
+    assert_eq!(tombstone.get::<String, _>("reason"), "move");
 
     let change = sqlx::query(
         r#"
@@ -1037,13 +1431,27 @@ async fn event_delete_preserves_custom_shared_calendar_tombstone_scope() -> Resu
     );
     assert_eq!(change.get::<String, _>("summary_object_uid"), "event-uid");
 
-    let identity_deleted = sqlx::query_scalar::<_, bool>(
-        "SELECT deleted_at IS NOT NULL FROM mapi_object_identities WHERE canonical_id = $1",
+    let identity = sqlx::query(
+        "SELECT object_kind, deleted_at IS NULL AS is_active \
+         FROM mapi_object_identities WHERE canonical_id = $1",
     )
     .bind(fixture.event_id)
     .fetch_one(fixture.storage.pool())
     .await?;
-    assert!(identity_deleted);
+    assert_eq!(
+        identity.get::<String, _>("object_kind"),
+        "deleted_calendar_event"
+    );
+    assert!(identity.get::<bool, _>("is_active"));
+    let lifecycle = sqlx::query(
+        "SELECT lifecycle_state, deleted_at IS NOT NULL AS has_deleted_at \
+         FROM calendar_events WHERE id = $1",
+    )
+    .bind(fixture.event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(lifecycle.get::<String, _>("lifecycle_state"), "deleted");
+    assert!(lifecycle.get::<bool, _>("has_deleted_at"));
 
     fixture.cleanup().await
 }

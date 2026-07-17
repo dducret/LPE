@@ -102,6 +102,7 @@ fn assert_calendar_notification(
             folder_id,
             Some(message_id),
             None,
+            None,
             Some("calendar_event"),
         )
     );
@@ -119,6 +120,118 @@ async fn assert_outsider_has_no_notifications(
         .await?;
     assert!(!poll.event_pending);
     assert!(poll.events.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let collection = storage
+        .create_accessible_calendar_collection(account_id, "Move notification lab")
+        .await?;
+    let event_id = Uuid::parse_str("82828282-8282-4282-9282-828282828282")?;
+    storage
+        .create_accessible_event(
+            account_id,
+            Some(&collection.id),
+            notification_event_input(
+                account_id,
+                event_id,
+                "mapi-calendar-move-notification-postgresql",
+                "Calendar move notification",
+                0,
+            ),
+        )
+        .await?;
+    let (source_folder_id, old_message_id) =
+        calendar_notification_ids(&storage, account_id, &collection.id, event_id).await?;
+    let trash_mailbox_id = storage
+        .ensure_jmap_system_mailboxes(account_id)
+        .await?
+        .into_iter()
+        .find(|mailbox| mailbox.role == "trash")
+        .map(|mailbox| mailbox.id)
+        .expect("canonical Deleted Items mailbox");
+    let trash_checkpoint = storage
+        .fetch_mapi_sync_changes(
+            account_id,
+            Some(trash_mailbox_id),
+            MapiCheckpointKind::Content,
+            0,
+        )
+        .await?
+        .current_change_sequence;
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+
+    let moved = storage
+        .move_accessible_event_to_deleted_items(account_id, event_id)
+        .await?;
+    let identity = moved.principal_identity.expect("owner Event move identity");
+    assert_eq!(identity.old_mapi_object_id, old_message_id);
+    assert_eq!(
+        storage
+            .fetch_mapi_object_ids_for_deleted_changes(
+                account_id,
+                MapiIdentityObjectKind::CalendarEvent,
+                &[event_id],
+            )
+            .await?,
+        vec![old_message_id]
+    );
+    let trash_changes = storage
+        .fetch_mapi_sync_changes(
+            account_id,
+            Some(trash_mailbox_id),
+            MapiCheckpointKind::Content,
+            trash_checkpoint,
+        )
+        .await?;
+    assert!(trash_changes
+        .changed_deleted_calendar_event_ids
+        .contains(&event_id));
+
+    // A second MAPI session starts from the pre-move cursor. The durable poll
+    // must reconstruct both [MS-OXCNOTIF] source deletion and destination move
+    // fields from the canonical logs plus the persisted identity-move record.
+    let poll = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(poll.event_pending);
+    assert_eq!(poll.events.len(), 2);
+    assert_eq!(
+        poll.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0008,
+            source_folder_id,
+            Some(old_message_id),
+            None,
+            None,
+            Some("calendar_event"),
+        )
+    );
+    assert_eq!(
+        poll.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0020,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            Some(identity.new_mapi_object_id),
+            Some(source_folder_id),
+            Some(old_message_id),
+            Some("deleted_calendar_event"),
+        )
+    );
+
+    fixture.cleanup().await?;
     Ok(())
 }
 
@@ -381,45 +494,124 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         deleted_row.get::<Vec<Uuid>, _>("affected_principal_ids"),
         affected_principals
     );
+    let destination_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE object_kind = 'deleted_calendar_event'
+          AND object_id = $1
+          AND change_kind = 'created'
+          AND cursor > $2
+        "#,
+    )
+    .bind(event_id)
+    .bind(deleted_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let identity_moves = sqlx::query(
+        r#"
+        SELECT account_id, old_mapi_object_id, new_mapi_object_id
+        FROM mapi_calendar_event_identity_moves
+        WHERE event_id = $1
+        "#,
+    )
+    .bind(event_id)
+    .fetch_all(storage.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<Uuid, _>("account_id"),
+            (
+                row.get::<i64, _>("old_mapi_object_id") as u64,
+                row.get::<i64, _>("new_mapi_object_id") as u64,
+            ),
+        )
+    })
+    .collect::<HashMap<_, _>>();
 
     let owner_deleted = storage
         .poll_mapi_notifications(owner_account_id, updated_cursor)
         .await?;
-    assert_calendar_notification(
-        &owner_deleted,
-        deleted_cursor,
-        0x0008,
-        owner_ids.0,
-        owner_ids.1,
-        calendar_id,
-        event_id,
+    assert_eq!(owner_deleted.cursor, Some(destination_cursor));
+    assert_eq!(owner_deleted.events.len(), 2);
+    assert_eq!(
+        owner_deleted.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0008,
+            owner_ids.0,
+            Some(owner_ids.1),
+            None,
+            None,
+            Some("calendar_event"),
+        )
+    );
+    assert_eq!(
+        owner_deleted.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0020,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            Some(identity_moves[&owner_account_id].1),
+            Some(owner_ids.0),
+            Some(owner_ids.1),
+            Some("deleted_calendar_event"),
+        )
     );
     let grantee_deleted = storage
         .poll_mapi_notifications(grantee_account_id, updated_cursor)
         .await?;
-    assert_calendar_notification(
-        &grantee_deleted,
-        deleted_cursor,
-        0x0008,
-        grantee_ids.0,
-        grantee_ids.1,
-        calendar_id,
-        event_id,
+    assert_eq!(grantee_deleted.cursor, Some(destination_cursor));
+    assert_eq!(grantee_deleted.events.len(), 2);
+    assert_eq!(
+        grantee_deleted.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0008,
+            grantee_ids.0,
+            Some(grantee_ids.1),
+            None,
+            None,
+            Some("calendar_event"),
+        )
+    );
+    assert_eq!(
+        grantee_deleted.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0020,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            Some(identity_moves[&grantee_account_id].1),
+            Some(grantee_ids.0),
+            Some(grantee_ids.1),
+            Some("deleted_calendar_event"),
+        )
     );
     assert_outsider_has_no_notifications(&storage, outsider_account_id, updated_cursor).await?;
 
-    let retired_identities = sqlx::query(
+    assert_eq!(identity_moves[&owner_account_id].0, owner_ids.1);
+    assert_eq!(identity_moves[&grantee_account_id].0, grantee_ids.1);
+    assert_ne!(
+        identity_moves[&owner_account_id].0,
+        identity_moves[&owner_account_id].1
+    );
+    assert_ne!(
+        identity_moves[&grantee_account_id].0,
+        identity_moves[&grantee_account_id].1
+    );
+    let destination_identities = sqlx::query(
         r#"
         SELECT account_id, mapi_object_id, deleted_at IS NOT NULL AS retired
         FROM mapi_object_identities
-        WHERE object_kind = 'calendar_event'
+        WHERE object_kind = 'deleted_calendar_event'
           AND canonical_id = $1
         "#,
     )
     .bind(event_id)
     .fetch_all(storage.pool())
     .await?;
-    let retired_identities = retired_identities
+    let destination_identities = destination_identities
         .into_iter()
         .map(|row| {
             (
@@ -431,12 +623,18 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
             )
         })
         .collect::<HashMap<_, _>>();
-    assert_eq!(retired_identities[&owner_account_id], (owner_ids.1, true));
     assert_eq!(
-        retired_identities[&grantee_account_id],
-        (grantee_ids.1, true)
+        destination_identities[&owner_account_id],
+        (identity_moves[&owner_account_id].1, false)
     );
-    assert!(retired_identities[&outsider_account_id].1);
+    assert_eq!(
+        destination_identities[&grantee_account_id],
+        (identity_moves[&grantee_account_id].1, false)
+    );
+    assert_eq!(
+        destination_identities[&outsider_account_id],
+        (identity_moves[&outsider_account_id].1, false)
+    );
 
     let change_kinds = sqlx::query_scalar::<_, String>(
         r#"
@@ -455,8 +653,8 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
     assert_eq!(change_kinds, ["created", "updated", "destroyed"]);
 
     // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 require the
-    // ObjectCreated/ObjectModified/ObjectDeleted message notifications above
-    // to retain the principal's stable FolderId and MessageId.
+    // ObjectCreated/ObjectModified/ObjectDeleted/ObjectMoved message
+    // notifications above to retain each principal's exact old/new IDs.
     fixture.cleanup().await?;
     Ok(())
 }

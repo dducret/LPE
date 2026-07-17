@@ -14,15 +14,16 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
-    MapiEventCreateResult, MapiEventReminderState, MapiEventVersion, PublicFolder,
-    PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights,
-    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    MapiEventCreateResult, MapiEventIdentityMove, MapiEventReminderState, MapiEventVersion,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -1718,6 +1719,7 @@ struct FakeStore {
     contact_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
+    deleted_calendar_events: Arc<Mutex<Vec<AccessibleEvent>>>,
     event_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_events: Arc<Mutex<Vec<Uuid>>>,
     tasks: Arc<Mutex<Vec<ClientTask>>>,
@@ -1765,6 +1767,7 @@ struct FakeStore {
     ews_im_groups: Arc<Mutex<Vec<EwsImGroup>>>,
     ews_im_group_members: Arc<Mutex<Vec<EwsImGroupMember>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    retired_mapi_identities: Arc<Mutex<Vec<MapiIdentityLookupRecord>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_event_identity_versions: Arc<Mutex<HashMap<Uuid, MapiEventVersion>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
@@ -2384,6 +2387,13 @@ impl FakeStore {
                     || crate::mapi::identity::legacy_migration_object_id(&event.id) == object_id
             })
             .map(|event| (MapiIdentityObjectKind::CalendarEvent, event.id));
+        let deleted_event_match = self
+            .deleted_calendar_events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| identities.get(&event.id).copied() == Some(object_id))
+            .map(|event| (MapiIdentityObjectKind::DeletedCalendarEvent, event.id));
         let task_match = self
             .tasks
             .lock()
@@ -2469,6 +2479,7 @@ impl FakeStore {
             .or(message_match)
             .or(contact_match)
             .or(event_match)
+            .or(deleted_event_match)
             .or(task_match)
             .or(note_match)
             .or(journal_entry_match)
@@ -4069,13 +4080,23 @@ impl ExchangeStore for FakeStore {
         canonical_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<u64>> {
         let identities = self.mapi_identities.lock().unwrap().clone();
+        let retired = self.retired_mapi_identities.lock().unwrap().clone();
         let records = canonical_ids
             .iter()
             .filter_map(|canonical_id| {
-                identities.get(canonical_id).copied().filter(|object_id| {
-                    self.fake_mapi_identity_lookup_for_object_id(*object_id)
-                        .is_some_and(|record| record.object_kind == object_kind)
-                })
+                retired
+                    .iter()
+                    .find(|identity| {
+                        identity.object_kind == object_kind
+                            && identity.canonical_id == *canonical_id
+                    })
+                    .map(|identity| identity.object_id)
+                    .or_else(|| {
+                        identities.get(canonical_id).copied().filter(|object_id| {
+                            self.fake_mapi_identity_lookup_for_object_id(*object_id)
+                                .is_some_and(|record| record.object_kind == object_kind)
+                        })
+                    })
             })
             .collect::<Vec<_>>();
         Box::pin(async move { Ok(records) })
@@ -5076,6 +5097,14 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(events) })
     }
 
+    fn fetch_accessible_deleted_events<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<AccessibleEvent>> {
+        let events = self.deleted_calendar_events.lock().unwrap().clone();
+        Box::pin(async move { Ok(events) })
+    }
+
     fn fetch_event_sync_versions<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -5826,6 +5855,176 @@ impl ExchangeStore for FakeStore {
             .unwrap()
             .retain(|event| event.id != event_id);
         Box::pin(async move { Ok(()) })
+    }
+
+    fn move_accessible_event_to_deleted_items<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> StoreFuture<'a, MoveAccessibleEventToDeletedItemsResult> {
+        let event = {
+            let mut events = self.events.lock().unwrap();
+            let Some(index) = events.iter().position(|event| event.id == event_id) else {
+                return Box::pin(async { Err(anyhow::anyhow!("event not found")) });
+            };
+            events.remove(index)
+        };
+        let (old_mapi_object_id, old_source_key) = {
+            let identities = self.mapi_identities.lock().unwrap();
+            let Some(old_mapi_object_id) = identities.get(&event_id).copied() else {
+                return Box::pin(async { Err(anyhow::anyhow!("active Event identity not found")) });
+            };
+            let old_source_key = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .get(&event_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::source_key_for_object_id(old_mapi_object_id)
+                });
+            (old_mapi_object_id, old_source_key)
+        };
+        let old_change_number = self
+            .mapi_event_identity_versions
+            .lock()
+            .unwrap()
+            .get(&event_id)
+            .map(|version| version.change_number)
+            .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(old_mapi_object_id));
+        let old_change_key = mapi_mailstore::change_key_for_change_number(old_change_number);
+
+        let new_mapi_object_id = {
+            let mut identities = self.mapi_identities.lock().unwrap();
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            *next_counter = (*next_counter)
+                .max(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+                .max(
+                    crate::mapi::identity::global_counter_from_store_id(old_mapi_object_id)
+                        .unwrap_or_default()
+                        .saturating_add(1),
+                );
+            while identities
+                .values()
+                .any(|identity| *identity == crate::mapi::identity::mapi_store_id(*next_counter))
+            {
+                *next_counter = next_counter.saturating_add(1);
+            }
+            let object_id = crate::mapi::identity::mapi_store_id(*next_counter);
+            *next_counter = next_counter.saturating_add(1);
+            identities.insert(event_id, object_id);
+            object_id
+        };
+        let new_source_key = crate::mapi::identity::source_key_for_object_id(new_mapi_object_id);
+        self.mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .insert(event_id, new_source_key.clone());
+        self.retired_mapi_identities
+            .lock()
+            .unwrap()
+            .push(MapiIdentityLookupRecord {
+                object_kind: MapiIdentityObjectKind::CalendarEvent,
+                canonical_id: event_id,
+                object_id: old_mapi_object_id,
+                source_key: old_source_key.clone(),
+            });
+        self.deleted_events.lock().unwrap().push(event_id);
+        self.deleted_calendar_events
+            .lock()
+            .unwrap()
+            .push(event.clone());
+
+        let new_change_number = mapi_mailstore::change_number_for_store_id(new_mapi_object_id);
+        let new_change_key = mapi_mailstore::change_key_for_change_number(new_change_number);
+        self.mapi_event_identity_versions.lock().unwrap().insert(
+            event_id,
+            MapiEventVersion {
+                event_id,
+                canonical_modseq: 2,
+                change_number: new_change_number,
+                change_key: new_change_key.clone(),
+                predecessor_change_list: mapi_mailstore::predecessor_change_list(new_change_number),
+                updated_at: "2026-07-16T20:52:00Z".to_string(),
+            },
+        );
+        if let Some(after_cursor) = *self.mapi_notification_cursor.lock().unwrap() {
+            let destination_cursor = after_cursor.saturating_add(2);
+            self.mapi_notification_polls
+                .lock()
+                .unwrap()
+                .push(MapiNotificationPoll {
+                    event_pending: true,
+                    cursor: Some(destination_cursor),
+                    events: vec![
+                        MapiNotificationEvent::canonical(
+                            MapiNotificationKind::Content,
+                            0x0008,
+                            crate::mapi::identity::CALENDAR_FOLDER_ID,
+                            Some(old_mapi_object_id),
+                            None,
+                            destination_cursor - 1,
+                            1,
+                            None,
+                            None,
+                            "destroyed".to_string(),
+                            None,
+                            None,
+                            Some(event.title.clone()),
+                        )
+                        .with_canonical_ids(None, Some(event_id))
+                        .with_object_kind("calendar_event"),
+                        MapiNotificationEvent::canonical(
+                            MapiNotificationKind::Content,
+                            0x0020,
+                            crate::mapi::identity::TRASH_FOLDER_ID,
+                            Some(new_mapi_object_id),
+                            Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                            destination_cursor,
+                            2,
+                            None,
+                            None,
+                            "moved".to_string(),
+                            None,
+                            None,
+                            Some(event.title.clone()),
+                        )
+                        .with_old_message_id(Some(old_mapi_object_id))
+                        .with_canonical_ids(None, Some(event_id))
+                        .with_object_kind("deleted_calendar_event"),
+                    ],
+                });
+        }
+        {
+            let mut changes = self.mapi_sync_changes.lock().unwrap();
+            changes.current_change_sequence = changes.current_change_sequence.saturating_add(1);
+            changes.current_modseq = changes.current_modseq.saturating_add(1);
+            if !changes.deleted_calendar_event_ids.contains(&event_id) {
+                changes.deleted_calendar_event_ids.push(event_id);
+            }
+            if !changes
+                .changed_deleted_calendar_event_ids
+                .contains(&event_id)
+            {
+                changes.changed_deleted_calendar_event_ids.push(event_id);
+            }
+        }
+        Box::pin(async move {
+            Ok(MoveAccessibleEventToDeletedItemsResult {
+                event,
+                principal_identity: Some(MapiEventIdentityMove {
+                    account_id: principal_account_id,
+                    old_mapi_object_id,
+                    new_mapi_object_id,
+                    old_source_key,
+                    new_source_key,
+                    old_change_number,
+                    new_change_number,
+                    old_change_key,
+                    new_change_key,
+                }),
+            })
+        })
     }
 
     fn fetch_accessible_tasks_by_ids<'a>(

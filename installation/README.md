@@ -14,8 +14,14 @@ rolls back that transaction. `init-schema.sh`, `update-lpe.sh`, and
 `check-lpe.sh` ignore user `psql` startup files for their contract queries and
 validate both the schema label and the
 required durable MAPI identity version columns (`mapi_change_number` and
-`predecessor_change_list`), so a database tagged `0.5.0-sql-v1` but physically
-incomplete is rejected. Initialization also refuses relations outside
+`predecessor_change_list`), the Calendar Event lifecycle columns
+(`lifecycle_state` and `deleted_at`), and the
+`mapi_calendar_event_identity_moves` table used to preserve old/new MAPI
+identity lineage for Calendar moves to Deleted Items. They also verify that
+the canonical change log and MAPI identity constraints accept the
+`deleted_calendar_event` object kind. A database tagged
+`0.5.0-sql-v1` but physically incomplete is therefore rejected.
+Initialization also refuses relations outside
 `public`, even for an intentional public-schema reset, because leaving them in
 place could create parallel state.
 The schema initializer creates the real platform tenant row

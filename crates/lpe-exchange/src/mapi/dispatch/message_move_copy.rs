@@ -89,6 +89,23 @@ pub(super) async fn append_move_copy_messages_response<S>(
         ));
         return;
     }
+    if let Some(partial_completion) = calendar_move_to_deleted_items_partial_completion(
+        store,
+        principal,
+        request,
+        source_folder_id,
+        target_folder_id,
+        snapshot,
+    )
+    .await
+    {
+        responses.extend_from_slice(&rop_partial_completion_response(
+            0x33,
+            request.response_handle_index(),
+            partial_completion,
+        ));
+        return;
+    }
     if source_folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
         tracing::info!(
             adapter = "mapi",

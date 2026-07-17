@@ -570,6 +570,7 @@ impl Storage {
                     FROM calendar_events
                     WHERE tenant_id = $1
                       AND calendar_id = $2
+                      AND lifecycle_state = 'active'
                     ORDER BY id ASC
                     "#,
                 )

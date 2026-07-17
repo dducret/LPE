@@ -121,6 +121,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND calendar_id = $3
+              AND lifecycle_state = 'active'
             ORDER BY id
             FOR UPDATE
             "#,
@@ -473,7 +474,12 @@ impl Storage {
             JOIN mapi_object_identities identity
               ON identity.tenant_id = event.tenant_id
              AND identity.account_id = $2
-             AND identity.object_kind = 'calendar_event'
+             AND (
+                    (event.lifecycle_state = 'active'
+                        AND identity.object_kind = 'calendar_event')
+                    OR (event.lifecycle_state = 'deleted'
+                        AND identity.object_kind = 'deleted_calendar_event')
+             )
              AND identity.canonical_id = event.id
              AND identity.deleted_at IS NULL
             WHERE event.tenant_id = $1
@@ -533,6 +539,7 @@ impl Storage {
             FROM calendar_events event
             WHERE event.tenant_id = $1
               AND event.id = $2
+              AND event.lifecycle_state = 'active'
             FOR UPDATE OF event
             "#,
         )
@@ -686,6 +693,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = $3
+              AND lifecycle_state = 'active'
             RETURNING calendar_id
             "#,
         )
@@ -713,29 +721,6 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
         rotate_active_mapi_event_identities_in_tx(tx, tenant_id, event_id).await
-    }
-
-    pub(crate) async fn retire_mapi_event_identities_in_tx(
-        tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &Uuid,
-        event_id: Uuid,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE mapi_object_identities
-            SET deleted_at = NOW(),
-                updated_at = NOW()
-            WHERE tenant_id = $1
-              AND object_kind = 'calendar_event'
-              AND canonical_id = $2
-              AND deleted_at IS NULL
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(event_id)
-        .execute(&mut **tx)
-        .await?;
-        Ok(())
     }
 }
 
@@ -858,6 +843,7 @@ async fn update_mapi_event_core_in_tx(
         WHERE tenant_id = $1
           AND owner_account_id = $2
           AND id = $3
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -921,6 +907,7 @@ async fn update_mapi_event_reminder_in_tx(
         WHERE tenant_id = $1
           AND owner_account_id = $2
           AND id = $3
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -1128,6 +1115,7 @@ async fn set_created_mapi_event_modseq_in_tx(
           AND owner_account_id = $2
           AND calendar_id = $3
           AND id = $4
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -1199,7 +1187,9 @@ async fn fetch_created_accessible_event_in_tx(
             body_text AS notes,
             COALESCE(body_html, '') AS body_html
         FROM calendar_events
-        WHERE tenant_id = $1 AND id = $2
+        WHERE tenant_id = $1
+          AND id = $2
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -1258,7 +1248,9 @@ async fn fetch_mapi_event_reminder_state_in_tx(
                 )
             END AS reminder_dismissed_at
         FROM calendar_events
-        WHERE tenant_id = $1 AND id = $2
+        WHERE tenant_id = $1
+          AND id = $2
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -1272,7 +1264,7 @@ async fn fetch_mapi_event_reminder_state_in_tx(
     })
 }
 
-const fn mapi_store_id(global_counter: u64) -> u64 {
+pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
 }
 
@@ -1387,6 +1379,7 @@ impl Storage {
             WHERE event.tenant_id = $1
               AND event.owner_account_id = $2
               AND event.id = $3
+              AND event.lifecycle_state = 'active'
             "#,
         )
         .bind(tenant_id)
@@ -1413,7 +1406,9 @@ async fn fetch_event_updated_at_in_tx(
             'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
         )
         FROM calendar_events
-        WHERE tenant_id = $1 AND id = $2
+        WHERE tenant_id = $1
+          AND id = $2
+          AND lifecycle_state = 'active'
         "#,
     )
     .bind(tenant_id)
@@ -1438,14 +1433,14 @@ fn mapi_event_version_from_row(row: sqlx::postgres::PgRow) -> Result<MapiEventVe
     })
 }
 
-fn mapi_change_key(replica_guid: Uuid, change_number: u64) -> Vec<u8> {
+pub(crate) fn mapi_change_key(replica_guid: Uuid, change_number: u64) -> Vec<u8> {
     let mut value = replica_guid.as_bytes().to_vec();
     let bytes = change_number.to_be_bytes();
     value.extend_from_slice(&bytes[2..]);
     value
 }
 
-fn merge_predecessor_change_list(current: &[u8], change_key: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn merge_predecessor_change_list(current: &[u8], change_key: &[u8]) -> Result<Vec<u8>> {
     // [MS-OXCFXICS] sections 2.2.2.3 and 3.1.5.6.1: serialize SizedXids
     // in GUID order and retain the greatest integrated LocalId for each replica.
     let mut entries = parse_predecessor_change_list(current)?;

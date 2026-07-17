@@ -11,6 +11,7 @@ use crate::{
     SUGGESTED_CONTACTS_ROLE,
 };
 
+mod deleted_events;
 mod grants;
 mod types;
 
@@ -19,6 +20,7 @@ pub use types::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ContactNameFields,
     ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
+    MapiEventIdentityMove, MoveAccessibleEventToDeletedItemsResult,
 };
 
 use types::{
@@ -150,6 +152,7 @@ impl Storage {
              AND c.role = 'calendar'
             WHERE e.tenant_id = $1
               AND e.owner_account_id = $2
+              AND e.lifecycle_state = 'active'
               AND e.status <> 'cancelled'
               AND e.starts_at < $3::timestamptz
               AND e.ends_at > $4::timestamptz
@@ -659,7 +662,7 @@ impl Storage {
         &self,
         principal_account_id: Uuid,
     ) -> Result<Vec<AccessibleEvent>> {
-        self.fetch_accessible_events_internal(principal_account_id, None, None)
+        self.fetch_accessible_events_internal(principal_account_id, None, None, "active")
             .await
     }
 
@@ -671,7 +674,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.fetch_accessible_events_internal(principal_account_id, None, Some(ids))
+        self.fetch_accessible_events_internal(principal_account_id, None, Some(ids), "active")
             .await
     }
 
@@ -680,8 +683,13 @@ impl Storage {
         principal_account_id: Uuid,
         collection_id: &str,
     ) -> Result<Vec<AccessibleEvent>> {
-        self.fetch_accessible_events_internal(principal_account_id, Some(collection_id), None)
-            .await
+        self.fetch_accessible_events_internal(
+            principal_account_id,
+            Some(collection_id),
+            None,
+            "active",
+        )
+        .await
     }
 
     pub async fn create_accessible_event(
@@ -839,6 +847,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = $3
+              AND lifecycle_state = 'active'
             "#,
         )
         .bind(&tenant_id)
@@ -1292,6 +1301,7 @@ impl Storage {
         principal_account_id: Uuid,
         collection_id: Option<&str>,
         ids: Option<&[Uuid]>,
+        lifecycle_state: &str,
     ) -> Result<Vec<AccessibleEvent>> {
         let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
         let collection_scope =
@@ -1373,6 +1383,7 @@ impl Storage {
               AND ($4::uuid IS NULL OR e.calendar_id = $4)
               AND ($5::text IS NULL OR c.role = $5)
               AND ($6::uuid[] IS NULL OR e.id = ANY($6))
+              AND e.lifecycle_state = $7
             ORDER BY e.starts_at ASC, e.id ASC
             "#,
         )
@@ -1382,6 +1393,7 @@ impl Storage {
         .bind(calendar_id)
         .bind(calendar_role)
         .bind(ids)
+        .bind(lifecycle_state)
         .fetch_all(&self.pool)
         .await?;
 

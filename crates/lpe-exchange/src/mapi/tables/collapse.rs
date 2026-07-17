@@ -35,18 +35,14 @@ pub(in crate::mapi) fn rop_expand_row_response(
     }
 
     let columns = columns.clone();
-    let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
-    source_rows.retain(|email| {
-        restriction_matches_email_in_snapshot(restriction.as_ref(), email, *folder_id, snapshot)
-    });
-    sort_emails(&mut source_rows, sort_orders);
-    let rows = categorized_email_rows(
+    let rows = expanded_categorized_rows(
         *folder_id,
-        source_rows,
+        mailboxes,
+        emails,
+        snapshot,
+        restriction.as_ref(),
         &columns,
         sort_orders,
-        1,
-        &HashSet::new(),
     );
     let leaf_rows = rows
         .into_iter()
@@ -104,18 +100,14 @@ pub(in crate::mapi) fn rop_collapse_row_response(
     }
 
     let columns = columns.clone();
-    let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
-    source_rows.retain(|email| {
-        restriction_matches_email_in_snapshot(restriction.as_ref(), email, *folder_id, snapshot)
-    });
-    sort_emails(&mut source_rows, sort_orders);
-    let rows = categorized_email_rows(
+    let rows = expanded_categorized_rows(
         *folder_id,
-        source_rows,
+        mailboxes,
+        emails,
+        snapshot,
+        restriction.as_ref(),
         &columns,
         sort_orders,
-        1,
-        &HashSet::new(),
     );
     let collapsed_count = rows
         .iter()
@@ -237,6 +229,35 @@ pub(in crate::mapi) fn rop_set_collapse_state_response(
         },
     );
     rop_set_collapse_state_success_response(request, &bookmark)
+}
+
+fn expanded_categorized_rows(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+) -> Vec<CategorizedTableRow> {
+    if folder_id == TRASH_FOLDER_ID {
+        let mut rows = deleted_items_content_rows(mailboxes, emails, snapshot, restriction);
+        sort_deleted_items_content_rows(&mut rows, sort_orders);
+        return categorized_deleted_items_content_rows(
+            rows,
+            columns,
+            sort_orders,
+            1,
+            &HashSet::new(),
+        );
+    }
+
+    let mut rows = emails_for_folder(folder_id, mailboxes, emails);
+    rows.retain(|email| {
+        restriction_matches_email_in_snapshot(restriction, email, folder_id, snapshot)
+    });
+    sort_emails(&mut rows, sort_orders);
+    categorized_email_rows(folder_id, rows, columns, sort_orders, 1, &HashSet::new())
 }
 
 fn read_u16_from(bytes: &[u8], offset: &mut usize) -> Option<u16> {

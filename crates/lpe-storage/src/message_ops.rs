@@ -69,70 +69,8 @@ impl Storage {
     }
 
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
-        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        let mut tx = self.pool.begin().await?;
-        let event = sqlx::query(
-            r#"
-            SELECT calendar_id, uid
-            FROM calendar_events
-            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
-            FOR UPDATE
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(account_id)
-        .bind(event_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        let Some(event) = event else {
-            bail!("event not found");
-        };
-        let calendar_id = event.get::<Uuid, _>("calendar_id");
-        let event_uid = event.get::<String, _>("uid");
-        let affected_principals = Self::calendar_event_affected_principals_in_tx(
-            &mut tx, &tenant_id, account_id, event_id,
-        )
-        .await?;
-
-        self.insert_collaboration_tombstone_in_tx(
-            &mut tx,
-            &tenant_id,
-            CanonicalChangeCategory::Calendar,
-            account_id,
-            Some(calendar_id),
-            "calendar_event",
-            event_id,
-            Some(&event_uid),
-            &affected_principals,
-        )
-        .await?;
-        Self::retire_mapi_event_identities_in_tx(&mut tx, &tenant_id, event_id).await?;
-        let deleted = sqlx::query(
-            r#"
-            DELETE FROM calendar_events
-            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(account_id)
-        .bind(event_id)
-        .execute(&mut *tx)
-        .await?;
-
-        if deleted.rows_affected() == 0 {
-            bail!("event not found");
-        }
-
-        Self::emit_collaboration_change(
-            &mut tx,
-            &tenant_id,
-            CanonicalChangeCategory::Calendar,
-            account_id,
-        )
-        .await?;
-        tx.commit().await?;
-
+        self.move_accessible_event_to_deleted_items(account_id, event_id)
+            .await?;
         Ok(())
     }
 
