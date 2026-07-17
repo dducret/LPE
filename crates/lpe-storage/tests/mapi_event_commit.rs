@@ -17,6 +17,7 @@ const REPLICA_GUID: [u8; 16] = [
     0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
 ];
 const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
+const TEST_SCHEMA_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
 static DATABASE_TEST_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 fn database_test_lock() -> &'static tokio::sync::Mutex<()> {
@@ -31,10 +32,81 @@ struct EventFixture {
     account_id: Uuid,
     calendar_id: Uuid,
     event_id: Uuid,
+    schema_cleanup: TestSchemaCleanup,
+}
+
+struct TestSchemaCleanup {
+    database_url: String,
+    schema_name: Option<String>,
+}
+
+impl TestSchemaCleanup {
+    fn armed(database_url: String, schema_name: String) -> Self {
+        Self {
+            database_url,
+            schema_name: Some(schema_name),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.schema_name = None;
+    }
+}
+
+impl Drop for TestSchemaCleanup {
+    fn drop(&mut self) {
+        let Some(schema_name) = self.schema_name.take() else {
+            return;
+        };
+        let schema_name_for_error = schema_name.clone();
+        let database_url = self.database_url.clone();
+        let cleanup = std::thread::Builder::new()
+            .name("lpe-mapi-event-schema-cleanup".to_string())
+            .spawn(move || -> Result<()> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("create temporary-schema cleanup runtime")?;
+                runtime.block_on(async move {
+                    let pool = PgPoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(TEST_SCHEMA_CLEANUP_TIMEOUT);
+                    let pool = tokio::time::timeout(
+                        TEST_SCHEMA_CLEANUP_TIMEOUT,
+                        pool.connect_with(PgConnectOptions::from_str(&database_url)?),
+                    )
+                    .await
+                    .context("temporary-schema cleanup connection timed out")?
+                    .context("connect for temporary-schema cleanup")?;
+                    let result = tokio::time::timeout(
+                        TEST_SCHEMA_CLEANUP_TIMEOUT,
+                        sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+                            .execute(&pool),
+                    )
+                    .await
+                    .context("temporary-schema DROP timed out")?
+                    .with_context(|| format!("drop temporary test schema {schema_name}"));
+                    drop(pool);
+                    result?;
+                    Ok(())
+                })
+            });
+
+        let result = cleanup
+            .context("spawn temporary-schema cleanup thread")
+            .and_then(|thread| {
+                thread
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("temporary-schema cleanup thread panicked"))?
+            });
+        if let Err(error) = result {
+            eprintln!("unable to clean temporary schema {schema_name_for_error}: {error:#}");
+        }
+    }
 }
 
 impl EventFixture {
-    async fn cleanup(self) -> Result<()> {
+    async fn cleanup(mut self) -> Result<()> {
         self.storage.pool().close().await;
         sqlx::query(&format!(
             "DROP SCHEMA IF EXISTS {} CASCADE",
@@ -42,6 +114,7 @@ impl EventFixture {
         ))
         .execute(&self.admin_pool)
         .await?;
+        self.schema_cleanup.disarm();
         self.admin_pool.close().await;
         Ok(())
     }
@@ -70,6 +143,7 @@ async fn event_fixture() -> Result<Option<EventFixture>> {
     sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
         .execute(&admin_pool)
         .await?;
+    let schema_cleanup = TestSchemaCleanup::armed(database_url.clone(), schema_name.clone());
 
     let search_path = format!("{schema_name},public");
     let pool = PgPoolOptions::new()
@@ -196,6 +270,7 @@ async fn event_fixture() -> Result<Option<EventFixture>> {
         account_id,
         calendar_id,
         event_id,
+        schema_cleanup,
     }))
 }
 
@@ -307,6 +382,36 @@ fn attachment_upsert(attach_num: u32, file_name: &str) -> MapiEventAttachmentUps
             property_value: b"attachment metadata".to_vec(),
         }],
     }
+}
+
+#[tokio::test]
+async fn mapi_event_fixture_drop_cleans_temporary_schema() -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let database_url = env::var("TEST_DATABASE_URL")?;
+    let schema_name = fixture.schema_name.clone();
+
+    drop(fixture);
+
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(PgConnectOptions::from_str(&database_url)?)
+        .await?;
+    let schema_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+    )
+    .bind(&schema_name)
+    .fetch_one(&admin_pool)
+    .await?;
+    admin_pool.close().await;
+
+    anyhow::ensure!(
+        !schema_exists,
+        "dropping an unfinished Event fixture left temporary schema {schema_name} behind"
+    );
+    Ok(())
 }
 
 #[tokio::test]

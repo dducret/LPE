@@ -35,6 +35,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 use uuid::Uuid;
 
@@ -75,17 +76,89 @@ static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 // Ephemeral search_path schemas cannot safely share prepared relation OIDs through a pooled proxy.
 static POSTGRES_MAPI_FIXTURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const STORAGE_SCHEMA_SQL: &str = include_str!("../../../lpe-storage/sql/schema.sql");
+const TEST_SCHEMA_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct PostgresMapiFixture {
     storage: Storage,
     admin_pool: PgPool,
     schema_name: String,
     account_id: Uuid,
+    schema_cleanup: TestSchemaCleanup,
+    // Struct fields drop in declaration order; keep the fixture lock through fallback cleanup.
     _lock: tokio::sync::MutexGuard<'static, ()>,
 }
 
+struct TestSchemaCleanup {
+    database_url: String,
+    schema_name: Option<String>,
+}
+
+impl TestSchemaCleanup {
+    fn armed(database_url: String, schema_name: String) -> Self {
+        Self {
+            database_url,
+            schema_name: Some(schema_name),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.schema_name = None;
+    }
+}
+
+impl Drop for TestSchemaCleanup {
+    fn drop(&mut self) {
+        let Some(schema_name) = self.schema_name.take() else {
+            return;
+        };
+        let schema_name_for_error = schema_name.clone();
+        let database_url = self.database_url.clone();
+        let cleanup = std::thread::Builder::new()
+            .name("lpe-mapi-calendar-schema-cleanup".to_string())
+            .spawn(move || -> anyhow::Result<()> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                runtime.block_on(async move {
+                    let pool = PgPoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(TEST_SCHEMA_CLEANUP_TIMEOUT);
+                    let pool = tokio::time::timeout(
+                        TEST_SCHEMA_CLEANUP_TIMEOUT,
+                        pool.connect_with(PgConnectOptions::from_str(&database_url)?),
+                    )
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!("temporary-schema cleanup connection timed out")
+                    })??;
+                    let result = tokio::time::timeout(
+                        TEST_SCHEMA_CLEANUP_TIMEOUT,
+                        sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+                            .execute(&pool),
+                    )
+                    .await
+                    .map_err(|_| anyhow::anyhow!("temporary-schema DROP timed out"))?;
+                    drop(pool);
+                    result?;
+                    Ok(())
+                })
+            });
+
+        let result = match cleanup {
+            Ok(thread) => thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("temporary-schema cleanup thread panicked"))
+                .and_then(|result| result),
+            Err(error) => Err(error.into()),
+        };
+        if let Err(error) = result {
+            eprintln!("unable to clean temporary schema {schema_name_for_error}: {error:#}");
+        }
+    }
+}
+
 impl PostgresMapiFixture {
-    async fn cleanup(self) -> anyhow::Result<()> {
+    async fn cleanup(mut self) -> anyhow::Result<()> {
         self.storage.pool().close().await;
         sqlx::query(&format!(
             "DROP SCHEMA IF EXISTS {} CASCADE",
@@ -93,6 +166,7 @@ impl PostgresMapiFixture {
         ))
         .execute(&self.admin_pool)
         .await?;
+        self.schema_cleanup.disarm();
         self.admin_pool.close().await;
         Ok(())
     }
@@ -119,6 +193,7 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
     sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
         .execute(&admin_pool)
         .await?;
+    let schema_cleanup = TestSchemaCleanup::armed(database_url.clone(), schema_name.clone());
 
     let search_path = format!("{schema_name},public");
     let pool = PgPoolOptions::new()
@@ -190,7 +265,37 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
         admin_pool,
         schema_name,
         account_id,
+        schema_cleanup,
     }))
+}
+
+#[tokio::test]
+async fn postgres_mapi_calendar_fixture_drop_cleans_temporary_schema() -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let database_url = env::var("TEST_DATABASE_URL")?;
+    let schema_name = fixture.schema_name.clone();
+
+    drop(fixture);
+
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(PgConnectOptions::from_str(&database_url)?)
+        .await?;
+    let schema_exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+    )
+    .bind(&schema_name)
+    .fetch_one(&admin_pool)
+    .await?;
+    admin_pool.close().await;
+
+    anyhow::ensure!(
+        !schema_exists,
+        "dropping an unfinished Calendar fixture left temporary schema {schema_name} behind"
+    );
+    Ok(())
 }
 
 #[tokio::test]
