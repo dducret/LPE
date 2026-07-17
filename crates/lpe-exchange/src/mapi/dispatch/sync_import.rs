@@ -1,4 +1,6 @@
 use super::*;
+use crate::mapi::wire::MapiError;
+use crate::store::MAX_MAPI_LOCAL_REPLICA_ID_COUNT;
 
 // Version 3 adds the owner Inbox special-folder identification properties to
 // folderChange, so version 2 checkpoints must replay a full hierarchy once.
@@ -106,32 +108,91 @@ pub(super) fn append_set_local_replica_midset_deleted_response(
     }
 }
 
-pub(super) fn append_get_local_replica_ids_response(
+pub(super) async fn append_get_local_replica_ids_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
-    session: &mut MapiSession,
+    session: &MapiSession,
+    handle_slots: &[u32],
     request: &RopRequest,
     responses: &mut Vec<u8>,
-) {
-    let (first_global_counter, _) = mapi_mailstore::local_replica_id_range(
-        principal.account_id,
-        request.local_replica_id_count(),
-        session.next_local_replica_sequence,
-    );
-    session.next_local_replica_sequence =
-        session.next_local_replica_sequence.saturating_add(1).max(1);
-    responses.extend_from_slice(&rop_get_local_replica_ids_response(
-        request,
-        first_global_counter,
-    ));
+) where
+    S: ExchangeStore,
+{
+    // [MS-OXCROPS] section 3.2.5.4 requires ecNullObject for an unassigned
+    // handle. [MS-OXCFXICS] section 2.2.3.2.4.7.1 then requires the assigned
+    // InputServerObject to be a Logon object.
+    let Some(input_handle) = input_handle(handle_slots, request) else {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NullObject.as_u32(),
+        ));
+        return;
+    };
+    let Some(input_object) = session.handles.get(&input_handle) else {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NullObject.as_u32(),
+        ));
+        return;
+    };
+    if !matches!(input_object, MapiObject::Logon) {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            ROP_ERROR_NOT_SUPPORTED,
+        ));
+        return;
+    }
+
+    let id_count = request.local_replica_id_count();
+    if !(1..=MAX_MAPI_LOCAL_REPLICA_ID_COUNT).contains(&id_count) {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::InvalidParameter.as_u32(),
+        ));
+        return;
+    }
+
+    match store
+        .reserve_mapi_local_replica_ids(principal.account_id, id_count)
+        .await
+    {
+        Ok(first_global_counter) => responses.extend_from_slice(
+            &rop_get_local_replica_ids_response(request, first_global_counter),
+        ),
+        Err(error) => {
+            tracing::error!(
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                account_id = %principal.account_id,
+                id_count,
+                error = %error,
+                "failed to reserve MAPI local replica ID range"
+            );
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                MapiError::GeneralFailure.as_u32(),
+            ));
+        }
+    }
 }
 
-pub(super) fn append_local_replica_dispatch_response(
+pub(super) async fn append_local_replica_dispatch_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     responses: &mut Vec<u8>,
-) -> bool {
+) -> bool
+where
+    S: ExchangeStore,
+{
     match RopId::from_u8(request.rop_id) {
         Some(RopId::SetLocalReplicaMidsetDeleted) => {
             append_set_local_replica_midset_deleted_response(
@@ -143,7 +204,15 @@ pub(super) fn append_local_replica_dispatch_response(
             false
         }
         Some(RopId::GetLocalReplicaIds) => {
-            append_get_local_replica_ids_response(principal, session, request, responses);
+            append_get_local_replica_ids_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                responses,
+            )
+            .await;
             true
         }
         _ => false,
@@ -255,12 +324,14 @@ where
         }
         Some(RopId::SetLocalReplicaMidsetDeleted | RopId::GetLocalReplicaIds) => {
             append_local_replica_dispatch_response(
+                store,
                 principal,
                 session,
                 handle_slots,
                 request,
                 responses,
             )
+            .await
         }
         _ => false,
     }

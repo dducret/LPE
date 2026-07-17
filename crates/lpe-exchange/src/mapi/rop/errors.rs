@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = MapiError::InvalidParameter.as_u32();
+pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = MapiError::NotSupported.as_u32();
 pub(in crate::mapi) const ROP_ERROR_NOT_FOUND: u32 = MapiError::NotFound.as_u32();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

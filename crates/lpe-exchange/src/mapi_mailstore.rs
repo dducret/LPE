@@ -49,8 +49,6 @@ pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
 use crate::mapi::properties::canonical_property_storage_tag;
 use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
 
-const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const INCR_SYNC_CHG: u32 = FastTransferMarker::IncrSyncChg.as_u32();
 const INCR_SYNC_DEL: u32 = FastTransferMarker::IncrSyncDel.as_u32();
 const INCR_SYNC_END: u32 = FastTransferMarker::IncrSyncEnd.as_u32();
@@ -1009,33 +1007,6 @@ fn attachments_for_message(
         .find(|facts| facts.message_id == message_id)
         .map(|facts| facts.attachments.as_slice())
         .unwrap_or_default()
-}
-
-pub(crate) fn local_replica_id_range(
-    account_id: Uuid,
-    requested: u32,
-    sequence: u64,
-) -> (u64, u32) {
-    let count = requested.clamp(1, 1_024);
-    let seed = stable_hash64([account_id.as_bytes().as_slice(), &sequence.to_le_bytes()]);
-    ((seed & 0x0000_FFFF_FFFF_FFFF).max(0x100), count)
-}
-
-fn stable_hash64<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> u64 {
-    let mut hash = FNV_OFFSET;
-    for part in parts {
-        hash = hash_bytes(hash, part);
-        hash = hash_bytes(hash, &[0]);
-    }
-    hash.max(1)
-}
-
-fn hash_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash
 }
 
 fn canonical_modseq_change_number(modseq: u64) -> u64 {

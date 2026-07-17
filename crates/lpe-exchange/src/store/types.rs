@@ -4,6 +4,8 @@ use uuid::Uuid;
 use crate::mapi::notifications::MapiNotificationEvent;
 use crate::mapi::properties::MapiNamedProperty;
 
+pub(crate) const MAX_MAPI_LOCAL_REPLICA_ID_COUNT: u32 = 0x0001_0000;
+
 #[derive(Debug, Clone)]
 pub(crate) enum MapiEventCreateOutcome {
     Created(lpe_storage::MapiEventCreateResult),

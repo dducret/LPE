@@ -2702,6 +2702,29 @@ fn test_mapi_pcl_includes_change_key(predecessor_change_list: &[u8], change_key:
 }
 
 impl ExchangeStore for FakeStore {
+    fn reserve_mapi_local_replica_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        id_count: u32,
+    ) -> StoreFuture<'a, u64> {
+        Box::pin(async move {
+            if !(1..=crate::store::MAX_MAPI_LOCAL_REPLICA_ID_COUNT).contains(&id_count) {
+                anyhow::bail!("invalid MAPI local replica ID count: {id_count}");
+            }
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+            }
+            let first_global_counter = *next_counter;
+            let next_global_counter = first_global_counter
+                .checked_add(u64::from(id_count))
+                .filter(|next| *next <= crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                .ok_or_else(|| anyhow::anyhow!("MAPI local replica ID space exhausted"))?;
+            *next_counter = next_global_counter;
+            Ok(first_global_counter)
+        })
+    }
+
     fn fetch_ews_user_configuration<'a>(
         &'a self,
         account_id: Uuid,
@@ -8385,6 +8408,17 @@ fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
         buffer.extend_from_slice(&handle.to_le_bytes());
     }
     buffer
+}
+
+fn mapi_private_logon_rops(recipient: &str) -> Vec<u8> {
+    let legacy_dn =
+        format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={recipient}\0");
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+    rops
 }
 
 fn rca_wrapped_private_logon_execute_body(mailbox: &str, client: &str) -> Vec<u8> {

@@ -37,7 +37,6 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) named_properties: HashMap<MapiNamedProperty, u16>,
     pub(in crate::mapi) named_property_ids: HashMap<u16, MapiNamedProperty>,
     pub(in crate::mapi) next_named_property_id: u16,
-    pub(in crate::mapi) next_local_replica_sequence: u64,
     pub(in crate::mapi) notification_cursor: Option<i64>,
     pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
     pub(in crate::mapi) table_notification_eligible_handles: HashSet<u32>,

@@ -4181,6 +4181,7 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
         session: Some(account.clone()),
         ..Default::default()
     };
+    let next_mapi_global_counter = store.next_mapi_global_counter.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4204,6 +4205,17 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
     let request = execute_body(&rop_buffer(&rops, &[1]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
@@ -4219,11 +4231,154 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
         0
     );
     assert_eq!(&response_rops[6..22], &mapi_mailstore::STORE_REPLICA_GUID);
-    let (first_global_counter, _) =
-        mapi_mailstore::local_replica_id_range(account.account_id, 4, 1);
+    let first_global_counter = next_mapi_global_counter.lock().unwrap().saturating_sub(4);
     assert_eq!(&response_rops[22..28], &globcnt_bytes(first_global_counter));
     assert_eq!(response_rops.len(), 28);
     assert!(response_rops[22..28].iter().any(|byte| *byte != 0));
+}
+
+#[tokio::test]
+async fn mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_handles() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let next_mapi_global_counter = store.next_mapi_global_counter.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &[0x7F, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00],
+                &[u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(response_rops[0], 0x7F);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0x0000_04B9
+    );
+
+    renew_mapi_request_id(&mut execute_headers);
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut folder_rops = Vec::new();
+    append_rop_open_folder(
+        &mut folder_rops,
+        0,
+        1,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    );
+    folder_rops.extend_from_slice(&[
+        0x7F, 0x00, 0x01, // RopGetLocalReplicaIds on a Folder handle.
+        0x04, 0x00, 0x00, 0x00,
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&folder_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x7F, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert_eq!(
+        *next_mapi_global_counter.lock().unwrap(),
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_get_local_replica_ids_returns_documented_failures() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let next_mapi_global_counter = store.next_mapi_global_counter.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let invalid_count_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &[0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                &[1],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(invalid_count_response).await;
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0x8007_0057
+    );
+
+    *next_mapi_global_counter.lock().unwrap() =
+        crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER;
+    renew_mapi_request_id(&mut execute_headers);
+    let exhausted_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &[0x7F, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00],
+                &[1],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(exhausted_response).await;
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0x8000_4005
+    );
 }
 
 #[tokio::test]

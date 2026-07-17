@@ -45,6 +45,12 @@ mod types;
 pub(crate) use types::*;
 
 pub trait ExchangeStore: AccountAuthStore {
+    fn reserve_mapi_local_replica_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        id_count: u32,
+    ) -> StoreFuture<'a, u64>;
+
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
         account_id: Uuid,

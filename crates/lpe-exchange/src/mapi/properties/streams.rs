@@ -889,7 +889,6 @@ mod tests {
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
-            next_local_replica_sequence: 1,
             notification_cursor: None,
             pending_notifications: VecDeque::new(),
             table_notification_eligible_handles: HashSet::new(),

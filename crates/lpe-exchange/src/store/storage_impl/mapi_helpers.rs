@@ -144,15 +144,17 @@ async fn advance_mapi_replica_counter_past_allocated(
     .fetch_one(&mut **tx)
     .await?;
 
+    // Equality with FIRST_RESERVED_HIGH_GLOBAL_COUNTER is the exhausted
+    // high-watermark and must not recycle unmaterialized client reservations.
     sqlx::query(
         r#"
         UPDATE mapi_mailbox_replicas
         SET next_global_counter = CASE
-                WHEN next_global_counter < $3 OR next_global_counter >= $4 THEN $3
+                WHEN next_global_counter < $3 OR next_global_counter > $4 THEN $3
                 ELSE GREATEST(next_global_counter, $3)
             END,
             updated_at = CASE
-                WHEN next_global_counter < $3 OR next_global_counter >= $4 THEN NOW()
+                WHEN next_global_counter < $3 OR next_global_counter > $4 THEN NOW()
                 ELSE updated_at
             END
         WHERE tenant_id = $1

@@ -5,6 +5,7 @@ mod calendar_identity_scope;
 mod connect;
 mod contacts;
 mod hierarchy;
+mod local_replica_ids;
 mod logon_profile;
 mod notifications;
 mod nspi;

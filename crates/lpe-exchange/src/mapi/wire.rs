@@ -866,12 +866,13 @@ pub(in crate::mapi) const MAPI_SUPPORTED_NOTIFICATION_MASK: u16 =
 pub(in crate::mapi) enum MapiError {
     Success = 0x0000_0000,
     NotFound = 0x8004_010F,
-    InvalidParameter = 0x8004_0102,
+    NotSupported = 0x8004_0102,
     NoAccess = 0x8007_0005,
     NotEnoughMemory = 0x8007_000E,
-    CallFailed = 0x8004_0405,
-    InvalidFunction = 0x8007_0057,
-    NoSupport = 0x0000_04B9,
+    InvalidBookmark = 0x8004_0405,
+    InvalidParameter = 0x8007_0057,
+    GeneralFailure = 0x8000_4005,
+    NullObject = 0x0000_04B9,
 }
 
 impl MapiError {
