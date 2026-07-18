@@ -22,9 +22,15 @@ use crate::store::{
     MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNavigationShortcutRecord,
 };
 
+mod folder_versions;
+pub(crate) use crate::store::MapiFolderVersion;
+pub(crate) use folder_versions::mapi_folder_identity_requests;
+use folder_versions::MapiFolderVersions;
+
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
+    folder_versions: MapiFolderVersions,
     public_folders: Vec<MapiPublicFolder>,
     public_folder_items: Vec<MapiPublicFolderItem>,
     public_folder_replicas: Vec<MapiPublicFolderReplica>,
@@ -718,18 +724,7 @@ fn mapi_identity_requests(
     public_folders: &[PublicFolder],
     public_folder_items: &[PublicFolderItem],
 ) -> Vec<MapiIdentityRequest> {
-    let mut requests = Vec::new();
-    requests.extend(
-        mailboxes
-            .iter()
-            .filter(|mailbox| !is_virtual_special_mailbox(mailbox))
-            .map(|mailbox| MapiIdentityRequest {
-                object_kind: MapiIdentityObjectKind::Mailbox,
-                canonical_id: mailbox.id,
-                reserved_global_counter: reserved_folder_counter_for_role(&mailbox.role),
-                source_key: None,
-            }),
-    );
+    let mut requests = mapi_folder_identity_requests(mailboxes);
     requests.extend(collaboration_folder_identity_requests(
         contact_collections,
         calendar_collections,
@@ -849,7 +844,7 @@ pub(crate) fn collaboration_folder_identity_requests(
     calendar_collections: &[CollaborationCollection],
     task_collections: &[CollaborationCollection],
 ) -> Vec<MapiIdentityRequest> {
-    let mut requests = contact_collections
+    contact_collections
         .iter()
         .filter_map(|collection| {
             collaboration_folder_identity_canonical_id(
@@ -875,25 +870,7 @@ pub(crate) fn collaboration_folder_identity_requests(
             reserved_global_counter: None,
             source_key: None,
         })
-        .collect::<Vec<_>>();
-
-    if calendar_collections
-        .iter()
-        .any(|collection| matches!(collection.id.as_str(), "default" | "calendar"))
-    {
-        let mailbox = crate::mapi_mailstore::virtual_special_mailbox(
-            crate::mapi::identity::CALENDAR_FOLDER_ID,
-        )
-        .expect("default Calendar virtual mailbox");
-        requests.push(MapiIdentityRequest {
-            object_kind: MapiIdentityObjectKind::Mailbox,
-            canonical_id: mailbox.id,
-            reserved_global_counter: Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
-            source_key: None,
-        });
-    }
-
-    requests
+        .collect()
 }
 
 pub(crate) fn is_virtual_special_mailbox(mailbox: &JmapMailbox) -> bool {

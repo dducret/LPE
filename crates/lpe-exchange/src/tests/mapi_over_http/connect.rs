@@ -4283,6 +4283,7 @@ async fn mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_h
         .await
         .unwrap();
     assert_eq!(logon_response.status(), StatusCode::OK);
+    let counter_before_invalid_folder_request = *next_mapi_global_counter.lock().unwrap();
 
     renew_mapi_request_id(&mut execute_headers);
     let mut folder_rops = Vec::new();
@@ -4311,7 +4312,8 @@ async fn mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_h
     ));
     assert_eq!(
         *next_mapi_global_counter.lock().unwrap(),
-        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+        counter_before_invalid_folder_request,
+        "RopGetLocalReplicaIds on a folder handle must not reserve the requested IDs"
     );
 }
 

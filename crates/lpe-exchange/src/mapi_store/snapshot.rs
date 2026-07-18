@@ -485,6 +485,22 @@ impl MapiMailStoreSnapshot {
             .collect()
     }
 
+    pub(crate) fn folder_change_number(&self, folder_id: u64) -> Option<u64> {
+        self.folder_versions.change_number(folder_id)
+    }
+
+    pub(crate) fn folder_version(&self, folder_id: u64) -> Option<&MapiFolderVersion> {
+        self.folder_versions.version(folder_id)
+    }
+
+    pub(crate) fn folder_versions(&self) -> Vec<MapiFolderVersion> {
+        self.folder_versions.all()
+    }
+
+    pub(crate) fn upsert_folder_version(&mut self, version: MapiFolderVersion) {
+        self.folder_versions.upsert(version);
+    }
+
     pub(crate) fn emails(&self) -> Vec<JmapEmail> {
         self.messages
             .iter()

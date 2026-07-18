@@ -494,26 +494,34 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
                 .map(|mailbox| {
-                    serialize_folder_row_with_context(
+                    serialize_folder_row_with_context_and_version(
                         mailbox,
                         mailboxes,
                         &columns,
                         principal.account_id,
+                        snapshot.folder_version(folder_id),
                     )
                 })
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| {
-                            serialize_collaboration_folder_row_with_context(
+                            serialize_collaboration_folder_row_with_context_and_version(
                                 folder,
                                 &columns,
                                 associated_folder_message_count(folder_id, snapshot),
+                                snapshot.folder_version(folder_id),
                             )
                         })
                 })
                 .unwrap_or_else(|| {
-                    serialize_special_folder_row(folder_id, mailboxes, &columns, Some(principal))
+                    serialize_special_folder_row_with_version(
+                        folder_id,
+                        mailboxes,
+                        &columns,
+                        Some(principal),
+                        snapshot.folder_version(folder_id),
+                    )
                 })
         }
     };
@@ -1334,26 +1342,34 @@ pub(in crate::mapi) fn serialize_object_property(
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
                 .map(|mailbox| {
-                    serialize_folder_row_with_context(
+                    serialize_folder_row_with_context_and_version(
                         mailbox,
                         mailboxes,
                         &[tag],
                         principal.account_id,
+                        snapshot.folder_version(folder_id),
                     )
                 })
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| {
-                            serialize_collaboration_folder_row_with_context(
+                            serialize_collaboration_folder_row_with_context_and_version(
                                 folder,
                                 &[tag],
                                 associated_folder_message_count(folder_id, snapshot),
+                                snapshot.folder_version(folder_id),
                             )
                         })
                 })
                 .unwrap_or_else(|| {
-                    serialize_special_folder_row(folder_id, mailboxes, &[tag], Some(principal))
+                    serialize_special_folder_row_with_version(
+                        folder_id,
+                        mailboxes,
+                        &[tag],
+                        Some(principal),
+                        snapshot.folder_version(folder_id),
+                    )
                 })
         }
     }
@@ -1376,6 +1392,14 @@ fn serialize_session_folder_row(
                 .is_some()
         {
             write_mapi_value(&mut row, *column, &MapiValue::U32(FOLDER_SEARCH));
+            continue;
+        }
+
+        if let Some(value) = snapshot
+            .folder_version(folder_id)
+            .and_then(|version| folder_version_property_value(version, *column))
+        {
+            write_mapi_value(&mut row, *column, &value);
             continue;
         }
 
@@ -1433,21 +1457,23 @@ fn serialize_session_folder_row(
 
         let value = folder_row_for_id(folder_id, mailboxes)
             .map(|mailbox| {
-                serialize_folder_row_with_context(
+                serialize_folder_row_with_context_and_version(
                     mailbox,
                     mailboxes,
                     &[*column],
                     principal.account_id,
+                    snapshot.folder_version(folder_id),
                 )
             })
             .or_else(|| {
                 snapshot
                     .collaboration_folder_for_id(folder_id)
                     .map(|folder| {
-                        serialize_collaboration_folder_row_with_context(
+                        serialize_collaboration_folder_row_with_context_and_version(
                             folder,
                             &[*column],
                             associated_folder_message_count(folder_id, snapshot),
+                            snapshot.folder_version(folder_id),
                         )
                     })
             })
@@ -1457,7 +1483,13 @@ fn serialize_session_folder_row(
                     .map(|folder| serialize_public_folder_row(folder, &[*column]))
             })
             .unwrap_or_else(|| {
-                serialize_special_folder_row(folder_id, mailboxes, &[*column], Some(principal))
+                serialize_special_folder_row_with_version(
+                    folder_id,
+                    mailboxes,
+                    &[*column],
+                    Some(principal),
+                    snapshot.folder_version(folder_id),
+                )
             });
         row.extend_from_slice(&value);
     }

@@ -15,6 +15,7 @@ mod public_folders;
 mod recoverable_items;
 mod submission;
 mod sync;
+mod sync_import_deletes;
 mod tables;
 mod transport;
 

@@ -157,6 +157,8 @@ fn mapi_notification_event_from_change_row(
                 row.try_get::<String, _>("object_role").ok().as_deref(),
                 row.try_get::<i64, _>("object_mapi_object_id").ok(),
             )?;
+            let virtual_metadata =
+                crate::mapi_mailstore::virtual_special_folder_metadata(changed_folder_id);
             let parent_folder_id = row
                 .try_get::<String, _>("parent_role")
                 .ok()
@@ -168,7 +170,17 @@ fn mapi_notification_event_from_change_row(
                         .ok()
                         .map(|value| value as u64)
                 })
+                .or_else(|| virtual_metadata.map(|(_, _, _, parent_id, _)| parent_id))
                 .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+            let display_name = row
+                .try_get("object_display_name")
+                .ok()
+                .or_else(|| virtual_metadata.map(|(_, name, _, _, _)| name.to_string()));
+            let parent_display_name = row.try_get("parent_display_name").ok().or_else(|| {
+                parent_folder_id
+                    .and_then(crate::mapi_mailstore::virtual_special_folder_metadata)
+                    .map(|(_, name, _, _, _)| name.to_string())
+            });
             Some(MapiNotificationEvent::canonical(
                 MapiNotificationKind::Hierarchy,
                 event_mask,
@@ -180,8 +192,8 @@ fn mapi_notification_event_from_change_row(
                 row.try_get("object_total_messages").ok(),
                 row.try_get("object_unread_messages").ok(),
                 change_kind,
-                row.try_get("object_display_name").ok(),
-                row.try_get("parent_display_name").ok(),
+                display_name,
+                parent_display_name,
                 None,
             ))
             .map(|event| {

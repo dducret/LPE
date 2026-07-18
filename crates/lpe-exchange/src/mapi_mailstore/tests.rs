@@ -160,14 +160,105 @@ fn store_id_change_numbers_use_global_counter() {
 }
 
 #[test]
-fn hierarchy_change_numbers_do_not_collapse_low_modseq_special_folders() {
+fn hierarchy_state_keeps_deleted_items_fid_distinct_from_its_server_cn() {
+    let mut deleted_items = virtual_special_mailbox(crate::mapi::identity::TRASH_FOLDER_ID)
+        .expect("virtual Deleted Items folder");
+    // Fresh 0.5.0 run 202607181515 persisted the reserved Deleted Items FID
+    // at counter 8 and its independently allocated server CN at counter 47.
+    deleted_items.modseq = 47;
+
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &[deleted_items],
+        &[],
+        &[],
+        &[],
+        1,
+    );
+    let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+    // [MS-OXCFXICS] sections 2.2.1.1.1 and 2.2.1.1.2 carry object IDs
+    // and change numbers in separate state properties.
+    assert_eq!(summary.final_state_idset_given_counters, vec![8]);
+    assert_eq!(summary.final_state_cnset_seen_counters, vec![47]);
+}
+
+#[test]
+fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
+    let mut deleted_items = virtual_special_mailbox(crate::mapi::identity::TRASH_FOLDER_ID)
+        .expect("virtual Deleted Items folder");
+    deleted_items.modseq = 58;
+    let imported_change_key = vec![
+        0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x15,
+    ];
+    let mut imported_predecessor_change_list = vec![imported_change_key.len() as u8];
+    imported_predecessor_change_list.extend_from_slice(&imported_change_key);
+    imported_predecessor_change_list.extend_from_slice(&predecessor_change_list(47));
+    let version = crate::mapi_store::MapiFolderVersion {
+        folder_id: crate::mapi::identity::TRASH_FOLDER_ID,
+        change_number: 58,
+        change_key: imported_change_key.clone(),
+        predecessor_change_list: imported_predecessor_change_list.clone(),
+        last_modification_time: filetime_from_change_number(58),
+    };
+    let mailboxes = [deleted_items];
+
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
+        Uuid::nil(),
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &mailboxes,
+        &[],
+        &[],
+        &[],
+        &[],
+        &mailboxes,
+        &mailboxes,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &[version],
+        1,
+    );
+    let binary_property = |property_tag: u32| {
+        let tag = property_tag.to_le_bytes();
+        let offset = buffer
+            .windows(tag.len())
+            .position(|window| window == tag)
+            .unwrap();
+        let length = u32::from_le_bytes(buffer[offset + 4..offset + 8].try_into().unwrap());
+        buffer[offset + 8..offset + 8 + length as usize].to_vec()
+    };
+    let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+    assert_eq!(binary_property(PID_TAG_CHANGE_KEY), imported_change_key);
+    assert_eq!(
+        binary_property(PID_TAG_PREDECESSOR_CHANGE_LIST),
+        imported_predecessor_change_list
+    );
+    assert_eq!(summary.final_state_idset_given_counters, vec![8]);
+    assert_eq!(summary.final_state_cnset_seen_counters, vec![58]);
+}
+
+#[test]
+fn hierarchy_change_numbers_use_distinct_persisted_folder_versions() {
     let drafts = JmapMailbox {
         id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
         parent_id: None,
         role: "drafts".to_string(),
         name: "Drafts".to_string(),
         sort_order: 30,
-        modseq: 1,
+        modseq: 45,
         total_emails: 0,
         unread_emails: 0,
         size_octets: 0,
@@ -179,7 +270,7 @@ fn hierarchy_change_numbers_do_not_collapse_low_modseq_special_folders() {
         role: "trash".to_string(),
         name: "Trash".to_string(),
         sort_order: 50,
-        modseq: 1,
+        modseq: 47,
         total_emails: 0,
         unread_emails: 0,
         size_octets: 0,
@@ -188,16 +279,16 @@ fn hierarchy_change_numbers_do_not_collapse_low_modseq_special_folders() {
 
     assert_eq!(
         canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &drafts),
-        crate::mapi::identity::DRAFTS_FOLDER_COUNTER
+        45
     );
     assert_eq!(
         canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &trash),
-        crate::mapi::identity::TRASH_FOLDER_COUNTER
+        47
     );
 }
 
 #[test]
-fn hierarchy_change_numbers_stay_in_folder_counter_domain() {
+fn hierarchy_change_number_uses_projected_mailbox_modseq() {
     let inbox = JmapMailbox {
         id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
         parent_id: None,
@@ -213,7 +304,7 @@ fn hierarchy_change_numbers_stay_in_folder_counter_domain() {
 
     assert_eq!(
         canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &inbox),
-        crate::mapi::identity::INBOX_FOLDER_COUNTER
+        51
     );
 }
 
@@ -889,7 +980,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
     assert_eq!(summary.final_state_idset_given_len, 30);
     assert_eq!(summary.final_state_cnset_seen_len, 30);
     assert_eq!(summary.final_state_idset_given_counters, vec![5]);
-    assert_eq!(summary.final_state_cnset_seen_counters, vec![5]);
+    assert_eq!(summary.final_state_cnset_seen_counters, vec![42]);
     assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
     assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
     assert_eq!(summary.first_folder_name(), "Inbox");
@@ -903,7 +994,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
         .final_state_cnset_seen_summary
         .as_deref()
         .unwrap()
-        .contains("ranges=5"));
+        .contains("ranges=42"));
     assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
     assert!(summary
         .emitted_property_tags
@@ -944,7 +1035,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
         .contains("ranges=4-5"));
     assert!(validation
         .root_inclusive_cnset_seen_summary
-        .contains("ranges=4-5"));
+        .contains("ranges=4,42"));
     assert_eq!(validation.top_level_row_count, 1);
     assert_eq!(validation.nested_row_count, 0);
     assert_eq!(validation.rows_without_folder_id, 1);

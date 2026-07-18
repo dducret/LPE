@@ -276,8 +276,9 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &state_attachment_facts,
         &all_special_sync_objects,
     );
+    let folder_versions = snapshot.folder_versions();
     let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
-    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
         principal.account_id,
         sync_type,
         sync_flags,
@@ -296,6 +297,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_special_sync_objects,
         &aggregate_sync_emails,
         &aggregate_attachment_facts,
+        &folder_versions,
         changes.current_change_sequence,
     );
     mapi_mailstore::log_hierarchy_transfer_debug(
@@ -326,7 +328,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         },
     );
     let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
-        mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+        mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
             principal.account_id,
             sync_type,
             sync_flags,
@@ -345,6 +347,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             &all_special_sync_objects,
             &aggregate_sync_emails,
             &aggregate_attachment_facts,
+            &folder_versions,
             changes.current_change_sequence,
         )
     });

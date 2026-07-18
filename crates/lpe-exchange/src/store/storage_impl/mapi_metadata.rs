@@ -67,7 +67,15 @@ macro_rules! store_impl_mapi_metadata {
                 let kind = request.object_kind.as_str();
                 let existing = sqlx::query(
                     r#"
-                    SELECT mapi_object_id, mapi_change_number, source_key
+                    SELECT mapi_object_id,
+                           mapi_change_number,
+                           source_key,
+                           change_key,
+                           predecessor_change_list,
+                           to_char(
+                               updated_at AT TIME ZONE 'UTC',
+                               'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                           ) AS updated_at
                     FROM mapi_object_identities
                     WHERE tenant_id = $1
                       AND account_id = $2
@@ -84,11 +92,23 @@ macro_rules! store_impl_mapi_metadata {
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                let (object_id, change_number, source_key) = if let Some(row) = existing {
+                let (
+                    object_id,
+                    change_number,
+                    source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
+                ) = if let Some(row) = existing {
                     (
                         row.get::<i64, _>("mapi_object_id") as u64,
                         row.get::<i64, _>("mapi_change_number") as u64,
                         row.get("source_key"),
+                        row.get("change_key"),
+                        row.get("predecessor_change_list"),
+                        crate::mapi_mailstore::filetime_from_rfc3339_utc(
+                            &row.get::<String, _>("updated_at"),
+                        ),
                     )
                 } else {
                     let global_counter = if let Some(counter) = request.reserved_global_counter {
@@ -165,7 +185,15 @@ macro_rules! store_impl_mapi_metadata {
                                 THEN mapi_object_identities.updated_at
                                 ELSE NOW()
                             END
-                        RETURNING mapi_object_id, mapi_change_number, source_key
+                        RETURNING mapi_object_id,
+                                  mapi_change_number,
+                                  source_key,
+                                  change_key,
+                                  predecessor_change_list,
+                                  to_char(
+                                      updated_at AT TIME ZONE 'UTC',
+                                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                                  ) AS updated_at
                         "#,
                     )
                     .bind(tenant_id)
@@ -185,6 +213,11 @@ macro_rules! store_impl_mapi_metadata {
                         row.get::<i64, _>("mapi_object_id") as u64,
                         row.get::<i64, _>("mapi_change_number") as u64,
                         row.get("source_key"),
+                        row.get("change_key"),
+                        row.get("predecessor_change_list"),
+                        crate::mapi_mailstore::filetime_from_rfc3339_utc(
+                            &row.get::<String, _>("updated_at"),
+                        ),
                     )
                 };
                 records.push(MapiIdentityRecord {
@@ -193,6 +226,9 @@ macro_rules! store_impl_mapi_metadata {
                     object_id,
                     change_number,
                     source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
                 });
             }
             tx.commit().await?;
@@ -1049,6 +1085,17 @@ macro_rules! store_impl_mapi_metadata {
                           AND mailbox.account_id = mail_change_log.account_id
                           AND mailbox.id = mail_change_log.object_id
                     )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mapi_object_identities identity
+                        WHERE identity.tenant_id = mail_change_log.tenant_id
+                          AND identity.account_id = mail_change_log.account_id
+                          AND identity.object_kind = 'mailbox'
+                          AND identity.canonical_id = mail_change_log.object_id
+                          AND identity.mapi_global_counter >= $8
+                          AND identity.mapi_global_counter < $9
+                          AND identity.deleted_at IS NULL
+                    )
                   )
                   AND (
                     object_kind <> 'associated_config'
@@ -1098,6 +1145,8 @@ macro_rules! store_impl_mapi_metadata {
             .bind(mailbox_id)
             .bind(special_object_kind)
             .bind(MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS.as_slice())
+            .bind(crate::mapi::identity::ROOT_FOLDER_COUNTER as i64)
+            .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
             .fetch_all(self.pool())
             .await?;
 

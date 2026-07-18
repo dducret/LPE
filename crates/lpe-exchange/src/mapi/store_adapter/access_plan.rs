@@ -921,16 +921,7 @@ fn push_unique(values: &mut Vec<u64>, value: u64) {
 pub(in crate::mapi) fn mapi_identity_requests_for_mailboxes(
     mailboxes: &[JmapMailbox],
 ) -> Vec<MapiIdentityRequest> {
-    mailboxes
-        .iter()
-        .filter(|mailbox| !mapi_store::is_virtual_special_mailbox(mailbox))
-        .map(|mailbox| MapiIdentityRequest {
-            object_kind: MapiIdentityObjectKind::Mailbox,
-            canonical_id: mailbox.id,
-            reserved_global_counter: mapi_store::reserved_folder_counter_for_role(&mailbox.role),
-            source_key: None,
-        })
-        .collect()
+    mapi_store::mapi_folder_identity_requests(mailboxes)
 }
 
 pub(in crate::mapi) fn merge_requested_mailboxes(

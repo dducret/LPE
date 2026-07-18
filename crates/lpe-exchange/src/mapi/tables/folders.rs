@@ -260,6 +260,31 @@ pub(in crate::mapi) fn serialize_special_folder_row(
     }
 }
 
+pub(in crate::mapi) fn serialize_special_folder_row_with_version(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+    principal: Option<&AccountPrincipal>,
+    version: Option<&crate::mapi_store::MapiFolderVersion>,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) =
+            version.and_then(|version| folder_version_property_value(version, *column))
+        {
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            row.extend_from_slice(&serialize_special_folder_row(
+                folder_id,
+                mailboxes,
+                &[*column],
+                principal,
+            ));
+        }
+    }
+    row
+}
+
 fn serialize_advertised_special_folder_row(
     folder_id: u64,
     columns: &[u32],
@@ -290,10 +315,29 @@ pub(super) fn serialize_advertised_special_folder_row_with_counts(
     unread_count: u32,
     deleted_count: u32,
 ) -> Vec<u8> {
+    serialize_advertised_special_folder_row_with_counts_and_change_number(
+        folder_id,
+        columns,
+        mailbox_guid,
+        content_count,
+        unread_count,
+        deleted_count,
+        mapi_mailstore::change_number_for_store_id(folder_id),
+    )
+}
+
+pub(super) fn serialize_advertised_special_folder_row_with_counts_and_change_number(
+    folder_id: u64,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+    content_count: u32,
+    unread_count: u32,
+    deleted_count: u32,
+    change_number: u64,
+) -> Vec<u8> {
     let mut row = Vec::new();
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
-    let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
@@ -385,6 +429,41 @@ pub(super) fn serialize_advertised_special_folder_row_with_counts(
                 }
             }
             _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(super) fn serialize_advertised_special_folder_row_with_counts_and_version(
+    folder_id: u64,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+    content_count: u32,
+    unread_count: u32,
+    deleted_count: u32,
+    version: Option<&crate::mapi_store::MapiFolderVersion>,
+) -> Vec<u8> {
+    let fallback_change_number = version
+        .map(|version| version.change_number)
+        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(folder_id));
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) =
+            version.and_then(|version| folder_version_property_value(version, *column))
+        {
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            row.extend_from_slice(
+                &serialize_advertised_special_folder_row_with_counts_and_change_number(
+                    folder_id,
+                    &[*column],
+                    mailbox_guid,
+                    content_count,
+                    unread_count,
+                    deleted_count,
+                    fallback_change_number,
+                ),
+            );
         }
     }
     row
@@ -763,6 +842,31 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
     row
 }
 
+pub(in crate::mapi) fn serialize_folder_row_with_context_and_version(
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+    mailbox_guid: Uuid,
+    version: Option<&crate::mapi_store::MapiFolderVersion>,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) =
+            version.and_then(|version| folder_version_property_value(version, *column))
+        {
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            row.extend_from_slice(&serialize_folder_row_with_context(
+                mailbox,
+                mailboxes,
+                &[*column],
+                mailbox_guid,
+            ));
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context(
     folder: &MapiCollaborationFolder,
     columns: &[u32],
@@ -790,6 +894,29 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context(
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context_and_version(
+    folder: &MapiCollaborationFolder,
+    columns: &[u32],
+    associated_count: u32,
+    version: Option<&crate::mapi_store::MapiFolderVersion>,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) =
+            version.and_then(|version| folder_version_property_value(version, *column))
+        {
+            write_mapi_value(&mut row, *column, &value);
+        } else {
+            row.extend_from_slice(&serialize_collaboration_folder_row_with_context(
+                folder,
+                &[*column],
+                associated_count,
+            ));
         }
     }
     row

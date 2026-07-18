@@ -1273,6 +1273,9 @@ pub(super) fn folder_properties_for_open_from_mailboxes(
         ));
     }
     if is_advertised_special_folder(folder_id) {
+        let change_number = snapshot
+            .folder_change_number(folder_id)
+            .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(folder_id));
         for property_tag in open_folder_property_tags {
             if property_tag == PID_TAG_PARENT_SOURCE_KEY
                 && matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID)
@@ -1280,11 +1283,21 @@ pub(super) fn folder_properties_for_open_from_mailboxes(
                 continue;
             }
             if !properties.contains_key(&property_tag) {
-                if let Some(value) =
-                    special_folder_property_value(folder_id, property_tag, principal.account_id)
-                {
+                if let Some(value) = special_folder_property_value_with_change_number(
+                    folder_id,
+                    property_tag,
+                    principal.account_id,
+                    change_number,
+                ) {
                     properties.insert(property_tag, value);
                 }
+            }
+        }
+    }
+    if let Some(version) = snapshot.folder_version(folder_id) {
+        for property_tag in open_folder_property_tags {
+            if let Some(value) = folder_version_property_value(version, property_tag) {
+                properties.insert(property_tag, value);
             }
         }
     }

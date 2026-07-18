@@ -303,7 +303,12 @@ non-canonical LPE state.
   deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
   identities. Real Calendar configuration FAI rows remain canonical and are
-  exposed independently of the folder-local Calendar NamedView.
+  exposed independently of the folder-local Calendar NamedView. When Outlook
+  imports the modeled Inbox `MessageListSettings` FAI, default properties enrich
+  the saved row without replacing its imported SourceKey, ChangeKey, PCL, or
+  MID. The imported identity therefore survives reconnect and
+  `RopOpenMessage`, following `[MS-OXCFXICS]` sections 2.2.3.2.4.2.1 and
+  3.3.5.8.7.
   Mutations to one open associated-configuration message are cumulative on that
   message handle through `RopSaveChangesMessage`; a later `RopSetProperties` or
   `RopDeletePropertiesNoReplicate` in the same batch must use the updated handle
@@ -599,6 +604,28 @@ not by itself authorize broad client publication.
   which lets it bind default folders such as Calendar.
   `MetaTagIdsetGiven` is sent as property tag `0x40170003` while its payload is
   serialized as binary, matching the Microsoft ICS state compatibility rule.
+  Every reserved private-store folder also has a durable
+  `(CN, ChangeKey, PCL, LMT)` version tuple in `mapi_object_identities`; its
+  FID/SourceKey remain the distinct object identity. The hierarchy import
+  validates all six fixed properties, allocates a server CN rather than reusing
+  the FID, retains the accepted imported ChangeKey, merges the imported and
+  current PCL lineages, and persists the winning last-modification time. A
+  non-conflicting `Applied` result and a `Conflict` result each allocate a
+  successor CN and write one `mail_change_log` row marked `mapiOnly`. That row
+  drives durable MAPI hierarchy delta and notification replay but is filtered
+  out of JMAP `Mailbox/changes`. Only `Applied` adds the new CN to the upload
+  `MetaTagCnsetSeen`; `Conflict` returns `Success` without that addition so the
+  client downloads the resolved server version. An exact `Duplicate` returns
+  `IgnoreFailure` without allocating a CN or writing a change-log row. Conflict
+  resolution merges both PCLs and selects ChangeKey/LMT by last-writer-wins;
+  equal timestamps retain the current server winner. The same durable tuple is
+  projected in the importing Execute and after reconnect. `PidTagHierRev` and
+  `PidTagLocalCommitTime` use its LMT; `PidTagLocalCommitTimeMax` remains the
+  separate most-recent change time of a top-level child. This follows
+  `[MS-OXCFXICS]` sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8,
+  2.2.3.2.4.3.1, 3.1.5.3, 3.1.5.6.2.2, and 3.2.5.9.4.3 and
+  `[MS-OXCFOLD]` sections 2.2.2.2.1.9, 2.2.2.2.1.13, and
+  2.2.2.2.1.14.
 - Contents synchronization emits canonical message-change rows, folder-associated
   information rows for the bounded bootstrap surface, conversation action FAI
   rows, destroyed conversation actions as `IncrSyncDel`, tombstones, read-state
@@ -674,7 +701,7 @@ not by itself authorize broad client publication.
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` is bounded to hard-deleting visible memberships in the target canonical mailbox folder through the canonical tombstone/change-log path. `RopHardDeleteMessagesAndSubfolders` recurses only through canonical mailbox descendants and does not delete non-mailbox objects. Public-folder whole-folder purge returns a parseable not-supported ROP error; public-folder item delete/move/copy remains item-scoped through canonical public-folder APIs. |
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. `RopMoveCopyMessages` move from a concrete recoverable subfolder uses canonical recoverable restore, `RopMoveCopyMessages` copy returns a parseable not-supported error, `RopDeleteMessages` on recoverable folders returns partial completion without purging because LPE does not yet implement Exchange's Deletions-to-Purges soft-delete progression, purge and empty-folder on Deletions, Versions, or Purges use canonical recoverable purge, Recoverable Items Root message mutation and purge calls return parseable not-supported errors, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `RopGetContentsTable` with `SoftDeletes` (`0x20`) returns a parseable not-supported ROP error because canonical LPE hard delete/Trash purge removes normal folder membership and writes `recoverable_items` rows instead of keeping folder-local soft-deleted rows. `OpenSoftDeleted` and complete Exchange dumpster folder parity remain gated on canonical lifecycle semantics; any MAPI-local dumpster store is forbidden. Versions and Purges are bounded virtual projections over canonical lifecycle rows; LPE does not claim Exchange copy-on-write Versions behavior or full Purges post-recovery parity. |
 | Sync move import | `RopSynchronizationImportMessageMove` parses all five documented length-prefixed fields as GID/XID/PCL values. A no-conflict Calendar-to-Deleted-Items import moves the canonical Event to its deleted lifecycle and atomically rekeys the principal identity with the supplied destination SourceKey, ChangeKey, and PCL while allocating a distinct internal server change number; it does not create a generic `IPM.Appointment` mail row. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.4.1, 3.1.5.3, 3.2.5.9.4.4, and 3.3.4.3.3.2.1.1 and `[MS-OXCROPS]` sections 2.2.13.6.1-2.2.13.6.3. Concurrent-move conflict handling and the `NewerClientChange` (`0x00040821`) response remain a separate interoperability gate. |
-| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` creates canonical custom mailbox folders and reconciles imported Outlook system-folder identities with existing canonical special folders. A system-folder import persists only account-scoped `(alias FID, SourceKey, server CN) -> canonical FID` protocol identity metadata in `mapi_special_folder_aliases`; it does not create a shadow mailbox, Calendar, Contacts folder, or user-visible row. The client FID must use `REPLID 1`, its GLOBCNT must be inside a range previously reserved for that account by `RopGetLocalReplicaIds`, and the 22-byte SourceKey must contain the store replica GUID plus the same GLOBCNT. Canonical special-folder FIDs use `REPLID 1` and reserved GLOBCNT values `1..42`; persistable aliases are bounded to `43 <= GLOBCNT < 0x7FFF_FE00_0000`. Alias FID and SourceKey collisions with `mapi_object_identities` are rejected. The canonical FID is intentionally non-unique so separate profiles/OST replicas can retain different aliases for the same folder. Imported parent SourceKeys resolve through both canonical identities and these aliases. A successful custom-folder or system-folder import advances `MetaTagCnsetSeen` with the separately allocated server CN, never the client-reserved or canonical FID, while upload `MetaTagIdsetGiven` is ignored and not returned. This follows [[MS-OXCFXICS] section 2.2.3.2.4.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/9d5d9d68-775d-4ede-a14c-119bc54a6327), sections 2.2.3.2.4.7.2, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12, plus [[MS-OXCFXICS] section 3.3.5.8.8](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/f3fab904-bb7d-4cf3-bbd6-65d4a34b67d2). |
+| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` validates the six fixed hierarchy properties before routing by SourceKey/FID. It applies the durable tuple transition above to an existing canonical reserved folder. A system-folder alias import persists only account-scoped `(alias FID, SourceKey, server CN) -> canonical FID` protocol identity metadata in `mapi_special_folder_aliases`; it does not create a shadow mailbox, Calendar, Contacts folder, or user-visible row. The client FID must use `REPLID 1`, its GLOBCNT must be inside a range previously reserved for that account by `RopGetLocalReplicaIds`, and the 22-byte SourceKey must contain the store replica GUID plus the same GLOBCNT. Canonical special-folder FIDs use `REPLID 1` and reserved GLOBCNT values `1..42`; persistable aliases are bounded to `43 <= GLOBCNT < 0x7FFF_FE00_0000`. Alias FID and SourceKey collisions with `mapi_object_identities` are rejected. The canonical FID is intentionally non-unique so separate profiles/OST replicas can retain different aliases for the same folder. Imported parent SourceKeys resolve through both canonical identities and these aliases. Upload `MetaTagIdsetGiven` is ignored and not returned. Atomically preserving an imported CK/PCL/LMT tuple during first-time custom-folder creation, existing custom-folder rename/move, system-folder alias rename/move, and advancing the tuple for canonical folder mutations performed outside this import path are not implemented yet and remain required Outlook interoperability work. This follows [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, [2.2.3.2.4.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/9d5d9d68-775d-4ede-a14c-119bc54a6327), 2.2.3.2.4.7.2, 3.1.5.3, 3.1.5.6.2.2, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12, plus [MS-OXCFXICS section 3.3.5.8.8](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/f3fab904-bb7d-4cf3-bbd6-65d4a34b67d2) and [MS-OXCFOLD] sections 2.2.2.2.1.9, 2.2.2.2.1.13, and 2.2.2.2.1.14. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, `PidNameKeywords` category property equality, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` are not implemented yet because their canonical rule/deferred-action model is still missing; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for default, owned custom, and share-right delegated calendar folders, with audit and change-log writes; Exchange-only ACL subjects remain gated on canonical principal semantics, and MAPI-local ACL storage is forbidden. |
@@ -1563,10 +1590,13 @@ through 2.2.8.6.3 (`RopSetProperties`), 2.2.8.9.1 through 2.2.8.9.3
 correction relies on bit `0x02`. The combined value `0x0A` is labeled
 `KeepOpenReadWrite DelayedCall` in [MS-OXOPFFB] section 4.1 and [MS-OXODLGT]
 section 4.1.3.2; no separate `0x08` semantic is relied on.
-`ForceSave` is bit `0x04`; it is used only for the explicit stale-version
-overwrite described above. The retained-handle, conflict, and forced-save
-server behavior follows [MS-OXCMSG] section 3.2.5.3 and is illustrated by
-sections 4.8.1 and 4.8.2.
+For Outlook's captured Contacts FAI `SaveFlags=0x0E`, the unlisted `0x08` bit
+is likewise ignored as required by [MS-OXCMSG] section 2.2.3.3.1; the remaining
+`ForceSave` bit `0x04` subsumes the compatible `KeepOpenReadWrite` bit `0x02`
+because both retain read/write access. `ForceSave` performs the explicit
+stale-version overwrite described above when a version conflict exists. The
+retained-handle, conflict, and forced-save server behavior follows [MS-OXCMSG]
+section 3.2.5.3 and is illustrated by sections 4.8.1 and 4.8.2.
 `PidTagReplyRecipientEntries` is defined by
 [MS-OXPROPS] section 2.917 and [MS-OXOMSG] section 2.2.1.43 as property ID
 `0x004F`, `PtypBinary (0x0102)`, containing the [MS-OXCDATA] section 2.3.3
@@ -1574,6 +1604,7 @@ sections 4.8.1 and 4.8.2.
 `mapi_over_http_calendar_keep_open_handle_accepts_second_update_save`,
 `mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards`,
 `mapi_over_http_calendar_concurrent_rw_handles_require_force_save`,
+`mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags`,
 `mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties`,
 `mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields`,
 and `mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_hiding_reminder`.

@@ -24,6 +24,22 @@ use sqlx::Row;
 use std::collections::HashSet;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapiFolderVersion {
+    pub folder_id: u64,
+    pub change_number: u64,
+    pub change_key: Vec<u8>,
+    pub predecessor_change_list: Vec<u8>,
+    pub last_modification_time: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MapiFolderHierarchyCommitOutcome {
+    Applied(MapiFolderVersion),
+    Duplicate(MapiFolderVersion),
+    Conflict(MapiFolderVersion),
+}
+
 use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
 use crate::mapi::properties::{
@@ -50,6 +66,15 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         id_count: u32,
     ) -> StoreFuture<'a, u64>;
+
+    fn commit_mapi_folder_hierarchy_change<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        imported_last_modification_time: i64,
+        imported_change_key: &'a [u8],
+        imported_predecessor_change_list: &'a [u8],
+    ) -> StoreFuture<'a, MapiFolderHierarchyCommitOutcome>;
 
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,

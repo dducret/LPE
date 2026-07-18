@@ -47,7 +47,21 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         hierarchy_row_expected_container_class(row),
                         |tag| {
                             debug_folder_row_property_value(
-                                || hierarchy_row_property_value(row, mailboxes, tag, mailbox_guid),
+                                || {
+                                    snapshot
+                                        .folder_version(object_id)
+                                        .and_then(|version| {
+                                            folder_version_property_value(version, tag)
+                                        })
+                                        .or_else(|| {
+                                            hierarchy_row_property_value(
+                                                row,
+                                                mailboxes,
+                                                tag,
+                                                mailbox_guid,
+                                            )
+                                        })
+                                },
                                 object_id,
                                 parent_id,
                                 tag,

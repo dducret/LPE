@@ -462,9 +462,22 @@ pub(in crate::mapi) fn special_folder_property_value(
     property_tag: u32,
     mailbox_guid: Uuid,
 ) -> Option<MapiValue> {
+    special_folder_property_value_with_change_number(
+        folder_id,
+        property_tag,
+        mailbox_guid,
+        mapi_mailstore::change_number_for_store_id(folder_id),
+    )
+}
+
+pub(in crate::mapi) fn special_folder_property_value_with_change_number(
+    folder_id: u64,
+    property_tag: u32,
+    mailbox_guid: Uuid,
+    change_number: u64,
+) -> Option<MapiValue> {
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
-    let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(display_name.to_string())),
         PID_TAG_ENTRY_ID => {
@@ -553,33 +566,48 @@ pub(super) fn serialize_hierarchy_row(
 ) -> Vec<u8> {
     match row {
         HierarchyRow::Mailbox(mailbox) => {
-            serialize_folder_row_with_context(mailbox, mailboxes, columns, mailbox_guid)
+            let folder_id = mapi_folder_id(mailbox);
+            serialize_folder_row_with_context_and_version(
+                mailbox,
+                mailboxes,
+                columns,
+                mailbox_guid,
+                snapshot.folder_version(folder_id),
+            )
         }
-        HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row_with_context(
-            folder,
-            columns,
-            associated_folder_message_count(folder.id, snapshot),
-        ),
+        HierarchyRow::Collaboration(folder) => {
+            serialize_collaboration_folder_row_with_context_and_version(
+                folder,
+                columns,
+                associated_folder_message_count(folder.id, snapshot),
+                snapshot.folder_version(folder.id),
+            )
+        }
         HierarchyRow::PublicFolder(folder) => serialize_public_folder_row(folder, columns),
         HierarchyRow::Special(folder_id)
             if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
         {
-            serialize_advertised_special_folder_row_with_mailbox_guid(
+            serialize_advertised_special_folder_row_with_counts_and_version(
                 folder_id,
                 columns,
                 mailbox_guid,
+                0,
+                0,
+                0,
+                snapshot.folder_version(folder_id),
             )
         }
         HierarchyRow::Special(folder_id) => {
             let emails = snapshot.emails();
             let content_count = folder_message_count(folder_id, mailboxes, &emails, snapshot);
-            serialize_advertised_special_folder_row_with_counts(
+            serialize_advertised_special_folder_row_with_counts_and_version(
                 folder_id,
                 columns,
                 mailbox_guid,
                 content_count,
                 0,
                 0,
+                snapshot.folder_version(folder_id),
             )
         }
     }

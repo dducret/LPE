@@ -172,6 +172,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
               AND (retained_until IS NULL OR retained_until > NOW())
+              AND NOT (summary_json @> '{"mapiOnly": true}'::jsonb)
             "#,
         )
         .bind(tenant_id)
@@ -196,6 +197,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
               AND (retained_until IS NULL OR retained_until > NOW())
+              AND NOT (summary_json @> '{"mapiOnly": true}'::jsonb)
             "#,
         )
         .bind(&tenant_id)
@@ -216,6 +218,7 @@ impl Storage {
               AND cursor > $2
               AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
               AND (retained_until IS NULL OR retained_until > NOW())
+              AND NOT (summary_json @> '{"mapiOnly": true}'::jsonb)
             ORDER BY cursor ASC
             LIMIT $4
             "#,
@@ -238,6 +241,11 @@ impl Storage {
             let mailbox_id: Option<Uuid> = row.try_get("mailbox_id")?;
             let change_kind: String = row.try_get("change_kind")?;
             let summary_json: Value = row.try_get("summary_json")?;
+            // Protocol-local MAPI hierarchy versions use the canonical durable
+            // change log for ordering, but they are not JMAP Mailbox changes.
+            if is_mapi_only_change(&summary_json) {
+                continue;
+            }
             if object_kind == "recoverable_item" {
                 continue;
             }
@@ -1301,6 +1309,13 @@ impl Storage {
     }
 }
 
+fn is_mapi_only_change(summary_json: &Value) -> bool {
+    summary_json
+        .get("mapiOnly")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn jmap_change_kind(change_kind: &str) -> String {
     match change_kind {
         "destroyed" | "expunged" => "destroyed",
@@ -1381,9 +1396,19 @@ fn summary_json_reminder_changed(summary_json: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{jmap_exact_object_kind, jmap_object_replay_kinds, jmap_replay_object_id};
+    use super::{
+        is_mapi_only_change, jmap_exact_object_kind, jmap_object_replay_kinds,
+        jmap_replay_object_id,
+    };
     use serde_json::json;
     use uuid::Uuid;
+
+    #[test]
+    fn jmap_replay_ignores_protocol_local_mapi_hierarchy_versions() {
+        assert!(is_mapi_only_change(&json!({ "mapiOnly": true })));
+        assert!(!is_mapi_only_change(&json!({ "mapiOnly": false })));
+        assert!(!is_mapi_only_change(&json!({})));
+    }
 
     #[test]
     fn jmap_object_replay_kinds_include_visibility_dependencies() {

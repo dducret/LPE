@@ -7,6 +7,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
     handle_slots: &[u32],
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
+    snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
     let Some(folder_id) =
@@ -47,10 +48,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 _ => None,
             })
     });
-    let Some((source_key, reserved_global_counter)) = source_key.and_then(|source_key| {
-        persistable_import_source_key_global_counter(&source_key)
-            .map(|counter| (source_key, counter))
-    }) else {
+    let Some(source_key) = source_key else {
         responses.extend_from_slice(&rop_error_response(
             0x73,
             request.response_handle_index(),
@@ -58,7 +56,23 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     };
-    let alias_folder_id = crate::mapi::identity::mapi_store_id(reserved_global_counter);
+    let Some(imported_version) = imported_hierarchy_version(&hierarchy_values) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8007_0057,
+        ));
+        return;
+    };
+    let Some(source_global_counter) = source_key_global_counter(&source_key) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let source_folder_id = crate::mapi::identity::mapi_store_id(source_global_counter);
     let parent_folder_id = hierarchy_values
         .iter()
         .find_map(|(tag, value)| match (tag, value) {
@@ -69,9 +83,80 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         })
         .map(|parent_id| session.resolve_special_folder_alias(parent_id))
         .unwrap_or_else(|| session.resolve_special_folder_alias(folder_id));
-    if let Some(canonical_folder_id) =
-        advertised_special_folder_id_for_create(parent_folder_id, &display_name)
-    {
+    let resolved_source_folder_id = session.resolve_special_folder_alias(source_folder_id);
+    let canonical_folder_id = is_advertised_special_folder(resolved_source_folder_id)
+        .then_some(resolved_source_folder_id)
+        .or_else(|| advertised_special_folder_id_for_create(parent_folder_id, &display_name));
+    if let Some(canonical_folder_id) = canonical_folder_id {
+        if resolved_source_folder_id == canonical_folder_id {
+            match store
+                .commit_mapi_folder_hierarchy_change(
+                    principal.account_id,
+                    canonical_folder_id,
+                    imported_version.last_modification_time,
+                    imported_version.change_key,
+                    imported_version.predecessor_change_list,
+                )
+                .await
+            {
+                Ok(MapiFolderHierarchyCommitOutcome::Applied(version)) => {
+                    let change_number = version.change_number;
+                    snapshot.upsert_folder_version(version);
+                    record_sync_upload_hierarchy_change_with_change_number(
+                        session,
+                        folder_id,
+                        canonical_folder_id,
+                        change_number,
+                    );
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_hierarchy_change_response(request),
+                    );
+                }
+                Ok(MapiFolderHierarchyCommitOutcome::Duplicate(version)) => {
+                    snapshot.upsert_folder_version(version);
+                    responses.extend_from_slice(&rop_error_response(
+                        0x73,
+                        request.response_handle_index(),
+                        0x8004_0801,
+                    ));
+                }
+                Ok(MapiFolderHierarchyCommitOutcome::Conflict(version)) => {
+                    snapshot.upsert_folder_version(version);
+                    // [MS-OXCFXICS] section 3.2.5.9.4.3: a hierarchy conflict
+                    // returns Success without adding its CN to MetaTagCnsetSeen.
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_hierarchy_change_response(request),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        account_id = %principal.account_id,
+                        folder_id = %format!("0x{canonical_folder_id:016x}"),
+                        error = %format!("{error:#}"),
+                        "rca debug mapi failed to commit canonical hierarchy change"
+                    );
+                    responses.extend_from_slice(&rop_error_response(
+                        0x73,
+                        request.response_handle_index(),
+                        0x8000_4005,
+                    ));
+                }
+            }
+            return;
+        }
+        let Some(reserved_global_counter) =
+            persistable_import_source_key_global_counter(&source_key)
+        else {
+            responses.extend_from_slice(&rop_error_response(
+                0x73,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return;
+        };
+        let alias_folder_id = crate::mapi::identity::mapi_store_id(reserved_global_counter);
         if alias_folder_id != canonical_folder_id {
             let alias = MapiSpecialFolderAlias {
                 alias_folder_id,
@@ -115,6 +200,16 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     }
+    let Some(reserved_global_counter) = persistable_import_source_key_global_counter(&source_key)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let alias_folder_id = crate::mapi::identity::mapi_store_id(reserved_global_counter);
     if let Some(existing) =
         imported_hierarchy_existing_mailbox(&hierarchy_values, &display_name, mailboxes)
     {
@@ -226,4 +321,50 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
             0x8004_0102,
         )),
     }
+}
+
+struct ImportedHierarchyVersion<'a> {
+    last_modification_time: i64,
+    change_key: &'a [u8],
+    predecessor_change_list: &'a [u8],
+}
+
+fn imported_hierarchy_version(
+    hierarchy_values: &[(u32, MapiValue)],
+) -> Option<ImportedHierarchyVersion<'_>> {
+    // [MS-OXCFXICS] section 2.2.3.2.4.3.1: all six fixed hierarchy
+    // properties are required. DisplayName and SourceKey are validated by the
+    // caller; validate ParentSourceKey and the version triplet here once for
+    // every routing branch.
+    hierarchy_values.iter().find_map(|(tag, value)| {
+        (*tag == PID_TAG_PARENT_SOURCE_KEY && matches!(value, MapiValue::Binary(_))).then_some(())
+    })?;
+    let last_modification_time =
+        hierarchy_values
+            .iter()
+            .find_map(|(tag, value)| match (tag, value) {
+                (tag, MapiValue::I64(value)) if *tag == PID_TAG_LAST_MODIFICATION_TIME => {
+                    Some(*value)
+                }
+                (tag, MapiValue::U64(value)) if *tag == PID_TAG_LAST_MODIFICATION_TIME => {
+                    i64::try_from(*value).ok()
+                }
+                _ => None,
+            })?;
+    let binary = |property_tag| {
+        hierarchy_values.iter().find_map(|(tag, value)| {
+            (*tag == property_tag).then_some(value).and_then(|value| {
+                if let MapiValue::Binary(bytes) = value {
+                    Some(bytes.as_slice())
+                } else {
+                    None
+                }
+            })
+        })
+    };
+    Some(ImportedHierarchyVersion {
+        last_modification_time,
+        change_key: binary(PID_TAG_CHANGE_KEY)?,
+        predecessor_change_list: binary(PID_TAG_PREDECESSOR_CHANGE_LIST)?,
+    })
 }

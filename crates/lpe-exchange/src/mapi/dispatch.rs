@@ -18,8 +18,9 @@ use crate::mapi::outlook_startup::{
 };
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
-    MapiIdentityObjectKind, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
-    UpsertMapiAssociatedConfigInput, UpsertMapiNavigationShortcutInput,
+    MapiFolderHierarchyCommitOutcome, MapiIdentityObjectKind, MapiSpecialFolderAlias,
+    MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
+    UpsertMapiNavigationShortcutInput,
 };
 use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::current_windows_filetime;

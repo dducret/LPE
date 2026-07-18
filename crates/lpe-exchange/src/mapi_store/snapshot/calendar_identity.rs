@@ -7,6 +7,7 @@ use super::*;
 struct ScopedCalendarIdentities {
     folders: HashMap<Uuid, u64>,
     events: HashMap<Uuid, (u64, Vec<u8>)>,
+    folder_versions: MapiFolderVersions,
 }
 
 impl ScopedCalendarIdentities {
@@ -28,7 +29,11 @@ impl ScopedCalendarIdentities {
                 _ => {}
             }
         }
-        Self { folders, events }
+        Self {
+            folders,
+            events,
+            folder_versions: MapiFolderVersions::from_identity_records(records),
+        }
     }
 
     fn folder_id(&self, collection: &CollaborationCollection) -> Result<u64> {
@@ -377,6 +382,9 @@ impl MapiMailStoreSnapshot {
             .collect();
         Ok(Self {
             folders,
+            folder_versions: calendar_identities
+                .map(|identities| identities.folder_versions.clone())
+                .unwrap_or_default(),
             public_folders: Vec::new(),
             public_folder_items: Vec::new(),
             public_folder_replicas: Vec::new(),

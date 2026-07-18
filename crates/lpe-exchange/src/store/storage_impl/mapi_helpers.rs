@@ -204,11 +204,16 @@ async fn repair_reserved_mapi_identity_counter_collisions(
         let object_kind = row.get::<String, _>("object_kind");
         let role = row.try_get::<String, _>("role").ok();
         let current_counter = row.get::<i64, _>("mapi_global_counter") as u64;
+        let canonical_id = row.get::<Uuid, _>("canonical_id");
         if object_kind == "mailbox"
-            && role
+            && (role
                 .as_deref()
                 .and_then(crate::mapi_store::reserved_folder_counter_for_role)
                 == Some(current_counter)
+                || canonical_id
+                    == crate::mapi_mailstore::virtual_special_mailbox_id(
+                        crate::mapi::identity::mapi_store_id(current_counter),
+                    ))
         {
             continue;
         }
@@ -224,8 +229,7 @@ async fn repair_reserved_mapi_identity_counter_collisions(
                 mapi_object_id = $6,
                 source_key = $7,
                 change_key = $8,
-                instance_key = $9,
-                updated_at = NOW()
+                instance_key = $9
             WHERE tenant_id = $1
               AND account_id = $2
               AND object_kind = $3
@@ -235,7 +239,7 @@ async fn repair_reserved_mapi_identity_counter_collisions(
         .bind(tenant_id)
         .bind(account_id)
         .bind(object_kind)
-        .bind(row.get::<Uuid, _>("canonical_id"))
+        .bind(canonical_id)
         .bind(global_counter as i64)
         .bind(object_id as i64)
         .bind(source_key)
@@ -295,8 +299,7 @@ async fn repair_reserved_mapi_mailbox_identities(
                 mapi_object_id = $6,
                 source_key = $7,
                 change_key = $8,
-                instance_key = $9,
-                updated_at = NOW()
+                instance_key = $9
             WHERE tenant_id = $1
               AND account_id = $2
               AND object_kind = 'mailbox'
@@ -701,8 +704,7 @@ async fn repair_invalid_mapi_identity_material(
             UPDATE mapi_object_identities
             SET source_key = $5,
                 change_key = $6,
-                instance_key = $7,
-                updated_at = NOW()
+                instance_key = $7
             WHERE tenant_id = $1
               AND account_id = $2
               AND object_kind = $3

@@ -601,6 +601,29 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
     }
 }
 
+// [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8,
+// and 3.1.5.3: an ICS import receives a server CN while retaining the
+// imported ChangeKey and its durable predecessor lineage.
+pub(in crate::mapi) fn folder_version_property_value(
+    version: &crate::mapi_store::MapiFolderVersion,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_HIER_REV => {
+            Some(MapiValue::U64(version.last_modification_time))
+        }
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => Some(MapiValue::U32(
+            version.change_number.min(u64::from(u32::MAX)) as u32,
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(version.change_key.clone())),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            Some(MapiValue::Binary(version.predecessor_change_list.clone()))
+        }
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(version.change_number)),
+        _ => None,
+    }
+}
+
 pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
     if mailbox.role.eq_ignore_ascii_case("inbox") {
         "Inbox".to_string()

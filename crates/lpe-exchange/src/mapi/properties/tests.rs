@@ -29,6 +29,23 @@ fn utf16z(value: &str) -> Vec<u8> {
         .collect()
 }
 
+#[test]
+fn hierarchy_display_name_prefers_required_hierarchy_value_over_duplicate_property_value() {
+    let hierarchy_values = vec![(
+        PID_TAG_DISPLAY_NAME_W,
+        MapiValue::String("Éléments supprimés".to_string()),
+    )];
+    let property_values = vec![(
+        PID_TAG_DISPLAY_NAME_W,
+        MapiValue::String("Ignored duplicate name".to_string()),
+    )];
+
+    assert_eq!(
+        hierarchy_display_name(&hierarchy_values, &property_values).as_deref(),
+        Some("Éléments supprimés")
+    );
+}
+
 fn store_test_principal(account_id: Uuid) -> AccountPrincipal {
     AccountPrincipal {
         tenant_id: Uuid::nil(),

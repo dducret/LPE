@@ -1,5 +1,15 @@
 use super::*;
 
+fn synchronization_import_deletes_response(request: &RopRequest, had_failure: bool) -> Vec<u8> {
+    // [MS-OXCROPS] section 2.2.13.5.2 and [MS-OXCFXICS] section
+    // 2.2.3.2.4.5.2 define only RopId, InputHandleIndex, and ReturnValue.
+    if had_failure {
+        rop_error_response(0x74, request.response_handle_index(), 0x8000_4005)
+    } else {
+        rop_simple_success_response(request)
+    }
+}
+
 pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
@@ -20,7 +30,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
         _ => None,
     };
     if hierarchy_collector_folder_id.is_some() {
-        let mut partial_completion = false;
+        let mut had_failure = false;
         for folder_id in request.import_delete_message_ids() {
             let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
                 // [MS-OXCFXICS] section 3.2.5.9.4.5: an object that was
@@ -28,7 +38,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 continue;
             };
             if mailbox.role != "custom" {
-                partial_completion = true;
+                had_failure = true;
                 continue;
             }
             if store
@@ -44,14 +54,13 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                had_failure = true;
                 continue;
             }
         }
-        responses.extend_from_slice(&rop_partial_completion_response(
-            0x74,
-            request.response_handle_index(),
-            partial_completion,
+        responses.extend_from_slice(&synchronization_import_deletes_response(
+            request,
+            had_failure,
         ));
         return;
     }
@@ -65,7 +74,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
         ));
         return;
     };
-    let mut partial_completion = false;
+    let mut had_failure = false;
     let hard_delete = request.import_delete_hard_delete();
     for source_key in request.import_delete_source_keys() {
         let message_id =
@@ -82,7 +91,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                had_failure = true;
             } else {
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
@@ -101,7 +110,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                had_failure = true;
             }
             continue;
         }
@@ -111,7 +120,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 .await
                 .is_err()
             {
-                partial_completion = true;
+                had_failure = true;
             }
             continue;
         }
@@ -169,7 +178,7 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 .map(|_| ())
         };
         if result.is_err() {
-            partial_completion = true;
+            had_failure = true;
         } else {
             record_sync_upload_content_change(
                 session,
@@ -181,9 +190,8 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
             );
         }
     }
-    responses.extend_from_slice(&rop_partial_completion_response(
-        0x74,
-        request.response_handle_index(),
-        partial_completion,
+    responses.extend_from_slice(&synchronization_import_deletes_response(
+        request,
+        had_failure,
     ));
 }

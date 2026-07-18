@@ -51,11 +51,11 @@ where
         "allocate mailbox identities",
         mailbox_requests.len(),
     );
-    for identity in store
+    let allocated_mailbox_identities = store
         .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
         .await
-        .context("allocate MAPI mailbox identities")?
-    {
+        .context("allocate MAPI mailbox identities")?;
+    for identity in &allocated_mailbox_identities {
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
@@ -705,6 +705,11 @@ where
             Some(identity.source_key.clone()),
         );
     }
+    let snapshot_identities = allocated_mailbox_identities
+        .iter()
+        .chain(allocated_non_message_identities.iter())
+        .cloned()
+        .collect::<Vec<_>>();
     let loaded_event_ids = events
         .iter()
         .chain(deleted_events.iter())
@@ -777,7 +782,7 @@ where
         deleted_events,
         tasks,
         folder_permissions,
-        &allocated_non_message_identities,
+        &snapshot_identities,
     )?
     .with_event_versions(event_versions)
     .context("apply durable MAPI Event versions to selective snapshot")?

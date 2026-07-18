@@ -215,9 +215,18 @@ where
     let id = associated_config_uuid(&properties);
     if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, &properties) {
         let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
-        let reserved_global_counter =
-            crate::mapi::identity::global_counter_from_store_id(default.id);
-        let persisted_properties = message_list_settings_placeholder_persisted_properties(&default);
+        let mut persisted_properties =
+            message_list_settings_placeholder_persisted_properties(&default);
+        // MS-OXCFXICS 2.2.3.2.4.2.1 and 3.3.5.8.7: normalizing an
+        // otherwise-empty FAI payload must not replace its imported ICS
+        // identity. The defaults enrich the message; client properties that
+        // have no modeled default, including SourceKey, ChangeKey, and PCL,
+        // remain canonical.
+        for (tag, value) in &properties {
+            persisted_properties
+                .entry(*tag)
+                .or_insert_with(|| value.clone());
+        }
         let saved = store
             .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
                 id: Some(default.canonical_id),
@@ -228,13 +237,16 @@ where
                 properties_json: mapi_properties_to_json(&persisted_properties),
             })
             .await?;
+        let identity_global_counter = reserved_global_counter
+            .or_else(|| crate::mapi::identity::global_counter_from_store_id(default.id));
+        let identity_source_key = source_key.filter(|_| reserved_global_counter.is_some());
         let message_id = remember_created_mapi_identity(
             store,
             principal,
             MapiIdentityObjectKind::AssociatedConfig,
             default.canonical_id,
-            reserved_global_counter,
-            None,
+            identity_global_counter,
+            identity_source_key,
         )
         .await?;
         return Ok((

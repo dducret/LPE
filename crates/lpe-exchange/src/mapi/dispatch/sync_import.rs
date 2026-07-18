@@ -241,7 +241,7 @@ pub(super) async fn append_sync_import_dispatch_response<S>(
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) -> bool
@@ -273,6 +273,7 @@ where
                 handle_slots,
                 request,
                 mailboxes,
+                snapshot,
                 responses,
             )
             .await;
@@ -1156,6 +1157,9 @@ pub(super) fn sync_mailboxes_with_collaboration_counts(
         let Some(folder_id) = try_mapi_folder_id(mailbox) else {
             continue;
         };
+        if let Some(change_number) = snapshot.folder_change_number(folder_id) {
+            mailbox.modseq = change_number;
+        }
         if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
             mailbox.total_emails = folder.item_count;
             mailbox.unread_emails = 0;
@@ -1195,7 +1199,9 @@ pub(super) fn sync_mailboxes_with_collaboration_counts(
                 role: "__mapi_collaboration_calendar".to_string(),
                 name: folder.collection.display_name.clone(),
                 sort_order: 57,
-                modseq: mapi_mailstore::change_number_for_store_id(folder.id),
+                modseq: snapshot
+                    .folder_change_number(folder.id)
+                    .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(folder.id)),
                 total_emails: folder.item_count,
                 unread_emails: 0,
                 size_octets: 0,

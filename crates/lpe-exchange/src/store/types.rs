@@ -123,6 +123,9 @@ pub(crate) struct MapiIdentityRecord {
     pub(crate) object_id: u64,
     pub(crate) change_number: u64,
     pub(crate) source_key: Vec<u8>,
+    pub(crate) change_key: Vec<u8>,
+    pub(crate) predecessor_change_list: Vec<u8>,
+    pub(crate) last_modification_time: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

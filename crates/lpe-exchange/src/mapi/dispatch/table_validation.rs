@@ -138,6 +138,10 @@ pub(in crate::mapi::dispatch) fn save_disposition(request: &RopRequest) -> Optio
         0x01 => Some(SaveDisposition::KeepOpenReadOnly),
         0x02 => Some(SaveDisposition::KeepOpenReadWrite),
         0x04 => Some(SaveDisposition::ForceSave),
+        // [MS-OXCMSG] section 2.2.3.3.1 requires unlisted SaveFlags bits to be
+        // ignored. ForceSave already keeps the Message open read/write, so a
+        // redundant KeepOpenReadWrite bit does not conflict with it.
+        0x06 => Some(SaveDisposition::ForceSave),
         _ => None,
     }
 }
@@ -592,10 +596,15 @@ mod property_tag_validation_tests {
         assert!(save_flags_are_supported(&request(0x01)));
         assert!(save_flags_are_supported(&request(0x02)));
         assert!(save_flags_are_supported(&request(0x04)));
+        assert!(save_flags_are_supported(&request(0x06)));
         assert!(save_flags_are_supported(&request(0x0A)));
+        assert!(save_flags_are_supported(&request(0x0E)));
+        assert_eq!(
+            save_disposition(&request(0x0E)),
+            Some(SaveDisposition::ForceSave)
+        );
         assert!(!save_flags_are_supported(&request(0x03)));
         assert!(!save_flags_are_supported(&request(0x05)));
-        assert!(!save_flags_are_supported(&request(0x06)));
         assert!(!save_flags_are_supported(&request(0x07)));
         assert!(!save_flags_are_supported(&request(0x0B)));
     }

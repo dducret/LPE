@@ -628,6 +628,107 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
 }
 
 #[tokio::test]
+async fn mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags() {
+    // Outlook trace 202607181515, request :34 creates this Contacts FAI and
+    // sends SaveFlags=0x0e before reading the saved Message object. The 0x08
+    // bit is not a [MS-OXCMSG] section 2.2.3.3.1 SaveFlags value and MUST be
+    // ignored; ForceSave subsumes the compatible KeepOpenReadWrite behavior.
+    let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        associated_configs: associated_configs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let dictionary = br#"<?xml version="1.0"?><UserConfiguration><Info version="Outlook.16"/><Data><e k="18-piImportedContactNickNames" v="3-True"/><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#;
+    let mut class_value = Vec::new();
+    append_mapi_utf16_property(
+        &mut class_value,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.ContactPrefs",
+    );
+    let mut roaming_value = Vec::new();
+    append_mapi_binary_property(&mut roaming_value, 0x7C07_0102, dictionary);
+    let mut subject_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut subject_values,
+        PID_TAG_SUBJECT_W,
+        "IPM.Configuration.ContactPrefs",
+    );
+    append_mapi_utf16_property(
+        &mut subject_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "IPM.Configuration.ContactPrefs",
+    );
+
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 1, &class_value);
+    append_rop_set_properties(&mut rops, 1, 1, &roaming_value);
+    append_rop_set_properties(&mut rops, 1, 2, &subject_values);
+    append_rop_save_changes_message_with_flags(&mut rops, 1, 1, 0x0E);
+    append_rop_get_properties_specific(&mut rops, 1, &[PID_TAG_MESSAGE_CLASS_W, 0x7C07_0102]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]),
+        "Outlook ContactPrefs SaveChangesMessage 0x0e failed: {response_rops:02x?}"
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.ContactPrefs")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        b"piImportedContactNickNames"
+    ));
+
+    let configs = associated_configs.lock().unwrap();
+    assert_eq!(configs.len(), 1, "{response_rops:02x?}");
+    assert_eq!(configs[0].account_id, account.account_id);
+    assert_eq!(
+        configs[0].folder_id,
+        crate::mapi::identity::CONTACTS_FOLDER_ID
+    );
+    assert_eq!(configs[0].message_class, "IPM.Configuration.ContactPrefs");
+    assert_eq!(
+        configs[0].properties_json["0x7c070102"]["value"],
+        dictionary
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_virtual_contact_link_config_accepts_outlook_marker_property() {
     let account = FakeStore::account();
     let associated_configs = Arc::new(Mutex::new(Vec::new()));

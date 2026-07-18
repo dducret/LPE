@@ -67,6 +67,7 @@ pub(in crate::mapi) use folders::*;
 use hierarchy::*;
 pub(in crate::mapi) use hierarchy::{
     mailbox_shadowed_by_active_outlook_special_folder, special_folder_property_value,
+    special_folder_property_value_with_change_number,
 };
 pub(in crate::mapi) use pending::*;
 pub(in crate::mapi) use public_folders::*;

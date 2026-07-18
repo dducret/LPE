@@ -269,15 +269,17 @@ pub(in crate::mapi) fn hierarchy_display_name(
     hierarchy_values: &[(u32, MapiValue)],
     property_values: &[(u32, MapiValue)],
 ) -> Option<String> {
-    hierarchy_values
-        .iter()
-        .chain(property_values.iter())
-        .rev()
-        .find_map(|(tag, value)| {
+    let display_name = |values: &[(u32, MapiValue)]| {
+        values.iter().rev().find_map(|(tag, value)| {
             (*tag == PID_TAG_DISPLAY_NAME_W)
                 .then(|| value.as_text().map(str::trim).map(str::to_string))
                 .flatten()
         })
+    };
+    // [MS-OXCFXICS] section 3.2.5.9.4.3: PropertyValues entries
+    // duplicated in HierarchyValues are ignored.
+    display_name(hierarchy_values)
+        .or_else(|| display_name(property_values))
         .filter(|value| !value.is_empty())
 }
 

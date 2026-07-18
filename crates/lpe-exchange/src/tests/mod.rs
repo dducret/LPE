@@ -65,10 +65,11 @@ use crate::{
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
         MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiEventCreateOutcome, MapiFolderProfilePropertyValue, MapiIdentityLookupRecord,
-        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue,
+        MapiFolderVersion, MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord,
+        MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
+        MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -1067,7 +1068,7 @@ async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
 }
 
 #[tokio::test]
-async fn mapi_full_snapshot_does_not_persist_virtual_special_mailbox_identity() {
+async fn mapi_full_snapshot_persists_virtual_special_folder_version_identity() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -1083,17 +1084,48 @@ async fn mapi_full_snapshot_does_not_persist_virtual_special_mailbox_identity() 
         .unwrap()
         .push(virtual_mailbox.clone());
 
-    let snapshot = store
+    let first_snapshot = store
         .load_mapi_mail_store(account.account_id, 500)
         .await
         .unwrap();
+    let first_change_number =
+        store.mapi_identity_change_numbers.lock().unwrap()[&virtual_mailbox.id];
 
-    assert_eq!(snapshot.folders().len(), 1);
-    assert!(!store
-        .mapi_identities
-        .lock()
-        .unwrap()
-        .contains_key(&virtual_mailbox.id));
+    let second_snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let second_change_number =
+        store.mapi_identity_change_numbers.lock().unwrap()[&virtual_mailbox.id];
+
+    assert_eq!(first_snapshot.folders().len(), 1);
+    assert_eq!(second_snapshot.folders().len(), 1);
+    assert_eq!(
+        store.mapi_identities.lock().unwrap()[&virtual_mailbox.id],
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+    );
+    assert_ne!(
+        first_change_number,
+        mapi_mailstore::change_number_for_store_id(
+            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        )
+    );
+    assert_eq!(second_change_number, first_change_number);
+    assert_eq!(first_snapshot.mailboxes()[0].modseq, virtual_mailbox.modseq);
+    assert_eq!(
+        second_snapshot.mailboxes()[0].modseq,
+        virtual_mailbox.modseq
+    );
+    assert_eq!(
+        first_snapshot
+            .folder_change_number(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,),
+        Some(first_change_number)
+    );
+    assert_eq!(
+        second_snapshot
+            .folder_change_number(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,),
+        Some(first_change_number)
+    );
 }
 
 #[tokio::test]
@@ -1917,6 +1949,309 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
     fixture.cleanup().await.unwrap();
 }
 
+#[tokio::test]
+async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_lineage() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let mailboxes = fixture
+        .storage
+        .ensure_jmap_system_mailboxes(fixture.account_id)
+        .await
+        .unwrap();
+    let trash_mailbox = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.role == "trash")
+        .expect("Deleted Items system mailbox");
+    let trash_identity_request = [MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Mailbox,
+        canonical_id: trash_mailbox.id,
+        reserved_global_counter: Some(crate::mapi::identity::TRASH_FOLDER_COUNTER),
+        source_key: None,
+    }];
+    let initial = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &trash_identity_request)
+        .await
+        .unwrap()
+        .remove(0);
+
+    assert_eq!(initial.object_id, crate::mapi::identity::TRASH_FOLDER_ID);
+    assert_ne!(
+        initial.change_number,
+        crate::mapi::identity::TRASH_FOLDER_COUNTER
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &initial.predecessor_change_list,
+        &initial.change_key
+    ));
+    let baseline_change_sequence = fixture
+        .storage
+        .fetch_mapi_sync_changes(fixture.account_id, None, MapiCheckpointKind::Hierarchy, 0)
+        .await
+        .unwrap()
+        .current_change_sequence;
+
+    let client_change_key = vec![
+        0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x15,
+    ];
+    let mut client_predecessor_change_list = vec![client_change_key.len() as u8];
+    client_predecessor_change_list.extend_from_slice(&client_change_key);
+    let imported_predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+        &initial.predecessor_change_list,
+        &client_predecessor_change_list,
+    )
+    .unwrap();
+
+    let applied = fixture
+        .storage
+        .commit_mapi_folder_hierarchy_change(
+            fixture.account_id,
+            initial.object_id,
+            (initial.last_modification_time + 600 * 10_000_000) as i64,
+            &client_change_key,
+            &imported_predecessor_change_list,
+        )
+        .await
+        .unwrap();
+    let MapiFolderHierarchyCommitOutcome::Applied(applied_version) = applied else {
+        panic!("expected an applied hierarchy change, got {applied:?}");
+    };
+    let applied_change_number = applied_version.change_number;
+    assert_ne!(applied_change_number, initial.change_number);
+
+    let after_apply = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &trash_identity_request)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(after_apply.object_id, initial.object_id);
+    assert_eq!(after_apply.change_number, applied_change_number);
+    assert_eq!(after_apply.change_key, client_change_key);
+    assert_eq!(
+        after_apply.last_modification_time,
+        applied_version.last_modification_time
+    );
+    assert_eq!(
+        after_apply.predecessor_change_list,
+        imported_predecessor_change_list
+    );
+    let applied_changes = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            baseline_change_sequence,
+        )
+        .await
+        .unwrap();
+    assert_eq!(applied_changes.changed_mailbox_ids, vec![trash_mailbox.id]);
+    let applied_notification = fixture
+        .storage
+        .poll_mapi_notifications(fixture.account_id, baseline_change_sequence as i64)
+        .await
+        .unwrap();
+    assert_eq!(applied_notification.events.len(), 1);
+    assert_eq!(
+        applied_notification.events[0].notification_test_shape(),
+        (
+            crate::mapi::notifications::MapiNotificationKind::Hierarchy,
+            0x0010,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            Some(crate::mapi::identity::TRASH_FOLDER_ID),
+            None,
+            None,
+            Some("mailbox"),
+        )
+    );
+
+    let duplicate = fixture
+        .storage
+        .commit_mapi_folder_hierarchy_change(
+            fixture.account_id,
+            initial.object_id,
+            applied_version.last_modification_time as i64,
+            &client_change_key,
+            &imported_predecessor_change_list,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate,
+        MapiFolderHierarchyCommitOutcome::Duplicate(applied_version.clone())
+    );
+    let duplicate_changes = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            applied_changes.current_change_sequence,
+        )
+        .await
+        .unwrap();
+    assert!(duplicate_changes.changed_mailbox_ids.is_empty());
+    assert_eq!(
+        duplicate_changes.current_change_sequence,
+        applied_changes.current_change_sequence
+    );
+
+    let conflicting_change_key = vec![
+        0x82, 0x31, 0x9b, 0x55, 0xc4, 0xc1, 0x4e, 0xc7, 0xb3, 0x3f, 0x75, 0x30, 0x8b, 0x68, 0xef,
+        0x11, 0x00, 0x00, 0x00, 0x21,
+    ];
+    let mut conflicting_predecessor_change_list = vec![conflicting_change_key.len() as u8];
+    conflicting_predecessor_change_list.extend_from_slice(&conflicting_change_key);
+    let conflict = fixture
+        .storage
+        .commit_mapi_folder_hierarchy_change(
+            fixture.account_id,
+            initial.object_id,
+            initial.last_modification_time as i64,
+            &conflicting_change_key,
+            &conflicting_predecessor_change_list,
+        )
+        .await
+        .unwrap();
+    let MapiFolderHierarchyCommitOutcome::Conflict(conflict_version) = conflict else {
+        panic!("expected a hierarchy conflict, got {conflict:?}");
+    };
+    let conflict_change_number = conflict_version.change_number;
+    assert_ne!(conflict_change_number, applied_change_number);
+
+    let successor = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &trash_identity_request)
+        .await
+        .unwrap()
+        .remove(0);
+    let expected_successor_predecessors = test_merge_mapi_predecessor_change_lists(
+        &imported_predecessor_change_list,
+        &conflicting_predecessor_change_list,
+    )
+    .unwrap();
+    assert_eq!(successor.change_number, conflict_change_number);
+    assert_eq!(successor.change_key, client_change_key);
+    assert_eq!(
+        successor.last_modification_time,
+        applied_version.last_modification_time
+    );
+    assert_eq!(
+        successor.predecessor_change_list,
+        expected_successor_predecessors
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &successor.predecessor_change_list,
+        &initial.change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &successor.predecessor_change_list,
+        &client_change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &successor.predecessor_change_list,
+        &conflicting_change_key
+    ));
+    let conflict_changes = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            duplicate_changes.current_change_sequence,
+        )
+        .await
+        .unwrap();
+    assert_eq!(conflict_changes.changed_mailbox_ids, vec![trash_mailbox.id]);
+    let jmap_mailbox_changes = fixture
+        .storage
+        .replay_jmap_mail_object_changes(
+            fixture.account_id,
+            "Mailbox",
+            baseline_change_sequence as i64,
+            1,
+        )
+        .await
+        .unwrap()
+        .expect("MAPI-only hierarchy versions must not exhaust the JMAP replay limit");
+    assert!(jmap_mailbox_changes.is_empty());
+
+    let common_views_id = crate::mapi_mailstore::virtual_special_mailbox_id(
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    let common_views_request = [MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Mailbox,
+        canonical_id: common_views_id,
+        reserved_global_counter: Some(crate::mapi::identity::COMMON_VIEWS_FOLDER_COUNTER),
+        source_key: None,
+    }];
+    let common_views = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &common_views_request)
+        .await
+        .unwrap()
+        .remove(0);
+    let virtual_baseline = conflict_changes.current_change_sequence;
+    let virtual_client_change_key = vec![
+        0x91, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x16,
+    ];
+    let mut virtual_client_pcl = vec![virtual_client_change_key.len() as u8];
+    virtual_client_pcl.extend_from_slice(&virtual_client_change_key);
+    let virtual_import_pcl = test_merge_mapi_predecessor_change_lists(
+        &common_views.predecessor_change_list,
+        &virtual_client_pcl,
+    )
+    .unwrap();
+    fixture
+        .storage
+        .commit_mapi_folder_hierarchy_change(
+            fixture.account_id,
+            common_views.object_id,
+            (common_views.last_modification_time + 10_000_000) as i64,
+            &virtual_client_change_key,
+            &virtual_import_pcl,
+        )
+        .await
+        .unwrap();
+    let virtual_changes = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            virtual_baseline,
+        )
+        .await
+        .unwrap();
+    assert_eq!(virtual_changes.changed_mailbox_ids, vec![common_views_id]);
+    let virtual_notification = fixture
+        .storage
+        .poll_mapi_notifications(fixture.account_id, virtual_baseline as i64)
+        .await
+        .unwrap();
+    assert_eq!(virtual_notification.events.len(), 1);
+    assert_eq!(
+        virtual_notification.events[0].notification_test_shape(),
+        (
+            crate::mapi::notifications::MapiNotificationKind::Hierarchy,
+            0x0010,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            Some(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID),
+            None,
+            None,
+            Some("mailbox"),
+        )
+    );
+
+    // The dispatcher owns the rule that a conflict CN is not added to
+    // CnsetSeen; this storage regression verifies the durable successor only.
+    fixture.cleanup().await.unwrap();
+}
+
 #[derive(Clone, Default)]
 struct FakeStore {
     session: Option<AuthenticatedAccount>,
@@ -1980,6 +2315,9 @@ struct FakeStore {
     retired_mapi_identities: Arc<Mutex<Vec<MapiIdentityLookupRecord>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_identity_change_numbers: Arc<Mutex<HashMap<Uuid, u64>>>,
+    mapi_identity_change_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
+    mapi_identity_predecessor_change_lists: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
+    mapi_identity_last_modification_times: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_special_folder_aliases: Arc<Mutex<HashMap<u64, MapiSpecialFolderAlias>>>,
     mapi_special_folder_alias_change_numbers: Arc<Mutex<HashMap<u64, u64>>>,
     mapi_event_identity_versions: Arc<Mutex<HashMap<Uuid, MapiEventVersion>>>,
@@ -2809,6 +3147,43 @@ fn test_mapi_pcl_includes_change_key(predecessor_change_list: &[u8], change_key:
     includes_change_key
 }
 
+fn test_merge_mapi_predecessor_change_lists(first: &[u8], second: &[u8]) -> Option<Vec<u8>> {
+    let mut entries = std::collections::BTreeMap::<[u8; 16], Vec<u8>>::new();
+    for bytes in [first, second] {
+        let mut offset = 0usize;
+        while offset < bytes.len() {
+            let size = usize::from(*bytes.get(offset)?);
+            offset += 1;
+            let end = offset.checked_add(size)?;
+            let xid = bytes.get(offset..end)?;
+            offset = end;
+            if !(17..=24).contains(&xid.len()) {
+                return None;
+            }
+            let guid: [u8; 16] = xid[..16].try_into().ok()?;
+            let local_id = xid[16..].to_vec();
+            match entries.get_mut(&guid) {
+                Some(current) if current.len() == local_id.len() => {
+                    if *current < local_id {
+                        *current = local_id;
+                    }
+                }
+                Some(_) => return None,
+                None => {
+                    entries.insert(guid, local_id);
+                }
+            }
+        }
+    }
+    let mut merged = Vec::new();
+    for (guid, local_id) in entries {
+        merged.push(u8::try_from(guid.len() + local_id.len()).ok()?);
+        merged.extend_from_slice(&guid);
+        merged.extend_from_slice(&local_id);
+    }
+    Some(merged)
+}
+
 impl ExchangeStore for FakeStore {
     fn reserve_mapi_local_replica_ids<'a>(
         &'a self,
@@ -2830,6 +3205,143 @@ impl ExchangeStore for FakeStore {
                 .ok_or_else(|| anyhow::anyhow!("MAPI local replica ID space exhausted"))?;
             *next_counter = next_global_counter;
             Ok(first_global_counter)
+        })
+    }
+
+    fn commit_mapi_folder_hierarchy_change<'a>(
+        &'a self,
+        _account_id: Uuid,
+        folder_id: u64,
+        imported_last_modification_time: i64,
+        imported_change_key: &'a [u8],
+        imported_predecessor_change_list: &'a [u8],
+    ) -> StoreFuture<'a, MapiFolderHierarchyCommitOutcome> {
+        Box::pin(async move {
+            if !(17..=24).contains(&imported_change_key.len())
+                || !test_mapi_pcl_includes_change_key(
+                    imported_predecessor_change_list,
+                    imported_change_key,
+                )
+            {
+                anyhow::bail!("invalid imported MAPI hierarchy version");
+            }
+            let canonical_id = self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(canonical_id, object_id)| {
+                    (*object_id == folder_id).then_some(*canonical_id)
+                })
+                .ok_or_else(|| anyhow::anyhow!("MAPI folder identity not found"))?;
+            let current_change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::global_counter_from_store_id(folder_id).unwrap_or(1)
+                });
+            let current_change_key = self
+                .mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::change_key_for_change_number(current_change_number)
+                });
+            let current_predecessor_change_list = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi_mailstore::predecessor_change_list(current_change_number)
+                });
+            let current_last_modification_time = self
+                .mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi_mailstore::filetime_from_change_number(current_change_number)
+                });
+            let merged_predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+                &current_predecessor_change_list,
+                imported_predecessor_change_list,
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid imported MAPI hierarchy PCL"))?;
+            if merged_predecessor_change_list == current_predecessor_change_list
+                && test_mapi_pcl_includes_change_key(
+                    &current_predecessor_change_list,
+                    imported_change_key,
+                )
+            {
+                return Ok(MapiFolderHierarchyCommitOutcome::Duplicate(
+                    MapiFolderVersion {
+                        folder_id,
+                        change_number: current_change_number,
+                        change_key: current_change_key,
+                        predecessor_change_list: current_predecessor_change_list,
+                        last_modification_time: current_last_modification_time,
+                    },
+                ));
+            }
+            let conflict = !test_mapi_pcl_includes_change_key(
+                imported_predecessor_change_list,
+                &current_change_key,
+            );
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            let change_number = *next_counter;
+            *next_counter = next_counter.saturating_add(1);
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            let imported_last_modification_time = u64::try_from(imported_last_modification_time)
+                .map_err(|_| anyhow::anyhow!("invalid MAPI hierarchy modification time"))?;
+            let imported_last_modification_time =
+                imported_last_modification_time - imported_last_modification_time % 10;
+            let imported_wins =
+                !conflict || imported_last_modification_time > current_last_modification_time;
+            let resolved_change_key = if imported_wins {
+                imported_change_key.to_vec()
+            } else {
+                current_change_key
+            };
+            let resolved_last_modification_time = if imported_wins {
+                imported_last_modification_time
+            } else {
+                current_last_modification_time
+            };
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, resolved_change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, merged_predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, resolved_last_modification_time);
+            let version = MapiFolderVersion {
+                folder_id,
+                change_number,
+                change_key: resolved_change_key,
+                predecessor_change_list: merged_predecessor_change_list,
+                last_modification_time: resolved_last_modification_time,
+            };
+            if conflict {
+                Ok(MapiFolderHierarchyCommitOutcome::Conflict(version))
+            } else {
+                Ok(MapiFolderHierarchyCommitOutcome::Applied(version))
+            }
         })
     }
 
@@ -3760,6 +4272,9 @@ impl ExchangeStore for FakeStore {
             let mut identities = self.mapi_identities.lock().unwrap();
             let mut source_keys = self.mapi_identity_source_keys.lock().unwrap();
             let mut change_numbers = self.mapi_identity_change_numbers.lock().unwrap();
+            let mut change_keys = self.mapi_identity_change_keys.lock().unwrap();
+            let mut predecessor_change_lists =
+                self.mapi_identity_predecessor_change_lists.lock().unwrap();
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
             if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
                 *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
@@ -3845,12 +4360,36 @@ impl ExchangeStore for FakeStore {
                     .clone()
                     .or_else(|| source_keys.get(&request.canonical_id).cloned())
                     .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
+                let change_key = change_keys
+                    .entry(request.canonical_id)
+                    .or_insert_with(|| {
+                        crate::mapi::identity::change_key_for_change_number(change_number)
+                    })
+                    .clone();
+                let predecessor_change_list = predecessor_change_lists
+                    .entry(request.canonical_id)
+                    .or_insert_with(|| {
+                        crate::mapi_mailstore::predecessor_change_list(change_number)
+                    })
+                    .clone();
+                let last_modification_time = self
+                    .mapi_identity_last_modification_times
+                    .lock()
+                    .unwrap()
+                    .entry(request.canonical_id)
+                    .or_insert_with(|| {
+                        crate::mapi_mailstore::filetime_from_change_number(change_number)
+                    })
+                    .to_owned();
                 records.push(MapiIdentityRecord {
                     object_kind: request.object_kind,
                     canonical_id: request.canonical_id,
                     object_id,
                     change_number,
                     source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
                 });
             }
             Ok(records)

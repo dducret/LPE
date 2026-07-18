@@ -3956,6 +3956,8 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let folder_change_numbers = store.mapi_identity_change_numbers.clone();
+    let folder_last_modification_times = store.mapi_identity_last_modification_times.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4016,6 +4018,10 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    let mailbox_uuid = Uuid::parse_str(mailbox_id).unwrap();
+    let durable_folder_change_number = folder_change_numbers.lock().unwrap()[&mailbox_uuid];
+    let durable_folder_last_modification_time =
+        folder_last_modification_times.lock().unwrap()[&mailbox_uuid];
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::STORE_REPLICA_GUID
@@ -4031,11 +4037,20 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     assert!(contains_bytes(&response_rops, &change_key_wire_value));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::filetime_from_change_number(folder_change).to_le_bytes()
+        &durable_folder_last_modification_time.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &(folder_change.min(u64::from(u32::MAX)) as u32).to_le_bytes()
+        &(durable_folder_change_number.min(u64::from(u32::MAX)) as u32).to_le_bytes()
+    ));
+    assert_ne!(
+        durable_folder_change_number,
+        crate::mapi::identity::INBOX_FOLDER_COUNTER,
+        "the folder version CN must be distinct from its FID"
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::filetime_from_change_number(folder_change).to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,

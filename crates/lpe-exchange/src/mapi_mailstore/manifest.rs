@@ -499,6 +499,53 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
     _final_change_sequence: u64,
 ) -> Vec<u8> {
+    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
+        mailbox_guid,
+        sync_type,
+        sync_flags,
+        sync_extra_flags,
+        sync_property_tags,
+        folder_id,
+        mailboxes,
+        emails,
+        attachment_facts,
+        special_objects,
+        deleted_message_ids,
+        parent_context_mailboxes,
+        state_mailboxes,
+        state_emails,
+        state_attachment_facts,
+        state_special_objects,
+        aggregate_emails,
+        aggregate_attachment_facts,
+        &[],
+        _final_change_sequence,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
+    mailbox_guid: Uuid,
+    sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    sync_property_tags: &[u32],
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    special_objects: &[SpecialMessageSyncFact],
+    deleted_message_ids: &[u64],
+    parent_context_mailboxes: &[JmapMailbox],
+    state_mailboxes: &[JmapMailbox],
+    state_emails: &[JmapEmail],
+    state_attachment_facts: &[MessageAttachmentSyncFacts],
+    state_special_objects: &[SpecialMessageSyncFact],
+    aggregate_emails: &[JmapEmail],
+    aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
+    _final_change_sequence: u64,
+) -> Vec<u8> {
     let mut buffer = Vec::new();
     let sync_root_folder_id = folder_id;
     let excluded_property_tags = if sync_flags & 0x0080 == 0 {
@@ -534,7 +581,21 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             }
             let parent_folder_id =
                 mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
-            let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
+            let folder_version = folder_versions
+                .iter()
+                .find(|version| version.folder_id == folder_id);
+            let change_number = folder_version
+                .map(|version| version.change_number)
+                .unwrap_or_else(|| canonical_hierarchy_change_number(sync_root_folder_id, mailbox));
+            let change_key = folder_version
+                .map(|version| version.change_key.clone())
+                .unwrap_or_else(|| change_key_for_change_number(change_number));
+            let predecessor_change_list = folder_version
+                .map(|version| version.predecessor_change_list.clone())
+                .unwrap_or_else(|| predecessor_change_list(change_number));
+            let last_modification_time = folder_version
+                .map(|version| version.last_modification_time)
+                .unwrap_or_else(|| filetime_from_change_number(change_number));
             let source_key = source_key_for_store_id(folder_id);
             let parent_source_key = if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
                 || parent_folder_id == sync_root_folder_id
@@ -617,19 +678,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
             write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
             write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-            write_i64(
-                &mut buffer,
-                filetime_from_change_number(change_number) as i64,
-            );
-            write_binary_property(
-                &mut buffer,
-                PID_TAG_CHANGE_KEY,
-                &change_key_for_change_number(change_number),
-            );
+            write_i64(&mut buffer, last_modification_time as i64);
+            write_binary_property(&mut buffer, PID_TAG_CHANGE_KEY, &change_key);
             write_binary_property(
                 &mut buffer,
                 PID_TAG_PREDECESSOR_CHANGE_LIST,
-                &predecessor_change_list(change_number),
+                &predecessor_change_list,
             );
             if !property_tag_excluded(excluded_property_tags, PID_TAG_ENTRY_ID) {
                 if let Some(entry_id) = crate::mapi::identity::folder_entry_id_from_object_id(

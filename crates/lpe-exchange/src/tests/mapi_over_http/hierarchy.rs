@@ -1,6 +1,109 @@
 use super::*;
 
 #[tokio::test]
+async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_number() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let contacts_identity_id =
+        mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::CONTACTS_FOLDER_ID);
+    let imported_change_key = vec![
+        0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x15,
+    ];
+    let mut imported_predecessor_change_list = vec![imported_change_key.len() as u8];
+    imported_predecessor_change_list.extend_from_slice(&imported_change_key);
+    store.mapi_identities.lock().unwrap().insert(
+        contacts_identity_id,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    );
+    store
+        .mapi_identity_change_numbers
+        .lock()
+        .unwrap()
+        .insert(contacts_identity_id, 57);
+    store
+        .mapi_identity_change_keys
+        .lock()
+        .unwrap()
+        .insert(contacts_identity_id, imported_change_key.clone());
+    store
+        .mapi_identity_predecessor_change_lists
+        .lock()
+        .unwrap()
+        .insert(
+            contacts_identity_id,
+            imported_predecessor_change_list.clone(),
+        );
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+        ],
+    );
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut row_offset =
+        mapi_get_properties_specific_standard_row_offset(&response_rops, 1).unwrap() + 1;
+    let advertised_change_number =
+        crate::mapi::identity::object_id_from_wire_id(&response_rops[row_offset..row_offset + 8])
+            .and_then(crate::mapi::identity::global_counter_from_store_id)
+            .unwrap();
+    row_offset += 8;
+    let advertised_change_key = read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
+    let advertised_predecessor_change_list =
+        read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
+    let expected_change_number = store.mapi_identity_change_numbers.lock().unwrap()
+        [&mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::CONTACTS_FOLDER_ID)];
+
+    assert_ne!(
+        expected_change_number,
+        mapi_mailstore::change_number_for_store_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+    );
+    assert_eq!(advertised_change_number, expected_change_number);
+    assert_eq!(advertised_change_key, imported_change_key);
+    assert_eq!(
+        advertised_predecessor_change_list,
+        imported_predecessor_change_list
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_opens_compat_shortcuts_folder() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
