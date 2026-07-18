@@ -222,11 +222,25 @@ pub(in crate::mapi) fn advertised_special_folder_id_for_create(
         QUICK_STEP_SETTINGS_FOLDER_ID,
         ARCHIVE_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
+        CONVERSATION_HISTORY_FOLDER_ID,
+        REMINDERS_FOLDER_ID,
     ]
     .into_iter()
     .find(|folder_id| {
         let (name, parent_id, _, _) = special_folder_metadata(*folder_id);
-        parent_id == parent_folder_id && name.eq_ignore_ascii_case(display_name)
+        if parent_id != parent_folder_id {
+            return false;
+        }
+        if name.eq_ignore_ascii_case(display_name.trim()) {
+            return true;
+        }
+        matches!(
+            (*folder_id, display_name.trim().to_ascii_lowercase().as_str()),
+            (SENT_FOLDER_ID, "sent items")
+                | (TRASH_FOLDER_ID, "deleted")
+                | (TRASH_FOLDER_ID, "trash")
+                | (JUNK_FOLDER_ID, "junk email")
+        )
     })
 }
 

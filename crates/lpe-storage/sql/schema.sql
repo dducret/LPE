@@ -2187,6 +2187,23 @@ CREATE UNIQUE INDEX mapi_object_identities_active_source_key_uidx
     ON mapi_object_identities (tenant_id, account_id, source_key)
     WHERE deleted_at IS NULL;
 
+CREATE TABLE mapi_special_folder_aliases (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    alias_folder_id BIGINT NOT NULL CHECK (alias_folder_id >= 2818049 AND alias_folder_id < 9223369837831520257 AND (alias_folder_id & 65535) = 1),
+    canonical_folder_id BIGINT NOT NULL CHECK (canonical_folder_id > 0 AND canonical_folder_id <= 2752513 AND (canonical_folder_id & 65535) = 1),
+    source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, alias_folder_id),
+    UNIQUE (tenant_id, account_id, source_key),
+    CHECK (alias_folder_id <> canonical_folder_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_special_folder_aliases_canonical_idx
+    ON mapi_special_folder_aliases (tenant_id, account_id, canonical_folder_id);
+
 CREATE TABLE mapi_calendar_event_identity_moves (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,

@@ -6716,7 +6716,7 @@ async fn mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_config
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x10, 0x00, // content sync, FAI only
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x00, 0x00, // PropertyTagCount
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
     ]);
@@ -8859,7 +8859,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x10, 0x00, // content sync, FAI only
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x00, 0x00, // PropertyTagCount
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
     ]);
@@ -8995,7 +8995,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x00, 0x00, // PropertyTagCount
     ]);
     for state_tag in [0x4017_0102u32, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {

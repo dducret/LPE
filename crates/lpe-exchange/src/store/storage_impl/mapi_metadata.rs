@@ -67,7 +67,7 @@ macro_rules! store_impl_mapi_metadata {
                 let kind = request.object_kind.as_str();
                 let existing = sqlx::query(
                     r#"
-                    SELECT mapi_object_id, source_key
+                    SELECT mapi_object_id, mapi_change_number, source_key
                     FROM mapi_object_identities
                     WHERE tenant_id = $1
                       AND account_id = $2
@@ -84,9 +84,10 @@ macro_rules! store_impl_mapi_metadata {
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                let (object_id, source_key) = if let Some(row) = existing {
+                let (object_id, change_number, source_key) = if let Some(row) = existing {
                     (
                         row.get::<i64, _>("mapi_object_id") as u64,
+                        row.get::<i64, _>("mapi_change_number") as u64,
                         row.get("source_key"),
                     )
                 } else {
@@ -95,11 +96,51 @@ macro_rules! store_impl_mapi_metadata {
                     } else {
                         allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?
                     };
-                    let (object_id, default_source_key, change_key, instance_key) =
+                    let change_number = if request.reserved_global_counter.is_some() {
+                        let mut change_number =
+                            allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
+                                .await?;
+                        if change_number == global_counter {
+                            change_number =
+                                allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
+                                    .await?;
+                        }
+                        change_number
+                    } else {
+                        global_counter
+                    };
+                    let (object_id, default_source_key, _, instance_key) =
                         crate::mapi::identity::persisted_identity_material(global_counter);
+                    let change_key =
+                        crate::mapi::identity::change_key_for_change_number(change_number);
                     let predecessor_change_list =
-                        crate::mapi_mailstore::predecessor_change_list(global_counter);
+                        crate::mapi_mailstore::predecessor_change_list(change_number);
                     let source_key = request.source_key.clone().unwrap_or(default_source_key);
+                    let special_folder_alias_collision = sqlx::query_scalar::<_, bool>(
+                        r#"
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM mapi_special_folder_aliases
+                            WHERE tenant_id = $1
+                              AND account_id = $2
+                              AND (
+                                  alias_folder_id = $3
+                                  OR source_key = $4
+                              )
+                        )
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(object_id as i64)
+                    .bind(&source_key)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if special_folder_alias_collision {
+                        anyhow::bail!(
+                            "MAPI object identity collides with a special-folder alias"
+                        );
+                    }
                     let row = sqlx::query(
                         r#"
                         INSERT INTO mapi_object_identities (
@@ -124,7 +165,7 @@ macro_rules! store_impl_mapi_metadata {
                                 THEN mapi_object_identities.updated_at
                                 ELSE NOW()
                             END
-                        RETURNING mapi_object_id, source_key
+                        RETURNING mapi_object_id, mapi_change_number, source_key
                         "#,
                     )
                     .bind(tenant_id)
@@ -136,12 +177,13 @@ macro_rules! store_impl_mapi_metadata {
                     .bind(source_key)
                     .bind(change_key)
                     .bind(instance_key)
-                    .bind(global_counter as i64)
+                    .bind(change_number as i64)
                     .bind(predecessor_change_list)
                     .fetch_one(&mut *tx)
                     .await?;
                     (
                         row.get::<i64, _>("mapi_object_id") as u64,
+                        row.get::<i64, _>("mapi_change_number") as u64,
                         row.get("source_key"),
                     )
                 };
@@ -149,11 +191,166 @@ macro_rules! store_impl_mapi_metadata {
                     object_kind: request.object_kind,
                     canonical_id: request.canonical_id,
                     object_id,
+                    change_number,
                     source_key,
                 });
             }
             tx.commit().await?;
             Ok(records)
+        })
+    }
+
+    fn fetch_mapi_special_folder_aliases<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiSpecialFolderAlias>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT alias_folder_id, canonical_folder_id, source_key
+                FROM mapi_special_folder_aliases
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                ORDER BY alias_folder_id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .fetch_all(self.pool())
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| MapiSpecialFolderAlias {
+                    alias_folder_id: row.get::<i64, _>("alias_folder_id") as u64,
+                    canonical_folder_id: row.get::<i64, _>("canonical_folder_id") as u64,
+                    source_key: row.get("source_key"),
+                })
+                .collect())
+        })
+    }
+
+    fn upsert_mapi_special_folder_aliases<'a>(
+        &'a self,
+        account_id: Uuid,
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if aliases.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let reserved_end = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT next_global_counter
+                FROM mapi_mailbox_replicas
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND replica_guid = $3
+                FOR UPDATE
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("MAPI mailbox replica was not initialized"))?
+                as u64;
+            for alias in aliases {
+                let alias_counter =
+                    crate::mapi::identity::global_counter_from_store_id(alias.alias_folder_id);
+                if alias.alias_folder_id == alias.canonical_folder_id
+                    || crate::mapi::identity::global_counter_from_store_id(
+                        alias.canonical_folder_id,
+                    )
+                    .is_none_or(|counter| {
+                        counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                    })
+                    || alias_counter.is_none_or(|counter| {
+                            !(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                                ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                                .contains(&counter)
+                                || counter >= reserved_end
+                        })
+                    || crate::mapi::identity::object_id_from_source_key(&alias.source_key)
+                        != Some(alias.alias_folder_id)
+                {
+                    anyhow::bail!("invalid MAPI special-folder alias");
+                }
+                let existing_alias = sqlx::query(
+                    r#"
+                    SELECT alias_folder_id, canonical_folder_id, source_key
+                    FROM mapi_special_folder_aliases
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND (alias_folder_id = $3 OR source_key = $4)
+                    LIMIT 1
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(alias.alias_folder_id as i64)
+                .bind(&alias.source_key)
+                .fetch_optional(&mut *tx)
+                .await?;
+                if let Some(existing) = existing_alias {
+                    if existing.get::<i64, _>("alias_folder_id") as u64
+                        == alias.alias_folder_id
+                        && existing.get::<i64, _>("canonical_folder_id") as u64
+                            == alias.canonical_folder_id
+                        && existing.get::<Vec<u8>, _>("source_key") == alias.source_key
+                    {
+                        continue;
+                    }
+                    anyhow::bail!("conflicting MAPI special-folder alias");
+                }
+                let identity_collision = sqlx::query_scalar::<_, bool>(
+                    r#"
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM mapi_object_identities
+                        WHERE tenant_id = $1
+                          AND account_id = $2
+                          AND (
+                              mapi_object_id = $3
+                              OR source_key = $4
+                          )
+                    )
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(alias.alias_folder_id as i64)
+                .bind(&alias.source_key)
+                .fetch_one(&mut *tx)
+                .await?;
+                if identity_collision {
+                    anyhow::bail!("MAPI special-folder alias collides with an object identity");
+                }
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_special_folder_aliases (
+                        tenant_id,
+                        account_id,
+                        alias_folder_id,
+                        canonical_folder_id,
+                        source_key
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(alias.alias_folder_id as i64)
+                .bind(alias.canonical_folder_id as i64)
+                .bind(&alias.source_key)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
         })
     }
 

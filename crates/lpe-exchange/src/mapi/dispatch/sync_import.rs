@@ -489,7 +489,13 @@ pub(super) fn append_synchronization_get_transfer_state_response(
         ));
         return;
     };
-    let transfer_buffer = if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
+    let transfer_buffer = if state.is_empty()
+        && matches!(
+            source_object,
+            Some(MapiObject::SynchronizationCollector { .. })
+        ) {
+        mapi_mailstore::upload_sync_state_stream_from_sets(sync_type, &[], &[], &[])
+    } else if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
         let sync_mailboxes = sync_mailboxes_for_excluding_deleted(
             folder_id,
             sync_type,
@@ -514,20 +520,6 @@ pub(super) fn append_synchronization_get_transfer_state_response(
         client_state_uploaded_bytes,
         client_state_uploaded_marker_mask,
     ) = match source_object {
-        Some(MapiObject::SynchronizationCollector {
-            client_state_uploaded_bytes,
-            client_state_uploaded_marker_mask,
-            ..
-        }) if *client_state_uploaded_bytes > 0
-            && !uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask) =>
-        {
-            (
-                false,
-                "uploaded_client_state_transfer",
-                *client_state_uploaded_bytes,
-                *client_state_uploaded_marker_mask,
-            )
-        }
         Some(MapiObject::SynchronizationCollector {
             client_state_uploaded_bytes,
             client_state_uploaded_marker_mask,
@@ -626,13 +618,14 @@ pub(super) fn append_synchronization_open_collector_response(
         ));
         return;
     };
+    let sync_type = request.collector_sync_type();
     let handle = session.allocate_output_handle(
         request.output_handle_index,
         MapiObject::SynchronizationCollector {
             folder_id,
-            mailbox_id: sync_checkpoint_mailbox_id(folder_id, request.sync_type(), mailboxes),
-            checkpoint_kind: sync_checkpoint_kind(request.sync_type()),
-            sync_type: request.sync_type(),
+            mailbox_id: sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes),
+            checkpoint_kind: sync_checkpoint_kind(sync_type),
+            sync_type,
             state: Vec::new(),
             state_upload_property_tag: None,
             state_upload_buffer: Vec::new(),
@@ -1082,8 +1075,8 @@ pub(super) fn record_sync_upload_content_change(
         if read_state_changed && !uploaded_read_change_numbers.contains(&change_number) {
             uploaded_read_change_numbers.push(change_number);
         }
-        *state = mapi_mailstore::content_sync_state_stream_from_sets(
-            uploaded_object_ids,
+        *state = mapi_mailstore::upload_sync_state_stream_from_sets(
+            0x01,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -1097,7 +1090,6 @@ pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, f
             folder_id: collector_folder_id,
             sync_type,
             state,
-            uploaded_object_ids,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -1109,8 +1101,8 @@ pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, f
         if *collector_folder_id != folder_id || *sync_type != 0x01 {
             continue;
         }
-        *state = mapi_mailstore::content_sync_state_stream_from_sets(
-            uploaded_object_ids,
+        *state = mapi_mailstore::upload_sync_state_stream_from_sets(
+            0x01,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -1122,6 +1114,20 @@ pub(super) fn record_sync_upload_hierarchy_change(
     session: &mut MapiSession,
     folder_id: u64,
     object_id: u64,
+) {
+    record_sync_upload_hierarchy_change_with_change_number(
+        session,
+        folder_id,
+        object_id,
+        mapi_mailstore::change_number_for_store_id(object_id),
+    );
+}
+
+pub(super) fn record_sync_upload_hierarchy_change_with_change_number(
+    session: &mut MapiSession,
+    folder_id: u64,
+    object_id: u64,
+    change_number: u64,
 ) {
     for object in session.handles.values_mut() {
         let MapiObject::SynchronizationCollector {
@@ -1141,14 +1147,14 @@ pub(super) fn record_sync_upload_hierarchy_change(
         if !uploaded_object_ids.contains(&object_id) {
             uploaded_object_ids.push(object_id);
         }
-        let change_number = mapi_mailstore::change_number_for_store_id(object_id);
         if !uploaded_normal_change_numbers.contains(&change_number) {
             uploaded_normal_change_numbers.push(change_number);
         }
-        *state = mapi_mailstore::final_sync_state_stream(
+        *state = mapi_mailstore::upload_sync_state_stream_from_sets(
             0x02,
-            uploaded_object_ids,
             uploaded_normal_change_numbers,
+            &[],
+            &[],
         );
     }
 }
@@ -1441,6 +1447,29 @@ pub(super) async fn remember_created_mapi_identity<S>(
 where
     S: ExchangeStore,
 {
+    Ok(remember_created_mapi_identity_record(
+        store,
+        principal,
+        object_kind,
+        canonical_id,
+        reserved_global_counter,
+        source_key,
+    )
+    .await?
+    .object_id)
+}
+
+pub(super) async fn remember_created_mapi_identity_record<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object_kind: MapiIdentityObjectKind,
+    canonical_id: Uuid,
+    reserved_global_counter: Option<u64>,
+    source_key: Option<Vec<u8>>,
+) -> Result<crate::store::MapiIdentityRecord>
+where
+    S: ExchangeStore,
+{
     let requests = [MapiIdentityRequest {
         object_kind,
         canonical_id,
@@ -1450,20 +1479,16 @@ where
     let records = store
         .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
         .await?;
-    let object_id = records
-        .first()
-        .map(|record| record.object_id)
+    let record = records
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
-    let source_key = records
-        .first()
-        .map(|record| record.source_key.clone())
-        .unwrap_or_default();
     crate::mapi::identity::remember_mapi_identity_with_source_key(
         canonical_id,
-        object_id,
-        Some(source_key),
+        record.object_id,
+        Some(record.source_key.clone()),
     );
-    Ok(object_id)
+    Ok(record)
 }
 
 pub(super) async fn remember_created_message_mapi_identity<S>(

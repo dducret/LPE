@@ -67,8 +67,8 @@ use crate::{
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
         MapiEventCreateOutcome, MapiFolderProfilePropertyValue, MapiIdentityLookupRecord,
         MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -1874,6 +1874,8 @@ struct FakeStore {
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     retired_mapi_identities: Arc<Mutex<Vec<MapiIdentityLookupRecord>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
+    mapi_identity_change_numbers: Arc<Mutex<HashMap<Uuid, u64>>>,
+    mapi_special_folder_aliases: Arc<Mutex<HashMap<u64, MapiSpecialFolderAlias>>>,
     mapi_event_identity_versions: Arc<Mutex<HashMap<Uuid, MapiEventVersion>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
@@ -3644,54 +3646,85 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move {
             let mut identities = self.mapi_identities.lock().unwrap();
             let mut source_keys = self.mapi_identity_source_keys.lock().unwrap();
+            let mut change_numbers = self.mapi_identity_change_numbers.lock().unwrap();
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
             if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
                 *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
             }
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {
-                let object_id = if let Some(existing) = identities.get(&request.canonical_id) {
-                    *existing
-                } else {
-                    let counter = request.reserved_global_counter.unwrap_or_else(|| {
-                        if request.object_kind == MapiIdentityObjectKind::Account {
-                            let value = *next_counter;
-                            *next_counter = next_counter.saturating_add(1);
-                            value
-                        } else {
-                            crate::mapi::identity::global_counter_from_store_id(
-                                crate::mapi::identity::legacy_migration_object_id(
-                                    &request.canonical_id,
-                                ),
-                            )
+                let (object_id, change_number) =
+                    if let Some(existing) = identities.get(&request.canonical_id) {
+                        let change_number = change_numbers
+                            .get(&request.canonical_id)
+                            .copied()
                             .unwrap_or_else(|| {
+                                crate::mapi::identity::global_counter_from_store_id(*existing)
+                                    .unwrap_or(1)
+                            });
+                        (*existing, change_number)
+                    } else {
+                        let counter = request.reserved_global_counter.unwrap_or_else(|| {
+                            if request.object_kind == MapiIdentityObjectKind::Account {
                                 let value = *next_counter;
                                 *next_counter = next_counter.saturating_add(1);
                                 value
-                            })
+                            } else {
+                                crate::mapi::identity::global_counter_from_store_id(
+                                    crate::mapi::identity::legacy_migration_object_id(
+                                        &request.canonical_id,
+                                    ),
+                                )
+                                .unwrap_or_else(|| {
+                                    let value = *next_counter;
+                                    *next_counter = next_counter.saturating_add(1);
+                                    value
+                                })
+                            }
+                        });
+                        let object_id = crate::mapi::identity::mapi_store_id(counter);
+                        if request.reserved_global_counter.is_some()
+                            && counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER
+                        {
+                            return Err(anyhow::anyhow!(
+                                "reserved MAPI global counter out of range: {counter}"
+                            ));
                         }
-                    });
-                    let object_id = crate::mapi::identity::mapi_store_id(counter);
-                    if request.reserved_global_counter.is_some()
-                        && counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER
-                    {
-                        return Err(anyhow::anyhow!(
-                            "reserved MAPI global counter out of range: {counter}"
-                        ));
-                    }
-                    if request.reserved_global_counter.is_some()
-                        && identities.values().any(|existing| *existing == object_id)
-                    {
-                        return Err(anyhow::anyhow!(
-                            "reserved MAPI object id already allocated: {object_id:#018x}"
-                        ));
-                    }
-                    identities.insert(request.canonical_id, object_id);
-                    if let Some(source_key) = request.source_key.clone() {
-                        source_keys.insert(request.canonical_id, source_key);
-                    }
-                    object_id
-                };
+                        if request.reserved_global_counter.is_some()
+                            && identities.values().any(|existing| *existing == object_id)
+                        {
+                            return Err(anyhow::anyhow!(
+                                "reserved MAPI object id already allocated: {object_id:#018x}"
+                            ));
+                        }
+                        if self
+                            .mapi_special_folder_aliases
+                            .lock()
+                            .unwrap()
+                            .contains_key(&object_id)
+                        {
+                            return Err(anyhow::anyhow!(
+                                "MAPI object identity collides with a special-folder alias"
+                            ));
+                        }
+                        identities.insert(request.canonical_id, object_id);
+                        if let Some(source_key) = request.source_key.clone() {
+                            source_keys.insert(request.canonical_id, source_key);
+                        }
+                        let change_number = if request.reserved_global_counter.is_some() {
+                            let mut value = *next_counter;
+                            *next_counter = next_counter.saturating_add(1);
+                            if value == counter {
+                                value = *next_counter;
+                                *next_counter = next_counter.saturating_add(1);
+                            }
+                            value
+                        } else {
+                            counter
+                        };
+                        change_numbers.insert(request.canonical_id, change_number);
+                        (object_id, change_number)
+                    };
                 let source_key = request
                     .source_key
                     .clone()
@@ -3701,11 +3734,39 @@ impl ExchangeStore for FakeStore {
                     object_kind: request.object_kind,
                     canonical_id: request.canonical_id,
                     object_id,
+                    change_number,
                     source_key,
                 });
             }
             Ok(records)
         })
+    }
+
+    fn fetch_mapi_special_folder_aliases<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiSpecialFolderAlias>> {
+        let aliases = self
+            .mapi_special_folder_aliases
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(aliases) })
+    }
+
+    fn upsert_mapi_special_folder_aliases<'a>(
+        &'a self,
+        _account_id: Uuid,
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, ()> {
+        let mut stored = self.mapi_special_folder_aliases.lock().unwrap();
+        for alias in aliases {
+            stored.remove(&alias.alias_folder_id);
+            stored.insert(alias.alias_folder_id, alias.clone());
+        }
+        Box::pin(async move { Ok(()) })
     }
 
     fn fetch_public_folder_trees<'a>(
@@ -9669,6 +9730,7 @@ struct StrictContentSyncStream {
 
 #[derive(Debug)]
 struct StrictContentMessageChange {
+    header_tags: Vec<u32>,
     source_key: Vec<u8>,
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
@@ -10176,6 +10238,7 @@ fn strict_finish_content_message(
         .ok_or("messageChange missing PidTagAssociated")?;
     let subject = message.subject.unwrap_or_default();
     message_changes.push(StrictContentMessageChange {
+        header_tags: message.header_tags,
         source_key,
         parent_source_key,
         change_key,

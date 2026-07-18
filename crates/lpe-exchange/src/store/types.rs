@@ -121,6 +121,7 @@ pub(crate) struct MapiIdentityRecord {
     pub(crate) object_kind: MapiIdentityObjectKind,
     pub(crate) canonical_id: Uuid,
     pub(crate) object_id: u64,
+    pub(crate) change_number: u64,
     pub(crate) source_key: Vec<u8>,
 }
 
@@ -129,6 +130,13 @@ pub(crate) struct MapiIdentityLookupRecord {
     pub(crate) object_kind: MapiIdentityObjectKind,
     pub(crate) canonical_id: Uuid,
     pub(crate) object_id: u64,
+    pub(crate) source_key: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiSpecialFolderAlias {
+    pub(crate) alias_folder_id: u64,
+    pub(crate) canonical_folder_id: u64,
     pub(crate) source_key: Vec<u8>,
 }
 

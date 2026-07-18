@@ -39,14 +39,70 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     };
-    if system_folder_display_name(&display_name) {
-        if let Some(existing) =
-            imported_hierarchy_existing_mailbox(&hierarchy_values, &display_name, mailboxes)
-        {
-            record_sync_upload_hierarchy_change(session, folder_id, mapi_folder_id(existing));
+    let source_key = hierarchy_values.iter().find_map(|(tag, value)| {
+        (*tag == PID_TAG_SOURCE_KEY)
+            .then_some(value)
+            .and_then(|value| match value {
+                MapiValue::Binary(bytes) => Some(bytes.clone()),
+                _ => None,
+            })
+    });
+    let Some((source_key, reserved_global_counter)) = source_key.and_then(|source_key| {
+        persistable_import_source_key_global_counter(&source_key)
+            .map(|counter| (source_key, counter))
+    }) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let alias_folder_id = crate::mapi::identity::mapi_store_id(reserved_global_counter);
+    let parent_folder_id = hierarchy_values
+        .iter()
+        .find_map(|(tag, value)| match (tag, value) {
+            (tag, MapiValue::Binary(bytes)) if *tag == PID_TAG_PARENT_SOURCE_KEY => {
+                crate::mapi::identity::object_id_from_source_key(bytes)
+            }
+            _ => None,
+        })
+        .map(|parent_id| session.resolve_special_folder_alias(parent_id))
+        .unwrap_or_else(|| session.resolve_special_folder_alias(folder_id));
+    if let Some(canonical_folder_id) =
+        advertised_special_folder_id_for_create(parent_folder_id, &display_name)
+    {
+        if alias_folder_id != canonical_folder_id {
+            let alias = MapiSpecialFolderAlias {
+                alias_folder_id,
+                canonical_folder_id,
+                source_key,
+            };
+            if store
+                .upsert_mapi_special_folder_aliases(principal.account_id, &[alias])
+                .await
+                .is_err()
+            {
+                responses.extend_from_slice(&rop_error_response(
+                    0x73,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            }
+            session.record_special_folder_alias(alias_folder_id, canonical_folder_id);
         }
+        record_sync_upload_hierarchy_change(session, folder_id, canonical_folder_id);
         responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
             request,
+        ));
+        return;
+    }
+    if system_folder_display_name(&display_name) {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8004_0102,
         ));
         return;
     }
@@ -87,18 +143,29 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         .await
     {
         Ok(mailbox) => {
-            match remember_created_mapi_identity(
+            let imported_identity = match remember_created_mapi_identity_record(
                 store,
                 principal,
                 MapiIdentityObjectKind::Mailbox,
                 mailbox.id,
-                None,
-                None,
+                Some(reserved_global_counter),
+                Some(source_key),
             )
             .await
             {
-                Ok(_) => {}
+                Ok(identity) => identity,
                 Err(_) => {
+                    let _ = store
+                        .destroy_jmap_mailbox(
+                            principal.account_id,
+                            mailbox.id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-sync-import-hierarchy-change-rollback".to_string(),
+                                subject: display_name.clone(),
+                            },
+                        )
+                        .await;
                     responses.extend_from_slice(&rop_error_response(
                         0x73,
                         request.response_handle_index(),
@@ -107,7 +174,12 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     return;
                 }
             };
-            record_sync_upload_hierarchy_change(session, folder_id, mapi_folder_id(&mailbox));
+            record_sync_upload_hierarchy_change_with_change_number(
+                session,
+                folder_id,
+                imported_identity.object_id,
+                imported_identity.change_number,
+            );
             responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
                 request,
             ));

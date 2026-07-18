@@ -19,7 +19,7 @@ use crate::mapi::outlook_startup::{
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
     MapiIdentityObjectKind, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
-    UpsertMapiNavigationShortcutInput,
+    MapiSpecialFolderAlias, UpsertMapiNavigationShortcutInput,
 };
 use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::current_windows_filetime;
@@ -461,6 +461,17 @@ where
         );
     }
 
+    if let Err(error) =
+        refresh_persisted_special_folder_aliases(store, principal, &mut session).await
+    {
+        store_session(session_id.clone(), session);
+        return execute_transport_failure_response(
+            request_id,
+            1,
+            &format!("failed to load persisted MAPI special-folder aliases: {error:#}"),
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
     let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
     let mut snapshot = match load_mapi_store_for_access_plan(

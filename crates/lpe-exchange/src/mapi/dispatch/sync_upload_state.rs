@@ -323,12 +323,43 @@ pub(super) fn append_upload_state_stream_end_response(
             client_state_uploaded_bytes,
             client_state_uploaded_marker_mask,
             sync_type,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
             ..
         }) => {
             let uploaded_bytes = state_upload_buffer.len();
             let property_tag = state_upload_property_tag.take().unwrap_or_default();
             if uploaded_bytes > 0 {
-                mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
+                let idset_given = matches!(property_tag, 0x4017_0003 | 0x4017_0102);
+                if !idset_given {
+                    mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
+                }
+                *state = mapi_mailstore::upload_sync_state_stream_with_uploaded_property(
+                    *sync_type,
+                    state,
+                    property_tag,
+                    state_upload_buffer,
+                );
+                if !idset_given {
+                    if let Ok(counters) =
+                        mapi_mailstore::replguid_globset_counters(state_upload_buffer)
+                    {
+                        let values = match property_tag {
+                            0x6796_0102 => Some(&mut *uploaded_normal_change_numbers),
+                            0x67DA_0102 => Some(&mut *uploaded_fai_change_numbers),
+                            0x67D2_0102 => Some(&mut *uploaded_read_change_numbers),
+                            _ => None,
+                        };
+                        if let Some(values) = values {
+                            for counter in counters {
+                                if !values.contains(&counter) {
+                                    values.push(counter);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             state_upload_buffer.clear();
             *client_state_uploaded_bytes =

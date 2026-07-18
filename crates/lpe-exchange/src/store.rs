@@ -63,6 +63,17 @@ pub trait ExchangeStore: AccountAuthStore {
         object_ids: &'a [u64],
     ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>>;
 
+    fn fetch_mapi_special_folder_aliases<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiSpecialFolderAlias>>;
+
+    fn upsert_mapi_special_folder_aliases<'a>(
+        &'a self,
+        account_id: Uuid,
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_mapi_object_ids_for_deleted_changes<'a>(
         &'a self,
         account_id: Uuid,

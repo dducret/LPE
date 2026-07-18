@@ -72,6 +72,7 @@ impl Storage {
             "calendar_events",
             "mapi_calendar_event_identity_moves",
             "mapi_object_identities",
+            "mapi_special_folder_aliases",
             "mapi_named_properties",
             "mapi_custom_property_values",
             "mapi_folder_profile_property_values",

@@ -954,10 +954,19 @@ impl MapiSession {
     }
 
     pub(in crate::mapi) fn record_special_folder_alias(&mut self, alias_id: u64, folder_id: u64) {
-        if alias_id == folder_id || self.special_folder_aliases.len() >= 32 {
+        if alias_id == folder_id {
             return;
         }
         self.special_folder_aliases.insert(alias_id, folder_id);
+    }
+
+    pub(in crate::mapi) fn replace_special_folder_aliases(
+        &mut self,
+        aliases: impl IntoIterator<Item = (u64, u64)>,
+    ) {
+        for (alias_id, folder_id) in aliases {
+            self.record_special_folder_alias(alias_id, folder_id);
+        }
     }
 
     pub(in crate::mapi) fn remember_search_folder_definition(

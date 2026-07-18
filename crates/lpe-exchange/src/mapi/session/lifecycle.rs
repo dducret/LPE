@@ -173,7 +173,7 @@ where
 {
     let session_id = rpc_context_session_id(context_handle)
         .ok_or_else(|| anyhow!("invalid RPC/HTTP EMSMDB context handle"))?;
-    let Some(session) = get_session(&session_id) else {
+    let Some(mut session) = get_session(&session_id) else {
         return Err(anyhow!("RPC/HTTP EMSMDB session context not found"));
     };
     if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
@@ -183,6 +183,7 @@ where
         return Err(anyhow!("RPC/HTTP EMSMDB ROP payload is empty"));
     }
 
+    refresh_persisted_special_folder_aliases(store, principal, &mut session).await?;
     let access_plan = plan_mapi_store_access(&session, rop_buffer);
     let mut snapshot =
         load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await?;
@@ -194,6 +195,7 @@ where
     if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
         return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
     }
+    refresh_persisted_special_folder_aliases(store, principal, &mut session).await?;
     let rop_buffer = execute_rops(
         store,
         principal,
@@ -215,6 +217,20 @@ where
     .await;
     store_session(session_id, session);
     Ok(rop_buffer)
+}
+
+pub(in crate::mapi) async fn refresh_persisted_special_folder_aliases<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+) -> Result<()> {
+    let aliases = store
+        .fetch_mapi_special_folder_aliases(principal.account_id)
+        .await?;
+    session.replace_special_folder_aliases(aliases.into_iter().map(|alias| {
+        (alias.alias_folder_id, alias.canonical_folder_id)
+    }));
+    Ok(())
 }
 
 pub(in crate::mapi) fn rpc_context_session_id(context_handle: &[u8]) -> Option<String> {

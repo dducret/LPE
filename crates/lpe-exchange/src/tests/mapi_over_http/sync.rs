@@ -1620,7 +1620,7 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_named
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x09, 0x00, // PropertyTagCount
     ]);
     for tag in [
@@ -1664,6 +1664,22 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_named
         .message_changes
         .iter()
         .all(|message| message.associated));
+    // [MS-OXCFXICS] sections 2.2.3.2.1.1.1, 2.2.4.3.14, and
+    // 3.2.5.9.1.1: 0x0000000d does not request PidTagMessageSize.
+    for message in &stream.message_changes {
+        assert_eq!(
+            message.header_tags,
+            [
+                PID_TAG_SOURCE_KEY,
+                PID_TAG_LAST_MODIFICATION_TIME,
+                PID_TAG_CHANGE_KEY,
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                PID_TAG_ASSOCIATED,
+                PID_TAG_MID,
+                PID_TAG_CHANGE_NUMBER,
+            ]
+        );
+    }
     assert!(stream
         .message_changes
         .iter()
@@ -2724,7 +2740,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
     ]);
     rops.extend_from_slice(&0xA139u16.to_le_bytes()); // Unicode | ReadState | FAI | Normal | NoForeignIdentifiers | BestBody | Progress
     rops.extend_from_slice(&0u16.to_le_bytes()); // RestrictionDataSize
-    rops.extend_from_slice(&0x0Du32.to_le_bytes()); // SynchronizationExtraFlags: Eid | CN | MessageSize
+    rops.extend_from_slice(&0x0Du32.to_le_bytes()); // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
     rops.extend_from_slice(&0u16.to_le_bytes()); // PropertyTagCount
     rops.extend_from_slice(&[
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
@@ -7006,7 +7022,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x10, 0x00, // content sync, FAI only
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x02, 0x00, // PropertyTagCount
     ]);
     sync_rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
@@ -7378,7 +7394,7 @@ async fn mapi_over_http_inbox_fai_sync_exports_folder_local_default_view() {
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x10, 0x00, // content sync, FAI only
         0x00, 0x00, // RestrictionDataSize
-        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
@@ -9714,8 +9730,14 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
         .lock()
         .unwrap()
         .insert(parent_id, parent_folder_id);
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(FakeStore::account().account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let imported_folder_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x200);
+    let imported_source_key = mapi_mailstore::source_key_for_store_id(imported_folder_id);
     let created_mailboxes = store.created_mailboxes.clone();
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -9737,11 +9759,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
         0x65E1_0102,
         &mapi_mailstore::source_key_for_store_id(parent_folder_id),
     );
-    append_mapi_binary_property(
-        &mut hierarchy_values,
-        0x65E0_0102,
-        b"local-folder-source-key",
-    );
+    append_mapi_binary_property(&mut hierarchy_values, 0x65E0_0102, &imported_source_key);
     append_mapi_i64_property(&mut hierarchy_values, 0x3008_0040, 0);
     append_mapi_binary_property(&mut hierarchy_values, 0x65E2_0102, b"change-key");
     append_mapi_binary_property(&mut hierarchy_values, 0x65E3_0102, b"pcl");
@@ -9756,17 +9774,22 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
-        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x7E, 0x00, 0x01, 0x02, 0x00, // RopSynchronizationOpenCollector, hierarchy
         0x73, 0x00, 0x02, // RopSynchronizationImportHierarchyChange
     ]);
     rops.extend_from_slice(&6u16.to_le_bytes());
     rops.extend_from_slice(&hierarchy_values);
     rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -9775,6 +9798,39 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x73, 0x02, 0, 0, 0, 0]));
+    let created_mailbox_id = store
+        .mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|mailbox| mailbox.name == "Imported Sync Folder")
+        .unwrap()
+        .id;
+    let imported_change_number =
+        store.mapi_identity_change_numbers.lock().unwrap()[&created_mailbox_id];
+    assert!(
+        imported_change_number >= first_reserved_counter + 0x1_0000,
+        "the imported folder must receive a server CN outside Outlook's reserved FID range"
+    );
+    let state_chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(state_chunks.len(), 1);
+    let cnset_seen = mapi_binary_property_value(&state_chunks[0].1, META_TAG_CNSET_SEEN);
+    assert!(
+        strict_replguid_globset_contains_counter(
+            cnset_seen,
+            &globcnt_bytes(imported_change_number),
+        )
+        .unwrap(),
+        "ImportHierarchyChange must add a newly allocated server CN"
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            cnset_seen,
+            &globcnt_bytes(first_reserved_counter + 0x200),
+        )
+        .unwrap(),
+        "the client-assigned FID must not be reused as a change number"
+    );
     assert_eq!(
         created_mailboxes.lock().unwrap()[0].name,
         "Imported Sync Folder"
@@ -9782,6 +9838,15 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
     assert_eq!(
         created_mailboxes.lock().unwrap()[0].parent_id,
         Some(parent_id)
+    );
+    assert_eq!(
+        store.mapi_identities.lock().unwrap()[&created_mailbox_id],
+        imported_folder_id,
+        "ImportHierarchyChange must preserve the FID assigned from the reserved local replica range"
+    );
+    assert_eq!(
+        store.mapi_identity_source_keys.lock().unwrap()[&created_mailbox_id],
+        imported_source_key
     );
 }
 
@@ -9803,6 +9868,14 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
         .lock()
         .unwrap()
         .insert(parent_id, parent_folder_id);
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(FakeStore::account().account_id, 0x0001_0000)
+        .await
+        .unwrap();
+    let imported_global_counter = first_reserved_counter + 0x200;
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(imported_global_counter),
+    );
     let service = ExchangeService::new(store.clone());
     let created_mailboxes = store.created_mailboxes.clone();
     let connect = service
@@ -9824,7 +9897,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
     append_mapi_binary_property(
         &mut hierarchy_values,
         PID_TAG_SOURCE_KEY,
-        b"ms-oxcfxics-4-1-1-folder",
+        &imported_source_key,
     );
     append_mapi_i64_property(&mut hierarchy_values, PID_TAG_LAST_MODIFICATION_TIME, 0);
     append_mapi_binary_property(&mut hierarchy_values, PID_TAG_CHANGE_KEY, b"change-key");
@@ -9845,18 +9918,27 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
         PID_TAG_DISPLAY_NAME_W,
         "MS-OXCFXICS 4.1.1 Folder",
     );
+    let uploaded_change_number = 5;
+    let uploaded_cnset_seen = strict_test_replguid_globset(&[uploaded_change_number]);
 
     let mut upload_rops = Vec::new();
     append_rop_open_folder(&mut upload_rops, 0, 1, test_mapi_folder_id(5));
     upload_rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
     ]);
-    upload_rops.push(0x02); // hierarchy sync
+    // [MS-OXCFXICS] section 2.2.3.2.4.1.1: IsContentsCollector is a
+    // PtypBoolean; 0x00 selects a hierarchy upload collector.
+    upload_rops.push(0x00);
     upload_rops.extend_from_slice(&[
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
     ]);
     upload_rops.extend_from_slice(&META_TAG_CNSET_SEEN.to_le_bytes());
-    upload_rops.extend_from_slice(&0u32.to_le_bytes());
+    upload_rops.extend_from_slice(&(uploaded_cnset_seen.len() as u32).to_le_bytes());
+    upload_rops.extend_from_slice(&[
+        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
+    ]);
+    upload_rops.extend_from_slice(&(uploaded_cnset_seen.len() as u32).to_le_bytes());
+    upload_rops.extend_from_slice(&uploaded_cnset_seen);
     upload_rops.extend_from_slice(&[
         0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
         0x73, 0x00, 0x02, // RopSynchronizationImportHierarchyChange
@@ -9903,14 +9985,49 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
         &upload_state_chunks[0].1,
         &FX_INCR_SYNC_STATE_END.to_le_bytes()
     ));
-    assert!(contains_bytes(
-        &upload_state_chunks[0].1,
-        &META_TAG_IDSET_GIVEN.to_le_bytes()
-    ));
+    assert!(
+        !contains_bytes(
+            &upload_state_chunks[0].1,
+            &META_TAG_IDSET_GIVEN.to_le_bytes()
+        ),
+        "[MS-OXCFXICS] section 3.2.5.2.1 forbids returning MetaTagIdsetGiven from upload state"
+    );
     assert!(contains_bytes(
         &upload_state_chunks[0].1,
         &META_TAG_CNSET_SEEN.to_le_bytes()
     ));
+    let returned_cnset_seen =
+        mapi_binary_property_value(&upload_state_chunks[0].1, META_TAG_CNSET_SEEN);
+    assert!(
+        strict_replguid_globset_contains_counter(
+            returned_cnset_seen,
+            &globcnt_bytes(uploaded_change_number),
+        )
+        .unwrap(),
+        "GetTransferState discarded the CnsetSeen uploaded before ImportHierarchyChange"
+    );
+    let imported_mailbox_id = store
+        .mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|mailbox| mailbox.name == "MS-OXCFXICS 4.1.1 Folder")
+        .unwrap()
+        .id;
+    let imported_change_number = *store
+        .mapi_identity_change_numbers
+        .lock()
+        .unwrap()
+        .get(&imported_mailbox_id)
+        .unwrap();
+    assert!(
+        strict_replguid_globset_contains_counter(
+            returned_cnset_seen,
+            &globcnt_bytes(imported_change_number),
+        )
+        .unwrap(),
+        "GetTransferState omitted the change number created by ImportHierarchyChange"
+    );
     let created = created_mailboxes.lock().unwrap();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].name, "MS-OXCFXICS 4.1.1 Folder");
@@ -9952,7 +10069,8 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_2_hierarchy_delete_returns_transf
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
     ]);
-    rops.push(0x02); // hierarchy sync
+    // [MS-OXCFXICS] section 2.2.3.2.4.1.1: 0x00 selects hierarchy.
+    rops.push(0x00);
     rops.extend_from_slice(&[
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
     ]);
@@ -10033,7 +10151,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
-        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x7E, 0x00, 0x01, 0x02, 0x00, // RopSynchronizationOpenCollector, hierarchy
         0x73, 0x00, 0x02, // RopSynchronizationImportHierarchyChange
     ]);
     rops.extend_from_slice(&3u16.to_le_bytes());
@@ -10052,6 +10170,108 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x73, 0x02, 0, 0, 0, 0]));
+    assert!(created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(FakeStore::account().account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x204);
+    let alias_source_key = crate::mapi::identity::source_key_for_object_id(alias_id);
+    let created_mailboxes = store.created_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let first_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut first_headers = mapi_headers("Execute");
+    first_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&first_connect)).unwrap(),
+    );
+    let mut hierarchy_values = Vec::new();
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4)),
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_SOURCE_KEY,
+        &alias_source_key,
+    );
+    append_mapi_utf16_property(
+        &mut hierarchy_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "Junk E-mail",
+    );
+    let mut import_rops = Vec::new();
+    append_rop_open_folder(&mut import_rops, 0, 1, test_mapi_folder_id(4));
+    import_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x00, // RopSynchronizationOpenCollector, hierarchy
+        0x73, 0x00, 0x02, // RopSynchronizationImportHierarchyChange
+    ]);
+    import_rops.extend_from_slice(&3u16.to_le_bytes());
+    import_rops.extend_from_slice(&hierarchy_values);
+    import_rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_utf16_property(
+        &mut import_rops,
+        PID_TAG_DISPLAY_NAME_W,
+        "Junk E-mail",
+    );
+    let import_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &first_headers,
+            &execute_body(&rop_buffer(&import_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let import_response_rops = response_rops_from_execute_response(import_response).await;
+    assert!(contains_bytes(
+        &import_response_rops,
+        &[0x73, 0x02, 0, 0, 0, 0]
+    ));
+
+    let second_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut second_headers = mapi_headers("Execute");
+    second_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&second_connect)).unwrap(),
+    );
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, alias_id);
+    append_rop_get_properties_specific(&mut open_rops, 1, &[PID_TAG_DISPLAY_NAME_W]);
+    let open_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &second_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let open_response_rops = response_rops_from_execute_response(open_response).await;
+    assert!(
+        contains_bytes(&open_response_rops, &[0x02, 0x01, 0, 0, 0, 0]),
+        "a second EMSMDB session must resolve the FID reconciled by the first session: {open_response_rops:02x?}"
+    );
+    assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 

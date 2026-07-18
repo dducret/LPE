@@ -5,7 +5,7 @@ use crate::mapi::properties::{
     canonical_property_storage_tag, parse_mapi_property_value, MapiNamedProperty,
     MapiNamedPropertyKind, MapiRestriction, MapiSortOrder, MapiValue, PID_TAG_SOURCE_KEY,
 };
-use crate::mapi::wire::RopId;
+use crate::mapi::wire::{MapiSyncType, RopId};
 use anyhow::{anyhow, Result};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -242,6 +242,17 @@ impl RopRequest {
 
     pub(in crate::mapi) fn sync_type(&self) -> u8 {
         self.payload.first().copied().unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn collector_sync_type(&self) -> u8 {
+        // [MS-OXCFXICS] section 2.2.3.2.4.1.1: unlike
+        // RopSynchronizationConfigure, OpenCollector carries the Boolean
+        // IsContentsCollector rather than a SynchronizationType value.
+        if self.payload.first().copied().unwrap_or(0) == 0 {
+            MapiSyncType::Hierarchy.as_u8()
+        } else {
+            MapiSyncType::Contents.as_u8()
+        }
     }
 
     pub(in crate::mapi) fn sync_send_options(&self) -> u8 {

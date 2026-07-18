@@ -150,8 +150,10 @@ const SYNC_FLAG_UNICODE: u16 = 0x0001;
 const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
 const SYNC_FLAG_PROGRESS: u16 = 0x8000;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
+// [MS-OXCFXICS] section 2.2.3.2.1.1.1: MessageSize is bit 0x02;
+// bit 0x08 is OrderByDeliveryTime.
+const SYNC_EXTRA_FLAG_MESSAGE_SIZE: u32 = 0x0000_0002;
 const SYNC_EXTRA_FLAG_CHANGE_NUMBER: u32 = 0x0000_0004;
-const SYNC_EXTRA_FLAG_MESSAGE_SIZE: u32 = 0x0000_0008;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_BITMASK_COMMAND: u8 = 0x42;
 const GLOBSET_POP_COMMAND: u8 = 0x50;
@@ -370,6 +372,61 @@ pub(crate) fn sync_state_stream_with_uploaded_property(
     )
 }
 
+pub(crate) fn upload_sync_state_stream_with_uploaded_property(
+    sync_type: u8,
+    current_state: &[u8],
+    property_tag: u32,
+    value: &[u8],
+) -> Vec<u8> {
+    if !value.is_empty() && replguid_globset_counters(value).is_err() {
+        return current_state.to_vec();
+    }
+    let normalized_property_tag = match property_tag {
+        META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => META_TAG_IDSET_GIVEN,
+        tag => tag,
+    };
+    // [MS-OXCFXICS] section 3.2.5.2.1: MetaTagIdsetGiven is ignored
+    // during upload and is not included in the final upload state.
+    if normalized_property_tag == META_TAG_IDSET_GIVEN {
+        return current_state.to_vec();
+    }
+    let cnset_seen = if normalized_property_tag == META_TAG_CNSET_SEEN {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_SEEN).unwrap_or_default()
+    };
+    let cnset_seen_fai = if normalized_property_tag == META_TAG_CNSET_SEEN_FAI {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_SEEN_FAI).unwrap_or_default()
+    };
+    let cnset_read = if normalized_property_tag == META_TAG_CNSET_READ {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_READ).unwrap_or_default()
+    };
+    upload_sync_state_stream_from_raw_properties(
+        sync_type,
+        &cnset_seen,
+        &cnset_seen_fai,
+        &cnset_read,
+    )
+}
+
+pub(crate) fn upload_sync_state_stream_from_sets(
+    sync_type: u8,
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<u8> {
+    upload_sync_state_stream_from_raw_properties(
+        sync_type,
+        &replguid_idset_from_counters(normal_change_numbers),
+        &replguid_idset_from_counters(fai_change_numbers),
+        &replguid_idset_from_counters(read_change_numbers),
+    )
+}
+
 fn final_content_sync_state_stream(
     object_ids: &[u64],
     normal_change_numbers: &[u64],
@@ -378,20 +435,6 @@ fn final_content_sync_state_stream(
 ) -> Vec<u8> {
     final_sync_state_stream_with_cnsets(
         SYNC_TYPE_CONTENTS,
-        object_ids,
-        normal_change_numbers,
-        fai_change_numbers,
-        read_change_numbers,
-    )
-}
-
-pub(crate) fn content_sync_state_stream_from_sets(
-    object_ids: &[u64],
-    normal_change_numbers: &[u64],
-    fai_change_numbers: &[u64],
-    read_change_numbers: &[u64],
-) -> Vec<u8> {
-    final_content_sync_state_stream(
         object_ids,
         normal_change_numbers,
         fai_change_numbers,
@@ -409,6 +452,23 @@ fn sync_state_stream_from_raw_properties(
     let mut token = Vec::new();
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
     write_binary_property(&mut token, META_TAG_IDSET_GIVEN, idset_given);
+    write_binary_property(&mut token, META_TAG_CNSET_SEEN, cnset_seen);
+    if sync_type == SYNC_TYPE_CONTENTS {
+        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, cnset_seen_fai);
+        write_binary_property(&mut token, META_TAG_CNSET_READ, cnset_read);
+    }
+    write_u32(&mut token, INCR_SYNC_STATE_END);
+    token
+}
+
+fn upload_sync_state_stream_from_raw_properties(
+    sync_type: u8,
+    cnset_seen: &[u8],
+    cnset_seen_fai: &[u8],
+    cnset_read: &[u8],
+) -> Vec<u8> {
+    let mut token = Vec::new();
+    write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, cnset_seen);
     if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, cnset_seen_fai);
