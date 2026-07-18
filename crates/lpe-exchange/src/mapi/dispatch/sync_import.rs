@@ -1110,19 +1110,6 @@ pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, f
     }
 }
 
-pub(super) fn record_sync_upload_hierarchy_change(
-    session: &mut MapiSession,
-    folder_id: u64,
-    object_id: u64,
-) {
-    record_sync_upload_hierarchy_change_with_change_number(
-        session,
-        folder_id,
-        object_id,
-        mapi_mailstore::change_number_for_store_id(object_id),
-    );
-}
-
 pub(super) fn record_sync_upload_hierarchy_change_with_change_number(
     session: &mut MapiSession,
     folder_id: u64,

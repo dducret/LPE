@@ -2193,16 +2193,15 @@ CREATE TABLE mapi_special_folder_aliases (
     alias_folder_id BIGINT NOT NULL CHECK (alias_folder_id >= 2818049 AND alias_folder_id < 9223369837831520257 AND (alias_folder_id & 65535) = 1),
     canonical_folder_id BIGINT NOT NULL CHECK (canonical_folder_id > 0 AND canonical_folder_id <= 2752513 AND (canonical_folder_id & 65535) = 1),
     source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22),
+    mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number >= 43 AND mapi_change_number < 140737454800896),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, alias_folder_id),
     UNIQUE (tenant_id, account_id, source_key),
+    UNIQUE (tenant_id, account_id, mapi_change_number),
     CHECK (alias_folder_id <> canonical_folder_id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
-
-CREATE INDEX mapi_special_folder_aliases_canonical_idx
-    ON mapi_special_folder_aliases (tenant_id, account_id, canonical_folder_id);
 
 CREATE TABLE mapi_calendar_event_identity_moves (
     tenant_id UUID NOT NULL,

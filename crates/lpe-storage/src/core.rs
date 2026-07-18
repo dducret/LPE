@@ -144,6 +144,141 @@ impl Storage {
             );
         }
 
+        let mut invalid_alias_columns = Vec::new();
+        for (column, data_type) in [
+            ("tenant_id", "uuid"),
+            ("account_id", "uuid"),
+            ("alias_folder_id", "bigint"),
+            ("canonical_folder_id", "bigint"),
+            ("source_key", "bytea"),
+            ("mapi_change_number", "bigint"),
+        ] {
+            let present = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'mapi_special_folder_aliases'
+                      AND column_name = $2
+                      AND data_type = $3
+                      AND is_nullable = 'NO'
+                )
+                "#,
+            )
+            .bind(schema_name)
+            .bind(column)
+            .bind(data_type)
+            .fetch_one(&self.pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "unable to inspect required column {schema_name}.mapi_special_folder_aliases.{column}"
+                )
+            })?;
+            if !present {
+                invalid_alias_columns.push(format!("{column} {data_type} NOT NULL"));
+            }
+        }
+        if !invalid_alias_columns.is_empty() {
+            bail!(
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_special_folder_aliases; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                invalid_alias_columns.join(", ")
+            );
+        }
+
+        let mapi_alias_constraints = sqlx::query_as::<_, (String, String)>(
+            r#"
+            SELECT constraint_row.contype::text, pg_get_constraintdef(constraint_row.oid)
+            FROM pg_constraint constraint_row
+            JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+            JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+            WHERE namespace_row.nspname = $1
+              AND table_row.relname = 'mapi_special_folder_aliases'
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| {
+            format!(
+                "unable to inspect MAPI special-folder alias constraints in schema {schema_name}"
+            )
+        })?;
+        let has_alias_constraint = |kind: &str, fragments: &[&str]| {
+            mapi_alias_constraints
+                .iter()
+                .any(|(actual_kind, definition)| {
+                    let definition = definition.replace('\'', "");
+                    actual_kind == kind
+                        && fragments
+                            .iter()
+                            .all(|fragment| definition.contains(fragment))
+                })
+        };
+
+        let mapi_alias_checks_are_current =
+            has_alias_constraint(
+                "c",
+                &[
+                    "alias_folder_id >= 2818049",
+                    "alias_folder_id < 9223369837831520257",
+                    "65535",
+                ],
+            ) && has_alias_constraint(
+                "c",
+                &[
+                    "canonical_folder_id > 0",
+                    "canonical_folder_id <= 2752513",
+                    "65535",
+                ],
+            ) && has_alias_constraint("c", &["octet_length(source_key) = 22"])
+                && has_alias_constraint(
+                    "c",
+                    &[
+                        "mapi_change_number >= 43",
+                        "mapi_change_number < 140737454800896",
+                    ],
+                )
+                && has_alias_constraint("c", &["alias_folder_id <> canonical_folder_id"]);
+        if !mapi_alias_checks_are_current {
+            bail!(
+                "required MAPI special-folder alias CHECK constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        let mapi_alias_unique_constraints_are_current =
+            has_alias_constraint("u", &["UNIQUE (tenant_id, account_id, source_key)"])
+                && has_alias_constraint(
+                    "u",
+                    &["UNIQUE (tenant_id, account_id, mapi_change_number)"],
+                )
+                && !mapi_alias_constraints.iter().any(|(kind, definition)| {
+                    kind == "u" && definition.contains("canonical_folder_id")
+                });
+        if !mapi_alias_unique_constraints_are_current {
+            bail!(
+                "required MAPI special-folder alias UNIQUE constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        let mapi_alias_scope_constraints_are_current = has_alias_constraint(
+            "p",
+            &["PRIMARY KEY (tenant_id, account_id, alias_folder_id)"],
+        ) && has_alias_constraint(
+            "f",
+            &[
+                "FOREIGN KEY (tenant_id, account_id)",
+                "REFERENCES accounts(tenant_id, id)",
+                "ON DELETE CASCADE",
+            ],
+        );
+        if !mapi_alias_scope_constraints_are_current {
+            bail!(
+                "required MAPI special-folder alias primary key or account foreign key is missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
         let mapi_change_key_constraint_count = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*)
@@ -269,7 +404,7 @@ mod tests {
     const SCHEMA_SQL: &str = include_str!("../sql/schema.sql");
 
     #[tokio::test]
-    async fn startup_rejects_tagged_schema_without_required_mapi_identity_shape() -> Result<()> {
+    async fn startup_rejects_tagged_schema_without_required_mapi_shape() -> Result<()> {
         let Some(database_url) = env::var("TEST_DATABASE_URL")
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -308,6 +443,112 @@ mod tests {
                 .execute(&pool)
                 .await
                 .context("apply crates/lpe-storage/sql/schema.sql")?;
+
+            sqlx::query(
+                r#"
+                ALTER TABLE mapi_special_folder_aliases
+                    ALTER COLUMN mapi_change_number DROP NOT NULL
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("make the special-folder alias CN nullable")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject an incompatible special-folder alias CN");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("mapi_special_folder_aliases")
+                    && message.contains("mapi_change_number bigint NOT NULL"),
+                "startup rejection must identify the invalid special-folder alias CN: {message}"
+            );
+            sqlx::query(
+                r#"
+                ALTER TABLE mapi_special_folder_aliases
+                    ALTER COLUMN mapi_change_number SET NOT NULL
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the special-folder alias CN nullability")?;
+
+            sqlx::query(
+                r#"
+                ALTER TABLE mapi_special_folder_aliases
+                    DROP CONSTRAINT mapi_special_folder_aliases_alias_folder_id_check
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("remove the special-folder alias FID range check")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a missing special-folder alias CHECK");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("MAPI special-folder alias CHECK constraints"),
+                "startup rejection must identify the missing special-folder alias CHECK: {message}"
+            );
+            sqlx::query(
+                r#"
+                ALTER TABLE mapi_special_folder_aliases
+                    ADD CHECK (
+                        alias_folder_id >= 2818049
+                        AND alias_folder_id < 9223369837831520257
+                        AND (alias_folder_id & 65535) = 1
+                    )
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the special-folder alias FID range check")?;
+
+            sqlx::raw_sql(
+                r#"
+                DO $$
+                DECLARE
+                    constraint_name TEXT;
+                BEGIN
+                    FOR constraint_name IN
+                        SELECT conname
+                        FROM pg_constraint
+                        WHERE conrelid = 'mapi_special_folder_aliases'::regclass
+                          AND contype = 'u'
+                    LOOP
+                        EXECUTE format(
+                            'ALTER TABLE mapi_special_folder_aliases DROP CONSTRAINT %I',
+                            constraint_name
+                        );
+                    END LOOP;
+                END;
+                $$;
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("remove the special-folder alias uniqueness constraints")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject missing special-folder alias UNIQUE constraints");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("MAPI special-folder alias UNIQUE constraints"),
+                "startup rejection must identify missing special-folder alias UNIQUE constraints: {message}"
+            );
+            sqlx::raw_sql(
+                r#"
+                ALTER TABLE mapi_special_folder_aliases
+                    ADD UNIQUE (tenant_id, account_id, source_key),
+                    ADD UNIQUE (tenant_id, account_id, mapi_change_number)
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the special-folder alias uniqueness constraints")?;
+
             sqlx::raw_sql(
                 r#"
                 ALTER TABLE mapi_object_identities

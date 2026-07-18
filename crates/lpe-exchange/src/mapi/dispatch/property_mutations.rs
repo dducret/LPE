@@ -203,38 +203,52 @@ where
                     responses.extend_from_slice(&response);
                     return PropertyMutationFlow::Continue;
                 }
-                record_default_folder_entry_id_aliases(session, object.as_ref(), &values);
-                let values = default_folder_identification_safe_property_values(
-                    principal,
-                    object.as_ref(),
-                    values,
-                );
-                let result = apply_mapi_property_values(
-                    input_object_mut(session, handle_slots, request),
-                    values.clone(),
-                );
-                if result.is_ok() {
-                    if let Some(MapiObject::Folder { folder_id, .. }) = object {
-                        if persist_profile_folder_property_values(
-                            store, principal, folder_id, &values,
-                        )
-                        .await
-                        .is_err()
-                        {
-                            tracing::warn!(
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                mailbox = %principal.email,
-                                folder_id = format_args!("0x{folder_id:016x}"),
-                                property_tags = %format_debug_property_tags(
-                                    &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
-                                ),
-                                "accepted MAPI folder property write but failed to persist profile state"
+                let aliases = default_folder_entry_id_aliases(object.as_ref(), &values);
+                match store
+                    .upsert_mapi_special_folder_aliases(principal.account_id, &aliases)
+                    .await
+                {
+                    Err(error) => Err(error),
+                    Ok(_change_numbers) => {
+                        for alias in aliases {
+                            session.record_special_folder_alias(
+                                alias.alias_folder_id,
+                                alias.canonical_folder_id,
                             );
                         }
+                        let values = default_folder_identification_safe_property_values(
+                            principal,
+                            object.as_ref(),
+                            values,
+                        );
+                        let result = apply_mapi_property_values(
+                            input_object_mut(session, handle_slots, request),
+                            values.clone(),
+                        );
+                        if result.is_ok() {
+                            if let Some(MapiObject::Folder { folder_id, .. }) = object {
+                                if persist_profile_folder_property_values(
+                                    store, principal, folder_id, &values,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    tracing::warn!(
+                                        adapter = "mapi",
+                                        endpoint = "emsmdb",
+                                        mailbox = %principal.email,
+                                        folder_id = format_args!("0x{folder_id:016x}"),
+                                        property_tags = %format_debug_property_tags(
+                                            &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
+                                        ),
+                                        "accepted MAPI folder property write but failed to persist profile state"
+                                    );
+                                }
+                            }
+                        }
+                        result
                     }
                 }
-                result
             }
             _object => {
                 apply_mapi_property_values(input_object_mut(session, handle_slots, request), values)

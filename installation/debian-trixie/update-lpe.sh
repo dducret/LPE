@@ -295,6 +295,17 @@ if [[ "${MAPI_IDENTITY_KEY_CONSTRAINT_COUNT}" != "3" \
   echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
+MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK="$(
+  mapi_special_folder_alias_shape_ok "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect MAPI special-folder alias schema." >&2
+  exit 1
+}
+if [[ "${MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK}" != "1" ]]; then
+  echo "MAPI special-folder alias schema is incomplete despite schema label ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"

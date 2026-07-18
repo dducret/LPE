@@ -19,11 +19,12 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
         }) => Some(*folder_id),
         _ => None,
     };
-    if let Some(collector_folder_id) = hierarchy_collector_folder_id {
+    if hierarchy_collector_folder_id.is_some() {
         let mut partial_completion = false;
         for folder_id in request.import_delete_message_ids() {
             let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
-                partial_completion = true;
+                // [MS-OXCFXICS] section 3.2.5.9.4.5: an object that was
+                // already deleted MUST be ignored.
                 continue;
             };
             if mailbox.role != "custom" {
@@ -46,7 +47,6 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
                 partial_completion = true;
                 continue;
             }
-            record_sync_upload_hierarchy_change(session, collector_folder_id, folder_id);
         }
         responses.extend_from_slice(&rop_partial_completion_response(
             0x74,
@@ -116,7 +116,8 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
             continue;
         }
         let Some(email) = email else {
-            partial_completion = true;
+            // [MS-OXCFXICS] section 3.2.5.9.4.5: a retry after the object
+            // disappeared from this folder is a successful no-op.
             continue;
         };
         let result = if hard_delete

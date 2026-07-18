@@ -1080,6 +1080,32 @@ fn folder_set_property_problems_accepts_additional_ren_entry_ids_ex_on_root_and_
 }
 
 #[test]
+fn folder_set_property_problems_accepts_a_reserved_default_folder_alias_candidate() {
+    let root = MapiObject::Folder {
+        folder_id: ROOT_FOLDER_ID,
+        properties: std::collections::HashMap::new(),
+    };
+    let alias_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x200,
+    );
+    let alias_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        test_principal().account_id,
+        alias_id,
+    )
+    .unwrap();
+
+    assert!(folder_set_property_problems(
+        Some(&root),
+        &[],
+        &[(
+            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+            MapiValue::Binary(alias_entry_id),
+        )],
+    )
+    .is_empty());
+}
+
+#[test]
 fn folder_set_property_problems_accepts_hidden_write_on_quick_step_folder() {
     let quick_step = JmapMailbox {
         id: Uuid::parse_str("f54d192a-3149-4ff1-bde7-a8dac219c73b").unwrap(),

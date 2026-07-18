@@ -37,6 +37,10 @@ const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_STORE_MAPI_METADATA: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
+const EXCHANGE_STORE_MAPI_PERMISSIONS: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/mapi_permissions.rs");
+const EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/mapi_special_folder_aliases.rs");
 const EXCHANGE_STORE_MAPI_HELPERS: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_helpers.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
@@ -440,10 +444,10 @@ fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
         "MAPI folder permission writes must use canonical mailbox_delegation_grants with audit and change-log rows"
     );
     assert!(
-        [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA]
+        [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_PERMISSIONS]
             .iter()
             .any(|source| source.contains("set_mailbox_folder_delegation_grant"))
-            && [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA]
+            && [EXCHANGE_STORE, EXCHANGE_STORE_MAPI_PERMISSIONS]
                 .iter()
                 .any(|source| source.contains("fetch_mapi_folder_permissions"))
             && EXCHANGE_MAPI_PERMISSIONS_TESTS
@@ -1029,7 +1033,11 @@ fn mapi_profile_settings_are_canonical_account_settings() {
 
     assert_sources_contain_all(
         "lpe-exchange store",
-        &[EXCHANGE_STORE, EXCHANGE_STORE_MAPI_METADATA],
+        &[
+            EXCHANGE_STORE,
+            EXCHANGE_STORE_MAPI_METADATA,
+            EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES,
+        ],
         &[
             "fn fetch_mapi_ipm_subtree_ost_id",
             "Storage::fetch_mapi_ipm_subtree_ost_id",
@@ -1064,6 +1072,39 @@ fn mapi_folder_profile_properties_are_bounded_profile_state() {
             "fn upsert_mapi_folder_profile_property_values",
             "FROM mapi_folder_profile_property_values",
             "INSERT INTO mapi_folder_profile_property_values",
+        ],
+    );
+}
+
+#[test]
+fn mapi_special_folder_aliases_are_bounded_protocol_identity_metadata() {
+    let aliases = table_definition("mapi_special_folder_aliases");
+    for required in [
+        "alias_folder_id BIGINT NOT NULL CHECK (alias_folder_id >= 2818049 AND alias_folder_id < 9223369837831520257 AND (alias_folder_id & 65535) = 1)",
+        "canonical_folder_id BIGINT NOT NULL CHECK (canonical_folder_id > 0 AND canonical_folder_id <= 2752513 AND (canonical_folder_id & 65535) = 1)",
+        "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22)",
+        "mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number >= 43 AND mapi_change_number < 140737454800896)",
+        "PRIMARY KEY (tenant_id, account_id, alias_folder_id)",
+        "UNIQUE (tenant_id, account_id, source_key)",
+        "UNIQUE (tenant_id, account_id, mapi_change_number)",
+        "CHECK (alias_folder_id <> canonical_folder_id)",
+        "REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            aliases.contains(required),
+            "mapi_special_folder_aliases must persist bounded Outlook identity aliases: {required}"
+        );
+    }
+    assert!(!aliases.contains("UNIQUE (tenant_id, account_id, canonical_folder_id)"));
+    assert_sources_contain_all(
+        "lpe-exchange special-folder alias store",
+        &[EXCHANGE_STORE, EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES],
+        &[
+            "fn fetch_mapi_special_folder_aliases",
+            "fn upsert_mapi_special_folder_aliases",
+            "FROM mapi_special_folder_aliases",
+            "INSERT INTO mapi_special_folder_aliases",
+            "FROM mapi_object_identities",
         ],
     );
 }
@@ -1151,6 +1192,56 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
         "check-lpe.sh deterministic psql wrapper",
         CHECK_LPE_SCRIPT,
         &["psql() {", "command psql -X \"$@\""],
+    );
+}
+
+#[test]
+fn deployment_scripts_reject_tagged_schema_without_special_folder_alias_shape() {
+    assert_source_contains_all(
+        "shared MAPI special-folder alias validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mapi_special_folder_alias_shape_ok()",
+            "to_regclass('public.mapi_special_folder_aliases')",
+            "replace(pg_get_constraintdef(oid), '''', '')",
+            "column_name IN ('alias_folder_id', 'canonical_folder_id', 'source_key', 'mapi_change_number')",
+            "PRIMARY KEY (tenant_id, account_id, alias_folder_id)",
+            "UNIQUE (tenant_id, account_id, source_key)",
+            "UNIQUE (tenant_id, account_id, mapi_change_number)",
+            "NOT EXISTS",
+            "canonical_folder_id",
+            "ON DELETE CASCADE",
+        ],
+    );
+    assert!(
+        !INSTALL_COMMON_SCRIPT.contains("'public.mapi_special_folder_aliases'::regclass"),
+        "the shape helper must return 0 instead of raising undefined_table on an old database"
+    );
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                "mapi_special_folder_alias_shape_ok",
+                "Initialize a fresh LPE 0.5.0 database",
+            ],
+        );
+    }
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "update-lpe.sh must reject a missing alias table before stopping LPE",
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "update-lpe.sh must reject a missing alias table before building LPE",
     );
 }
 
@@ -1299,6 +1390,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "\"calendar_events\"",
             "\"mapi_calendar_event_identity_moves\"",
             "\"mapi_object_identities\"",
+            "\"mapi_special_folder_aliases\"",
             "\"mapi_named_properties\"",
             "\"mapi_custom_property_values\"",
             "\"mapi_associated_config_messages\"",

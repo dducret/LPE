@@ -195,7 +195,12 @@ where
     if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
         return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
     }
-    refresh_persisted_special_folder_aliases(store, principal, &mut session).await?;
+    if let Err(error) =
+        refresh_persisted_special_folder_aliases(store, principal, &mut session).await
+    {
+        store_session(session_id, session);
+        return Err(error);
+    }
     let rop_buffer = execute_rops(
         store,
         principal,
@@ -227,9 +232,11 @@ pub(in crate::mapi) async fn refresh_persisted_special_folder_aliases<S: Exchang
     let aliases = store
         .fetch_mapi_special_folder_aliases(principal.account_id)
         .await?;
-    session.replace_special_folder_aliases(aliases.into_iter().map(|alias| {
-        (alias.alias_folder_id, alias.canonical_folder_id)
-    }));
+    session.replace_special_folder_aliases(
+        aliases
+            .into_iter()
+            .map(|alias| (alias.alias_folder_id, alias.canonical_folder_id)),
+    );
     Ok(())
 }
 

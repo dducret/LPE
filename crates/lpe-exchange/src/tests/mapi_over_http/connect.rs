@@ -4448,6 +4448,11 @@ async fn mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk() {
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         ..Default::default()
     };
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let stale_junk_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x212);
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4459,9 +4464,6 @@ async fn mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let stale_junk_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 77,
-    );
     let conflicts = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::CONFLICTS_FOLDER_ID,

@@ -2986,7 +2986,7 @@ async fn mapi_over_http_empty_folder_keeps_child_folder_contents() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
+async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias_in_a_new_session() {
     let account = FakeStore::account();
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let store = FakeStore {
@@ -2994,6 +2994,11 @@ async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         ..Default::default()
     };
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let stale_junk_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x210);
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3005,9 +3010,6 @@ async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let stale_junk_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,
-    );
     let conflicts = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::CONFLICTS_FOLDER_ID,
@@ -3057,15 +3059,21 @@ async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
         )
         .await
         .unwrap();
-    let cookie = mapi_cookie_header(&set_response);
     let set_response_rops = response_rops_from_execute_response(set_response).await;
     assert!(contains_bytes(
         &set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
 
+    let second_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
     let mut open_headers = mapi_headers("Execute");
-    open_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    open_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&second_connect)).unwrap(),
+    );
     let mut open_rops = Vec::new();
     append_rop_open_folder(&mut open_rops, 0, 1, stale_junk_id);
     append_rop_get_properties_specific(&mut open_rops, 1, &[0x3001_001F, 0x3613_001F]);
@@ -3084,6 +3092,89 @@ async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
     ));
     assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
     assert!(contains_bytes(&open_response_rops, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_scalar_calendar_entry_id_alias_survives_a_new_session() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let calendar_alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x211);
+    let calendar_alias_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        calendar_alias_id,
+    )
+    .unwrap();
+    let service = ExchangeService::new(store);
+
+    let first_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut first_headers = mapi_headers("Execute");
+    first_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&first_connect)).unwrap(),
+    );
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        0x36D0_0102, // PidTagIpmAppointmentEntryId
+        &calendar_alias_entry_id,
+    );
+    let mut set_rops = Vec::new();
+    append_rop_open_folder(&mut set_rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
+    append_rop_set_properties(&mut set_rops, 1, 1, &property_values);
+    let set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &first_headers,
+            &execute_body(&rop_buffer(&set_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let set_response_rops = response_rops_from_execute_response(set_response).await;
+    assert!(contains_bytes(
+        &set_response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+
+    let second_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut second_headers = mapi_headers("Execute");
+    second_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&second_connect)).unwrap(),
+    );
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_alias_id);
+    append_rop_get_properties_specific(&mut open_rops, 1, &[0x3001_001F, 0x3613_001F]);
+    let open_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &second_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let open_response_rops = response_rops_from_execute_response(open_response).await;
+    assert!(contains_bytes(
+        &open_response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&open_response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(
+        &open_response_rops,
+        &utf16z("IPF.Appointment")
+    ));
 }
 
 #[tokio::test]

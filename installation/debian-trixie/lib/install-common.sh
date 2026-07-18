@@ -206,6 +206,97 @@ WHERE n.nspname = 'public'
 SQL
 }
 
+mapi_special_folder_alias_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  to_regclass('public.mapi_special_folder_aliases') IS NOT NULL
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_special_folder_aliases'
+      AND column_name IN ('alias_folder_id', 'canonical_folder_id', 'source_key', 'mapi_change_number')
+      AND is_nullable = 'NO'
+      AND data_type = CASE column_name
+        WHEN 'alias_folder_id' THEN 'bigint'
+        WHEN 'canonical_folder_id' THEN 'bigint'
+        WHEN 'source_key' THEN 'bytea'
+        WHEN 'mapi_change_number' THEN 'bigint'
+      END
+  ) = 4
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%alias_folder_id >= 2818049%'
+      AND replace(pg_get_constraintdef(oid), '''', '') LIKE '%alias_folder_id < 9223369837831520257%'
+      AND pg_get_constraintdef(oid) LIKE '%65535%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%canonical_folder_id > 0%'
+      AND pg_get_constraintdef(oid) LIKE '%canonical_folder_id <= 2752513%'
+      AND pg_get_constraintdef(oid) LIKE '%65535%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%octet_length(source_key) = 22%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%mapi_change_number >= 43%'
+      AND replace(pg_get_constraintdef(oid), '''', '') LIKE '%mapi_change_number < 140737454800896%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%alias_folder_id <> canonical_folder_id%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'p'
+      AND pg_get_constraintdef(oid) = 'PRIMARY KEY (tenant_id, account_id, alias_folder_id)'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, account_id, source_key)'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, account_id, mapi_change_number)'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) LIKE '%canonical_folder_id%'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = to_regclass('public.mapi_special_folder_aliases')
+      AND contype = 'f'
+      AND pg_get_constraintdef(oid) LIKE '%FOREIGN KEY (tenant_id, account_id)%'
+      AND pg_get_constraintdef(oid) LIKE '%REFERENCES accounts(tenant_id, id)%'
+      AND pg_get_constraintdef(oid) LIKE '%ON DELETE CASCADE%'
+  )
+THEN 1 ELSE 0 END;
+SQL
+}
+
 normalize_yes_no() {
   local value
   value="$(trim "${1-}")"

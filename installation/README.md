@@ -21,7 +21,15 @@ identity lineage for Calendar moves to Deleted Items. They also verify that
 the canonical change log and MAPI identity constraints accept the
 `deleted_calendar_event` object kind, that SourceKey and InstanceKey remain
 22-byte GIDs, and that Event identity and move ChangeKeys accept 17- through
-24-byte XIDs. A database tagged
+24-byte XIDs. The same scripts require `mapi_special_folder_aliases` with
+non-null account-scoped alias FID, canonical FID, 22-byte SourceKey, and
+separately allocated server-CN columns; bounded `REPLID 1` FID and CN ranges;
+alias-FID, SourceKey, and CN uniqueness; the account
+foreign key; and no uniqueness constraint on the canonical FID, because several
+Outlook profiles or OST replicas may map different client aliases to one
+canonical special folder. The alias table stores protocol identity only and
+does not duplicate Calendar, Contacts, mailbox, FAI, rights, or user-visible
+state. A database tagged
 `0.5.0-sql-v1` but physically incomplete is therefore rejected.
 Initialization also refuses relations outside
 `public`, even for an intentional public-schema reset, because leaving them in
@@ -361,14 +369,14 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` requires the exact current 0.5.0 schema version and the required durable MAPI identity version columns, performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or physically incomplete databases
+- `update-lpe.sh` requires the exact current 0.5.0 schema version, the required durable MAPI identity version columns, and the complete `mapi_special_folder_aliases` shape; it performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or physically incomplete databases
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version plus the durable MAPI identity version columns before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
-- `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version and required durable MAPI identity version columns, the service, and the HTTP endpoints
+- `init-schema.sh` rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version, the durable MAPI identity version columns, and the complete account-scoped special-folder alias shape before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
+- `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version, required durable MAPI identity version columns, complete account-scoped special-folder alias shape, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
 - `test-ha-core-active-passive.sh` validates local core HA role gating and readiness transitions
@@ -803,11 +811,14 @@ For later updates:
 2. run `update-lpe.sh`
 
 `update-lpe.sh` checks that the installed schema is exactly the current 0.5.0
-baseline, performs no SQL mutation, then rebuilds and redeploys code and web
-assets. Pre-0.5 databases are rejected. For a new 0.5.0 deployment, point
-`DATABASE_URL` at an empty SQL database and run `init-schema.sh`; for a
+baseline and includes the required `mapi_special_folder_aliases` shape, performs
+no SQL mutation, then rebuilds and redeploys code and web assets. Pre-0.5
+databases and physically incomplete 0.5.0 databases are rejected. In
+particular, a database created from an earlier 0.5.0 checkout without the alias
+table cannot be reused merely because it carries the `0.5.0-sql-v1` label. Point
+`DATABASE_URL` at a new empty SQL database and run `init-schema.sh`; for a
 disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before
-running `init-schema.sh`.
+running `init-schema.sh`. This is destructive and is not an in-place upgrade.
 
 To keep routine source updates faster, `update-lpe.sh` skips unchanged rebuild
 steps when the installed outputs already exist. It rebuilds the Rust service

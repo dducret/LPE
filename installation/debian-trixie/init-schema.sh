@@ -98,6 +98,9 @@ mapi_identity_constraint_count="$(
 mapi_calendar_event_move_change_key_constraint_count="$(
   mapi_calendar_event_move_change_key_constraint_count "${DATABASE_URL}"
 )"
+mapi_special_folder_alias_shape_ok="$(
+  mapi_special_folder_alias_shape_ok "${DATABASE_URL}"
+)"
 
 if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_version_column_count}" != "2" \
@@ -105,8 +108,9 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
   || "${deleted_calendar_event_constraint_count}" != "2" \
   || "${mapi_identity_constraint_count}" != "3" \
-  || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}." >&2
+  || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
+  || "${mapi_special_folder_alias_shape_ok}" != "1" ]]; then
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
   echo "Initialize a fresh LPE 0.5.0 database after correcting the canonical schema source." >&2
   exit 1
 fi

@@ -70,7 +70,14 @@ pub(super) fn folder_set_property_problems(
                 return match values.get(3).and_then(|bytes| {
                     crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes)
                 }) {
-                    Some(folder_id) if folder_id == FREEBUSY_DATA_FOLDER_ID => None,
+                    Some(folder_id)
+                        if default_folder_id_matches_or_is_persistable_alias_candidate(
+                            folder_id,
+                            FREEBUSY_DATA_FOLDER_ID,
+                        ) =>
+                    {
+                        None
+                    }
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
@@ -112,11 +119,30 @@ pub(super) fn folder_set_property_problems(
                 return Some((index, *tag, 0x8004_0102));
             };
             match crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes) {
-                Some(folder_id) if folder_id == expected_folder_id => None,
+                Some(folder_id)
+                    if default_folder_id_matches_or_is_persistable_alias_candidate(
+                        folder_id,
+                        expected_folder_id,
+                    ) =>
+                {
+                    None
+                }
                 _ => Some((index, *tag, 0x8004_0102)),
             }
         })
         .collect()
+}
+
+fn default_folder_id_matches_or_is_persistable_alias_candidate(
+    folder_id: u64,
+    expected_folder_id: u64,
+) -> bool {
+    folder_id == expected_folder_id
+        || crate::mapi::identity::global_counter_from_store_id(folder_id).is_some_and(|counter| {
+            (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                .contains(&counter)
+        })
 }
 
 pub(super) fn default_folder_identification_safe_property_values(
@@ -190,19 +216,18 @@ fn merge_indexed_special_folder_entry_ids(
     Some(MapiValue::MultiBinary(canonical_values))
 }
 
-pub(super) fn record_default_folder_entry_id_aliases(
-    session: &mut MapiSession,
+pub(super) fn default_folder_entry_id_aliases(
     object: Option<&MapiObject>,
     values: &[(u32, MapiValue)],
-) {
+) -> Vec<MapiSpecialFolderAlias> {
     if !strips_any_default_folder_identification_values(object) {
-        return;
+        return Vec::new();
     }
+    let mut aliases = Vec::new();
     for (tag, value) in values {
         let storage_tag = canonical_property_storage_tag(*tag);
         if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
-            record_indexed_special_folder_aliases(
-                session,
+            aliases.extend(indexed_special_folder_aliases(
                 value,
                 &[
                     CONFLICTS_FOLDER_ID,
@@ -211,13 +236,12 @@ pub(super) fn record_default_folder_entry_id_aliases(
                     SERVER_FAILURES_FOLDER_ID,
                     JUNK_FOLDER_ID,
                 ],
-            );
+            ));
         } else if storage_tag == PID_TAG_FREE_BUSY_ENTRY_IDS {
-            record_indexed_special_folder_aliases(
-                session,
+            aliases.extend(indexed_special_folder_aliases(
                 value,
                 &[0, 0, 0, FREEBUSY_DATA_FOLDER_ID],
-            );
+            ));
         } else if is_scalar_default_folder_entry_id_property_tag(storage_tag) {
             let Some(expected_folder_id) = default_folder_entry_id_expected_folder_id(storage_tag)
             else {
@@ -226,19 +250,22 @@ pub(super) fn record_default_folder_entry_id_aliases(
             let MapiValue::Binary(bytes) = value else {
                 continue;
             };
-            record_special_folder_alias(session, bytes, expected_folder_id);
+            if let Some(alias) = special_folder_alias(bytes, expected_folder_id) {
+                aliases.push(alias);
+            }
         }
     }
+    aliases
 }
 
-fn record_indexed_special_folder_aliases(
-    session: &mut MapiSession,
+fn indexed_special_folder_aliases(
     value: &MapiValue,
     expected_folder_ids: &[u64],
-) {
+) -> Vec<MapiSpecialFolderAlias> {
     let MapiValue::MultiBinary(values) = value else {
-        return;
+        return Vec::new();
     };
+    let mut aliases = Vec::new();
     for (index, bytes) in values.iter().enumerate() {
         let Some(expected_folder_id) = expected_folder_ids.get(index).copied() else {
             continue;
@@ -246,18 +273,26 @@ fn record_indexed_special_folder_aliases(
         if expected_folder_id == 0 {
             continue;
         }
-        record_special_folder_alias(session, bytes, expected_folder_id);
+        if let Some(alias) = special_folder_alias(bytes, expected_folder_id) {
+            aliases.push(alias);
+        }
     }
+    aliases
 }
 
-fn record_special_folder_alias(session: &mut MapiSession, bytes: &[u8], expected_folder_id: u64) {
+fn special_folder_alias(bytes: &[u8], expected_folder_id: u64) -> Option<MapiSpecialFolderAlias> {
     let Some(alias_id) = crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes)
     else {
-        return;
+        return None;
     };
-    if alias_id != expected_folder_id {
-        session.record_special_folder_alias(alias_id, expected_folder_id);
+    if alias_id == expected_folder_id {
+        return None;
     }
+    Some(MapiSpecialFolderAlias {
+        alias_folder_id: alias_id,
+        canonical_folder_id: expected_folder_id,
+        source_key: crate::mapi::identity::source_key_for_object_id(alias_id),
+    })
 }
 
 pub(super) fn default_folder_identification_values_stripped_by_safe_values(

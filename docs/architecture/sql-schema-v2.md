@@ -330,6 +330,28 @@ Protocol adapters store only cursor rows:
   destination SourceKey/ChangeKey/PCL supplied by the client are retained for
   that principal, while `mapi_change_number` remains a separately allocated
   server CN. Delegated identities continue to receive server-assigned rekeys.
+- `mapi_special_folder_aliases` stores the bounded account-scoped protocol
+  identity that maps an Outlook client FID and its 22-byte SourceKey back to an
+  existing canonical special-folder FID. Canonical special-folder FIDs use
+  `REPLID 1` and GLOBCNT values `1..42`. Alias FIDs also use `REPLID 1`, but
+  their GLOBCNT is limited to the persisted dynamic interval
+  `43 <= GLOBCNT < 0x7FFF_FE00_0000` and must also fall below the end of a range
+  already reserved for the account by `RopGetLocalReplicaIds`. The SourceKey
+  contains the store replica GUID followed by the same six-byte GLOBCNT. The
+  primary key makes an alias FID immutable per account, the account-scoped
+  SourceKey is unique, and collisions with `mapi_object_identities` are rejected
+  by the transactional store path. Each row also retains the separately
+  allocated `mapi_change_number` used in upload `MetaTagCnsetSeen`; that CN is
+  unique per account and is never derived from either FID. `canonical_folder_id` is deliberately not
+  unique: different Outlook profiles and OST replicas can retain different
+  client aliases for the same canonical Calendar, Contacts, Deleted Items, or
+  other special folder. The table has no display name, hierarchy content,
+  membership, FAI, rights, or collaboration columns and cannot become parallel
+  canonical folder state. An imported FID is object identity, not a change
+  number; successful hierarchy import allocates a distinct server CN and upload
+  transfer state never returns `MetaTagIdsetGiven`. These boundaries follow
+  `[MS-OXCFXICS]` sections 2.2.3.2.4.3.1, 2.2.3.2.4.7.2, 3.1.5.3,
+  3.2.5.2.1, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12.
 - `mapi_named_properties` stores durable per-account named-property mappings
   for Outlook-cached property ids. `mapi_custom_property_values` stores opaque
   Outlook-specific property values by canonical object identity, property tag,
@@ -785,6 +807,7 @@ collaboration, rights, or user-visible state.
 - `mapi_sync_checkpoints`
 - `mapi_mailbox_replicas`
 - `mapi_object_identities`
+- `mapi_special_folder_aliases`
 - `mapi_named_properties`
 - `mapi_custom_property_values`
 
@@ -848,9 +871,19 @@ compatible. They do not replace canonical mail or collaboration tables.
 - `schema.sql` creates the fresh `0.5.0-sql-v1` baseline.
 - `0.5.0` installations start from an empty SQL database initialized by
   `init-schema.sh`. Databases from pre-0.5 releases are not upgraded in place.
+- A database initialized from an earlier 0.5.0 checkout that lacks
+  `mapi_special_folder_aliases` is physically incomplete even if its metadata
+  still says `0.5.0-sql-v1`. There is no in-place compatibility SQL for this
+  development baseline: deploy it with a new empty database or perform an
+  explicitly destructive `LPE_RESET_SCHEMA=true` initialization.
 - `update-lpe.sh` accepts only the current schema version and performs no SQL
-  compatibility mutation. A future 0.5.x schema change requires an explicit
-  release-policy decision before an update path is added.
+  compatibility mutation. `init-schema.sh`, `check-lpe.sh`, and
+  `update-lpe.sh` validate the alias table's required columns, bounded FID,
+  SourceKey, and server-CN checks, account foreign key, alias/SourceKey/CN
+  uniqueness, and absence
+  of a uniqueness constraint on `canonical_folder_id`. A future 0.5.x schema
+  change requires an explicit release-policy decision before an update path is
+  added.
 - Fresh schema initialization inserts the real platform tenant UUID row and the
   default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
   synthesize pseudo-tenants.

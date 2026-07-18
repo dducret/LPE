@@ -119,6 +119,12 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
 
         collect(
             &mut failures,
+            "MAPI special-folder alias constraints",
+            exercise_mapi_special_folder_alias_constraints(pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
             "mailbox SQL path",
             exercise_mailbox_path(&storage, &fixture).await,
         );
@@ -1832,6 +1838,154 @@ async fn exercise_change_log_cursor_constraints(
     );
 
     Ok(())
+}
+
+async fn exercise_mapi_special_folder_alias_constraints(
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let canonical_junk_folder_id = (30_i64 << 16) | 1;
+    let first_alias_counter = 0x230_i64;
+    let second_alias_counter = first_alias_counter + 1;
+    let first_alias_folder_id = (first_alias_counter << 16) | 1;
+    let second_alias_folder_id = (second_alias_counter << 16) | 1;
+    let first_change_number = 0x1_0030_i64;
+    let second_change_number = first_change_number + 1;
+    let first_source_key = mapi_source_key(first_alias_counter as u64);
+    let second_source_key = mapi_source_key(second_alias_counter as u64);
+
+    insert_mapi_special_folder_alias(
+        pool,
+        fixture,
+        first_alias_folder_id,
+        canonical_junk_folder_id,
+        &first_source_key,
+        first_change_number,
+    )
+    .await
+    .context("store the first Outlook profile special-folder alias")?;
+    insert_mapi_special_folder_alias(
+        pool,
+        fixture,
+        second_alias_folder_id,
+        canonical_junk_folder_id,
+        &second_source_key,
+        second_change_number,
+    )
+    .await
+    .context("store a second Outlook profile alias for the same canonical special folder")?;
+
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject a non-dynamic alias FID",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            (42_i64 << 16) | 1,
+            canonical_junk_folder_id,
+            &mapi_source_key(42),
+            second_change_number + 1,
+        )
+        .await,
+    )?;
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject a non-special canonical FID",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            ((second_alias_counter + 1) << 16) | 1,
+            (43_i64 << 16) | 1,
+            &mapi_source_key((second_alias_counter + 1) as u64),
+            second_change_number + 2,
+        )
+        .await,
+    )?;
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject malformed SourceKeys",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            ((second_alias_counter + 2) << 16) | 1,
+            canonical_junk_folder_id,
+            &[0_u8; 21],
+            second_change_number + 3,
+        )
+        .await,
+    )?;
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject server CNs below the dynamic range",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            ((second_alias_counter + 3) << 16) | 1,
+            canonical_junk_folder_id,
+            &mapi_source_key((second_alias_counter + 3) as u64),
+            42,
+        )
+        .await,
+    )?;
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject duplicate SourceKeys",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            ((second_alias_counter + 4) << 16) | 1,
+            canonical_junk_folder_id,
+            &first_source_key,
+            second_change_number + 4,
+        )
+        .await,
+    )?;
+    expect_constraint_failure(
+        "MAPI special-folder aliases reject duplicate server CNs",
+        insert_mapi_special_folder_alias(
+            pool,
+            fixture,
+            ((second_alias_counter + 5) << 16) | 1,
+            canonical_junk_folder_id,
+            &mapi_source_key((second_alias_counter + 5) as u64),
+            first_change_number,
+        )
+        .await,
+    )?;
+
+    Ok(())
+}
+
+async fn insert_mapi_special_folder_alias(
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+    alias_folder_id: i64,
+    canonical_folder_id: i64,
+    source_key: &[u8],
+    change_number: i64,
+) -> std::result::Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_special_folder_aliases (
+            tenant_id, account_id, alias_folder_id, canonical_folder_id,
+            source_key, mapi_change_number
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(alias_folder_id)
+    .bind(canonical_folder_id)
+    .bind(source_key)
+    .bind(change_number)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+fn mapi_source_key(global_counter: u64) -> Vec<u8> {
+    let mut source_key = vec![
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10,
+    ];
+    source_key.extend_from_slice(&global_counter.to_be_bytes()[2..]);
+    source_key
 }
 
 async fn exercise_submission_path(

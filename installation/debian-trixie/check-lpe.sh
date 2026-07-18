@@ -120,6 +120,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_fo
   || fail "Table public.mapi_folder_profile_property_values is missing. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_folder_profile_property_values"
 
+mapi_special_folder_alias_shape_ok="$(mapi_special_folder_alias_shape_ok "${DATABASE_URL}")" \
+  || fail "Unable to inspect MAPI special-folder alias schema"
+[[ "${mapi_special_folder_alias_shape_ok}" == "1" ]] \
+  || fail "MAPI special-folder alias schema is missing or invalid. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "MAPI special-folder alias schema is current"
+
 mapi_shortcut_group_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" \
   || fail "Unable to inspect MAPI navigation shortcut columns"
 [[ "$mapi_shortcut_group_column_count" == "2" ]] \

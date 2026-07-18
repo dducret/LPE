@@ -24,6 +24,12 @@ before it is advertised.
   readiness failure; LPE must reject it before accepting or advertising a MAPI
   session rather than exposing the database failure through an Outlook
   `Execute` request.
+- The required physical shape includes `mapi_special_folder_aliases` with its
+  account scope, bounded FID, 22-byte SourceKey, and separately allocated server
+  CN checks, alias/SourceKey/CN uniqueness, account foreign key, and deliberately
+  non-unique canonical FID.
+  The last rule permits different Outlook profiles or OST replicas to retain
+  different client FIDs for the same canonical special folder.
 - The canonical SQL schema for those checks is always `public`, independent of
   the connection `search_path`; installation pins schema creation to `public`
   and refuses relations outside it, while `Storage::connect` pins every pooled
@@ -506,18 +512,23 @@ not by itself authorize broad client publication.
   `PidTagAttachmentHidden` are preserved across create/save, attachment table
   reads, attachment property reads, and draft submission into canonical LPE state.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
-  accepted as session-local Inbox metadata during cached-mode bootstrap. LPE
-  keeps canonical values for the documented indexes and preserves client data at
-  other indexes, matching the special-folder property contract without creating
-  durable MAPI-only folder truth. Documented index aliases learned from this
-  property, including index 4 for Junk E-mail, resolve to the canonical special
-  folder for later `RopOpenFolder` calls in the same MAPI session. Unlearned
-  client-local folder identifiers remain unmapped and fail through the normal
-  `ecNotFound` folder-open path.
+  accepted as Inbox metadata during cached-mode bootstrap. LPE keeps canonical
+  values for the documented indexes and keeps unmodeled client payload only on
+  the live handle, matching the special-folder property contract without
+  creating durable MAPI-only folder truth. A recognized alternate FID learned
+  from a documented index, including index 4 for Junk E-mail, is persisted as
+  bounded account-scoped protocol identity metadata in
+  `mapi_special_folder_aliases`. It therefore resolves to the canonical special
+  folder after a new EMSMDB session or server restart, not only later in the
+  session that learned it. Multiple profiles or OST replicas may contribute
+  different aliases for one canonical FID; an alias FID or SourceKey can map to
+  only one canonical FID. Unlearned client-local folder identifiers remain
+  unmapped and fail through the normal `ecNotFound` folder-open path.
 - Outlook scalar default-folder EntryID writebacks on Root or Inbox are validated
-  against the canonical special-folder map and acknowledged for interoperability,
-  but they do not override the canonical projection or create session-local
-  folder identity state.
+  against the canonical special-folder map and acknowledged for interoperability.
+  A valid alternate FID and matching SourceKey are recorded through the same
+  durable account-scoped alias path, but they never override the canonical
+  projection or create a second folder or user-visible content record.
 - Store-level `RopGetPropertiesAll` and `RopGetPropertiesList` enumerate the
   same computed default-folder identities as targeted store `GetProps` calls,
   including `PidTagIpmAppointmentEntryId`, so Outlook bootstrap paths that
@@ -571,6 +582,15 @@ not by itself authorize broad client publication.
 
 ### ICS and FastTransfer Coverage
 
+- `RopSynchronizationOpenCollector.IsContentsCollector` is decoded as the
+  one-byte, 8-bit MAPI Boolean defined by
+  [[MS-OXCDATA] section 2.11.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/0c77892e-288e-435a-9c49-be1c20c7afdb): raw `0` opens
+  a hierarchy collector and raw `1` opens a contents collector. LPE does not
+  reinterpret raw `0` as the download-only `SynchronizationType` value
+  `Contents (0x01)`. This follows
+  [[MS-OXCFXICS] section 2.2.3.2.4.1.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/7fa21d88-71ba-4cfe-8af5-4d7902489e5f)
+  and
+  [[MS-OXCROPS] section 2.2.13.7.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/8588e7dd-4732-4d3e-bf28-82bbdf0b4d04).
 - Hierarchy synchronization emits canonical folder identities, source keys,
   change keys, predecessor lists, special-folder fields, content counts, unread
   counts, `PidTagLocalCommitTimeMax`, `PidTagDeletedCountTotal`, and final state.
@@ -605,11 +625,14 @@ not by itself authorize broad client publication.
   and applies the section 3.1.5.6.2.2 last-writer-wins rule. The resulting PCL
   is a successor of both versions as required by sections 3.1.5.6.2 and
   3.2.5.9.4.2.
-- After a new or changed Calendar import is saved, its collector state records
-  the Event MID in `MetaTagIdsetGiven` and its distinct server CN in
-  `MetaTagCnsetSeen`; it does not add that CN to `MetaTagCnsetSeenFAI` or
-  `MetaTagCnsetRead`. This follows `[MS-OXCFXICS]` sections 2.2.1.1.2-2.2.1.1.4
-  and 3.1.5.3.
+- After a new or changed Calendar import is saved, its upload collector unions
+  the Event's distinct server CN into `MetaTagCnsetSeen`; it does not add that
+  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`, and it does not return the
+  Event MID in `MetaTagIdsetGiven`. The server ignores `MetaTagIdsetGiven` in an
+  upload and omits it from the final upload state, as required by
+  [[MS-OXCFXICS] section 3.2.5.2.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/696ec085-cfb4-451c-a576-7cdc81b1550a)
+  and sections 2.2.1.1.2-2.2.1.1.4. The separate server CN follows
+  [[MS-OXCFXICS] section 3.1.5.3](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/b03168dc-6ad4-4747-b1b5-c95fd436dfce).
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
@@ -651,7 +674,7 @@ not by itself authorize broad client publication.
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` is bounded to hard-deleting visible memberships in the target canonical mailbox folder through the canonical tombstone/change-log path. `RopHardDeleteMessagesAndSubfolders` recurses only through canonical mailbox descendants and does not delete non-mailbox objects. Public-folder whole-folder purge returns a parseable not-supported ROP error; public-folder item delete/move/copy remains item-scoped through canonical public-folder APIs. |
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. `RopMoveCopyMessages` move from a concrete recoverable subfolder uses canonical recoverable restore, `RopMoveCopyMessages` copy returns a parseable not-supported error, `RopDeleteMessages` on recoverable folders returns partial completion without purging because LPE does not yet implement Exchange's Deletions-to-Purges soft-delete progression, purge and empty-folder on Deletions, Versions, or Purges use canonical recoverable purge, Recoverable Items Root message mutation and purge calls return parseable not-supported errors, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `RopGetContentsTable` with `SoftDeletes` (`0x20`) returns a parseable not-supported ROP error because canonical LPE hard delete/Trash purge removes normal folder membership and writes `recoverable_items` rows instead of keeping folder-local soft-deleted rows. `OpenSoftDeleted` and complete Exchange dumpster folder parity remain gated on canonical lifecycle semantics; any MAPI-local dumpster store is forbidden. Versions and Purges are bounded virtual projections over canonical lifecycle rows; LPE does not claim Exchange copy-on-write Versions behavior or full Purges post-recovery parity. |
 | Sync move import | `RopSynchronizationImportMessageMove` parses all five documented length-prefixed fields as GID/XID/PCL values. A no-conflict Calendar-to-Deleted-Items import moves the canonical Event to its deleted lifecycle and atomically rekeys the principal identity with the supplied destination SourceKey, ChangeKey, and PCL while allocating a distinct internal server change number; it does not create a generic `IPM.Appointment` mail row. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.4.1, 3.1.5.3, 3.2.5.9.4.4, and 3.3.4.3.3.2.1.1 and `[MS-OXCROPS]` sections 2.2.13.6.1-2.2.13.6.3. Concurrent-move conflict handling and the `NewerClientChange` (`0x00040821`) response remain a separate interoperability gate. |
-| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` creates canonical custom mailbox folders only. Imported system-folder rows are acknowledged as no-op reconciliation so Outlook hierarchy sync does not surface `MAPI_E_NO_SUPPORT` for Inbox, Deleted Items, Sent Items, Drafts, Sync Issues, and other built-in folders. Imported parent source keys are resolved against existing canonical mailbox MAPI identities so Outlook-created child folders keep their canonical parent; if the parent source key is absent or not canonical, the synchronization collector folder is used when it maps to a canonical mailbox, otherwise the folder is created at the account root. |
+| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` creates canonical custom mailbox folders and reconciles imported Outlook system-folder identities with existing canonical special folders. A system-folder import persists only account-scoped `(alias FID, SourceKey, server CN) -> canonical FID` protocol identity metadata in `mapi_special_folder_aliases`; it does not create a shadow mailbox, Calendar, Contacts folder, or user-visible row. The client FID must use `REPLID 1`, its GLOBCNT must be inside a range previously reserved for that account by `RopGetLocalReplicaIds`, and the 22-byte SourceKey must contain the store replica GUID plus the same GLOBCNT. Canonical special-folder FIDs use `REPLID 1` and reserved GLOBCNT values `1..42`; persistable aliases are bounded to `43 <= GLOBCNT < 0x7FFF_FE00_0000`. Alias FID and SourceKey collisions with `mapi_object_identities` are rejected. The canonical FID is intentionally non-unique so separate profiles/OST replicas can retain different aliases for the same folder. Imported parent SourceKeys resolve through both canonical identities and these aliases. A successful custom-folder or system-folder import advances `MetaTagCnsetSeen` with the separately allocated server CN, never the client-reserved or canonical FID, while upload `MetaTagIdsetGiven` is ignored and not returned. This follows [[MS-OXCFXICS] section 2.2.3.2.4.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/9d5d9d68-775d-4ede-a14c-119bc54a6327), sections 2.2.3.2.4.7.2, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12, plus [[MS-OXCFXICS] section 3.3.5.8.8](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/f3fab904-bb7d-4cf3-bbd6-65d4a34b67d2). |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, `PidNameKeywords` category property equality, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` are not implemented yet because their canonical rule/deferred-action model is still missing; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for default, owned custom, and share-right delegated calendar folders, with audit and change-log writes; Exchange-only ACL subjects remain gated on canonical principal semantics, and MAPI-local ACL storage is forbidden. |
@@ -672,7 +695,7 @@ not by itself authorize broad client publication.
 | Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection plus bounded generated-Sieve `RopModifyRules` mutations | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain gated on canonical rule/deferred-action semantics. |
 | Settings | `server_settings`, mailbox state, `mapi_profile_settings`, computed store/folder defaults | `/api/mail/outlook-profile` read summary and server setting APIs | private read-only `OutlookProfile/*` | Store/logon properties, default-folder properties, IPM subtree OST identity reload | Tests cover profile-state summary and OST identity reuse; full Exchange profile blobs remain gated on canonical profile-state requirements, while client-local registry state is outside server control. |
 | Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
-| Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut and associated configuration FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
+| Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, `mapi_sync_checkpoints`, `mapi_object_identities`, `mapi_special_folder_aliases` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut and associated configuration FAI rows, ICS checkpoints, object IDs/source keys/change keys, and bounded special-folder alias resolution across sessions | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
 
 ## Outlook Compatibility Metadata Boundaries
 
@@ -683,7 +706,7 @@ session handling.
 | Boundary | Owns | Tables or storage | Rule |
 | --- | --- | --- | --- |
 | Canonical mailbox and collaboration state | Mailbox membership, messages, MIME/body/blob rows, submission queue state, contacts, calendars, tasks, notes, journals, search folders, public-folder state, grants, sender rights, and user-visible settings. | Canonical LPE tables such as `messages`, `mailboxes`, `mailbox_messages`, `submission_queue`, `contact_books`, `contacts`, `calendars`, `calendar_events`, `task_lists`, `tasks`, `search_folders`, public-folder tables, grants, `sieve_scripts`, `account_identities`, and `server_settings`. | This is the source of truth. MAPI projects from and mutates this state through canonical APIs or storage paths. No `mapi_*` compatibility table may shadow a canonical field such as subject, body, flags, attendees, permissions, Sent membership, or submission status. |
-| Durable Outlook compatibility metadata | Stable protocol identity, bounded profile reuse data, Outlook-only custom properties, associated configuration rows, navigation shortcuts, and resumable EMSMDB/ICS cursors. | `mapi_mailbox_replicas`, `mapi_object_identities`, `mapi_named_properties`, `mapi_custom_property_values`, `mapi_profile_settings`, `mapi_folder_profile_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, and `mapi_sync_checkpoints`. | These rows are durable because Outlook cached-mode clients need stable ids, named-property mappings, profile hints, FAI/config replay, and sync cursors across sessions. They do not own mailbox or collaboration content; when a value has a canonical LPE field, the canonical field wins. |
+| Durable Outlook compatibility metadata | Stable protocol identity, bounded profile reuse data, Outlook-only custom properties, associated configuration rows, navigation shortcuts, and resumable EMSMDB/ICS cursors. | `mapi_mailbox_replicas`, `mapi_object_identities`, `mapi_special_folder_aliases`, `mapi_named_properties`, `mapi_custom_property_values`, `mapi_profile_settings`, `mapi_folder_profile_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, and `mapi_sync_checkpoints`. | These rows are durable because Outlook cached-mode clients need stable ids, named-property mappings, profile hints, FAI/config replay, alias resolution, and sync cursors across sessions. They do not own mailbox or collaboration content; when a value has a canonical LPE field, the canonical field wins. |
 | Session-only MAPI transport state | HTTP request sequencing, cookies, active `MapiContext` and `MapiSequence`, handle tables, open table category/collapse state, pending ROP buffers, transfer-source/collector handles, notification registrations, replay dedupe, and accepted writeback caches that are documented as live-handle-only. | In-memory EMSMDB/NSPI/MAPI session structures and per-handle state only. | Losing this state may force reconnect, replay, or resynchronization, but must not lose committed user data. Session state is persisted only when code explicitly commits a canonical mutation or writes one of the bounded durable Outlook metadata rows above. |
 
 Durable compatibility metadata is intentionally narrower than canonical state:
@@ -691,6 +714,13 @@ Durable compatibility metadata is intentionally narrower than canonical state:
 - `mapi_mailbox_replicas` and `mapi_object_identities` provide stable Outlook
   replica, FID/MID, source-key, change-key, and instance-key mappings for
   canonical or bounded compatibility objects.
+- `mapi_special_folder_aliases` stores only immutable, account-scoped alternate
+  client FID/SourceKey mappings, plus the server CN required for hierarchy-upload
+  state, to reserved canonical special-folder FIDs. It is
+  many-to-one toward the canonical folder so independent Outlook profiles and
+  OST replicas can coexist. It contains no folder attributes, Calendar or
+  Contacts data, membership, rights, FAI payload, or other parallel canonical
+  state.
 - `mapi_named_properties` stores stable per-account named-property ID
   allocations; active session registries are caches.
 - `mapi_custom_property_values` stores opaque Outlook/custom MAPI property
@@ -723,7 +753,7 @@ this plan explicitly documents that compatibility behavior.
 | --- | --- | --- |
 | Server/bootstrap defaults | `server_settings`, request host/proxy headers, and computed MAPI logon/store properties | Used for URLs, store display metadata, private-store marker, mailbox owner, max submit size, and minimal valid icon payloads. No per-profile copy is stored. |
 | Send identities | `account_identities` and authenticated account state | Projected through JMAP/EWS/MAPI identity and submission paths; MAPI does not own a separate identity store. |
-| Folder identity and hierarchy | `mailboxes`, built-in projected folder IDs, `search_folders`, and `mapi_object_identities` | Stable FIDs/source keys/change keys are reused across cached-mode sessions. Default-folder EntryIDs remain computed canonical projections. |
+| Folder identity and hierarchy | `mailboxes`, built-in projected folder IDs, `search_folders`, `mapi_object_identities`, and `mapi_special_folder_aliases` | Stable FIDs/source keys/change keys and bounded alternate special-folder aliases are reused across cached-mode sessions. Several profile/OST aliases may resolve to one canonical default folder; default-folder EntryIDs remain computed canonical projections and the alias table contains no folder content. |
 | Custom/shared collaboration folders | `contact_books`, `calendars`, `task_lists`, grants, and `mapi_object_identities` | Non-reserved Outlook-visible collaboration folders use kind-scoped deterministic canonical identity keys and durable store-allocated MAPI object IDs. LPE must not derive folder IDs from raw collection text, owner UUID suffixes, or fallback counters. |
 | Named property IDs | `mapi_named_properties` | Durable per-account Outlook named-property ID mapping; session registry is only a cache. |
 | Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
@@ -732,7 +762,7 @@ this plan explicitly documents that compatibility behavior.
 | Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable EMSMDB/ICS cursors for hierarchy/content/read-state reuse; they do not store mailbox content. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
-| Default-folder EntryID writes | computed canonical folder projections | Valid writes are accepted for compatibility and stripped from session storage; invalid values are rejected. |
+| Default-folder EntryID writes | computed canonical folder projections plus `mapi_special_folder_aliases` for validated alternate identity | Valid writes are accepted for compatibility. Canonical values stay computed; a validated alternate FID/SourceKey is retained only as a durable account-scoped alias, and invalid values are rejected. |
 
 Normal message contents-table rows project Outlook-selected Inbox view columns
 from canonical mail data, including creation time, normal importance,
@@ -748,9 +778,16 @@ canonical `from` identity.
 
 ### ICS State Encoding
 
-- Final and checkpoint ICS state generated by LPE uses REPLGUID-scoped
+- Final and checkpoint ICS download state generated by LPE uses REPLGUID-scoped
   IDSET/CNSET encoding for `MetaTagIdsetGiven`, `MetaTagCnsetSeen`,
-  `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead`.
+  `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead` as applicable to the download
+  scope. Final or checkpoint ICS upload state uses the applicable CN sets only;
+  it never returns `MetaTagIdsetGiven`.
+- A successful hierarchy `RopSynchronizationImportDeletes` applies the
+  canonical deletion without fabricating a CN from the deleted FID or adding
+  that FID to `MetaTagCnsetSeen`. This follows the deletion behavior in
+  `[MS-OXCFXICS]` section 3.2.5.9.4.5; that section does not define the deleted
+  object identifier as a change number.
 - The REPLGUID in durable final/checkpoint state is the LPE replica GUID for the
   relevant mailbox or account scope.
 - GLOBSET range commands carry six-byte GLOBCNT values in canonical
@@ -787,15 +824,21 @@ canonical `from` identity.
 - Zero-length client ICS state forces a baseline transfer.
 - Non-empty uploaded client ICS state may select a delta transfer when it is
   parseable and compatible with the requested mailbox, folder, and sync scope.
-- Uploaded client ICS state is input only. It must not be appended to, copied
-  into, or substituted for server-generated final/checkpoint state.
+- Uploaded client CN sets are parsed as the initial upload checkpoint, not
+  copied as opaque bytes or substituted for server-generated state. The final
+  upload checkpoint is the semantic set union of each applicable initial CN set
+  with the server CNs assigned to successful imports. Uploaded
+  `MetaTagIdsetGiven` is ignored.
 - `RopSynchronizationGetTransferState` on an ICS upload collector returns
   server-generated checkpoint state. After successful imported message,
   note, journal, read-state, move, delete, or hierarchy changes, the collector
-  state is advanced with the server-assigned object IDs and change numbers
-  that Outlook must persist for the upload transaction. Successful delete and
-  source-move uploads still produce an explicit server checkpoint so the
-  transfer-state path does not fall back to a stale pre-upload folder snapshot.
+  state is advanced with the server-assigned change numbers in the applicable
+  CN sets; it does not return object IDs through `MetaTagIdsetGiven`. Successful
+  delete and source-move uploads still produce an explicit server checkpoint so
+  the transfer-state path does not fall back to a stale pre-upload folder
+  snapshot. This follows `[MS-OXCFXICS]` sections 2.2.3.2.3.1, 2.2.4.4,
+  3.2.5.9.3.1, and 3.2.5.2.1 and `[MS-OXCROPS]` sections 2.2.13.8.1 and
+  2.2.13.8.2.
 - `RopSaveChangesMessage` for an Outlook-uploaded message with an imported
   `PidTagSourceKey`, including uploads into Deleted Items, persists the message
   through canonical mail storage and returns a server-assigned Message ID/change

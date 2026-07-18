@@ -235,7 +235,10 @@ pub(in crate::mapi) fn advertised_special_folder_id_for_create(
             return true;
         }
         matches!(
-            (*folder_id, display_name.trim().to_ascii_lowercase().as_str()),
+            (
+                *folder_id,
+                display_name.trim().to_ascii_lowercase().as_str()
+            ),
             (SENT_FOLDER_ID, "sent items")
                 | (TRASH_FOLDER_ID, "deleted")
                 | (TRASH_FOLDER_ID, "trash")

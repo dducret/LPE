@@ -78,21 +78,30 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 canonical_folder_id,
                 source_key,
             };
-            if store
+            let change_number = match store
                 .upsert_mapi_special_folder_aliases(principal.account_id, &[alias])
                 .await
-                .is_err()
+                .ok()
+                .and_then(|change_numbers| change_numbers.into_iter().next())
             {
-                responses.extend_from_slice(&rop_error_response(
-                    0x73,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                ));
-                return;
-            }
+                Some(change_number) => change_number,
+                None => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x73,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    return;
+                }
+            };
             session.record_special_folder_alias(alias_folder_id, canonical_folder_id);
+            record_sync_upload_hierarchy_change_with_change_number(
+                session,
+                folder_id,
+                canonical_folder_id,
+                change_number,
+            );
         }
-        record_sync_upload_hierarchy_change(session, folder_id, canonical_folder_id);
         responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
             request,
         ));
@@ -110,10 +119,37 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         imported_hierarchy_existing_mailbox(&hierarchy_values, &display_name, mailboxes)
     {
         if existing.role == "custom" && existing.name.eq_ignore_ascii_case(&display_name) {
-            record_sync_upload_hierarchy_change(session, folder_id, mapi_folder_id(existing));
-            responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
-                request,
-            ));
+            match remember_created_mapi_identity_record(
+                store,
+                principal,
+                MapiIdentityObjectKind::Mailbox,
+                existing.id,
+                Some(reserved_global_counter),
+                Some(source_key),
+            )
+            .await
+            {
+                Ok(identity)
+                    if identity.object_id == alias_folder_id
+                        && identity.source_key
+                            == crate::mapi::identity::source_key_for_object_id(alias_folder_id) =>
+                {
+                    record_sync_upload_hierarchy_change_with_change_number(
+                        session,
+                        folder_id,
+                        identity.object_id,
+                        identity.change_number,
+                    );
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_hierarchy_change_response(request),
+                    );
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x73,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            }
         } else {
             responses.extend_from_slice(&rop_error_response(
                 0x73,
